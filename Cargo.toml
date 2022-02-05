@@ -12,3 +12,11 @@ futures = "0.3.19"
 tokio = "1.16.1"
 anyhow = "1.0.53"
 bytes = "1.1.0"
+dhat = "0.3.0"
+
+[profile.release]
+debug = 1
+
+[features]
+dhat-heap = []    # if you are doing heap profiling
+dhat-ad-hoc = []  # if you are doing ad hoc profiling
