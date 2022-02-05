@@ -15,39 +15,6 @@ pub struct ServerHandler {
     pub client: Arc<Mutex<ServerClient>>,
 }
 
-impl ServerHandler {
-    pub async fn _data(
-        self,
-        channel: ChannelId,
-        data: BytesMut,
-        mut session: Session,
-    ) -> anyhow::Result<(Self, Session)> {
-        self.client
-            .lock()
-            .await
-            ._data(channel, data, &mut session)
-            .await;
-        Ok((self, session))
-    }
-
-    pub async fn _finished(self, s: Session) -> anyhow::Result<(ServerHandler, Session)> {
-        Ok((self, s))
-    }
-
-    pub async fn _channel_open_session(
-        self,
-        channel: ChannelId,
-        mut session: Session,
-    ) -> anyhow::Result<(ServerHandler, Session)> {
-        self.client
-            .lock()
-            .await
-            ._channel_open_session(channel, &mut session)
-            .await;
-        Ok((self, session))
-    }
-}
-
 impl thrussh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
     type FutureAuth = Ready<anyhow::Result<(Self, thrussh::server::Auth)>>;
@@ -64,11 +31,20 @@ impl thrussh::server::Handler for ServerHandler {
     }
 
     fn finished(self, s: Session) -> Self::FutureUnit {
-        self._finished(s).boxed()
+        async {
+            Ok((self, s))
+        }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
-        self._channel_open_session(channel, session).boxed()
+    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_open_session(channel, &mut session)
+                .await;
+            Ok((self, session))
+        }.boxed()
     }
 
     fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
@@ -81,9 +57,16 @@ impl thrussh::server::Handler for ServerHandler {
         self.finished_auth(Auth::Accept)
     }
 
-    fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+    fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
-        self._data(channel, data, session).boxed()
+        async move {
+            self.client
+                .lock()
+                .await
+                ._data(channel, data, &mut session)
+                .await;
+            Ok((self, session))
+        }.boxed()
     }
 }
 
