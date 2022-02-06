@@ -39,6 +39,7 @@ pub static CIPHER: super::Cipher = super::Cipher {
 };
 
 pub const NAME: super::Name = super::Name("aes256-gcm");
+pub const NAME_ALT: super::Name = super::Name("aes256-gcm@openssh.com");
 
 fn make_sealing_cipher(k: &[u8], n: &[u8]) -> super::SealingCipher {
     let mut key = Key([0; KEY_BYTES]);
@@ -61,7 +62,7 @@ fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
     new_nonce.0.clone_from_slice(&nonce.0);
     let i0 = NONCE_BYTES - 8;
     let ctr = BigEndian::read_u64(&mut new_nonce.0[i0..]);
-    BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64);
+    BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - 3 ); ///<<<<<TODO
     new_nonce
 }
 
@@ -90,7 +91,6 @@ impl super::OpeningKey for OpeningKey {
         buffer.copy_from_slice(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..]);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
-        println!("aes_dec");
         if !aes256gcm_decrypt(&mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..], tag, &buffer, &packet_length, &nonce, &self.key) {
             panic!("aes256gcm_decrypt failed");
         }

@@ -161,6 +161,7 @@ impl Algorithm {
         let cipher = match cipher {
             super::cipher::chacha20poly1305::NAME => &super::cipher::chacha20poly1305::CIPHER,
             super::cipher::aes256gcm::NAME => &super::cipher::aes256gcm::CIPHER,
+            super::cipher::aes256gcm::NAME_ALT => &super::cipher::aes256gcm::CIPHER,
             _ => unreachable!(),
         };
 

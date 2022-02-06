@@ -167,7 +167,7 @@ pub mod ed25519 {
 
 pub mod aes256gcm {
     use super::*;
-    pub const NONCE_BYTES: usize = crypto_aead_aes256gcm_NPUBBYTES as usize + 4;
+    pub const NONCE_BYTES: usize = crypto_aead_aes256gcm_NPUBBYTES as usize;
     pub const KEY_BYTES: usize = crypto_aead_aes256gcm_KEYBYTES as usize;
     pub const TAG_BYTES: usize = crypto_aead_aes256gcm_ABYTES as usize;
     pub struct Key(pub [u8; KEY_BYTES]);
