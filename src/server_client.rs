@@ -131,8 +131,7 @@ impl ServerClient {
     }
 
     fn connect_rc_shell(&mut self, channel_id: ChannelId) -> Result<()> {
-        let (stdin_tx, mut stdin_rx) = unbounded_channel();
-        self.rc_tx.send(RCCommand::OpenShell(stdin_rx, channel_id))?;
+        self.rc_tx.send(RCCommand::OpenShell(channel_id))?;
         Ok(())
     }
 
@@ -150,7 +149,7 @@ impl ServerClient {
     pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
         println!("Data {:?}", data);
         self.maybe_connect_remote().await;
-        session.data(channel, CryptoVec::from_slice(&data));
+        self.rc_tx.send(RCCommand::Data(channel, data.freeze()));
     }
 
     fn close(&mut self) {}

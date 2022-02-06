@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
+use tokio::sync::mpsc::error::SendError;
+use std::collections::HashMap;
 use std::{sync::Arc, time::Duration};
 use thrussh::client::{Handle, Session};
 use thrussh::{ChannelId, Pty};
 use thrussh_keys::key::PublicKey;
 use thrussh_keys::load_secret_key;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::Mutex;
 
 use crate::ServerClient;
@@ -20,7 +22,8 @@ pub enum RCEvent {
 #[derive(Debug)]
 pub enum RCCommand {
     Connect,
-    OpenShell(UnboundedReceiver<Bytes>, ChannelId),
+    OpenShell(ChannelId),
+    Data(ChannelId, Bytes),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +39,7 @@ pub struct RemoteClient {
     rx: UnboundedReceiver<RCCommand>,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
+    channel_map: Arc<Mutex<HashMap<ChannelId, UnboundedSender<Bytes>>>>,
 }
 
 impl RemoteClient {
@@ -49,6 +53,7 @@ impl RemoteClient {
             rx,
             tx,
             session: None,
+            channel_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -67,13 +72,29 @@ impl RemoteClient {
                             e.chain().skip(1).for_each(|e| println!(": {}", e));
                         }
                     },
-                    Some(RCCommand::OpenShell(rx, channel_id)) => {
-                        match self.open_shell(rx, channel_id).await {
+                    Some(RCCommand::OpenShell(channel_id)) => {
+                        match self.open_shell(channel_id).await {
                             Ok(_) => {}
                             Err(e) => {
                                 self.tx.send(RCEvent::Disconnected).unwrap();
                                 println!("[rc] open shell error: {}", e);
                                 e.chain().skip(1).for_each(|e| println!(": {}", e));
+                            }
+                        }
+                    }
+                    Some(RCCommand::Data(channel_id, data)) => {
+                        let mut channel_map = self.channel_map.lock().await;
+                        match channel_map.get(&channel_id) {
+                            Some(tx) => {
+                                match tx.send(data) {
+                                    Ok(_) => {}
+                                    Err(SendError(_)) => {
+                                        channel_map.remove(&channel_id);
+                                    }
+                                }
+                            }
+                            None => {
+                                println!("[rc] data for unknown channel {:?}", channel_id);
                             }
                         }
                     }
@@ -126,12 +147,15 @@ impl RemoteClient {
 
     async fn open_shell(
         &mut self,
-        mut rx: UnboundedReceiver<Bytes>,
         channel_id: ChannelId,
     ) -> Result<()> {
+        let (tx, mut rx) = unbounded_channel();
+        self.channel_map.lock().await.insert(channel_id, tx);
+
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
             let mut channel = session.channel_open_session().await?;
+
             channel
                 .request_pty(
                     true,
@@ -144,40 +168,45 @@ impl RemoteClient {
                 )
                 .await?;
             channel.request_shell(true).await?;
-            let channel = Arc::new(Mutex::new(channel));
-            tokio::spawn({
-                let channel = channel.clone();
-                async move {
-                    loop {
-                        match rx.recv().await {
-                            Some(data) => {
-                                channel.lock().await.data(&*data).await?;
-                            }
-                            None => break,
-                        }
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }
-            });
+
             tokio::spawn({
                 let tx = self.tx.clone();
                 async move {
                     loop {
-                        match channel.lock().await.wait().await {
-                            Some(thrussh::ChannelMsg::Data { data }) => {
-                                let bytes: &[u8] = &data;
-                                tx.send(RCEvent::Output(
-                                    channel_id,
-                                    Bytes::from(BytesMut::from(bytes)),
-                                ))?;
+                        tokio::select! {
+                            incoming_data = rx.recv() => {
+                                match incoming_data {
+                                    Some(data) => {
+                                        match channel.data(&*data).await {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                println!("[rc] data error on ch {:?}: {}", channel_id, e);
+                                                break
+                                            }
+                                        }
+                                    }
+                                    None => break,
+                                }
                             }
-                            Some(thrussh::ChannelMsg::Close) | None => break,
-                            Some(thrussh::ChannelMsg::Success) => {},
-                            None => break,
-                            mgs => {
-                                println!("[rc] unexpected message: {:?}", mgs);
+                            channel_event = channel.wait() => {
+                                match channel_event {
+                                    Some(thrussh::ChannelMsg::Data { data }) => {
+                                        let bytes: &[u8] = &data;
+                                        tx.send(RCEvent::Output(
+                                            channel_id,
+                                            Bytes::from(BytesMut::from(bytes)),
+                                        ))?;
+                                    }
+                                    Some(thrussh::ChannelMsg::Close) | None => break,
+                                    Some(thrussh::ChannelMsg::Success) => {},
+                                    None => break,
+                                    mgs => {
+                                        println!("[rc] unexpected message: {:?}", mgs);
+                                    }
+                                }
                             }
                         }
+
                     }
                     Ok::<(), anyhow::Error>(())
                 }
@@ -198,6 +227,12 @@ impl RemoteClient {
         }
         Ok(())
     }
+
+    // pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
+    //     println!("Data {:?}", data);
+    //     self.maybe_connect_remote().await;
+    //     self.tx.send(RCCommand::Data(channel, data.freeze()));
+    // }
 }
 
 struct ClientHandler {
