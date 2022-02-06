@@ -8,6 +8,7 @@ use thrussh::{ChannelId, Pty};
 use thrussh::server::{Auth, Session};
 use tokio::sync::Mutex;
 
+use crate::remote_client::PtyRequest;
 use crate::server_client::ServerClient;
 
 
@@ -47,16 +48,6 @@ impl thrussh::server::Handler for ServerHandler {
         }.boxed()
     }
 
-    fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
-        println!("Auth {:?} with key {:?}", user, key);
-        self.finished_auth(Auth::Accept)
-    }
-
-    fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
-        println!("Auth {:?} with pw {:?}", user, password);
-        self.finished_auth(Auth::Accept)
-    }
-
     fn pty_request(
         self,
         channel: ChannelId,
@@ -68,7 +59,33 @@ impl thrussh::server::Handler for ServerHandler {
         modes: &[(Pty, u32)],
         session: Session,
     ) -> Self::FutureUnit {
-        self.finished(session)
+        let term = term.to_string();
+        let modes = modes.to_vec();
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_pty_request(channel, PtyRequest {
+                    term,
+                    col_width,
+                    row_height,
+                    pix_width,
+                    pix_height,
+                    modes,
+                })
+                .await?;
+            Ok((self, session))
+        }.boxed()
+    }
+
+    fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
+        println!("Auth {:?} with key {:?}", user, key);
+        self.finished_auth(Auth::Accept)
+    }
+
+    fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
+        println!("Auth {:?} with pw {:?}", user, password);
+        self.finished_auth(Auth::Accept)
     }
 
     fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {

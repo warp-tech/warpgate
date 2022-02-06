@@ -1,0 +1,60 @@
+[package]
+name = "thrussh-keys"
+version = "0.21.0"
+edition = "2018"
+authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
+description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
+keywords = ["ssh"]
+repository = "https://nest.pijul.com/pijul/thrussh"
+homepage = "https://pijul.org/thrussh"
+documentation = "https://docs.rs/thrussh-keys"
+license = "Apache-2.0"
+include = [
+"Cargo.toml",
+"src/lib.rs",
+"src/pem.rs",
+"src/agent/mod.rs",
+"src/agent/msg.rs",
+"src/agent/server.rs",
+"src/agent/client.rs",
+"src/bcrypt_pbkdf.rs",
+"src/blowfish.rs",
+"src/encoding.rs",
+"src/format/mod.rs",
+"src/format/openssh.rs",
+"src/format/pkcs5.rs",
+"src/format/pkcs8.rs",
+"src/key.rs",
+"src/signature.rs"
+]
+
+[dependencies]
+data-encoding = "2.3"
+byteorder = "1.4"
+tokio = { version = "1.6", features = [ "io-util", "rt-multi-thread", "time", "net" ] }
+tokio-stream = { version = "0.1", features = [ "net" ] }
+futures = "0.3"
+cryptovec = "0.6.0"
+yasna = { version = "0.4.0", features = [ "bit-vec", "num-bigint" ] }
+num-bigint = "0.4"
+num-integer = "0.1"
+openssl = { version = "0.10", optional = true }
+bit-vec = "0.6"
+serde_derive = "1.0"
+serde = "1.0"
+dirs = "3.0"
+log = "0.4"
+thiserror = "1.0"
+thrussh-libsodium = { version = "0.2", path = "../thrussh-libsodium" }
+sha2 = "0.9"
+pbkdf2 = "0.8"
+hmac = "0.11"
+rand = "0.8"
+block-modes = "0.8"
+aes = { version = "0.7", features = [ "ctr" ] }
+bcrypt-pbkdf = "0.6"
+md5 = "0.7"
+
+[dev-dependencies]
+env_logger = "0.8"
+tempdir="0.3"

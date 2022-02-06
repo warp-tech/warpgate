@@ -113,8 +113,9 @@ impl ServerClient {
             RCEvent::Connected => {
                 self.rc_state = RCState::Connected;
                 self.emit_service_message(&"Connected".to_string()).await;
-                for (channel, pty) in self.shell_channels.clone() {
-                    self.connect_rc_shell(channel)?;
+                for (channel_id, pty) in self.shell_channels.clone() {
+                    self.rc_tx.send(RCCommand::OpenShell(channel_id))?;
+                    self.rc_tx.send(RCCommand::RequestPty(channel_id, pty))?;
                 }
             }
             RCEvent::Disconnected => {
@@ -133,11 +134,6 @@ impl ServerClient {
         Ok(())
     }
 
-    fn connect_rc_shell(&mut self, channel_id: ChannelId) -> Result<()> {
-        self.rc_tx.send(RCCommand::OpenShell(channel_id))?;
-        Ok(())
-    }
-
     pub async fn _channel_open_session(&mut self, channel: ChannelId, session: &mut Session) -> Result<()> {
         println!("Channel open session {:?}", channel);
         self.ensure_client_registered(session).await;
@@ -150,15 +146,27 @@ impl ServerClient {
             modes: vec![(Pty::TTY_OP_END, 0)],
         }));
         if self.rc_state == RCState::Connected {
-            self.connect_rc_shell(channel.clone());
-        } else {
-            self.maybe_connect_remote().await;
+            self.rc_tx.send(RCCommand::OpenShell(channel))?;
         }
         Ok(())
         // {
         //     let mut clients = self.clients.lock().unwrap();
         //     clients.get_mut(&self.id).unwrap().shell_channel = Some(channel);
         // }
+    }
+
+    pub async fn _channel_pty_request (&mut self, channel: ChannelId, request: PtyRequest) -> Result<()> {
+        for (c, pty) in &mut self.shell_channels {
+            if c == &channel {
+                *pty = request.clone();
+            }
+        }
+        if self.rc_state == RCState::Connected {
+            self.rc_tx.send(RCCommand::RequestPty(channel, request))?;
+        } else {
+            self.maybe_connect_remote().await;
+        }
+        Ok(())
     }
 
     pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {

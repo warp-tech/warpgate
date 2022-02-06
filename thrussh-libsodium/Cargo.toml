@@ -1,0 +1,19 @@
+[package]
+name = "thrussh-libsodium"
+version = "0.2.1"
+license = "Apache-2.0/MIT"
+description = "Straightforward bindings to libsodium"
+homepage = "https://nest.pijul.com/pijul_org/thrussh"
+repository = "https://nest.pijul.com/pijul_org/thrussh"
+authors = ["pe@pijul.org <pe@pijul.org>"]
+include = [ "Cargo.toml", "src/lib.rs" ]
+edition = "2018"
+
+[dependencies]
+libc = "0.2"
+lazy_static = "1.4"
+libsodium-sys = "0.2"
+
+[build-dependencies]
+pkg-config = "0.3"
+vcpkg = "0.2"

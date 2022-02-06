@@ -1,5 +1,6 @@
 #![feature(type_alias_impl_trait)]
 
+use env_logger;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,13 +26,15 @@ async fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
-    let server_key = load_secret_key("host_key", None).unwrap();
+    env_logger::init();
+
     let mut config = thrussh::server::Config {
         auth_rejection_time: std::time::Duration::from_secs(1),
         methods: MethodSet::PUBLICKEY,
         ..Default::default()
     };
-    config.keys.push(server_key);
+    config.keys.push(load_secret_key("host_key", None).unwrap());
+    config.keys.push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
