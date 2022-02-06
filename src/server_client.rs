@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use thrussh::{server::Session, ChannelId, CryptoVec};
+use thrussh::{server::Session, ChannelId, CryptoVec, Pty};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     Mutex,
 };
 
+use crate::remote_client::PtyRequest;
 use crate::{
     misc::Client,
     remote_client::{RCCommand, RCEvent, RCState, RemoteClient},
@@ -16,7 +17,7 @@ pub struct ServerClient {
     clients: Arc<Mutex<HashMap<u64, Client>>>,
     id: u64,
     session_handle: Option<thrussh::server::Handle>,
-    shell_channel: Option<ChannelId>,
+    shell_channels: Vec<(ChannelId, PtyRequest)>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_state: RCState,
 }
@@ -30,7 +31,7 @@ impl ServerClient {
             clients,
             id,
             session_handle: None,
-            shell_channel: None,
+            shell_channels: vec![],
             rc_tx: rcc_tx,
             rc_state: RCState::NotInitialized,
         }));
@@ -90,9 +91,9 @@ impl ServerClient {
 
     pub async fn emit_session_output(&mut self, data: &[u8]) {
         if let Some(handle) = &mut self.session_handle {
-            if let Some(shell_channel) = &self.shell_channel {
+            for (channel, pty) in &mut self.shell_channels {
                 let _ = handle
-                    .data(*shell_channel, CryptoVec::from_slice(data))
+                    .data(*channel, CryptoVec::from_slice(data))
                     .await;
             }
         }
@@ -112,7 +113,9 @@ impl ServerClient {
             RCEvent::Connected => {
                 self.rc_state = RCState::Connected;
                 self.emit_service_message(&"Connected".to_string()).await;
-                self.connect_rc_shell(self.shell_channel.unwrap())?;
+                for (channel, pty) in self.shell_channels.clone() {
+                    self.connect_rc_shell(channel)?;
+                }
             }
             RCEvent::Disconnected => {
                 self.rc_state = RCState::Disconnected;
@@ -135,11 +138,23 @@ impl ServerClient {
         Ok(())
     }
 
-    pub async fn _channel_open_session(&mut self, channel: ChannelId, session: &mut Session) {
+    pub async fn _channel_open_session(&mut self, channel: ChannelId, session: &mut Session) -> Result<()> {
         println!("Channel open session {:?}", channel);
-        self.shell_channel = Some(channel);
         self.ensure_client_registered(session).await;
-        self.maybe_connect_remote().await;
+        self.shell_channels.push((channel, PtyRequest {
+            term: "xterm".to_string(),
+            col_width: 80,
+            row_height: 24,
+            pix_width: 0,
+            pix_height: 0,
+            modes: vec![(Pty::TTY_OP_END, 0)],
+        }));
+        if self.rc_state == RCState::Connected {
+            self.connect_rc_shell(channel.clone());
+        } else {
+            self.maybe_connect_remote().await;
+        }
+        Ok(())
         // {
         //     let mut clients = self.clients.lock().unwrap();
         //     clients.get_mut(&self.id).unwrap().shell_channel = Some(channel);

@@ -19,11 +19,22 @@ pub enum RCEvent {
     Output(ChannelId, Bytes),
 }
 
+#[derive(Clone, Debug)]
+pub struct PtyRequest {
+    pub term: String,
+    pub col_width: u32,
+    pub row_height: u32,
+    pub pix_width: u32,
+    pub pix_height: u32,
+    pub modes: Vec<(Pty, u32)>,
+}
+
 #[derive(Debug)]
 pub enum RCCommand {
     Connect,
     OpenShell(ChannelId),
     Data(ChannelId, Bytes),
+    RequestPty(ChannelId, PtyRequest),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +93,7 @@ impl RemoteClient {
                             }
                         }
                     }
+                    Some(RCCommand::RequestPty(_, _)) => {}
                     Some(RCCommand::Data(channel_id, data)) => {
                         let mut channel_map = self.channel_map.lock().await;
                         match channel_map.get(&channel_id) {

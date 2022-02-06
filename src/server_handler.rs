@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::FutureExt;
 use futures::future::{ready, Ready};
-use thrussh::ChannelId;
+use thrussh::{ChannelId, Pty};
 use thrussh::server::{Auth, Session};
 use tokio::sync::Mutex;
 
@@ -42,7 +42,7 @@ impl thrussh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_open_session(channel, &mut session)
-                .await;
+                .await?;
             Ok((self, session))
         }.boxed()
     }
@@ -55,6 +55,20 @@ impl thrussh::server::Handler for ServerHandler {
     fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
         println!("Auth {:?} with pw {:?}", user, password);
         self.finished_auth(Auth::Accept)
+    }
+
+    fn pty_request(
+        self,
+        channel: ChannelId,
+        term: &str,
+        col_width: u32,
+        row_height: u32,
+        pix_width: u32,
+        pix_height: u32,
+        modes: &[(Pty, u32)],
+        session: Session,
+    ) -> Self::FutureUnit {
+        self.finished(session)
     }
 
     fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
