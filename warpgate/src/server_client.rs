@@ -130,6 +130,14 @@ impl ServerClient {
                     }
                 }
             }
+            RCEvent::Success(channel) => {
+                if let Some(handle) = &mut self.session_handle {
+                    match handle.channel_success(channel).await {
+                        Ok(_) => {},
+                        Err(_) => anyhow::bail!("failed to send data"),
+                    }
+                }
+            }
         }
         Ok(())
     }

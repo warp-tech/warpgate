@@ -17,6 +17,7 @@ pub enum RCEvent {
     Connected,
     Disconnected,
     Output(ChannelId, Bytes),
+    Success(ChannelId),
 }
 
 #[derive(Clone, Debug)]
@@ -210,7 +211,11 @@ impl RemoteClient {
                                         ))?;
                                     }
                                     Some(thrussh::ChannelMsg::Close) | None => break,
-                                    Some(thrussh::ChannelMsg::Success) => {},
+                                    Some(thrussh::ChannelMsg::Success) => {
+                                        tx.send(RCEvent::Success(
+                                            channel_id,
+                                        ))?;
+                                    },
                                     None => break,
                                     mgs => {
                                         println!("[rc] unexpected message: {:?}", mgs);

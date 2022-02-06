@@ -57,6 +57,15 @@ impl Handle {
             .map_err(|_| ())
     }
 
+
+    /// Send success to the session referenced by this handler.
+    pub async fn channel_success(&mut self, id: ChannelId) -> Result<(), ()> {
+        self.sender
+            .send((id, ChannelMsg::Success))
+            .await
+            .map_err(|_| ())
+    }
+
     /// Close a channel.
     pub async fn close(&mut self, id: ChannelId) -> Result<(), ()> {
         self.sender
