@@ -13,6 +13,7 @@ tokio = "1.16.1"
 anyhow = "1.0.53"
 bytes = "1.1.0"
 dhat = "0.3.0"
+env_logger = "0.9.0"
 
 [profile.release]
 debug = 1

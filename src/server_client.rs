@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
-
-use bytes::BytesMut;
+use anyhow::Result;
+use bytes::{Bytes, BytesMut};
 use thrussh::{server::Session, ChannelId, CryptoVec};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -52,7 +52,14 @@ impl ServerClient {
                             }
                             let t = this.unwrap();
                             let this = &mut t.lock().await;
-                            this.handle_remote_event(e).await;
+                            match this.handle_remote_event(e).await {
+                                Err(e) => {
+                                    println!("[rc event handler] error {:?}", e);
+                                    this.close();
+                                    break;
+                                }
+                                _ => ()
+                            }
                         }
                         None => {
                             break;
@@ -77,13 +84,15 @@ impl ServerClient {
     }
 
     pub async fn emit_service_message(&mut self, msg: &String) {
+        self.emit_session_output(format!("[warpgate]: {}\r\n", msg).as_bytes())
+            .await;
+    }
+
+    pub async fn emit_session_output(&mut self, data: &[u8]) {
         if let Some(handle) = &mut self.session_handle {
             if let Some(shell_channel) = &self.shell_channel {
                 let _ = handle
-                    .data(
-                        *shell_channel,
-                        CryptoVec::from_slice(format!("{}\r\n", msg).as_bytes()),
-                    )
+                    .data(*shell_channel, CryptoVec::from_slice(data))
                     .await;
             }
         }
@@ -98,17 +107,33 @@ impl ServerClient {
         }
     }
 
-    pub async fn handle_remote_event(&mut self, event: RCEvent) {
+    pub async fn handle_remote_event(&mut self, event: RCEvent) -> Result<()> {
         match event {
             RCEvent::Connected => {
                 self.rc_state = RCState::Connected;
                 self.emit_service_message(&"Connected".to_string()).await;
+                self.connect_rc_shell(self.shell_channel.unwrap())?;
             }
             RCEvent::Disconnected => {
                 self.rc_state = RCState::Disconnected;
                 self.emit_service_message(&"Disconnected".to_string()).await;
             }
+            RCEvent::Output(channel, data) => {
+                if let Some(handle) = &mut self.session_handle {
+                    match handle.data(channel, CryptoVec::from_slice(&data)).await {
+                        Ok(_) => {},
+                        Err(_) => anyhow::bail!("failed to send data"),
+                    }
+                }
+            }
         }
+        Ok(())
+    }
+
+    fn connect_rc_shell(&mut self, channel_id: ChannelId) -> Result<()> {
+        let (stdin_tx, mut stdin_rx) = unbounded_channel();
+        self.rc_tx.send(RCCommand::OpenShell(stdin_rx, channel_id))?;
+        Ok(())
     }
 
     pub async fn _channel_open_session(&mut self, channel: ChannelId, session: &mut Session) {
