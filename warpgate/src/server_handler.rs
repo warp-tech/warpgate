@@ -78,6 +78,17 @@ impl thrussh::server::Handler for ServerHandler {
         }.boxed()
     }
 
+    fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_shell_request(channel, &mut session)
+                .await?;
+            Ok((self, session))
+        }.boxed()
+    }
+
     fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
         println!("Auth {:?} with key {:?}", user, key);
         self.finished_auth(Auth::Accept)
