@@ -18,6 +18,7 @@
 use super::super::Error;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::aes256gcm::*;
+use sodium::random::randombytes;
 
 pub struct OpeningKey {
     key: Key,
@@ -38,8 +39,7 @@ pub static CIPHER: super::Cipher = super::Cipher {
     make_opening_cipher,
 };
 
-pub const NAME: super::Name = super::Name("aes256-gcm");
-pub const NAME_ALT: super::Name = super::Name("aes256-gcm@openssh.com");
+pub const NAME: super::Name = super::Name("aes256-gcm@openssh.com");
 
 fn make_sealing_cipher(k: &[u8], n: &[u8]) -> super::SealingCipher {
     let mut key = Key([0; KEY_BYTES]);
@@ -60,8 +60,10 @@ fn make_opening_cipher(k: &[u8], n: &[u8]) -> super::OpeningCipher {
 fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
     let mut new_nonce = Nonce([0; NONCE_BYTES]);
     new_nonce.0.clone_from_slice(&nonce.0);
+    // Increment the nonce
     let i0 = NONCE_BYTES - 8;
     let ctr = BigEndian::read_u64(&mut new_nonce.0[i0..]);
+    // GCM requires the counter to start from 1
     BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - 3 ); ///<<<<<TODO
     new_nonce
 }
@@ -85,14 +87,17 @@ impl super::OpeningKey for OpeningKey {
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
+        // Packet length is sent unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
         packet_length.clone_from_slice(&ciphertext_in_plaintext_out[..super::PACKET_LENGTH_LEN]);
+
+        // Prepare a buffer for libsodium to read from
         let mut buffer = vec![0; ciphertext_in_plaintext_out.len() - super::PACKET_LENGTH_LEN];
         buffer.copy_from_slice(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..]);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
         if !aes256gcm_decrypt(&mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..], tag, &buffer, &packet_length, &nonce, &self.key) {
-            panic!("aes256gcm_decrypt failed");
+            return Err(Error::DecryptionError);
         }
         Ok(ciphertext_in_plaintext_out)
     }
@@ -115,32 +120,30 @@ impl super::SealingKey for SealingKey {
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        // TODO random
-        for padding_byte in padding_out {
-            *padding_byte = 0;
-        }
+        randombytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {
         TAG_LEN
     }
 
-    /// Append an encrypted packet with contents `packet_content` at the end of `buffer`.
     fn seal(
         &self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
+        // Packet length is received unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
         packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
+        // Prepare an output buffer
         let mut buffer = vec![0; plaintext_in_ciphertext_out.len()];
-        buffer.copy_from_slice(plaintext_in_ciphertext_out); // TODO only copy len
+        buffer.splice(..super::PACKET_LENGTH_LEN, packet_length.clone());
 
         let nonce = make_nonce(&self.nonce, sequence_number);
         if !aes256gcm_encrypt(&mut buffer[super::PACKET_LENGTH_LEN..], tag_out, &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..], &packet_length, &nonce, &self.key) {
-            panic!("aes256gcm_encrypt failed");
+            panic!("aes256gcm_encrypt() failed");
         }
         plaintext_in_ciphertext_out.clone_from_slice(&buffer);
     }

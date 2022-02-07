@@ -409,6 +409,9 @@ pub enum Error {
     #[error("Pending buffer limit reached")]
     Pending,
 
+    #[error("Failed to decrypt a packet")]
+    DecryptionError,
+
     #[error(transparent)]
     Keys(#[from] thrussh_keys::Error),
 

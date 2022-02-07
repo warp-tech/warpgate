@@ -563,9 +563,6 @@ where
                     Some((id, ChannelMsg::WindowAdjusted { new_size })) => {
                         debug!("window adjusted to {:?} for channel {:?}", new_size, id);
                     }
-                    Some((id, ChannelMsg::Success)) => {
-                        debug!("channel success {:?}", id);
-                    }
                     None => {
                         debug!("session.receiver: received None");
                     }

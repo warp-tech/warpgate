@@ -246,3 +246,14 @@ pub mod scalarmult {
         q
     }
 }
+
+pub mod random {
+    use libc::c_void;
+    use libsodium_sys::randombytes_buf;
+
+    pub fn randombytes(buf: &mut [u8]) {
+        unsafe {
+            randombytes_buf(buf.as_mut_ptr() as *mut c_void, buf.len());
+        }
+    }
+}

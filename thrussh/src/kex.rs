@@ -161,7 +161,6 @@ impl Algorithm {
         let cipher = match cipher {
             super::cipher::chacha20poly1305::NAME => &super::cipher::chacha20poly1305::CIPHER,
             super::cipher::aes256gcm::NAME => &super::cipher::aes256gcm::CIPHER,
-            super::cipher::aes256gcm::NAME_ALT => &super::cipher::aes256gcm::CIPHER,
             _ => unreachable!(),
         };
 
@@ -181,7 +180,7 @@ impl Algorithm {
                         buffer.extend(exchange_hash.as_ref());
                         buffer.push(c);
                         buffer.extend(session_id.as_ref());
-                        let hash =                    {
+                        let hash = {
                             use sha2::Digest;
                             let mut hasher = sha2::Sha256::new();
                             hasher.update(&buffer[..]);
