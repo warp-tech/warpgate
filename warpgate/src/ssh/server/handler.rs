@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,11 +10,12 @@ use thrussh::server::{Auth, Session};
 use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;
 
-use crate::remote_client::{PtyRequest, ServerChannelId};
-use crate::server_client::ServerClient;
+use super::super::common::{PtyRequest, ServerChannelId};
+use super::session::ServerSession;
 
 pub struct ServerHandler {
-    pub client: Arc<Mutex<ServerClient>>,
+    pub id: u64,
+    pub client: Arc<Mutex<ServerSession>>,
 }
 
 impl thrussh::server::Handler for ServerHandler {
@@ -43,6 +45,24 @@ impl thrussh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_open_session(ServerChannelId(channel), &mut session)
+                .await?;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn subsystem_request(
+        self,
+        channel: ChannelId,
+        name: &str,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let name = name.to_string();
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_subsystem_request(ServerChannelId(channel), name)
                 .await?;
             Ok((self, session))
         }
@@ -170,8 +190,16 @@ impl Drop for ServerHandler {
     fn drop(&mut self) {
         debug!("Server handler dropped");
         let client = self.client.clone();
-        tokio::spawn(async move {
+        tokio::task::Builder::new().name(
+            &format!("SSH S{} cleanup", self.id)
+        ).spawn(async move {
             client.lock().await._disconnect().await;
         });
+    }
+}
+
+impl Debug for ServerHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ServerHandler")
     }
 }

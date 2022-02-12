@@ -5,19 +5,15 @@ use std::net::ToSocketAddrs;
 use std::{collections::HashMap, sync::Arc};
 use thrussh::{server::Session, CryptoVec};
 use tokio::sync::oneshot;
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    Mutex,
-};
+use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tracing::*;
 
-use crate::remote_client::{ChannelOperation, PtyRequest, ServerChannelId};
-use crate::{
-    misc::Client,
-    remote_client::{RCCommand, RCEvent, RCState, RemoteClient},
+use super::super::{
+    ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
 };
+use crate::misc::Client;
 
-pub struct ServerClient {
+pub struct ServerSession {
     clients: Arc<Mutex<HashMap<u64, Client>>>,
     id: u64,
     session_handle: Option<thrussh::server::Handle>,
@@ -25,29 +21,22 @@ pub struct ServerClient {
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
-    remote_addr: Option<std::net::SocketAddr>,
+    remote_addr: std::net::SocketAddr,
 }
 
-impl std::fmt::Debug for ServerClient {
+impl std::fmt::Debug for ServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[S{} - {}]",
-            self.id,
-            self.remote_addr
-                .map(|x| x.to_string())
-                .unwrap_or("unknown".into())
-        )
+        write!(f, "[S{} - {}]", self.id, self.remote_addr)
     }
 }
 
-impl ServerClient {
+impl ServerSession {
     pub fn new(
         clients: Arc<Mutex<HashMap<u64, Client>>>,
         id: u64,
-        remote_addr: Option<std::net::SocketAddr>,
+        remote_addr: std::net::SocketAddr,
     ) -> Arc<Mutex<Self>> {
-        let mut rc_handles = RemoteClient::create();
+        let mut rc_handles = RemoteClient::create(id);
 
         let this = Self {
             clients,
@@ -65,7 +54,8 @@ impl ServerClient {
         let session_debug_tag = format!("{:?}", this);
         let this = Arc::new(Mutex::new(this));
 
-        tokio::spawn({
+        let name = format!("SSH S{} client events", id);
+        tokio::task::Builder::new().name(&name).spawn({
             let this = Arc::downgrade(&this);
             async move {
                 loop {
@@ -259,10 +249,7 @@ impl ServerClient {
         Ok(())
     }
 
-    pub async fn _channel_shell_request(
-        &mut self,
-        channel: ServerChannelId,
-    ) -> Result<()> {
+    pub async fn _channel_shell_request(&mut self, channel: ServerChannelId) -> Result<()> {
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
         info!(session=?self, ?channel, "Opening shell");
@@ -272,6 +259,19 @@ impl ServerClient {
             .unwrap()
             .channel_success(channel.0)
             .await;
+        Ok(())
+    }
+
+    pub async fn _channel_subsystem_request(
+        &mut self,
+        channel: ServerChannelId,
+        name: String,
+    ) -> Result<()> {
+        info!(session=?self, ?channel, "Requesting subsystem {}", &name);
+        self.rc_tx.send(RCCommand::Channel(
+            channel,
+            ChannelOperation::RequestSubsystem(name),
+        ))?;
         Ok(())
     }
 
@@ -323,7 +323,7 @@ impl ServerClient {
     }
 }
 
-impl Drop for ServerClient {
+impl Drop for ServerSession {
     fn drop(&mut self) {
         info!(session=?self, "Closed connection");
     }

@@ -1,67 +1,59 @@
 #![feature(type_alias_impl_trait)]
 
-use std::collections::HashMap;
+use anyhow::Result;
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use tracing_subscriber::EnvFilter;
-
-use misc::Client;
-use server_client::ServerClient;
-use server_handler::ServerHandler;
-use thrussh::MethodSet;
-use thrussh_keys::load_secret_key;
-use tokio::sync::Mutex;
+use time::{format_description, UtcOffset};
+use tracing::*;
+use tracing_subscriber::filter::{dynamic_filter_fn, filter_fn};
+use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::layer::{Layered, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 mod misc;
-mod remote_client;
-mod server_client;
-mod server_handler;
+mod ssh;
+
+use crate::ssh::SSHProtocolServer;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
-    tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
 
-    let mut config = thrussh::server::Config {
-        auth_rejection_time: std::time::Duration::from_secs(1),
-        methods: MethodSet::PUBLICKEY,
-        ..Default::default()
-    };
-    config.keys.push(load_secret_key("host_key", None).unwrap());
-    config
-        .keys
-        .push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
-    let config = Arc::new(config);
-    let sh = Server {
-        clients: Arc::new(Mutex::new(HashMap::new())),
-        last_client_id: 0,
-    };
-    thrussh::server::run(config, "0.0.0.0:2222", sh)
-        .await
-        .unwrap();
-}
+    let offset =
+        UtcOffset::current_local_offset().unwrap_or(UtcOffset::from_whole_seconds(0).unwrap());
 
-#[derive(Clone)]
-struct Server {
-    clients: Arc<Mutex<HashMap<u64, Client>>>,
-    last_client_id: u64,
-}
+    let env_filter = Arc::new(EnvFilter::from_default_env());
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_timer(OffsetTime::new(
+            offset,
+            format_description::parse("[day].[month].[year] [hour]:[minute]:[second]").unwrap(),
+        ))
+        .with_filter(dynamic_filter_fn(move |m, c| {
+            env_filter.enabled(m, c.clone())
+        }));
 
-impl thrussh::server::Server for Server {
-    type Handler = ServerHandler;
-    fn new(&mut self, remote_addr: Option<std::net::SocketAddr>) -> Self::Handler {
-        self.last_client_id += 1;
-        let client = ServerClient::new(self.clients.clone(), self.last_client_id, remote_addr);
-        ServerHandler { client }
-    }
+    let mut r = tracing_subscriber::registry();
+
+    #[cfg(debug_assertions)]
+    let console_layer = console_subscriber::spawn();
+
+    #[cfg(debug_assertions)]
+    let r = r.with(console_layer);
+
+    r.with(fmt_layer).init();
+
+    let address = "0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap();
+    SSHProtocolServer::new().run(address).await?;
+    info!("Exiting");
+    Ok(())
 }

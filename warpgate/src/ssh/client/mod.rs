@@ -5,15 +5,20 @@ use futures::FutureExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use thrussh::client::{Handle, Session};
-use thrussh::{ChannelId, Pty};
-use thrussh_keys::key::PublicKey;
+use thrussh::client::Handle;
 use thrussh_keys::load_secret_key;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
+
+mod handler;
+use handler::ClientHandler;
+
+use self::handler::ClientHandlerEvent;
+
+use super::{ChannelOperation, ServerChannelId};
 
 #[derive(Clone, Debug)]
 pub enum RCEvent {
@@ -26,28 +31,6 @@ pub enum RCEvent {
     ConnectionError,
     AuthError,
     Done,
-}
-
-#[derive(Clone, Debug)]
-pub struct PtyRequest {
-    pub term: String,
-    pub col_width: u32,
-    pub row_height: u32,
-    pub pix_width: u32,
-    pub pix_height: u32,
-    pub modes: Vec<(Pty, u32)>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
-pub struct ServerChannelId(pub ChannelId);
-
-#[derive(Debug)]
-pub enum ChannelOperation {
-    OpenShell,
-    RequestPty(PtyRequest),
-    ResizePty(PtyRequest),
-    RequestShell,
-    Data(Bytes),
 }
 
 #[derive(Debug)]
@@ -66,6 +49,7 @@ pub enum RCState {
 }
 
 pub struct RemoteClient {
+    id: u64,
     rx: UnboundedReceiver<RCCommand>,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
@@ -84,12 +68,13 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create() -> RemoteClientHandles {
+    pub fn create(id: u64) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = oneshot::channel();
 
         let this = Self {
+            id,
             rx: command_rx,
             tx: event_tx,
             session: None,
@@ -158,7 +143,8 @@ impl RemoteClient {
     }
 
     pub fn start(mut self) {
-        tokio::spawn(async move {
+        let name = format!("SSH S{} client commands", self.id);
+        tokio::task::Builder::new().name(&name).spawn(async move {
             async {
                 loop {
                     tokio::select! {
@@ -254,7 +240,7 @@ impl RemoteClient {
                 let mut session = session.with_context(|| "connect()")?;
 
                 let auth_result = session
-                    .authenticate_password("root1", "syslink")
+                    .authenticate_password("root", "syslink")
                     // .authenticate_publickey("root", client_key)
                     .await
                     .with_context(|| "authenticate()")?;
@@ -283,7 +269,9 @@ impl RemoteClient {
             let (tx, mut rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            self.child_tasks.push(tokio::spawn({
+            self.child_tasks.push(tokio::task::Builder::new().name(
+                &format!("SSH S{} {:?} ops", self.id, channel_id.0),
+            ).spawn({
                 let tx = self.tx.clone();
                 async move {
                     loop {
@@ -314,6 +302,9 @@ impl RemoteClient {
                                     },
                                     Some(ChannelOperation::RequestShell) => {
                                         channel.request_shell(true).await.context("request_shell")?;
+                                    },
+                                    Some(ChannelOperation::RequestSubsystem(name)) => {
+                                        channel.request_subsystem(true, &name).await.context("request_subsystem")?;
                                     },
                                     Some(op) => {
                                         error!(?op, "Unknown channel operation in channel loop")
@@ -347,7 +338,7 @@ impl RemoteClient {
                                         break
                                     },
                                     mgs => {
-                                        debug!("unexpected message: {:?}", mgs);
+                                        info!("Unexpected message: {:?}", mgs);
                                     }
                                 }
                             }
@@ -390,40 +381,5 @@ impl Drop for RemoteClient {
             let _ = task.abort();
         }
         debug!("remote client dropped");
-    }
-}
-
-struct ClientHandler {
-    pub tx: UnboundedSender<ClientHandlerEvent>,
-}
-
-#[derive(Debug)]
-enum ClientHandlerEvent {
-    Disconnect,
-}
-
-impl thrussh::client::Handler for ClientHandler {
-    type Error = anyhow::Error;
-    type FutureUnit = futures::future::Ready<Result<(Self, Session), anyhow::Error>>;
-    type FutureBool = futures::future::Ready<Result<(Self, bool), anyhow::Error>>;
-
-    fn finished_bool(self, b: bool) -> Self::FutureBool {
-        futures::future::ready(Ok((self, b)))
-    }
-
-    fn finished(self, session: Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
-    }
-
-    fn check_server_key(self, server_public_key: &PublicKey) -> Self::FutureBool {
-        debug!("check_server_key: {:?}", server_public_key);
-        self.finished_bool(true)
-    }
-}
-
-impl Drop for ClientHandler {
-    fn drop(&mut self) {
-        let _ = self.tx.send(ClientHandlerEvent::Disconnect);
-        debug!("handler dropped");
     }
 }
