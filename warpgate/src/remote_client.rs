@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
+use futures::future::OptionFuture;
+use log::*;
 use std::collections::HashMap;
 use std::{sync::Arc, time::Duration};
-use thrussh::client::{Handle, Session, Channel};
+use thrussh::client::{Channel, Handle, Session};
 use thrussh::{ChannelId, Pty};
 use thrussh_keys::key::PublicKey;
 use thrussh_keys::load_secret_key;
@@ -17,6 +19,10 @@ pub enum RCEvent {
     State(RCState),
     Output(ChannelId, Bytes),
     Success(ChannelId),
+    Eof(ChannelId),
+    Close(ChannelId),
+    ExitStatus(ChannelId, u32),
+    Done,
 }
 
 #[derive(Clone, Debug)]
@@ -41,6 +47,7 @@ pub enum ChannelOperation {
 pub enum RCCommand {
     Connect,
     Channel(ChannelOperation),
+    Disconnect,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,7 +59,6 @@ pub enum RCState {
 }
 
 pub struct RemoteClient {
-    client: Arc<Mutex<ServerClient>>,
     rx: UnboundedReceiver<RCCommand>,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
@@ -60,16 +66,12 @@ pub struct RemoteClient {
     channels_in_setup: HashMap<ChannelId, Channel>,
     pending_ops: Vec<ChannelOperation>,
     state: RCState,
+    client_handler_rx: Option<UnboundedReceiver<ClientHandlerEvent>>,
 }
 
 impl RemoteClient {
-    pub fn new(
-        client: Arc<Mutex<ServerClient>>,
-        rx: UnboundedReceiver<RCCommand>,
-        tx: UnboundedSender<RCEvent>,
-    ) -> Self {
+    pub fn new(rx: UnboundedReceiver<RCCommand>, tx: UnboundedSender<RCEvent>) -> Self {
         Self {
-            client,
             rx,
             tx,
             session: None,
@@ -77,7 +79,14 @@ impl RemoteClient {
             channels_in_setup: HashMap::new(),
             pending_ops: vec![],
             state: RCState::NotInitialized,
+            client_handler_rx: None,
         }
+    }
+
+    fn set_disconnected(&mut self) {
+        self.session = None;
+        self.set_state(RCState::Disconnected);
+        let _ = self.tx.send(RCEvent::Done);
     }
 
     fn set_state(&mut self, state: RCState) -> Result<()> {
@@ -96,25 +105,30 @@ impl RemoteClient {
             ChannelOperation::OpenShell(channel_id) => match self.open_shell(channel_id).await {
                 Ok(_) => {}
                 Err(e) => {
-                    self.set_state(RCState::Disconnected)?;
-                    println!("[rc] open shell error: {}", e);
-                    e.chain().skip(1).for_each(|e| println!(": {}", e));
+                    self.set_disconnected();
+                    debug!("open shell error: {}", e);
+                    e.chain().skip(1).for_each(|e| debug!(": {}", e));
                 }
             },
-            ChannelOperation::RequestPty(channel_id, pty) => match self.request_pty(channel_id, pty).await {
-                Ok(_) => {}
-                Err(e) => {
-                    self.set_state(RCState::Disconnected)?;
-                    println!("[rc] pty req error: {}", e);
-                    e.chain().skip(1).for_each(|e| println!(": {}", e));
+            ChannelOperation::RequestPty(channel_id, pty) => {
+                match self.request_pty(channel_id, pty).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.set_disconnected();
+                        debug!("pty req error: {}", e);
+                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
+                    }
                 }
             }
-            ChannelOperation::RequestShell(channel_id) => match self.request_shell(channel_id).await {
-                Ok(_) => {}
-                Err(e) => {
-                    self.set_state(RCState::Disconnected)?;
-                    println!("[rc] shell req error: {}", e);
-                    e.chain().skip(1).for_each(|e| println!(": {}", e));
+            ChannelOperation::RequestShell(channel_id) => {
+                match self.request_shell(channel_id).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.set_disconnected();
+
+                        debug!("shell req error: {}", e);
+                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
+                    }
                 }
             }
             ChannelOperation::Data(channel_id, data) => {
@@ -127,7 +141,7 @@ impl RemoteClient {
                         }
                     },
                     None => {
-                        println!("[rc] data for unknown channel {:?}", channel_id);
+                        debug!("data for unknown channel {:?}", channel_id);
                     }
                 }
             }
@@ -139,30 +153,48 @@ impl RemoteClient {
         tokio::spawn(async move {
             match (async {
                 loop {
-                    let cmd = self.rx.recv().await;
-                    match cmd {
-                        Some(RCCommand::Connect) => match self.connect().await {
-                            Ok(_) => {
-                                self.set_state(RCState::Connected)?;
-                                let mut ops = vec![];
-                                std::mem::swap(&mut self.pending_ops, &mut ops);
-                                for op in ops {
+                    tokio::select! {
+                        cmd = self.rx.recv() => {
+                            match cmd {
+                                Some(RCCommand::Connect) => match self.connect().await {
+                                    Ok(_) => {
+                                        self.set_state(RCState::Connected)?;
+                                        let mut ops = vec![];
+                                        std::mem::swap(&mut self.pending_ops, &mut ops);
+                                        for op in ops {
+                                            self.apply_channel_op(op).await?;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.set_disconnected();
+                                        debug!("connect error: {}", e);
+                                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
+                                    }
+                                },
+                                Some(RCCommand::Channel(op)) => {
                                     self.apply_channel_op(op).await?;
                                 }
+                                Some(RCCommand::Disconnect) => {
+                                    self.disconnect().await?;
+                                    self.set_disconnected();
+                                }
+                                None => {
+                                    break;
+                                }
                             }
-                            Err(e) => {
-                                self.set_state(RCState::Disconnected)?;
-                                println!("[rc] connect error: {}", e);
-                                e.chain().skip(1).for_each(|e| println!(": {}", e));
+                        }
+                        Some(client_event) = OptionFuture::from(self.client_handler_rx.as_mut().map(|x| x.recv())) => {
+                            debug!("client handler event: {:?}", client_event);
+                            match client_event {
+                                Some(ClientHandlerEvent::Disconnect) => {
+                                    self._on_disconnect().await?;
+                                }
+                                None => {
+                                    self.client_handler_rx = None
+                                }
                             }
-                        },
-                        Some(RCCommand::Channel(op)) => {
-                            self.apply_channel_op(op).await?;
                         }
-                        None => {
-                            break;
-                        }
-                    }
+                    };
                 }
                 Ok::<(), anyhow::Error>(())
             })
@@ -170,15 +202,15 @@ impl RemoteClient {
             {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("[rc] error in command loop: {}", e);
+                    debug!("error in command loop: {}", e);
                 }
             }
-            println!("[rc] no more commmands");
+            debug!("no more commmands");
         });
     }
 
     async fn connect(&mut self) -> Result<()> {
-        println!("[rc] connecting");
+        debug!("connecting");
         let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
             .with_context(|| "load_secret_key()")?;
         let client_key = Arc::new(client_key);
@@ -188,7 +220,9 @@ impl RemoteClient {
         let config = Arc::new(config);
         // tokio::time::sleep(Duration::from_millis(5000)).await;
 
-        let handler = ClientHandler {};
+        let (tx, rx) = unbounded_channel();
+        let handler = ClientHandler { tx };
+        self.client_handler_rx = Some(rx);
 
         // self.tx.send(RCEvent::Output(Bytes::from(
         //     "Connecting now...\r\n".as_bytes(),
@@ -203,7 +237,7 @@ impl RemoteClient {
             .await
             .with_context(|| "authenticate()")?;
         if !auth_result {
-            println!("[rc] auth failed");
+            debug!("auth failed");
             let _ = session
                 .disconnect(thrussh::Disconnect::ByApplication, "", "")
                 .await;
@@ -212,7 +246,7 @@ impl RemoteClient {
 
         self.session = Some(Arc::new(Mutex::new(session)));
 
-        println!("[rc] done");
+        debug!("done");
         Ok(())
     }
 
@@ -240,8 +274,7 @@ impl RemoteClient {
             .channels_in_setup
             .remove(&channel_id)
             .ok_or(anyhow::anyhow!("channel not found"))?;
-        client_channel
-            .request_shell(true).await?;
+        client_channel.request_shell(true).await?;
         self.start_channel_pipe(client_channel).await;
         Ok(())
     }
@@ -261,7 +294,7 @@ impl RemoteClient {
                                     match channel.data(&*data).await {
                                         Ok(_) => {}
                                         Err(e) => {
-                                            println!("[rc] data error on ch {:?}: {}", channel.id(), e);
+                                            debug!("data error on ch {:?}: {}", channel.id(), e);
                                             break
                                         }
                                     }
@@ -278,15 +311,24 @@ impl RemoteClient {
                                         Bytes::from(BytesMut::from(bytes)),
                                     ))?;
                                 }
-                                Some(thrussh::ChannelMsg::Close) | None => break,
-                                Some(thrussh::ChannelMsg::Success) => {
-                                    tx.send(RCEvent::Success(
-                                        channel.id(),
-                                    ))?;
+                                Some(thrussh::ChannelMsg::Close) => {
+                                    tx.send(RCEvent::Close(channel.id()))?;
                                 },
-                                None => break,
+                                Some(thrussh::ChannelMsg::Success) => {
+                                    tx.send(RCEvent::Success(channel.id()))?;
+                                },
+                                Some(thrussh::ChannelMsg::Eof) => {
+                                    tx.send(RCEvent::Eof(channel.id()))?;
+                                }
+                                Some(thrussh::ChannelMsg::ExitStatus { exit_status }) => {
+                                    tx.send(RCEvent::ExitStatus(channel.id(), exit_status))?;
+                                }
+                                None => {
+                                    tx.send(RCEvent::Close(channel.id()))?;
+                                    break
+                                },
                                 mgs => {
-                                    println!("[rc] unexpected message: {:?}", mgs);
+                                    debug!("unexpected message: {:?}", mgs);
                                 }
                             }
                         }
@@ -300,7 +342,7 @@ impl RemoteClient {
     async fn open_shell(&mut self, channel_id: ChannelId) -> Result<()> {
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
-            let mut channel = session.channel_open_session().await?;
+            let channel = session.channel_open_session().await?;
             self.channels_in_setup.insert(channel_id, channel);
         }
         Ok(())
@@ -313,21 +355,36 @@ impl RemoteClient {
                 .await
                 .disconnect(thrussh::Disconnect::ByApplication, "", "")
                 .await;
-            self.session = None;
-            self.set_state(RCState::Disconnected)?;
+            self.set_disconnected();
         }
         Ok(())
     }
 
+    async fn _on_disconnect(&mut self) -> Result<()> {
+        self.set_disconnected();
+        Ok(())
+    }
+
     // pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
-    //     println!("Data {:?}", data);
+    //     debug!("Data {:?}", data);
     //     self.maybe_connect_remote().await;
     //     self.tx.send(RCCommand::Data(channel, data.freeze()));
     // }
 }
 
+impl Drop for RemoteClient {
+    fn drop(&mut self) {
+        debug!("remote client dropped");
+    }
+}
+
 struct ClientHandler {
-    // data_queue_rx: UnboundedReceiver<(ChannelId, Bytes)>,
+    pub tx: UnboundedSender<ClientHandlerEvent>,
+}
+
+#[derive(Debug)]
+enum ClientHandlerEvent {
+    Disconnect,
 }
 
 impl thrussh::client::Handler for ClientHandler {
@@ -344,7 +401,14 @@ impl thrussh::client::Handler for ClientHandler {
     }
 
     fn check_server_key(self, server_public_key: &PublicKey) -> Self::FutureBool {
-        println!("check_server_key: {:?}", server_public_key);
+        debug!("check_server_key: {:?}", server_public_key);
         self.finished_bool(true)
+    }
+}
+
+impl Drop for ClientHandler {
+    fn drop(&mut self) {
+        let _ = self.tx.send(ClientHandlerEvent::Disconnect);
+        debug!("handler dropped");
     }
 }

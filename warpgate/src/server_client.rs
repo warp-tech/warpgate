@@ -1,13 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use bytes::BytesMut;
+use log::*;
+use std::{collections::HashMap, sync::Arc};
 use thrussh::{server::Session, ChannelId, CryptoVec, Pty};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     Mutex,
 };
 
-use crate::remote_client::{PtyRequest, ChannelOperation};
+use crate::remote_client::{ChannelOperation, PtyRequest};
 use crate::{
     misc::Client,
     remote_client::{RCCommand, RCEvent, RCState, RemoteClient},
@@ -36,7 +37,7 @@ impl ServerClient {
             rc_state: RCState::NotInitialized,
         }));
 
-        let rc = RemoteClient::new(this.clone(), rcc_rx, rce_tx);
+        let rc = RemoteClient::new(rcc_rx, rce_tx);
         rc.start();
 
         tokio::spawn({
@@ -46,20 +47,23 @@ impl ServerClient {
                     let state = rce_rx.recv().await;
                     match state {
                         Some(e) => {
-                            println!("[handler] event {:?}", e);
+                            debug!("[handler] event {:?}", e);
                             let this = this.upgrade();
                             if this.is_none() {
                                 break;
                             }
                             let t = this.unwrap();
                             let this = &mut t.lock().await;
-                            match this.handle_remote_event(e).await {
-                                Err(e) => {
-                                    println!("[rc event handler] error {:?}", e);
-                                    this.close();
-                                    break;
-                                }
-                                _ => ()
+                            match e {
+                                RCEvent::Done => break,
+                                e => match this.handle_remote_event(e).await {
+                                    Err(e) => {
+                                        debug!("[rc event handler] error {:?}", e);
+                                        this.close();
+                                        break;
+                                    }
+                                    _ => (),
+                                },
                             }
                         }
                         None => {
@@ -67,7 +71,7 @@ impl ServerClient {
                         }
                     }
                 }
-                println!("[handler] no more events from rc");
+                debug!("[handler] no more events from rc");
             }
         });
 
@@ -92,9 +96,7 @@ impl ServerClient {
     pub async fn emit_session_output(&mut self, data: &[u8]) {
         if let Some(handle) = &mut self.session_handle {
             for channel in &mut self.shell_channels {
-                let _ = handle
-                    .data(*channel, CryptoVec::from_slice(data))
-                    .await;
+                let _ = handle.data(*channel, CryptoVec::from_slice(data)).await;
             }
         }
     }
@@ -117,8 +119,8 @@ impl ServerClient {
                         self.emit_service_message(&"Connected".to_string()).await;
                     }
                     RCState::Disconnected => {
-                        self.rc_state = RCState::Disconnected;
                         self.emit_service_message(&"Disconnected".to_string()).await;
+                        drop(self.session_handle.take());
                     }
                     _ => {}
                 }
@@ -126,7 +128,7 @@ impl ServerClient {
             RCEvent::Output(channel, data) => {
                 if let Some(handle) = &mut self.session_handle {
                     match handle.data(channel, CryptoVec::from_slice(&data)).await {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(_) => anyhow::bail!("failed to send data"),
                     }
                 }
@@ -134,20 +136,52 @@ impl ServerClient {
             RCEvent::Success(channel) => {
                 if let Some(handle) = &mut self.session_handle {
                     match handle.channel_success(channel).await {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(_) => anyhow::bail!("failed to send data"),
                     }
                 }
+            }
+            RCEvent::Close(channel) => {
+                if let Some(handle) = &mut self.session_handle {
+                    match handle.close(channel).await {
+                        Ok(_) => {}
+                        Err(_) => anyhow::bail!("failed to close ch"),
+                    }
+                }
+            }
+            RCEvent::Eof(channel) => {
+                if let Some(handle) = &mut self.session_handle {
+                    match handle.eof(channel).await {
+                        Ok(_) => {}
+                        Err(_) => anyhow::bail!("failed to send eof"),
+                    }
+                }
+            }
+            RCEvent::ExitStatus(channel, code) => {
+                if let Some(handle) = &mut self.session_handle {
+                    match handle.exit_status_request(channel, code).await {
+                        Ok(_) => {}
+                        Err(_) => anyhow::bail!("failed to send exit status"),
+                    }
+                }
+            }
+            x => {
+                warn!("[rc event handler] unhandled event {:?}", x);
             }
         }
         Ok(())
     }
 
-    pub async fn _channel_open_session(&mut self, channel: ChannelId, session: &mut Session) -> Result<()> {
-        println!("Channel open session {:?}", channel);
+    pub async fn _channel_open_session(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<()> {
+        debug!("Channel open session {:?}", channel);
         self.ensure_client_registered(session).await;
         self.shell_channels.push(channel);
-        self.rc_tx.send(RCCommand::Channel(ChannelOperation::OpenShell(channel)))?;
+        self.rc_tx
+            .send(RCCommand::Channel(ChannelOperation::OpenShell(channel)))?;
         // match self.session_handle.as_mut().unwrap().channel_success(channel).await {
         //     Ok(_) => {},
         //     Err(_) => anyhow::bail!("failed to send data"),
@@ -159,25 +193,59 @@ impl ServerClient {
         // }
     }
 
-    pub async fn _channel_pty_request(&mut self, channel: ChannelId, request: PtyRequest) -> Result<()> {
-        self.rc_tx.send(RCCommand::Channel(ChannelOperation::RequestPty(channel, request)))?;
+    pub async fn _channel_pty_request(
+        &mut self,
+        channel: ChannelId,
+        request: PtyRequest,
+    ) -> Result<()> {
+        self.rc_tx
+            .send(RCCommand::Channel(ChannelOperation::RequestPty(
+                channel, request,
+            )))?;
         self.maybe_connect_remote().await;
-        // match self.session_handle.as_mut().unwrap().channel_success(channel).await {
-        //     Ok(_) => {},
-        //     Err(_) => anyhow::bail!("failed to send data"),
-        // }
+        let _ = self
+            .session_handle
+            .as_mut()
+            .unwrap()
+            .channel_success(channel)
+            .await;
         Ok(())
     }
 
-    pub async fn _channel_shell_request(&mut self, channel: ChannelId, session: &mut Session) -> Result<()> {
-        self.rc_tx.send(RCCommand::Channel(ChannelOperation::RequestShell(channel)))?;
+    pub async fn _channel_shell_request(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<()> {
+        self.rc_tx
+            .send(RCCommand::Channel(ChannelOperation::RequestShell(channel)))?;
+        let _ = self
+            .session_handle
+            .as_mut()
+            .unwrap()
+            .channel_success(channel)
+            .await;
         Ok(())
     }
 
     pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
-        println!("Data {:?}", data);
+        debug!("Data {:?}", data);
         self.maybe_connect_remote().await;
-        let _ = self.rc_tx.send(RCCommand::Channel(ChannelOperation::Data(channel, data.freeze())));
+        let _ = self.rc_tx.send(RCCommand::Channel(ChannelOperation::Data(
+            channel,
+            data.freeze(),
+        )));
+    }
+
+    pub async fn _channel_close(&mut self, channel: ChannelId, session: &mut Session) {
+        debug!("channel close {:?}", channel);
+    }
+
+    pub async fn _disconnect(&mut self) {
+        debug!("disconnect");
+        if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
+            self.rc_tx.send(RCCommand::Disconnect).unwrap();
+        }
     }
 
     fn close(&mut self) {}
@@ -186,6 +254,6 @@ impl ServerClient {
 impl Drop for ServerClient {
     fn drop(&mut self) {
         self.close();
-        println!("[client] dropped");
+        debug!("[client] dropped");
     }
 }

@@ -2,15 +2,15 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use futures::FutureExt;
 use futures::future::{ready, Ready};
-use thrussh::{ChannelId, Pty};
+use futures::FutureExt;
+use log::*;
 use thrussh::server::{Auth, Session};
+use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;
 
 use crate::remote_client::PtyRequest;
 use crate::server_client::ServerClient;
-
 
 pub struct ServerHandler {
     pub client: Arc<Mutex<ServerClient>>,
@@ -19,7 +19,8 @@ pub struct ServerHandler {
 impl thrussh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
     type FutureAuth = Ready<anyhow::Result<(Self, thrussh::server::Auth)>>;
-    type FutureUnit = Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
+    type FutureUnit =
+        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
     type FutureBool = Ready<anyhow::Result<(Self, Session, bool)>>;
 
     fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
@@ -32,9 +33,7 @@ impl thrussh::server::Handler for ServerHandler {
     }
 
     fn finished(self, s: Session) -> Self::FutureUnit {
-        async {
-            Ok((self, s))
-        }.boxed()
+        async { Ok((self, s)) }.boxed()
     }
 
     fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
@@ -45,7 +44,8 @@ impl thrussh::server::Handler for ServerHandler {
                 ._channel_open_session(channel, &mut session)
                 .await?;
             Ok((self, session))
-        }.boxed()
+        }
+        .boxed()
     }
 
     fn pty_request(
@@ -65,17 +65,21 @@ impl thrussh::server::Handler for ServerHandler {
             self.client
                 .lock()
                 .await
-                ._channel_pty_request(channel, PtyRequest {
-                    term,
-                    col_width,
-                    row_height,
-                    pix_width,
-                    pix_height,
-                    modes,
-                })
+                ._channel_pty_request(
+                    channel,
+                    PtyRequest {
+                        term,
+                        col_width,
+                        row_height,
+                        pix_width,
+                        pix_height,
+                        modes,
+                    },
+                )
                 .await?;
             Ok((self, session))
-        }.boxed()
+        }
+        .boxed()
     }
 
     fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
@@ -86,7 +90,8 @@ impl thrussh::server::Handler for ServerHandler {
                 ._channel_shell_request(channel, &mut session)
                 .await?;
             Ok((self, session))
-        }.boxed()
+        }
+        .boxed()
     }
 
     fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
@@ -108,12 +113,29 @@ impl thrussh::server::Handler for ServerHandler {
                 ._data(channel, data, &mut session)
                 .await;
             Ok((self, session))
-        }.boxed()
+        }
+        .boxed()
+    }
+
+    fn channel_close(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_close(channel, &mut session)
+                .await;
+            Ok((self, session))
+        }
+        .boxed()
     }
 }
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        println!("Server handler dropped");
+        debug!("Server handler dropped");
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            client.lock().await._disconnect().await;
+        });
     }
 }

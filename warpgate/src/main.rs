@@ -16,7 +16,6 @@ mod remote_client;
 mod server_client;
 mod server_handler;
 
-
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -34,7 +33,9 @@ async fn main() {
         ..Default::default()
     };
     config.keys.push(load_secret_key("host_key", None).unwrap());
-    config.keys.push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
+    config
+        .keys
+        .push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
@@ -56,8 +57,6 @@ impl thrussh::server::Server for Server {
     fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self::Handler {
         self.last_client_id += 1;
         let client = ServerClient::new(self.clients.clone(), self.last_client_id);
-        ServerHandler {
-            client,
-        }
+        ServerHandler { client }
     }
 }
