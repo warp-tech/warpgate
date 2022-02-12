@@ -9,7 +9,7 @@ use thrussh::server::{Auth, Session};
 use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;
 
-use crate::remote_client::PtyRequest;
+use crate::remote_client::{PtyRequest, ServerChannelId};
 use crate::server_client::ServerClient;
 
 pub struct ServerHandler {
@@ -18,7 +18,8 @@ pub struct ServerHandler {
 
 impl thrussh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
-    type FutureAuth = Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
+    type FutureAuth =
+        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
     type FutureUnit =
         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
     type FutureBool = Ready<anyhow::Result<(Self, Session, bool)>>;
@@ -41,7 +42,7 @@ impl thrussh::server::Handler for ServerHandler {
             self.client
                 .lock()
                 .await
-                ._channel_open_session(channel, &mut session)
+                ._channel_open_session(ServerChannelId(channel), &mut session)
                 .await?;
             Ok((self, session))
         }
@@ -66,7 +67,7 @@ impl thrussh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_pty_request(
-                    channel,
+                    ServerChannelId(channel),
                     PtyRequest {
                         term,
                         col_width,
@@ -87,7 +88,7 @@ impl thrussh::server::Handler for ServerHandler {
             self.client
                 .lock()
                 .await
-                ._channel_shell_request(channel, &mut session)
+                ._channel_shell_request(ServerChannelId(channel), &mut session)
                 .await?;
             Ok((self, session))
         }
@@ -98,11 +99,7 @@ impl thrussh::server::Handler for ServerHandler {
         let user = user.to_string();
         let key = key.clone();
         async move {
-            let result = self.client
-                .lock()
-                .await
-                ._auth_publickey(user, &key)
-                .await;
+            let result = self.client.lock().await._auth_publickey(user, &key).await;
             Ok((self, result))
         }
         .boxed()
@@ -119,7 +116,7 @@ impl thrussh::server::Handler for ServerHandler {
             self.client
                 .lock()
                 .await
-                ._data(channel, data, &mut session)
+                ._data(ServerChannelId(channel), data)
                 .await;
             Ok((self, session))
         }
@@ -131,8 +128,38 @@ impl thrussh::server::Handler for ServerHandler {
             self.client
                 .lock()
                 .await
-                ._channel_close(channel, &mut session)
+                ._channel_close(ServerChannelId(channel), &mut session)
                 .await;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn window_change_request(
+        self,
+        channel: ChannelId,
+        col_width: u32,
+        row_height: u32,
+        pix_width: u32,
+        pix_height: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._window_change_request(
+                    ServerChannelId(channel),
+                    PtyRequest {
+                        term: "".to_string(),
+                        col_width,
+                        row_height,
+                        pix_width,
+                        pix_height,
+                        modes: vec![],
+                    },
+                )
+                .await?;
             Ok((self, session))
         }
         .boxed()
