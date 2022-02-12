@@ -1,8 +1,8 @@
 #![feature(type_alias_impl_trait)]
 
-use env_logger;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing_subscriber::EnvFilter;
 
 use misc::Client;
 use server_client::ServerClient;
@@ -25,7 +25,12 @@ async fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
-    env_logger::init();
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let mut config = thrussh::server::Config {
         auth_rejection_time: std::time::Duration::from_secs(1),
@@ -54,9 +59,9 @@ struct Server {
 
 impl thrussh::server::Server for Server {
     type Handler = ServerHandler;
-    fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self::Handler {
+    fn new(&mut self, remote_addr: Option<std::net::SocketAddr>) -> Self::Handler {
         self.last_client_id += 1;
-        let client = ServerClient::new(self.clients.clone(), self.last_client_id);
+        let client = ServerClient::new(self.clients.clone(), self.last_client_id, remote_addr);
         ServerHandler { client }
     }
 }

@@ -1,12 +1,13 @@
+use ansi_term::Colour;
 use anyhow::Result;
 use bytes::BytesMut;
-use log::*;
 use std::{collections::HashMap, sync::Arc};
-use thrussh::{server::Session, ChannelId, CryptoVec, Pty};
+use thrussh::{server::Session, ChannelId, CryptoVec};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     Mutex,
 };
+use tracing::*;
 
 use crate::remote_client::{ChannelOperation, PtyRequest};
 use crate::{
@@ -18,36 +19,56 @@ pub struct ServerClient {
     clients: Arc<Mutex<HashMap<u64, Client>>>,
     id: u64,
     session_handle: Option<thrussh::server::Handle>,
-    shell_channels: Vec<ChannelId>,
+    pty_channels: Vec<ChannelId>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_state: RCState,
+    remote_addr: Option<std::net::SocketAddr>,
+}
+
+impl std::fmt::Debug for ServerClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[S{} - {}]",
+            self.id,
+            self.remote_addr
+                .map(|x| x.to_string())
+                .unwrap_or("unknown".into())
+        )
+    }
 }
 
 impl ServerClient {
-    pub fn new(clients: Arc<Mutex<HashMap<u64, Client>>>, id: u64) -> Arc<Mutex<Self>> {
-        let (rce_tx, mut rce_rx) = unbounded_channel();
-        let (rcc_tx, rcc_rx) = unbounded_channel();
+    pub fn new(
+        clients: Arc<Mutex<HashMap<u64, Client>>>,
+        id: u64,
+        remote_addr: Option<std::net::SocketAddr>,
+    ) -> Arc<Mutex<Self>> {
+        let mut rc_handles = RemoteClient::create();
 
-        let this = Arc::new(Mutex::new(Self {
+        let this = Self {
             clients,
             id,
             session_handle: None,
-            shell_channels: vec![],
-            rc_tx: rcc_tx,
+            pty_channels: vec![],
+            rc_tx: rc_handles.command_tx,
             rc_state: RCState::NotInitialized,
-        }));
+            remote_addr,
+        };
 
-        let rc = RemoteClient::new(rcc_rx, rce_tx);
-        rc.start();
+        info!(session=?this, "New connection");
+
+        let session_debug_tag = format!("{:?}", this);
+        let this = Arc::new(Mutex::new(this));
 
         tokio::spawn({
             let this = Arc::downgrade(&this);
             async move {
                 loop {
-                    let state = rce_rx.recv().await;
+                    let state = rc_handles.event_rx.recv().await;
                     match state {
                         Some(e) => {
-                            debug!("[handler] event {:?}", e);
+                            debug!(session=%session_debug_tag, event=?e, "Event");
                             let this = this.upgrade();
                             if this.is_none() {
                                 break;
@@ -57,9 +78,8 @@ impl ServerClient {
                             match e {
                                 RCEvent::Done => break,
                                 e => match this.handle_remote_event(e).await {
-                                    Err(e) => {
-                                        debug!("[rc event handler] error {:?}", e);
-                                        this.close();
+                                    Err(err) => {
+                                        error!(session=%session_debug_tag, "Event handler error: {:?}", err);
                                         break;
                                     }
                                     _ => (),
@@ -71,7 +91,7 @@ impl ServerClient {
                         }
                     }
                 }
-                debug!("[handler] no more events from rc");
+                debug!(session=%session_debug_tag, "No more events from RC");
             }
         });
 
@@ -88,14 +108,22 @@ impl ServerClient {
         // }
     }
 
-    pub async fn emit_service_message(&mut self, msg: &String) {
-        self.emit_session_output(format!("[warpgate]: {}\r\n", msg).as_bytes())
-            .await;
+    pub async fn emit_service_message(&mut self, msg: &str) {
+        debug!(session=?self, "Service message: {}", msg);
+        self.emit_pty_output(
+            format!(
+                "{} {}\r\n",
+                Colour::Black.on(Colour::Blue).bold().paint(" warpgate "),
+                msg,
+            )
+            .as_bytes(),
+        )
+        .await;
     }
 
-    pub async fn emit_session_output(&mut self, data: &[u8]) {
+    pub async fn emit_pty_output(&mut self, data: &[u8]) {
         if let Some(handle) = &mut self.session_handle {
-            for channel in &mut self.shell_channels {
+            for channel in &mut self.pty_channels {
                 let _ = handle.data(*channel, CryptoVec::from_slice(data)).await;
             }
         }
@@ -104,7 +132,7 @@ impl ServerClient {
     pub async fn maybe_connect_remote(&mut self) {
         if self.rc_state == RCState::NotInitialized {
             self.rc_state = RCState::Connecting;
-            self.emit_service_message(&"Connecting...\n\n\n\n".to_string())
+            self.emit_service_message(&"Connecting...".to_string())
                 .await;
             self.rc_tx.send(RCCommand::Connect).unwrap();
         }
@@ -165,8 +193,8 @@ impl ServerClient {
                     }
                 }
             }
-            x => {
-                warn!("[rc event handler] unhandled event {:?}", x);
+            e => {
+                warn!(session=?self, event=?e, "Unhandled event");
             }
         }
         Ok(())
@@ -177,20 +205,11 @@ impl ServerClient {
         channel: ChannelId,
         session: &mut Session,
     ) -> Result<()> {
-        debug!("Channel open session {:?}", channel);
+        debug!(session=?self, ?channel, "Opening channel");
         self.ensure_client_registered(session).await;
-        self.shell_channels.push(channel);
         self.rc_tx
             .send(RCCommand::Channel(ChannelOperation::OpenShell(channel)))?;
-        // match self.session_handle.as_mut().unwrap().channel_success(channel).await {
-        //     Ok(_) => {},
-        //     Err(_) => anyhow::bail!("failed to send data"),
-        // }
         Ok(())
-        // {
-        //     let mut clients = self.clients.lock().unwrap();
-        //     clients.get_mut(&self.id).unwrap().shell_channel = Some(channel);
-        // }
     }
 
     pub async fn _channel_pty_request(
@@ -202,13 +221,14 @@ impl ServerClient {
             .send(RCCommand::Channel(ChannelOperation::RequestPty(
                 channel, request,
             )))?;
-        self.maybe_connect_remote().await;
         let _ = self
             .session_handle
             .as_mut()
             .unwrap()
             .channel_success(channel)
             .await;
+        self.pty_channels.push(channel);
+        self.maybe_connect_remote().await;
         Ok(())
     }
 
@@ -219,6 +239,7 @@ impl ServerClient {
     ) -> Result<()> {
         self.rc_tx
             .send(RCCommand::Channel(ChannelOperation::RequestShell(channel)))?;
+        info!(session=?self, ?channel, "Opening shell");
         let _ = self
             .session_handle
             .as_mut()
@@ -229,31 +250,47 @@ impl ServerClient {
     }
 
     pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
-        debug!("Data {:?}", data);
+        debug!(session=?self,?data, "Data");
         self.maybe_connect_remote().await;
+        if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
+            info!(session=?self, ?channel, "User requested connection abort (Ctrl-C)");
+            self._disconnect().await;
+            return;
+        }
         let _ = self.rc_tx.send(RCCommand::Channel(ChannelOperation::Data(
             channel,
             data.freeze(),
         )));
     }
 
+    pub async fn _auth_publickey(
+        &mut self,
+        user: String,
+        key: &thrussh_keys::key::PublicKey,
+    ) -> thrussh::server::Auth {
+        info!(session=?self, "Public key auth as {} with key {}", user, key.fingerprint());
+        self._auth_accept()
+    }
+
+    fn _auth_accept(&mut self) -> thrussh::server::Auth {
+        info!(session=?self, "Authenticated");
+        thrussh::server::Auth::Accept
+    }
+
     pub async fn _channel_close(&mut self, channel: ChannelId, session: &mut Session) {
-        debug!("channel close {:?}", channel);
+        debug!(session=?self, ?channel, "Closing channel");
     }
 
     pub async fn _disconnect(&mut self) {
-        debug!("disconnect");
+        debug!(session=?self, "Disconnecting");
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
             self.rc_tx.send(RCCommand::Disconnect).unwrap();
         }
     }
-
-    fn close(&mut self) {}
 }
 
 impl Drop for ServerClient {
     fn drop(&mut self) {
-        self.close();
-        debug!("[client] dropped");
+        info!(session=?self, "Closed connection");
     }
 }

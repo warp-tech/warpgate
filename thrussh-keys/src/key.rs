@@ -97,7 +97,7 @@ impl SignatureHash {
 }
 
 /// Public key
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PublicKey {
     #[doc(hidden)]
     Ed25519(thrussh_libsodium::ed25519::PublicKey),
@@ -111,6 +111,7 @@ pub enum PublicKey {
 
 /// A public key from OpenSSL.
 #[cfg(feature = "openssl")]
+#[derive(Clone)]
 pub struct OpenSSLPKey(pub openssl::pkey::PKey<Public>);
 
 #[cfg(feature = "openssl")]

@@ -18,14 +18,14 @@ pub struct ServerHandler {
 
 impl thrussh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
-    type FutureAuth = Ready<anyhow::Result<(Self, thrussh::server::Auth)>>;
+    type FutureAuth = Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
     type FutureUnit =
         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
     type FutureBool = Ready<anyhow::Result<(Self, Session, bool)>>;
 
     fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
         println!("Finished auth {:?}", auth);
-        ready(Ok((self, auth)))
+        async { Ok((self, auth)) }.boxed()
     }
 
     fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
@@ -95,13 +95,22 @@ impl thrussh::server::Handler for ServerHandler {
     }
 
     fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
-        println!("Auth {:?} with key {:?}", user, key);
-        self.finished_auth(Auth::Accept)
+        let user = user.to_string();
+        let key = key.clone();
+        async move {
+            let result = self.client
+                .lock()
+                .await
+                ._auth_publickey(user, &key)
+                .await;
+            Ok((self, result))
+        }
+        .boxed()
     }
 
     fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
         println!("Auth {:?} with pw {:?}", user, password);
-        self.finished_auth(Auth::Accept)
+        async { Ok((self, Auth::Accept)) }.boxed()
     }
 
     fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {

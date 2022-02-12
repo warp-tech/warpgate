@@ -12,8 +12,6 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 
-use crate::ServerClient;
-
 #[derive(Clone, Debug)]
 pub enum RCEvent {
     State(RCState),
@@ -69,17 +67,29 @@ pub struct RemoteClient {
     client_handler_rx: Option<UnboundedReceiver<ClientHandlerEvent>>,
 }
 
+pub struct RemoteClientHandles {
+    pub event_rx: UnboundedReceiver<RCEvent>,
+    pub command_tx: UnboundedSender<RCCommand>,
+}
+
 impl RemoteClient {
-    pub fn new(rx: UnboundedReceiver<RCCommand>, tx: UnboundedSender<RCEvent>) -> Self {
-        Self {
-            rx,
-            tx,
+    pub fn create() -> RemoteClientHandles {
+        let (event_tx, mut event_rx) = unbounded_channel();
+        let (command_tx, command_rx) = unbounded_channel();
+
+        let this = Self {
+            rx: command_rx,
+            tx: event_tx,
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
             channels_in_setup: HashMap::new(),
             pending_ops: vec![],
             state: RCState::NotInitialized,
             client_handler_rx: None,
+        };
+        this.start();
+        return RemoteClientHandles {
+            event_rx, command_tx,
         }
     }
 
@@ -102,34 +112,14 @@ impl RemoteClient {
         }
 
         match op {
-            ChannelOperation::OpenShell(channel_id) => match self.open_shell(channel_id).await {
-                Ok(_) => {}
-                Err(e) => {
-                    self.set_disconnected();
-                    debug!("open shell error: {}", e);
-                    e.chain().skip(1).for_each(|e| debug!(": {}", e));
-                }
+            ChannelOperation::OpenShell(channel_id) => {
+                self.open_shell(channel_id).await.context("failed to open shell")?;
             },
             ChannelOperation::RequestPty(channel_id, pty) => {
-                match self.request_pty(channel_id, pty).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        self.set_disconnected();
-                        debug!("pty req error: {}", e);
-                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
-                    }
-                }
+                self.request_pty(channel_id, pty).await.context("pty req error")?;
             }
             ChannelOperation::RequestShell(channel_id) => {
-                match self.request_shell(channel_id).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        self.set_disconnected();
-
-                        debug!("shell req error: {}", e);
-                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
-                    }
-                }
+                self.request_shell(channel_id).await.context("shell req error")?;
             }
             ChannelOperation::Data(channel_id, data) => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
@@ -139,10 +129,8 @@ impl RemoteClient {
                         Err(SendError(_)) => {
                             channel_pipes.remove(&channel_id);
                         }
-                    },
-                    None => {
-                        debug!("data for unknown channel {:?}", channel_id);
                     }
+                    None => debug!("data for unknown channel {:?}", channel_id)
                 }
             }
         }
@@ -168,7 +156,6 @@ impl RemoteClient {
                                     Err(e) => {
                                         self.set_disconnected();
                                         debug!("connect error: {}", e);
-                                        e.chain().skip(1).for_each(|e| debug!(": {}", e));
                                     }
                                 },
                                 Some(RCCommand::Channel(op)) => {

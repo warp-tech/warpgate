@@ -84,7 +84,7 @@ pub mod ed25519 {
     pub const SIGNATURE_BYTES: usize = 64;
 
     /// Ed25519 public key.
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq, Clone)]
     pub struct PublicKey {
         /// Actual key
         pub key: [u8; PUBLICKEY_BYTES],
