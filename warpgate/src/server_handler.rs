@@ -83,12 +83,12 @@ impl thrussh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+    fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
             self.client
                 .lock()
                 .await
-                ._channel_shell_request(ServerChannelId(channel), &mut session)
+                ._channel_shell_request(ServerChannelId(channel))
                 .await?;
             Ok((self, session))
         }
@@ -110,7 +110,7 @@ impl thrussh::server::Handler for ServerHandler {
         async { Ok((self, Auth::Accept)) }.boxed()
     }
 
-    fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
+    fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
             self.client
@@ -123,12 +123,12 @@ impl thrussh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn channel_close(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+    fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
             self.client
                 .lock()
                 .await
-                ._channel_close(ServerChannelId(channel), &mut session)
+                ._channel_close(ServerChannelId(channel))
                 .await;
             Ok((self, session))
         }

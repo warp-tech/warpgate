@@ -2,16 +2,15 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
-use std::any::Any;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::{sync::Arc, time::Duration};
-use thrussh::client::{Channel, Handle, Session};
+use std::sync::Arc;
+use thrussh::client::{Handle, Session};
 use thrussh::{ChannelId, Pty};
 use thrussh_keys::key::PublicKey;
 use thrussh_keys::load_secret_key;
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -24,6 +23,8 @@ pub enum RCEvent {
     Eof(ServerChannelId),
     Close(ServerChannelId),
     ExitStatus(ServerChannelId, u32),
+    ConnectionError,
+    AuthError,
     Done,
 }
 
@@ -84,7 +85,7 @@ pub struct RemoteClientHandles {
 
 impl RemoteClient {
     pub fn create() -> RemoteClientHandles {
-        let (event_tx, mut event_rx) = unbounded_channel();
+        let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = oneshot::channel();
 
@@ -245,14 +246,20 @@ impl RemoteClient {
                 anyhow::bail!("Aborted");
             }
             session = fut_connect => {
+                if let Err(err) = session {
+                    self.tx.send(RCEvent::ConnectionError)?;
+                    anyhow::bail!("Error connecting: {}", err);
+                }
+
                 let mut session = session.with_context(|| "connect()")?;
 
                 let auth_result = session
-                    .authenticate_password("root", "syslink")
+                    .authenticate_password("root1", "syslink")
                     // .authenticate_publickey("root", client_key)
                     .await
                     .with_context(|| "authenticate()")?;
                 if !auth_result {
+                    self.tx.send(RCEvent::AuthError)?;
                     debug!("auth failed");
                     let _ = session
                         .disconnect(thrussh::Disconnect::ByApplication, "", "")

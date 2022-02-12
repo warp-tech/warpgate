@@ -3,10 +3,10 @@ use anyhow::Result;
 use bytes::BytesMut;
 use std::net::ToSocketAddrs;
 use std::{collections::HashMap, sync::Arc};
-use thrussh::{server::Session, ChannelId, CryptoVec};
+use thrussh::{server::Session, CryptoVec};
 use tokio::sync::oneshot;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
+    mpsc::UnboundedSender,
     Mutex,
 };
 use tracing::*;
@@ -153,14 +153,20 @@ impl ServerClient {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.emit_service_message(&"Connected".to_string()).await;
+                        self.emit_service_message(&"Connected").await;
                     }
                     RCState::Disconnected => {
-                        self.emit_service_message(&"Disconnected".to_string()).await;
+                        self.emit_service_message(&"Disconnected").await;
                         drop(self.session_handle.take());
                     }
                     _ => {}
                 }
+            }
+            RCEvent::ConnectionError => {
+                self.emit_service_message(&"Connection failed").await;
+            }
+            RCEvent::AuthError => {
+                self.emit_service_message(&"Authentication failed").await;
             }
             RCEvent::Output(channel, data) => {
                 if let Some(handle) = &mut self.session_handle {
@@ -256,7 +262,6 @@ impl ServerClient {
     pub async fn _channel_shell_request(
         &mut self,
         channel: ServerChannelId,
-        session: &mut Session,
     ) -> Result<()> {
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
@@ -298,7 +303,7 @@ impl ServerClient {
         thrussh::server::Auth::Accept
     }
 
-    pub async fn _channel_close(&mut self, channel: ServerChannelId, session: &mut Session) {
+    pub async fn _channel_close(&mut self, channel: ServerChannelId) {
         debug!(session=?self, ?channel, "Closing channel");
     }
 
