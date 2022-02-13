@@ -3,22 +3,22 @@ edition = "2021"
 name = "warpgate"
 version = "0.1.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+ansi_term = "0.12.1"
 anyhow = "1.0.53"
 bytes = "1.1.0"
+console-subscriber = "0.1.2"
 dhat = "0.3.0"
 futures = "0.3.19"
-ansi_term = "0.12.1"
-log = "0.4.14"
 thrussh = {version = "0.33.5", features = ["openssl"], path = "../thrussh"}
 thrussh-keys = {version = "0.21.0", features = ["openssl"], path = "../thrussh-keys"}
-tokio = {version="1.16.1", features=["tracing"]}
+time = "0.3.7"
+tokio = {version = "1.16.1", features = ["tracing"]}
 tracing = "0.1.30"
 tracing-subscriber = {version = "0.3.8", features = ["env-filter", "local-time"]}
-time = "0.3.7"
-console-subscriber = "0.1.2"
+warpgate-common = {version = "*", path = "../warpgate-common"}
+warpgate-admin = {version = "*", path = "../warpgate-admin"}
+
 [features]
 dhat-ad-hoc = [] # if you are doing ad hoc profiling
 dhat-heap = [] # if you are doing heap profiling

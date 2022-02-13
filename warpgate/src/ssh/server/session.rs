@@ -2,7 +2,7 @@ use ansi_term::Colour;
 use anyhow::Result;
 use bytes::BytesMut;
 use std::net::ToSocketAddrs;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use thrussh::{server::Session, CryptoVec};
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
@@ -11,10 +11,9 @@ use tracing::*;
 use super::super::{
     ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
 };
-use crate::misc::Client;
+use warpgate_common::{SessionState, State};
 
 pub struct ServerSession {
-    clients: Arc<Mutex<HashMap<u64, Client>>>,
     id: u64,
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
@@ -22,6 +21,8 @@ pub struct ServerSession {
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
     remote_addr: std::net::SocketAddr,
+    state: Arc<Mutex<State>>,
+    session_state: Arc<Mutex<SessionState>>,
 }
 
 impl std::fmt::Debug for ServerSession {
@@ -32,14 +33,14 @@ impl std::fmt::Debug for ServerSession {
 
 impl ServerSession {
     pub fn new(
-        clients: Arc<Mutex<HashMap<u64, Client>>>,
         id: u64,
         remote_addr: std::net::SocketAddr,
+        state: Arc<Mutex<State>>,
+        session_state: Arc<Mutex<SessionState>>,
     ) -> Arc<Mutex<Self>> {
         let mut rc_handles = RemoteClient::create(id);
 
         let this = Self {
-            clients,
             id,
             session_handle: None,
             pty_channels: vec![],
@@ -47,6 +48,8 @@ impl ServerSession {
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
             remote_addr,
+            state,
+            session_state,
         };
 
         info!(session=?this, "New connection");
@@ -325,6 +328,11 @@ impl ServerSession {
 
 impl Drop for ServerSession {
     fn drop(&mut self) {
+        let id = self.id;
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.remove_session(id);
+        });
         info!(session=?self, "Closed connection");
     }
 }

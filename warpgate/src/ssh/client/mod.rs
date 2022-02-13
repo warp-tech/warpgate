@@ -333,6 +333,7 @@ impl RemoteClient {
                                     Some(thrussh::ChannelMsg::ExitStatus { exit_status }) => {
                                         tx.send(RCEvent::ExitStatus(channel_id, exit_status))?;
                                     }
+                                    Some(thrussh::ChannelMsg::WindowAdjusted { new_size: _ }) => { },
                                     None => {
                                         tx.send(RCEvent::Close(channel_id))?;
                                         break

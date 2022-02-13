@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::future::{ready, Ready};
 use futures::FutureExt;
-use log::*;
+use tracing::*;
 use thrussh::server::{Auth, Session};
 use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;

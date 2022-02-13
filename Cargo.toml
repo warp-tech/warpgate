@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "warpgate",
+    "warpgate-admin",
+    "warpgate-common",
     "thrussh",
     "thrussh-keys",
     "thrussh-libsodium",
