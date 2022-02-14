@@ -62,16 +62,16 @@ async fn main() -> Result<()> {
     let state = State::new();
     let state = Arc::new(Mutex::new(state));
 
-    tokio::spawn({
-        let state = state.clone();
-        async move {
-            let admin = warpgate_admin::AdminServer::new(state);
-            admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()).await;
-        }
-    });
+    let admin = warpgate_admin::AdminServer::new(state.clone());
 
     let address = "0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap();
-    SSHProtocolServer::new(state).run(address).await?;
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = SSHProtocolServer::new(state).run(address) => {}
+        _ = admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()) => {}
+    }
+
     info!("Exiting");
     Ok(())
 }
