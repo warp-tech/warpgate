@@ -57,6 +57,8 @@ fn make_opening_cipher(k: &[u8], n: &[u8]) -> super::OpeningCipher {
     super::OpeningCipher::AES256GCM(OpeningKey { key, nonce })
 }
 
+const GCM_COUNTER_OFFSET: u64 = 3;
+
 fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
     let mut new_nonce = Nonce([0; NONCE_BYTES]);
     new_nonce.0.clone_from_slice(&nonce.0);
@@ -64,7 +66,7 @@ fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
     let i0 = NONCE_BYTES - 8;
     let ctr = BigEndian::read_u64(&mut new_nonce.0[i0..]);
     // GCM requires the counter to start from 1
-    BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - 3 ); ///<<<<<TODO
+    BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - GCM_COUNTER_OFFSET);
     new_nonce
 }
 
