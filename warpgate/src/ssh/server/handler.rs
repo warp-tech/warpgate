@@ -63,7 +63,7 @@ impl thrussh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_subsystem_request(ServerChannelId(channel), name)
-                .await?;
+                .await;
             Ok((self, session))
         }
         .boxed()
@@ -143,6 +143,25 @@ impl thrussh::server::Handler for ServerHandler {
         .boxed()
     }
 
+    fn extended_data(
+        self,
+        channel: ChannelId,
+        code: u32,
+        data: &[u8],
+        session: Session,
+    ) -> Self::FutureUnit {
+        let data = BytesMut::from(data);
+        async move {
+            self.client
+                .lock()
+                .await
+                ._extended_data(ServerChannelId(channel), code, data)
+                .await;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
     fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
             self.client
@@ -179,11 +198,121 @@ impl thrussh::server::Handler for ServerHandler {
                         modes: vec![],
                     },
                 )
+                .await;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_eof(
+                    ServerChannelId(channel),
+                )
+                .await;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn signal(self, channel: ChannelId, signal_name: thrussh::Sig, session: Session) -> Self::FutureUnit {
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_signal(
+                    ServerChannelId(channel),
+                    signal_name,
+                )
+                .await;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+        let data = BytesMut::from(data);
+        async move {
+            self.client
+                .lock()
+                .await
+                ._channel_exec_request(ServerChannelId(channel), data.freeze())
                 .await?;
             Ok((self, session))
         }
         .boxed()
     }
+
+
+
+    // -----
+
+    // fn auth_none(self, user: &str) -> Self::FutureAuth {
+    //     self.finished_auth(Auth::Reject)
+    // }
+
+    // fn auth_keyboard_interactive(
+    //     self,
+    //     user: &str,
+    //     submethods: &str,
+    //     response: Option<thrussh::server::Response>,
+    // ) -> Self::FutureAuth {
+    //     self.finished_auth(Auth::Reject)
+    // }
+
+    // fn channel_open_x11(
+    //     self,
+    //     channel: ChannelId,
+    //     originator_address: &str,
+    //     originator_port: u32,
+    //     session: Session,
+    // ) -> Self::FutureUnit {
+    //     self.finished(session)
+    // }
+
+    // fn channel_open_direct_tcpip(
+    //     self,
+    //     channel: ChannelId,
+    //     host_to_connect: &str,
+    //     port_to_connect: u32,
+    //     originator_address: &str,
+    //     originator_port: u32,
+    //     session: Session,
+    // ) -> Self::FutureUnit {
+    //     self.finished(session)
+    // }
+
+    // fn x11_request(
+    //     self,
+    //     channel: ChannelId,
+    //     single_conection: bool,
+    //     x11_auth_protocol: &str,
+    //     x11_auth_cookie: &str,
+    //     x11_screen_number: u32,
+    //     session: Session,
+    // ) -> Self::FutureUnit {
+    //     self.finished(session)
+    // }
+
+    // fn env_request(
+    //     self,
+    //     channel: ChannelId,
+    //     variable_name: &str,
+    //     variable_value: &str,
+    //     session: Session,
+    // ) -> Self::FutureUnit {
+    //     self.finished(session)
+    // }
+    // fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+    //     self.finished_bool(false, session)
+    // }
+
+    // fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+    //     self.finished_bool(false, session)
+    // }
 }
 
 impl Drop for ServerHandler {

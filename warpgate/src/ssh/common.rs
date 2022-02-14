@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use thrussh::{ChannelId, Pty};
+use thrussh::{ChannelId, Pty, Sig};
 
 
 #[derive(Clone, Debug)]
@@ -21,6 +21,14 @@ pub enum ChannelOperation {
     RequestPty(PtyRequest),
     ResizePty(PtyRequest),
     RequestShell,
+    RequestExec(String),
     RequestSubsystem(String),
     Data(Bytes),
+    ExtendedData {
+        data: Bytes,
+        ext: u32,
+    },
+    Close,
+    Eof,
+    Signal(Sig),
 }

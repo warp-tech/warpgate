@@ -1,19 +1,18 @@
 #![feature(async_stream)]
+use futures::stream;
+use futures::StreamExt;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warp::Filter;
 use warpgate_common::State;
-use futures::{stream, Future};
-use futures::StreamExt;
 
 pub struct AdminServer {
     state: Arc<Mutex<State>>,
 }
 
 use serde::Serialize;
-
 
 #[derive(Serialize)]
 struct SessionData {
@@ -40,19 +39,15 @@ impl AdminServer {
             .and(with_state.clone())
             .and_then(|state: Arc<Mutex<State>>| async move {
                 let state = state.lock().await;
-                let sessions = stream::iter(state.sessions.iter()).then(|(id, s)| {
-                    async move {
-                        let session = s.lock().await;
-                        SessionData {
-                            id: *id,
-                            username: session.username.clone(),
-                        }
+                let sessions = stream::iter(state.sessions.iter()).then(|(id, s)| async move {
+                    let session = s.lock().await;
+                    SessionData {
+                        id: *id,
+                        username: session.username.clone(),
                     }
                 });
                 let sessions = sessions.collect::<Vec<_>>().await;
-                Ok::<_, Infallible>(warp::reply::json(&IndexResponse {
-                    sessions,
-                }))
+                Ok::<_, Infallible>(warp::reply::json(&IndexResponse { sessions }))
             });
 
         warp::serve(hello).run(address).await;

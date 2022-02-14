@@ -1,8 +1,9 @@
 use ansi_term::Colour;
-use anyhow::{Context, Result};
-use bytes::BytesMut;
+use anyhow::Result;
+use bytes::{Bytes, BytesMut};
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use thrussh::Sig;
 use thrussh::{server::Session, CryptoVec};
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
@@ -119,7 +120,7 @@ impl ServerSession {
         }
     }
 
-    pub async fn maybe_connect_remote(&mut self) {
+    pub async fn maybe_connect_remote(&mut self) -> Result<()> {
         if self.rc_state == RCState::NotInitialized {
             self.rc_state = RCState::Connecting;
             let address = "192.168.78.233:22"
@@ -127,10 +128,11 @@ impl ServerSession {
                 .unwrap()
                 .next()
                 .unwrap();
+            self.rc_tx.send(RCCommand::Connect(address))?;
             self.emit_service_message(&format!("Connecting to {address}"))
                 .await;
-            self.rc_tx.send(RCCommand::Connect(address)).unwrap();
         }
+        Ok(())
     }
 
     pub async fn handle_remote_event(&mut self, event: RCEvent) -> Result<()> {
@@ -160,7 +162,8 @@ impl ServerSession {
                         .await
                         .map_err(|_| ())
                         .context("failed to send data")
-                }).await?;
+                })
+                .await?;
             }
             RCEvent::Success(channel) => {
                 self.maybe_with_session(|handle| async move {
@@ -168,17 +171,20 @@ impl ServerSession {
                         .channel_success(channel.0)
                         .await
                         .context("failed to send data")
-                }).await?;
+                })
+                .await?;
             }
             RCEvent::Close(channel) => {
                 self.maybe_with_session(|handle| async move {
                     handle.close(channel.0).await.context("failed to close ch")
-                }).await?;
+                })
+                .await?;
             }
             RCEvent::Eof(channel) => {
                 self.maybe_with_session(|handle| async move {
                     handle.eof(channel.0).await.context("failed to send eof")
-                }).await?;
+                })
+                .await?;
             }
             RCEvent::ExitStatus(channel, code) => {
                 self.maybe_with_session(|handle| async move {
@@ -186,7 +192,8 @@ impl ServerSession {
                         .exit_status_request(channel.0, code)
                         .await
                         .context("failed to send exit status")
-                }).await?;
+                })
+                .await?;
             }
             RCEvent::ExitSignal {
                 channel_id,
@@ -207,9 +214,25 @@ impl ServerSession {
                         .await
                         .context("failed to send exit status")?;
                     Ok(())
-                }).await?;
+                })
+                .await?;
             }
-            RCEvent::Done => todo!(),
+            RCEvent::Done => {}
+            RCEvent::ExtendedData {
+                channel_id,
+                data,
+                ext,
+            } => {
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .extended_data(channel_id.0, ext, CryptoVec::from_slice(&data))
+                        .await
+                        .map_err(|_| ())
+                        .context("failed to send extended data")?;
+                    Ok(())
+                })
+                .await?;
+            }
         }
         Ok(())
     }
@@ -255,19 +278,32 @@ impl ServerSession {
             .channel_success(channel.0)
             .await;
         self.pty_channels.push(channel);
-        self.maybe_connect_remote().await;
+        let _ = self.maybe_connect_remote().await;
         Ok(())
     }
 
-    pub async fn _window_change_request(
-        &mut self,
-        channel: ServerChannelId,
-        request: PtyRequest,
-    ) -> Result<()> {
-        self.rc_tx.send(RCCommand::Channel(
+    pub async fn _window_change_request(&mut self, channel: ServerChannelId, request: PtyRequest) {
+        self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::ResizePty(request),
-        ))?;
+        ));
+    }
+
+    pub async fn _channel_exec_request(&mut self, channel: ServerChannelId, data: Bytes) -> Result<()> {
+        match std::str::from_utf8(&data) {
+            Err(e) => {
+                error!(session=?self, channel=?channel.0, ?data, "Requested exec - invalid UTF-8");
+                anyhow::bail!(e)
+            }
+            Ok::<&str, _>(command) => {
+                debug!(session=?self, channel=?channel.0, %command, "Requested exec");
+                let _ = self.maybe_connect_remote().await;
+                self.send_command(RCCommand::Channel(
+                    channel,
+                    ChannelOperation::RequestExec(command.to_string()),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -284,30 +320,36 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_subsystem_request(
-        &mut self,
-        channel: ServerChannelId,
-        name: String,
-    ) -> Result<()> {
+    pub async fn _channel_subsystem_request(&mut self, channel: ServerChannelId, name: String) {
         info!(session=?self, ?channel, "Requesting subsystem {}", &name);
-        self.rc_tx.send(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::RequestSubsystem(name),
-        ))?;
-        Ok(())
+        ));
     }
 
     pub async fn _data(&mut self, channel: ServerChannelId, data: BytesMut) {
         debug!(session=?self, channel=?channel.0, ?data, "Data");
-        self.maybe_connect_remote().await;
+        let _ = self.maybe_connect_remote().await;
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
             info!(session=?self, ?channel, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return;
         }
-        let _ = self.rc_tx.send(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::Data(data.freeze()),
+        ));
+    }
+
+    pub async fn _extended_data(&mut self, channel: ServerChannelId, code: u32, data: BytesMut) {
+        debug!(session=?self, channel=?channel.0, ?data, "Data");
+        self.send_command(RCCommand::Channel(
+            channel,
+            ChannelOperation::ExtendedData {
+                ext: code,
+                data: data.freeze(),
+            },
         ));
     }
 
@@ -328,6 +370,24 @@ impl ServerSession {
 
     pub async fn _channel_close(&mut self, channel: ServerChannelId) {
         debug!(session=?self, ?channel, "Closing channel");
+        self.send_command(RCCommand::Channel(channel, ChannelOperation::Close));
+    }
+
+    pub async fn _channel_eof(&mut self, channel: ServerChannelId) {
+        debug!(session=?self, ?channel, "EOF");
+        self.send_command(RCCommand::Channel(channel, ChannelOperation::Eof));
+    }
+
+    pub async fn _channel_signal(&mut self, channel: ServerChannelId, signal: Sig) {
+        debug!(session=?self, ?channel, ?signal, "Signal");
+        self.send_command(RCCommand::Channel(
+            channel,
+            ChannelOperation::Signal(signal),
+        ));
+    }
+
+    fn send_command(&mut self, command: RCCommand) {
+        let _ = self.rc_tx.send(command);
     }
 
     pub async fn _disconnect(&mut self) {
@@ -341,7 +401,7 @@ impl ServerSession {
             let _ = s.send(());
         }
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
-            let _ = self.rc_tx.send(RCCommand::Disconnect);
+            self.send_command(RCCommand::Disconnect);
         }
     }
 

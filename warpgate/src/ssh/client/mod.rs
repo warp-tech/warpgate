@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
-use thrussh::Sig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thrussh::client::Handle;
+use thrussh::Sig;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -34,6 +34,11 @@ pub enum RCEvent {
         core_dumped: bool,
         error_message: String,
         lang_tag: String,
+    },
+    ExtendedData {
+        channel_id: ServerChannelId,
+        data: Bytes,
+        ext: u32,
     },
     ConnectionError,
     AuthError,
@@ -216,7 +221,7 @@ impl RemoteClient {
     async fn connect(&mut self, address: SocketAddr) -> Result<()> {
         info!(?address, "Connecting");
         // let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
-            // .with_context(|| "load_secret_key()")?;
+        // .with_context(|| "load_secret_key()")?;
         // let client_key = Arc::new(client_key);
         let config = thrussh::client::Config {
             ..Default::default()
@@ -291,6 +296,9 @@ impl RemoteClient {
                                     Some(ChannelOperation::Data(data)) => {
                                         channel.data(&*data).await.context("data")?;
                                     }
+                                    Some(ChannelOperation::ExtendedData { ext, data }) => {
+                                        channel.extended_data(ext, &*data).await.context("extended data")?;
+                                    }
                                     Some(ChannelOperation::RequestPty(request)) => {
                                         channel.request_pty(
                                             true,
@@ -313,12 +321,20 @@ impl RemoteClient {
                                     Some(ChannelOperation::RequestShell) => {
                                         channel.request_shell(true).await.context("request_shell")?;
                                     },
+                                    Some(ChannelOperation::RequestExec(command)) => {
+                                        channel.exec(true, command).await.context("request_exec")?;
+                                    },
                                     Some(ChannelOperation::RequestSubsystem(name)) => {
                                         channel.request_subsystem(true, &name).await.context("request_subsystem")?;
                                     },
-                                    Some(op) => {
-                                        error!(?op, "Unknown channel operation in channel loop")
-                                    }
+                                    Some(ChannelOperation::Eof) => {
+                                        channel.eof().await.context("eof")?;
+                                    },
+                                    Some(ChannelOperation::Signal(signal)) => {
+                                        channel.signal(signal).await.context("signal")?;
+                                    },
+                                    Some(ChannelOperation::OpenShell) => unreachable!(),
+                                    Some(ChannelOperation::Close) => break,
                                     None => break,
                                 }
                             }
@@ -351,13 +367,20 @@ impl RemoteClient {
                                             channel_id, core_dumped, error_message, lang_tag, signal_name
                                         })?;
                                     },
+                                    Some(thrussh::ChannelMsg::XonXoff { client_can_do: _ }) => {
+                                    }
+                                    Some(thrussh::ChannelMsg::ExtendedData { data, ext }) => {
+                                        let data: &[u8] = &data;
+                                        tx.send(RCEvent::ExtendedData {
+                                            channel_id,
+                                            data: Bytes::from(BytesMut::from(data)),
+                                            ext,
+                                        })?;
+                                    }
                                     None => {
                                         tx.send(RCEvent::Close(channel_id))?;
                                         break
                                     },
-                                    mgs => {
-                                        info!("Unexpected message: {:?}", mgs);
-                                    }
                                 }
                             }
                         }
