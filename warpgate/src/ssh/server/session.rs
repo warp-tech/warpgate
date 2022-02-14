@@ -1,5 +1,5 @@
 use ansi_term::Colour;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::BytesMut;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -11,12 +11,14 @@ use tracing::*;
 use super::super::{
     ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
 };
+use crate::compat::ContextExt;
 use warpgate_common::{SessionState, State};
 
 pub struct ServerSession {
     id: u64,
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
+    all_channels: Vec<ServerChannelId>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
@@ -44,6 +46,7 @@ impl ServerSession {
             id,
             session_handle: None,
             pty_channels: vec![],
+            all_channels: vec![],
             rc_tx: rc_handles.command_tx,
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -95,16 +98,6 @@ impl ServerSession {
         this
     }
 
-    pub async fn ensure_client_registered(&mut self, session: &Session) {
-        self.session_handle = Some(session.handle());
-        // let mut clients = self.clients.lock().await;
-        // if !clients.contains_key(&self.id) {
-        //     let mut client = Client::new(session.handle());
-        //     client.id = self.id;
-        //     clients.insert(self.id, client);
-        // }
-    }
-
     pub async fn emit_service_message(&mut self, msg: &str) {
         debug!(session=?self, "Service message: {}", msg);
         self.emit_pty_output(
@@ -149,7 +142,6 @@ impl ServerSession {
                         self.emit_service_message(&"Connected").await;
                     }
                     RCState::Disconnected => {
-                        self.emit_service_message(&"Disconnected").await;
                         drop(self.session_handle.take());
                     }
                     _ => {}
@@ -162,50 +154,76 @@ impl ServerSession {
                 self.emit_service_message(&"Authentication failed").await;
             }
             RCEvent::Output(channel, data) => {
-                if let Some(handle) = &mut self.session_handle {
-                    match handle.data(channel.0, CryptoVec::from_slice(&data)).await {
-                        Ok(_) => {}
-                        Err(_) => anyhow::bail!("failed to send data"),
-                    }
-                }
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .data(channel.0, CryptoVec::from_slice(&data))
+                        .await
+                        .map_err(|_| ())
+                        .context("failed to send data")
+                }).await?;
             }
             RCEvent::Success(channel) => {
-                if let Some(handle) = &mut self.session_handle {
-                    match handle.channel_success(channel.0).await {
-                        Ok(_) => {}
-                        Err(_) => anyhow::bail!("failed to send data"),
-                    }
-                }
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .channel_success(channel.0)
+                        .await
+                        .context("failed to send data")
+                }).await?;
             }
             RCEvent::Close(channel) => {
-                if let Some(handle) = &mut self.session_handle {
-                    match handle.close(channel.0).await {
-                        Ok(_) => {}
-                        Err(_) => anyhow::bail!("failed to close ch"),
-                    }
-                }
+                self.maybe_with_session(|handle| async move {
+                    handle.close(channel.0).await.context("failed to close ch")
+                }).await?;
             }
             RCEvent::Eof(channel) => {
-                if let Some(handle) = &mut self.session_handle {
-                    match handle.eof(channel.0).await {
-                        Ok(_) => {}
-                        Err(_) => anyhow::bail!("failed to send eof"),
-                    }
-                }
+                self.maybe_with_session(|handle| async move {
+                    handle.eof(channel.0).await.context("failed to send eof")
+                }).await?;
             }
             RCEvent::ExitStatus(channel, code) => {
-                if let Some(handle) = &mut self.session_handle {
-                    match handle.exit_status_request(channel.0, code).await {
-                        Ok(_) => {}
-                        Err(_) => anyhow::bail!("failed to send exit status"),
-                    }
-                }
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .exit_status_request(channel.0, code)
+                        .await
+                        .context("failed to send exit status")
+                }).await?;
             }
-            e => {
-                warn!(session=?self, event=?e, "Unhandled event");
+            RCEvent::ExitSignal {
+                channel_id,
+                signal_name,
+                core_dumped,
+                error_message,
+                lang_tag,
+            } => {
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .exit_signal_request(
+                            channel_id.0,
+                            signal_name,
+                            core_dumped,
+                            error_message,
+                            lang_tag,
+                        )
+                        .await
+                        .context("failed to send exit status")?;
+                    Ok(())
+                }).await?;
             }
+            RCEvent::Done => todo!(),
         }
         Ok(())
+    }
+
+    async fn maybe_with_session<'a, FN, FT, R>(&'a mut self, f: FN) -> Result<R>
+    where
+        FN: FnOnce(&'a mut thrussh::server::Handle) -> FT + 'a,
+        FT: futures::Future<Output = Result<R>>,
+        R: Default,
+    {
+        if let Some(handle) = &mut self.session_handle {
+            f(handle).await?;
+        }
+        Ok(Default::default())
     }
 
     pub async fn _channel_open_session(
@@ -214,7 +232,8 @@ impl ServerSession {
         session: &mut Session,
     ) -> Result<()> {
         debug!(session=?self, ?channel, "Opening channel");
-        self.ensure_client_registered(session).await;
+        self.all_channels.push(channel);
+        self.session_handle = Some(session.handle());
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::OpenShell))?;
         Ok(())
@@ -279,11 +298,11 @@ impl ServerSession {
     }
 
     pub async fn _data(&mut self, channel: ServerChannelId, data: BytesMut) {
-        debug!(session=?self,?data, "Data");
+        debug!(session=?self, channel=?channel.0, ?data, "Data");
         self.maybe_connect_remote().await;
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
             info!(session=?self, ?channel, "User requested connection abort (Ctrl-C)");
-            self._disconnect().await;
+            self.request_disconnect().await;
             return;
         }
         let _ = self.rc_tx.send(RCCommand::Channel(
@@ -298,11 +317,12 @@ impl ServerSession {
         key: &thrussh_keys::key::PublicKey,
     ) -> thrussh::server::Auth {
         info!(session=?self, "Public key auth as {} with key {}", user, key.fingerprint());
-        self._auth_accept()
+        self._auth_accept(&user).await
     }
 
-    fn _auth_accept(&mut self) -> thrussh::server::Auth {
+    async fn _auth_accept(&mut self, username: &str) -> thrussh::server::Auth {
         info!(session=?self, "Authenticated");
+        self.session_state.lock().await.username = Some(username.into());
         thrussh::server::Auth::Accept
     }
 
@@ -312,18 +332,28 @@ impl ServerSession {
 
     pub async fn _disconnect(&mut self) {
         debug!(session=?self, "Client disconnect requested");
-        self.disconnect().await;
+        self.request_disconnect().await;
     }
 
-    async fn disconnect(&mut self) {
+    async fn request_disconnect(&mut self) {
         debug!(session=?self, "Disconnecting");
         if let Some(s) = self.rc_abort_tx.take() {
             let _ = s.send(());
         }
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
-            self.rc_tx.send(RCCommand::Disconnect).unwrap();
+            let _ = self.rc_tx.send(RCCommand::Disconnect);
         }
     }
+
+    // async fn disconnect(&mut self) {
+    //     let channels: Vec<ServerChannelId> = self.all_channels.drain(..).collect();
+    //     let _ = self.maybe_with_session(|handle| async move {
+    //         for ch in channels {
+    //             let _ = handle.close(ch.0);
+    //         }
+    //         Ok(())
+    //     }).await;
+    // }
 }
 
 impl Drop for ServerSession {
@@ -334,5 +364,6 @@ impl Drop for ServerSession {
             state.lock().await.remove_session(id);
         });
         info!(session=?self, "Closed connection");
+        debug!("Dropped");
     }
 }

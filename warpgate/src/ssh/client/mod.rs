@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
+use thrussh::Sig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thrussh::client::Handle;
-use thrussh_keys::load_secret_key;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -28,6 +28,13 @@ pub enum RCEvent {
     Eof(ServerChannelId),
     Close(ServerChannelId),
     ExitStatus(ServerChannelId, u32),
+    ExitSignal {
+        channel_id: ServerChannelId,
+        signal_name: Sig,
+        core_dumped: bool,
+        error_message: String,
+        lang_tag: String,
+    },
     ConnectionError,
     AuthError,
     Done,
@@ -160,7 +167,8 @@ impl RemoteClient {
                                     }
                                     Err(e) => {
                                         self.set_disconnected();
-                                        debug!("connect error: {}", e);
+                                        debug!("Connect error: {}", e);
+                                        break
                                     }
                                 },
                                 Some(RCCommand::Channel(ch, op)) => {
@@ -168,14 +176,15 @@ impl RemoteClient {
                                 }
                                 Some(RCCommand::Disconnect) => {
                                     self.disconnect().await?;
+                                    break
                                 }
                                 None => {
-                                    break;
+                                    break
                                 }
                             }
                         }
                         Some(client_event) = OptionFuture::from(self.client_handler_rx.as_mut().map(|x| x.recv())) => {
-                            debug!("client handler event: {:?}", client_event);
+                            debug!("Client handler event: {:?}", client_event);
                             match client_event {
                                 Some(ClientHandlerEvent::Disconnect) => {
                                     self._on_disconnect().await?;
@@ -199,16 +208,16 @@ impl RemoteClient {
                 error!(?error, "error in command loop");
                 anyhow::anyhow!("Error in command loop: {error}")
             })?;
-            debug!("no more commmands");
+            debug!("No more commmands");
             Ok::<(), anyhow::Error>(())
         });
     }
 
     async fn connect(&mut self, address: SocketAddr) -> Result<()> {
-        debug!("connecting");
-        let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
-            .with_context(|| "load_secret_key()")?;
-        let client_key = Arc::new(client_key);
+        info!(?address, "Connecting");
+        // let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
+            // .with_context(|| "load_secret_key()")?;
+        // let client_key = Arc::new(client_key);
         let config = thrussh::client::Config {
             ..Default::default()
         };
@@ -227,13 +236,14 @@ impl RemoteClient {
 
         tokio::select! {
             Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
-                debug!("Abort requested");
+                info!("Abort requested");
                 self.set_disconnected();
                 anyhow::bail!("Aborted");
             }
             session = fut_connect => {
                 if let Err(err) = session {
                     self.tx.send(RCEvent::ConnectionError)?;
+                    error!(error=?err, "Connection error");
                     anyhow::bail!("Error connecting: {}", err);
                 }
 
@@ -246,16 +256,16 @@ impl RemoteClient {
                     .with_context(|| "authenticate()")?;
                 if !auth_result {
                     self.tx.send(RCEvent::AuthError)?;
-                    debug!("auth failed");
+                    error!("Auth rejected");
                     let _ = session
                         .disconnect(thrussh::Disconnect::ByApplication, "", "")
                         .await;
-                    anyhow::bail!("auth failed");
+                    anyhow::bail!("Auth rejected");
                 }
 
                 self.session = Some(Arc::new(Mutex::new(session)));
 
-                debug!("done");
+                info!(?address, "Connected");
                 Ok(())
             }
         }
@@ -333,7 +343,14 @@ impl RemoteClient {
                                     Some(thrussh::ChannelMsg::ExitStatus { exit_status }) => {
                                         tx.send(RCEvent::ExitStatus(channel_id, exit_status))?;
                                     }
-                                    Some(thrussh::ChannelMsg::WindowAdjusted { new_size: _ }) => { },
+                                    Some(thrussh::ChannelMsg::WindowAdjusted { .. }) => { },
+                                    Some(thrussh::ChannelMsg::ExitSignal {
+                                        core_dumped, error_message, lang_tag, signal_name
+                                    }) => {
+                                        tx.send(RCEvent::ExitSignal {
+                                            channel_id, core_dumped, error_message, lang_tag, signal_name
+                                        })?;
+                                    },
                                     None => {
                                         tx.send(RCEvent::Close(channel_id))?;
                                         break
@@ -368,12 +385,6 @@ impl RemoteClient {
         self.set_disconnected();
         Ok(())
     }
-
-    // pub async fn _data(&mut self, channel: ChannelId, data: BytesMut, session: &mut Session) {
-    //     debug!("Data {:?}", data);
-    //     self.maybe_connect_remote().await;
-    //     self.tx.send(RCCommand::Data(channel, data.freeze()));
-    // }
 }
 
 impl Drop for RemoteClient {
@@ -381,6 +392,7 @@ impl Drop for RemoteClient {
         for task in self.child_tasks.drain(..) {
             let _ = task.abort();
         }
-        debug!("remote client dropped");
+        info!("Closed connection");
+        debug!("Dropped");
     }
 }

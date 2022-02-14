@@ -36,4 +36,14 @@ impl State {
 
 pub struct SessionState {
     pub remote_address: SocketAddr,
+    pub username: Option<String>,
+}
+
+impl SessionState {
+    pub fn new(remote_address: SocketAddr) -> Self {
+        SessionState {
+            remote_address,
+            username: None,
+        }
+    }
 }

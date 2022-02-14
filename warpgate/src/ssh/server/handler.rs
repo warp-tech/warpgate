@@ -188,7 +188,7 @@ impl thrussh::server::Handler for ServerHandler {
 
 impl Drop for ServerHandler {
     fn drop(&mut self) {
-        debug!("Server handler dropped");
+        debug!("Dropped");
         let client = self.client.clone();
         tokio::task::Builder::new().name(
             &format!("SSH S{} cleanup", self.id)

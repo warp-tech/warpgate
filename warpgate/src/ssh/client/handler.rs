@@ -34,6 +34,6 @@ impl thrussh::client::Handler for ClientHandler {
 impl Drop for ClientHandler {
     fn drop(&mut self) {
         let _ = self.tx.send(ClientHandlerEvent::Disconnect);
-        debug!("handler dropped");
+        debug!("Dropped");
     }
 }

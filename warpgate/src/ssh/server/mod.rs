@@ -10,11 +10,11 @@ mod session;
 pub use handler::ServerHandler;
 pub use session::ServerSession;
 
-use warpgate_common::{SessionState, State};
 use thrussh::MethodSet;
 use thrussh_keys::load_secret_key;
 use tokio::sync::Mutex;
 use tracing::*;
+use warpgate_common::{SessionState, State};
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -43,7 +43,7 @@ impl SSHProtocolServer {
         while let Ok((socket, remote_address)) = socket.accept().await {
             let config = config.clone();
 
-            let session_state = Arc::new(Mutex::new(SessionState { remote_address }));
+            let session_state = Arc::new(Mutex::new(SessionState::new(remote_address)));
             let id = self.state.lock().await.register_session(&session_state);
 
             let client = ServerSession::new(id, remote_address, self.state.clone(), session_state);
