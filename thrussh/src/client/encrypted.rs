@@ -448,7 +448,21 @@ impl super::Session {
                         .await?
                     }
                     _ => {
-                        info!("Unknown channel request {:?}", std::str::from_utf8(req));
+                        let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                        if wants_reply == 1 {
+                            if let Some(ref mut enc) = self.common.encrypted {
+                                self.common.wants_reply = false;
+                                push_packet!(enc.write, {
+                                    enc.write.push(msg::CHANNEL_FAILURE);
+                                    enc.write.push_u32_be(channel_num.0)
+                                })
+                            }
+                        }
+                        info!(
+                            "Unknown channel request {:?} {:?}",
+                            std::str::from_utf8(req),
+                            wants_reply
+                        );
                         (cl, self)
                     }
                 };
@@ -478,7 +492,16 @@ impl super::Session {
             msg::GLOBAL_REQUEST => {
                 let mut r = buf.reader(1);
                 let req = r.read_string().map_err(crate::Error::from)?;
-                info!("Unhandled global request: {:?}", std::str::from_utf8(req));
+                let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                if let Some(ref mut enc) = self.common.encrypted {
+                    self.common.wants_reply = false;
+                    push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                }
+                info!(
+                    "Unhandled global request: {:?} {:?}",
+                    std::str::from_utf8(req),
+                    wants_reply
+                );
                 Ok(self)
             }
             msg::CHANNEL_SUCCESS => {

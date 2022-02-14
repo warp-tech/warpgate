@@ -364,15 +364,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         mut self,
         public: &key::PublicKey,
         data: &[u8],
-    ) -> impl futures::Future<Output = Result<(Self, crate::signature::Signature), Error>> {
+    ) -> impl futures::Future<Output = (Self, Result<crate::signature::Signature, Error>)> {
         debug!("sign_request: {:?}", data);
         self.prepare_sign_request(public, data);
 
         async move {
-            self.read_response().await?;
+            if let Err(e) = self.read_response().await {
+                return (self, Err(e));
+            }
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-                let sig: Result<crate::signature::Signature, Error> = {
-                    let mut r = self.buf.reader(1);
+                let as_sig = |buf: &CryptoVec| -> Result<crate::signature::Signature, Error> {
+                    let mut r = buf.reader(1);
                     let mut resp = r.read_string()?.reader(0);
                     let typ = resp.read_string()?;
                     let sig = resp.read_string()?;
@@ -399,9 +401,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                         .into()),
                     }
                 };
-                Ok((self, sig?))
+                let sig = as_sig(&self.buf);
+                (self, sig)
             } else {
-                Err(Error::AgentProtocolError.into())
+                (self, Err(Error::AgentProtocolError.into()))
             }
         }
     }

@@ -1,9 +1,10 @@
 extern crate libc;
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 use libc::c_ulonglong;
 use libsodium_sys::*;
 
-lazy_static!{
+lazy_static! {
     static ref SODIUM: i32 = unsafe { sodium_init() };
 }
 
