@@ -34,9 +34,16 @@ impl State {
     }
 }
 
+#[derive(Clone)]
+pub struct TargetSnapshot {
+    pub hostname: String,
+    pub port: u16,
+}
+
 pub struct SessionState {
     pub remote_address: SocketAddr,
     pub username: Option<String>,
+    pub target: Option<TargetSnapshot>,
 }
 
 impl SessionState {
@@ -44,6 +51,7 @@ impl SessionState {
         SessionState {
             remote_address,
             username: None,
+            target: None,
         }
     }
 }

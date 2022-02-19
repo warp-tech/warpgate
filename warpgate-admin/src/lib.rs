@@ -9,17 +9,27 @@ use rocket::{get, Config};
 use rocket::serde::json::Json;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use rocket_okapi::swagger_ui::{make_swagger_ui, SwaggerUIConfig};
+use rocket::fs::{FileServer, relative, Options};
 use futures::StreamExt;
+
 pub struct AdminServer {
     state: Arc<Mutex<State>>,
 }
 
 use serde::Serialize;
 
+
+#[derive(Serialize, JsonSchema)]
+struct TargetSnapshotData {
+    hostname: String,
+    port: u16,
+}
+
 #[derive(Serialize, JsonSchema)]
 struct SessionData {
     id: u64,
     username: Option<String>,
+    target: Option<TargetSnapshotData>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -28,7 +38,7 @@ struct IndexResponse {
 }
 
 #[openapi]
-#[get("/")]
+#[get("/api/sessions")]
 async fn my_controller(
     state: &rocket::State<Arc<Mutex<State>>>
 ) -> Json<IndexResponse> {
@@ -39,6 +49,13 @@ async fn my_controller(
         SessionData {
             id: *id,
             username: session.username.clone(),
+            target: match &session.target {
+                Some(target) => Some(TargetSnapshotData {
+                    hostname: target.hostname.clone(),
+                    port: target.port.clone(),
+                }),
+                None => None,
+            },
         }
     });
     let sessions = sessions.collect::<Vec<_>>().await;
@@ -61,15 +78,19 @@ impl AdminServer {
     pub async fn run(self, address: SocketAddr) -> Result<()> {
         let state = self.state.clone();
 
-        rocket::custom(Config {
+        let mut rocket = rocket::custom(Config {
             address: address.ip(),
             port: address.port(),
             ..Default::default()
         })
             .manage(state)
             .mount("/", openapi_get_routes![my_controller])
-            .mount("/swagger", make_swagger_ui(&get_docs()))
-            .launch().await?;
+            .mount("/swagger", make_swagger_ui(&get_docs()));
+
+        let path = relative!("frontend/dist");
+        rocket = rocket.mount("/", FileServer::new(path, Options::Index));
+
+        rocket.launch().await?;
 
         Ok(())
     }
