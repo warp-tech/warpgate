@@ -13,7 +13,7 @@ use super::super::{
     ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
 };
 use crate::compat::ContextExt;
-use warpgate_common::{SessionState, State};
+use warpgate_common::{SessionState, State, TargetSnapshot};
 
 pub struct ServerSession {
     id: u64,
@@ -26,6 +26,7 @@ pub struct ServerSession {
     remote_addr: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
+    chosen_target: Option<TargetSnapshot>,
 }
 
 impl std::fmt::Debug for ServerSession {
@@ -48,12 +49,13 @@ impl ServerSession {
             session_handle: None,
             pty_channels: vec![],
             all_channels: vec![],
-            rc_tx: rc_handles.command_tx,
+            rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
             remote_addr,
             state,
             session_state,
+            chosen_target: None,
         };
 
         info!(session=?this, "New connection");
@@ -113,24 +115,43 @@ impl ServerSession {
     }
 
     pub async fn emit_pty_output(&mut self, data: &[u8]) {
-        if let Some(handle) = &mut self.session_handle {
-            for channel in &mut self.pty_channels {
-                let _ = handle.data(channel.0, CryptoVec::from_slice(data)).await;
-            }
+        let channels = self.pty_channels.clone();
+        for channel in channels {
+            let _ = self.maybe_with_session(|session| async {
+                let _ = session.data(channel.0, CryptoVec::from_slice(data)).await;
+                Ok(())
+            }).await;
         }
     }
 
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
         if self.rc_state == RCState::NotInitialized {
             self.rc_state = RCState::Connecting;
-            let address = "192.168.78.233:22"
+            let address_str = format!(
+                "{}:{}",
+                self.chosen_target.as_ref().unwrap().hostname,
+                self.chosen_target.as_ref().unwrap().port
+            );
+            match address_str
                 .to_socket_addrs()
-                .unwrap()
-                .next()
-                .unwrap();
-            self.rc_tx.send(RCCommand::Connect(address))?;
-            self.emit_service_message(&format!("Connecting to {address}"))
-                .await;
+                .map_err(|e| anyhow::anyhow!("{}", e))
+                .and_then(|mut x| x.next().ok_or(anyhow::anyhow!("Cannot resolve address")))
+            {
+                Ok(address) => {
+                    self.rc_tx.send(RCCommand::Connect(address))?;
+                    self.emit_service_message(&format!("Connecting to {address}"))
+                        .await;
+                }
+                Err(error) => {
+                    error!(session=?self, ?error, "Cannot find target address");
+                    self.emit_service_message(&format!(
+                        "Could not resolve target address {address_str}"
+                    ))
+                    .await;
+                    self.disconnect_server().await;
+                    Err(error)?
+                }
+            }
         }
         Ok(())
     }
@@ -144,7 +165,7 @@ impl ServerSession {
                         self.emit_service_message(&"Connected").await;
                     }
                     RCState::Disconnected => {
-                        drop(self.session_handle.take());
+                        self.disconnect_server().await;
                     }
                     _ => {}
                 }
@@ -278,7 +299,6 @@ impl ServerSession {
             .channel_success(channel.0)
             .await;
         self.pty_channels.push(channel);
-        let _ = self.maybe_connect_remote().await;
         Ok(())
     }
 
@@ -289,7 +309,11 @@ impl ServerSession {
         ));
     }
 
-    pub async fn _channel_exec_request(&mut self, channel: ServerChannelId, data: Bytes) -> Result<()> {
+    pub async fn _channel_exec_request(
+        &mut self,
+        channel: ServerChannelId,
+        data: Bytes,
+    ) -> Result<()> {
         match std::str::from_utf8(&data) {
             Err(e) => {
                 error!(session=?self, channel=?channel.0, ?data, "Requested exec - invalid UTF-8");
@@ -317,6 +341,7 @@ impl ServerSession {
             .unwrap()
             .channel_success(channel.0)
             .await;
+        let _ = self.maybe_connect_remote().await;
         Ok(())
     }
 
@@ -330,7 +355,6 @@ impl ServerSession {
 
     pub async fn _data(&mut self, channel: ServerChannelId, data: BytesMut) {
         debug!(session=?self, channel=?channel.0, ?data, "Data");
-        let _ = self.maybe_connect_remote().await;
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
             info!(session=?self, ?channel, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
@@ -364,7 +388,14 @@ impl ServerSession {
 
     async fn _auth_accept(&mut self, username: &str) -> thrussh::server::Auth {
         info!(session=?self, "Authenticated");
-        self.session_state.lock().await.username = Some(username.into());
+        let target = TargetSnapshot {
+            hostname: username.to_string(),
+            port: 22,
+        };
+        let mut session_state = self.session_state.lock().await;
+        session_state.username = Some(username.into());
+        session_state.target = Some(target.clone());
+        self.chosen_target = Some(target);
         thrussh::server::Auth::Accept
     }
 
@@ -405,15 +436,18 @@ impl ServerSession {
         }
     }
 
-    // async fn disconnect(&mut self) {
-    //     let channels: Vec<ServerChannelId> = self.all_channels.drain(..).collect();
-    //     let _ = self.maybe_with_session(|handle| async move {
-    //         for ch in channels {
-    //             let _ = handle.close(ch.0);
-    //         }
-    //         Ok(())
-    //     }).await;
-    // }
+    async fn disconnect_server(&mut self) {
+        let channels: Vec<ServerChannelId> = self.all_channels.drain(..).collect();
+        let _ = self
+            .maybe_with_session(|handle| async move {
+                for ch in channels {
+                    let _ = handle.close(ch.0).await;
+                }
+                Ok(())
+            })
+            .await;
+        drop(self.session_handle.take());
+    }
 }
 
 impl Drop for ServerSession {
