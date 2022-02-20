@@ -5,16 +5,17 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 
-mod handler;
 mod session;
-pub use handler::ServerHandler;
+mod session_handle;
+mod thrussh_handler;
 pub use session::ServerSession;
+pub use thrussh_handler::ServerHandler;
 
 use thrussh::MethodSet;
 use thrussh_keys::load_secret_key;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{SessionState, State};
+use warpgate_common::State;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -43,15 +44,16 @@ impl SSHProtocolServer {
         while let Ok((socket, remote_address)) = socket.accept().await {
             let config = config.clone();
 
-            let session_state = Arc::new(Mutex::new(SessionState::new(remote_address)));
-            let id = self.state.lock().await.register_session(&session_state);
+            let client = ServerSession::new(remote_address, self.state.clone()).await;
+            let id = { client.lock().await.id };
 
-            let client = ServerSession::new(id, remote_address, self.state.clone(), session_state);
-
-            let handler = ServerHandler { id, client };
+            let handler = ServerHandler {
+                id,
+                client,
+            };
 
             tokio::task::Builder::new()
-                .name(&format!("SSH S{} protocol", id))
+                .name(&format!("SSH S{id} protocol"))
                 .spawn(_run_stream(config, socket, handler));
         }
         Ok(())

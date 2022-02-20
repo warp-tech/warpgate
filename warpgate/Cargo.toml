@@ -7,7 +7,8 @@ version = "0.1.0"
 ansi_term = "0.12.1"
 anyhow = "1.0.53"
 bytes = "1.1.0"
-console-subscriber = "0.1.2"
+config = "0.12.0"
+console-subscriber = {version = "0.1.2", optional = true}
 dhat = "0.3.0"
 futures = "0.3.19"
 thrussh = {version = "0.33.5", features = ["openssl"], path = "../thrussh"}
@@ -16,8 +17,8 @@ time = "0.3.7"
 tokio = {version = "1.16.1", features = ["tracing"]}
 tracing = "0.1.30"
 tracing-subscriber = {version = "0.3.8", features = ["env-filter", "local-time"]}
-warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
+warpgate-common = {version = "*", path = "../warpgate-common"}
 
 [features]
 dhat-ad-hoc = [] # if you are doing ad hoc profiling

@@ -1,7 +1,7 @@
 <script lang="ts">
     // import logo from './assets/svelte.png';
     import Counter from './lib/Counter.svelte'
-    import { Spinner } from 'sveltestrap'
+    import { Spinner, Button } from 'sveltestrap'
 
     import { onDestroy } from 'svelte'
     let sessions: any[]|null = null
@@ -9,6 +9,10 @@
 
     async function reloadSessions () {
         sessions = (await (await fetch('/api/sessions')).json()).sessions
+    }
+
+    async function closeAllSesssions () {
+        await fetch('/api/sessions', { method: 'DELETE' })
     }
 
     reloadSessions()
@@ -31,7 +35,7 @@
         </div>
     </nav>
 
-    <Counter />
+    <Button on:click={closeAllSesssions}>Close all sessions</Button>
 
     {#if !sessions}
         <Spinner />
@@ -42,7 +46,13 @@
                     class="list-group-item list-group-item-action"
                     href="/sessions/{session.id}"
                     class:active={i == 0}>
-                    {session.id}: {session.username}
+                    {session.id}:
+                    {#if session.user }
+                        User: <code>{session.user.username}</code>
+                    {/if}
+                    {#if session.target }
+                        Target: <code>{session.target.host}:{session.target.port}</code>
+                    {/if}
                 </a>
             {/each}
         </div>

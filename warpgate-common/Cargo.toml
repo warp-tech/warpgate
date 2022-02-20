@@ -7,3 +7,4 @@ edition = "2021"
 tokio = {version = "1.16.1", features = ["tracing"]}
 tracing = "0.1.30"
 anyhow = "1.0.53"
+serde = "1.0.136"

@@ -5,6 +5,8 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use thrussh::Sig;
 use thrussh::{server::Session, CryptoVec};
+use thrussh_keys::key::PublicKey;
+use thrussh_keys::PublicKeyBase64;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tracing::*;
@@ -12,36 +14,67 @@ use tracing::*;
 use super::super::{
     ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
 };
+use super::session_handle::{SSHSessionHandle, SessionHandleCommand};
 use crate::compat::ContextExt;
-use warpgate_common::{SessionState, State, TargetSnapshot};
+use warpgate_common::{SessionState, State, Target, User, UserAuth};
+
+#[derive(Clone)]
+enum TargetSelection {
+    None,
+    NotFound(String),
+    Found(Target),
+}
+
+struct Selector {
+    username: String,
+    target_name: String,
+}
+
+impl From<&str> for Selector {
+    fn from(s: &str) -> Self {
+        let mut parts = s.splitn(2, ':');
+        let username = parts.next().unwrap_or("").to_string();
+        let target_name = parts.next().unwrap_or("").to_string();
+        Selector {
+            username,
+            target_name,
+        }
+    }
+}
 
 pub struct ServerSession {
-    id: u64,
+    pub id: u64,
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
     all_channels: Vec<ServerChannelId>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
-    remote_addr: std::net::SocketAddr,
+    remote_address: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
-    chosen_target: Option<TargetSnapshot>,
+    target: TargetSelection,
 }
 
 impl std::fmt::Debug for ServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[S{} - {}]", self.id, self.remote_addr)
+        write!(f, "[S{} - {}]", self.id, self.remote_address)
     }
 }
 
 impl ServerSession {
-    pub fn new(
-        id: u64,
-        remote_addr: std::net::SocketAddr,
+    pub async fn new(
+        remote_address: std::net::SocketAddr,
         state: Arc<Mutex<State>>,
-        session_state: Arc<Mutex<SessionState>>,
     ) -> Arc<Mutex<Self>> {
+        let (session_handle, mut session_handle_rx) = SSHSessionHandle::new();
+
+        let session_state = Arc::new(Mutex::new(SessionState::new(
+            remote_address,
+            Box::new(session_handle),
+        )));
+        let id = state.lock().await.register_session(&session_state);
+
         let mut rc_handles = RemoteClient::create(id);
 
         let this = Self {
@@ -52,16 +85,44 @@ impl ServerSession {
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
-            remote_addr,
+            remote_address,
             state,
             session_state,
-            chosen_target: None,
+            target: TargetSelection::None,
         };
 
         info!(session=?this, "New connection");
 
         let session_debug_tag = format!("{:?}", this);
         let this = Arc::new(Mutex::new(this));
+
+        let name = format!("SSH S{} session control", id);
+        tokio::task::Builder::new().name(&name).spawn({
+            let session_debug_tag = session_debug_tag.clone();
+            let this = Arc::downgrade(&this);
+            async move {
+                loop {
+                    let state = session_handle_rx.recv().await;
+                    match state {
+                        Some(c) => {
+                            debug!(session=%session_debug_tag, command=?c, "Session control");
+                            let Some(this) = this.upgrade() else {
+                                break;
+                            };
+                            let this = &mut this.lock().await;
+                            if let Err(err) = this.handle_session_control(c).await {
+                                error!(session=%session_debug_tag, "Event handler error: {:?}", err);
+                                break;
+                            }
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                }
+                debug!(session=%session_debug_tag, "No more session control commands");
+            }
+        });
 
         let name = format!("SSH S{} client events", id);
         tokio::task::Builder::new().name(&name).spawn({
@@ -72,20 +133,17 @@ impl ServerSession {
                     match state {
                         Some(e) => {
                             debug!(session=%session_debug_tag, event=?e, "Event");
-                            let this = this.upgrade();
-                            if this.is_none() {
+                            let Some(this) = this.upgrade() else {
                                 break;
-                            }
-                            let t = this.unwrap();
-                            let this = &mut t.lock().await;
+                            };
+                            let this = &mut this.lock().await;
                             match e {
                                 RCEvent::Done => break,
-                                e => match this.handle_remote_event(e).await {
-                                    Err(err) => {
+                                e => {
+                                    if let Err(err) = this.handle_remote_event(e).await {
                                         error!(session=%session_debug_tag, "Event handler error: {:?}", err);
                                         break;
                                     }
-                                    _ => (),
                                 },
                             }
                         }
@@ -117,40 +175,63 @@ impl ServerSession {
     pub async fn emit_pty_output(&mut self, data: &[u8]) {
         let channels = self.pty_channels.clone();
         for channel in channels {
-            let _ = self.maybe_with_session(|session| async {
-                let _ = session.data(channel.0, CryptoVec::from_slice(data)).await;
-                Ok(())
-            }).await;
+            let _ = self
+                .maybe_with_session(|session| async {
+                    let _ = session.data(channel.0, CryptoVec::from_slice(data)).await;
+                    Ok(())
+                })
+                .await;
         }
     }
 
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
-        if self.rc_state == RCState::NotInitialized {
-            self.rc_state = RCState::Connecting;
-            let address_str = format!(
-                "{}:{}",
-                self.chosen_target.as_ref().unwrap().hostname,
-                self.chosen_target.as_ref().unwrap().port
-            );
-            match address_str
-                .to_socket_addrs()
-                .map_err(|e| anyhow::anyhow!("{}", e))
-                .and_then(|mut x| x.next().ok_or(anyhow::anyhow!("Cannot resolve address")))
-            {
-                Ok(address) => {
-                    self.rc_tx.send(RCCommand::Connect(address))?;
-                    self.emit_service_message(&format!("Connecting to {address}"))
-                        .await;
-                }
-                Err(error) => {
-                    error!(session=?self, ?error, "Cannot find target address");
-                    self.emit_service_message(&format!(
-                        "Could not resolve target address {address_str}"
-                    ))
+        match self.target.clone() {
+            TargetSelection::None => {
+                panic!("Target not set");
+            }
+            TargetSelection::NotFound(name) => {
+                self.emit_service_message(&format!("Selected target not found: {name}"))
                     .await;
-                    self.disconnect_server().await;
-                    Err(error)?
+                self.disconnect_server().await;
+                anyhow::bail!("Target not found: {}", name);
+            }
+            TargetSelection::Found(snapshot) => {
+                if self.rc_state == RCState::NotInitialized {
+                    self.rc_state = RCState::Connecting;
+                    let address_str = format!("{}:{}", snapshot.host, snapshot.port);
+                    match address_str
+                        .to_socket_addrs()
+                        .map_err(|e| anyhow::anyhow!("{}", e))
+                        .and_then(|mut x| x.next().ok_or(anyhow::anyhow!("Cannot resolve address")))
+                    {
+                        Ok(address) => {
+                            self.rc_tx.send(RCCommand::Connect(address))?;
+                            self.emit_service_message(&format!("Connecting to {address}"))
+                                .await;
+                        }
+                        Err(error) => {
+                            error!(session=?self, ?error, "Cannot find target address");
+                            self.emit_service_message(&format!(
+                                "Could not resolve target address {address_str}"
+                            ))
+                            .await;
+                            self.disconnect_server().await;
+                            Err(error)?
+                        }
+                    }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn handle_session_control(&mut self, command: SessionHandleCommand) -> Result<()> {
+        match command {
+            SessionHandleCommand::Close => {
+                let _ = self.emit_service_message("Session closed by admin").await;
+                info!(session=?self, "Session closed by admin");
+                let _ = self.request_disconnect().await;
+                self.disconnect_server().await;
             }
         }
         Ok(())
@@ -380,22 +461,59 @@ impl ServerSession {
     pub async fn _auth_publickey(
         &mut self,
         user: String,
-        key: &thrussh_keys::key::PublicKey,
+        key: &PublicKey,
     ) -> thrussh::server::Auth {
-        info!(session=?self, "Public key auth as {} with key {}", user, key.fingerprint());
-        self._auth_accept(&user).await
+        info!(session=?self, "Public key auth as {} with key FP {}", user, key.fingerprint());
+        let selector: Selector = user[..].into();
+        let user = {
+            let state = self.state.lock().await;
+            state
+                .config
+                .users
+                .iter()
+                .find(|x| x.username == selector.username)
+                .map(User::to_owned)
+        };
+        let Some(user) = user else {
+            self.emit_service_message(&format!("Selected user not found: {}", selector.username)).await;
+            return thrussh::server::Auth::Reject;
+        };
+
+        let UserAuth::PublicKey { key: ref user_key } = user.auth else {
+            return thrussh::server::Auth::Reject;
+        };
+
+        let client_key = format!("{} {}", key.name(), key.public_key_base64());
+        debug!(session=?self, "Client key: {}", client_key);
+
+        if &client_key != user_key {
+            error!(session=?self, "Client key does not match");
+            return thrussh::server::Auth::Reject;
+        }
+
+        self._auth_accept(user, selector).await
     }
 
-    async fn _auth_accept(&mut self, username: &str) -> thrussh::server::Auth {
+    async fn _auth_accept(&mut self, user: User, selector: Selector) -> thrussh::server::Auth {
         info!(session=?self, "Authenticated");
-        let target = TargetSnapshot {
-            hostname: username.to_string(),
-            port: 22,
+
+        let state = self.state.lock().await;
+        let target = state
+            .config
+            .targets
+            .iter()
+            .find(|x| x.name == selector.target_name);
+
+        let Some(target) = target else {
+            self.target = TargetSelection::NotFound(selector.target_name);
+            info!(session=?self, "Selected target not found");
+            return thrussh::server::Auth::Accept;
         };
+
         let mut session_state = self.session_state.lock().await;
-        session_state.username = Some(username.into());
+        session_state.user = Some(user);
         session_state.target = Some(target.clone());
-        self.chosen_target = Some(target);
+        self.target = TargetSelection::Found(target.clone());
         thrussh::server::Auth::Accept
     }
 

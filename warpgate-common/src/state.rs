@@ -2,18 +2,21 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::num::Wrapping;
 use std::sync::Arc;
-
 use tokio::sync::Mutex;
+
+use crate::{WarpgateConfig, Target, User, SessionHandle};
 
 pub struct State {
     pub sessions: HashMap<u64, Arc<Mutex<SessionState>>>,
+    pub config: WarpgateConfig,
     last_id: Wrapping<u64>,
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(config: WarpgateConfig) -> Self {
         State {
             sessions:HashMap::new(),
+            config,
             last_id: Wrapping(0),
         }
     }
@@ -34,24 +37,20 @@ impl State {
     }
 }
 
-#[derive(Clone)]
-pub struct TargetSnapshot {
-    pub hostname: String,
-    pub port: u16,
-}
-
 pub struct SessionState {
     pub remote_address: SocketAddr,
-    pub username: Option<String>,
-    pub target: Option<TargetSnapshot>,
+    pub user: Option<User>,
+    pub target: Option<Target>,
+    pub handle: Box<dyn SessionHandle + Send>,
 }
 
 impl SessionState {
-    pub fn new(remote_address: SocketAddr) -> Self {
+    pub fn new(remote_address: SocketAddr, handle: Box<dyn SessionHandle + Send>) -> Self {
         SessionState {
             remote_address,
-            username: None,
+            user: None,
             target: None,
+            handle,
         }
     }
 }

@@ -1,5 +1,4 @@
-#![feature(type_alias_impl_trait)]
-
+#![feature(type_alias_impl_trait, let_else)]
 use anyhow::Result;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::str::FromStr;
@@ -14,9 +13,11 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 mod compat;
+mod config;
 mod ssh;
 
 use warpgate_common::State;
+use crate::config::load_config;
 use crate::ssh::SSHProtocolServer;
 
 #[cfg(feature = "dhat-heap")]
@@ -43,10 +44,10 @@ fn init_logging() {
 
     let r = tracing_subscriber::registry();
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature="console-subscriber"))]
     let console_layer = console_subscriber::spawn();
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature="console-subscriber"))]
     let r = r.with(console_layer);
 
     r.with(fmt_layer).init();
@@ -59,7 +60,7 @@ async fn main() -> Result<()> {
 
     init_logging();
 
-    let state = State::new();
+    let state = State::new(load_config()?);
     let state = Arc::new(Mutex::new(state));
 
     let admin = warpgate_admin::AdminServer::new(state.clone());

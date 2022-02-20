@@ -1,3 +1,7 @@
+mod config;
+mod handle;
 mod state;
 
-pub use state::{State, SessionState, TargetSnapshot};
+pub use config::*;
+pub use handle::SessionHandle;
+pub use state::{State, SessionState};
