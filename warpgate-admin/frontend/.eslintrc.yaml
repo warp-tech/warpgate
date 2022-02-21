@@ -18,6 +18,8 @@ plugins:
   - '@typescript-eslint/eslint-plugin'
 settings:
   svelte3/typescript: true
+  import/resolver:
+    typescript: {}
 rules:
   '@typescript-eslint/semi':
     - error
@@ -64,10 +66,6 @@ rules:
   computed-property-spacing:
     - error
     - never
-  comma-dangle: 'off'
-  '@typescript-eslint/comma-dangle':
-    - error
-    - always-multiline
   curly: error
   eol-last: error
   eqeqeq:

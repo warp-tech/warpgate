@@ -8,9 +8,15 @@
     "build": "vite build",
     "watch": "vite build -w --mode development",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "eslint src",
+    "postinstall": "yarn run openapi-client",
+    "openapi-schema": "curl http://localhost:8888/openapi.json > openapi-schema.json",
+    "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && npm run build",
+    "openapi": "yarn run openapi-schema && yarn run openapi-client"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.4.26",
     "@sveltejs/vite-plugin-svelte": "^1.0.0-next.30",
     "@tsconfig/svelte": "^3.0.0",
     "@typescript-eslint/eslint-plugin": "^5.12.0",
@@ -27,9 +33,12 @@
     "svelte": "^3.44.0",
     "svelte-check": "^2.2.7",
     "svelte-preprocess": "^4.9.8",
+    "svelte-spa-router": "^3.2.0",
     "sveltestrap": "^5.8.5",
     "tslib": "^2.3.1",
     "typescript": "^4.5.4",
-    "vite": "^2.8.0"
+    "vite": "^2.8.0",
+    "vite-plugin-checker": "^0.4.2",
+    "vite-tsconfig-paths": "^3.4.0"
   }
 }
