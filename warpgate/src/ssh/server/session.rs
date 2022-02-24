@@ -16,7 +16,7 @@ use super::super::{
 };
 use super::session_handle::{SSHSessionHandle, SessionHandleCommand};
 use crate::compat::ContextExt;
-use warpgate_common::{SessionState, State, Target, User, UserAuth};
+use warpgate_common::{SessionState, State, Target, User, UserAuth, SessionId};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -43,7 +43,7 @@ impl From<&str> for Selector {
 }
 
 pub struct ServerSession {
-    pub id: u64,
+    pub id: SessionId,
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
     all_channels: Vec<ServerChannelId>,

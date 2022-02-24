@@ -9,12 +9,13 @@ use tracing::*;
 use thrussh::server::{Auth, Session};
 use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;
+use warpgate_common::SessionId;
 
 use super::super::common::{PtyRequest, ServerChannelId};
 use super::session::ServerSession;
 
 pub struct ServerHandler {
-    pub id: u64,
+    pub id: SessionId,
     pub client: Arc<Mutex<ServerSession>>,
 }
 

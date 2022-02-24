@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::num::Wrapping;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::{WarpgateConfig, Target, User, SessionHandle};
+use crate::{WarpgateConfig, Target, User, SessionHandle, SessionId};
 
 pub struct State {
-    pub sessions: HashMap<u64, Arc<Mutex<SessionState>>>,
+    pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
     pub config: WarpgateConfig,
-    last_id: Wrapping<u64>,
 }
 
 impl State {
@@ -17,23 +15,17 @@ impl State {
         State {
             sessions:HashMap::new(),
             config,
-            last_id: Wrapping(0),
         }
     }
 
-    pub fn register_session(&mut self, session: &Arc<Mutex<SessionState>>) -> u64 {
-        let id = self.alloc_id();
+    pub fn register_session(&mut self, session: &Arc<Mutex<SessionState>>) -> SessionId {
+        let id = uuid::Uuid::new_v4();
         self.sessions.insert(id, session.clone());
         id
     }
 
-    pub fn remove_session(&mut self, id: u64) {
+    pub fn remove_session(&mut self, id: SessionId) {
         self.sessions.remove(&id);
-    }
-
-    fn alloc_id(&mut self) -> u64 {
-        self.last_id += 1;
-        self.last_id.0
     }
 }
 

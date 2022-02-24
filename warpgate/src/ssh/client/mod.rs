@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
+use warpgate_common::SessionId;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -61,7 +62,7 @@ pub enum RCState {
 }
 
 pub struct RemoteClient {
-    id: u64,
+    id: SessionId,
     rx: UnboundedReceiver<RCCommand>,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
@@ -80,7 +81,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: u64) -> RemoteClientHandles {
+    pub fn create(id: SessionId) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = oneshot::channel();
