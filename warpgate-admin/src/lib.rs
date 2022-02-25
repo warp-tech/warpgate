@@ -2,87 +2,22 @@
 use anyhow::Result;
 use futures::stream;
 use futures::StreamExt;
+use helpers::{ApiError, ApiResult, EmptyResponse, UuidParam};
 use rocket::fs::{relative, FileServer, Options};
-use rocket::http::Status;
-use rocket::request::FromParam;
-use rocket::response::{self, Responder};
 use rocket::serde::json::Json;
-use rocket::{delete, get, Config, Request};
-use rocket_okapi::gen::OpenApiGenerator;
-use rocket_okapi::okapi::openapi3::{Responses, Parameter};
-use rocket_okapi::request::OpenApiFromParam;
-use rocket_okapi::response::OpenApiResponderInner;
+use rocket::{delete, get, Config};
 use rocket_okapi::swagger_ui::{make_swagger_ui, SwaggerUIConfig};
-use rocket_okapi::{openapi, openapi_get_routes, JsonSchema, OpenApiError};
+use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warpgate_common::{SessionId, SessionState, State};
 
+mod helpers;
+
 pub struct AdminServer {
     state: Arc<Mutex<State>>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub enum ApiError {
-    NotFound,
-    InvalidRequestParameter,
-}
-
-pub type ApiResult<T> = Result<Json<T>, ApiError>;
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct EmptyResponse {}
-
-impl<'r, 'o: 'r> Responder<'r, 'o> for ApiError {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o> {
-        match self {
-            ApiError::NotFound => return Err(Status::NotFound),
-            ApiError::InvalidRequestParameter => return Err(Status::BadRequest),
-        };
-    }
-}
-
-fn add_404_error(
-    gen: &mut OpenApiGenerator,
-    responses: &mut Responses,
-) -> Result<(), OpenApiError> {
-    let response = Json::<EmptyResponse>::responses(gen)?
-        .responses
-        .remove("200")
-        .unwrap();
-    responses
-        .responses
-        .entry("404".to_owned())
-        .or_insert_with(|| response);
-    Ok(())
-}
-
-impl OpenApiResponderInner for ApiError {
-    fn responses(gen: &mut OpenApiGenerator) -> Result<Responses, OpenApiError> {
-        let mut responses = Responses::default();
-        add_404_error(gen, &mut responses)?;
-        Ok(responses)
-    }
-}
-
-struct UuidParam(uuid::Uuid);
-
-impl<'a> FromParam<'a> for UuidParam {
-    type Error = ApiError;
-
-    fn from_param(param: &'a str) -> Result<Self, Self::Error> {
-        Ok(UuidParam(
-            uuid::Uuid::parse_str(param).map_err(|_| ApiError::InvalidRequestParameter)?,
-        ))
-    }
-}
-
-impl OpenApiFromParam<'_> for UuidParam {
-    fn path_parameter(gen: &mut OpenApiGenerator, name: String) -> Result<Parameter, OpenApiError> {
-        String::path_parameter(gen, name)
-    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -144,9 +79,9 @@ async fn api_get_session(
     id: UuidParam,
 ) -> ApiResult<SessionData> {
     let state = state.lock().await;
-    let session = state.sessions.get(&id.0).ok_or(ApiError::NotFound)?;
+    let session = state.sessions.get(id.as_ref()).ok_or(ApiError::NotFound)?;
     let session = session.lock().await;
-    Ok(Json(SessionData::new(id.0, &session)))
+    Ok(Json(SessionData::new(id.into(), &session)))
 }
 
 #[openapi]

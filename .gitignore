@@ -16,3 +16,7 @@ Cargo.lock
 temp
 host_key*
 .vscode
+
+# ---
+
+data

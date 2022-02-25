@@ -156,7 +156,7 @@ impl RemoteClient {
     }
 
     pub fn start(mut self) {
-        let name = format!("SSH S{} client commands", self.id);
+        let name = format!("SSH {} client commands", self.id);
         tokio::task::Builder::new().name(&name).spawn(async move {
             async {
                 loop {
@@ -286,7 +286,7 @@ impl RemoteClient {
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
             self.child_tasks.push(tokio::task::Builder::new().name(
-                &format!("SSH S{} {:?} ops", self.id, channel_id.0),
+                &format!("SSH {} {:?} ops", self.id, channel_id.0),
             ).spawn({
                 let tx = self.tx.clone();
                 async move {

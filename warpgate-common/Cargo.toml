@@ -5,7 +5,10 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.53"
+bytes = "1.1.0"
 serde = "1.0.136"
+serde_yaml = "0.8"
 tokio = {version = "1.16.1", features = ["tracing"]}
 tracing = "0.1.30"
 uuid = {version = "0.8.2", features = ["v4", "serde"]}
+data-encoding = "2.3"

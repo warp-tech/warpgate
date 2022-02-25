@@ -39,4 +39,5 @@ pub struct User {
 pub struct WarpgateConfig {
     pub targets: Vec<Target>,
     pub users: Vec<User>,
+    pub recordings_path: String,
 }

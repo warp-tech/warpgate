@@ -53,7 +53,7 @@ impl SSHProtocolServer {
             };
 
             tokio::task::Builder::new()
-                .name(&format!("SSH S{id} protocol"))
+                .name(&format!("SSH {id} protocol"))
                 .spawn(_run_stream(config, socket, handler));
         }
         Ok(())

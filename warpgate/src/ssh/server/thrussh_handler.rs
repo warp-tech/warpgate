@@ -321,7 +321,7 @@ impl Drop for ServerHandler {
         debug!("Dropped");
         let client = self.client.clone();
         tokio::task::Builder::new().name(
-            &format!("SSH S{} cleanup", self.id)
+            &format!("SSH {} cleanup", self.id)
         ).spawn(async move {
             client.lock().await._disconnect().await;
         });

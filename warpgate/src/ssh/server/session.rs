@@ -1,6 +1,7 @@
 use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
+use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use thrussh::Sig;
@@ -16,7 +17,7 @@ use super::super::{
 };
 use super::session_handle::{SSHSessionHandle, SessionHandleCommand};
 use crate::compat::ContextExt;
-use warpgate_common::{SessionState, State, Target, User, UserAuth, SessionId};
+use warpgate_common::{SessionState, State, Target, User, UserAuth, SessionId, SessionRecorder};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -47,6 +48,7 @@ pub struct ServerSession {
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
     all_channels: Vec<ServerChannelId>,
+    channel_recorders: HashMap<ServerChannelId, SessionRecorder>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
@@ -58,7 +60,7 @@ pub struct ServerSession {
 
 impl std::fmt::Debug for ServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[S{} - {}]", self.id, self.remote_address)
+        write!(f, "[{} - {}]", self.id, self.remote_address)
     }
 }
 
@@ -82,6 +84,7 @@ impl ServerSession {
             session_handle: None,
             pty_channels: vec![],
             all_channels: vec![],
+            channel_recorders: HashMap::new(),
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -96,7 +99,7 @@ impl ServerSession {
         let session_debug_tag = format!("{:?}", this);
         let this = Arc::new(Mutex::new(this));
 
-        let name = format!("SSH S{} session control", id);
+        let name = format!("SSH {} session control", id);
         tokio::task::Builder::new().name(&name).spawn({
             let session_debug_tag = session_debug_tag.clone();
             let this = Arc::downgrade(&this);
@@ -124,7 +127,7 @@ impl ServerSession {
             }
         });
 
-        let name = format!("SSH S{} client events", id);
+        let name = format!("SSH {} client events", id);
         tokio::task::Builder::new().name(&name).spawn({
             let this = Arc::downgrade(&this);
             async move {
@@ -258,6 +261,13 @@ impl ServerSession {
                 self.emit_service_message(&"Authentication failed").await;
             }
             RCEvent::Output(channel, data) => {
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
+                    if let Err(error) = recorder.write(&data).await {
+                        error!(session=?self, ?channel, ?error, "Failed to record session data");
+                        self.channel_recorders.remove(&channel);
+                    }
+                }
+
                 self.maybe_with_session(|handle| async move {
                     handle
                         .data(channel.0, CryptoVec::from_slice(&data))
@@ -415,6 +425,16 @@ impl ServerSession {
     pub async fn _channel_shell_request(&mut self, channel: ServerChannelId) -> Result<()> {
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
+
+        match self.state.lock().await.recordings.lock().await.start(&self.id, format!("shell-channel-{}", channel.0)).await {
+            Ok(recorder) => {
+                self.channel_recorders.insert(channel, recorder);
+            }
+            Err(error) => {
+                error!(session=?self, ?channel, ?error, "Failed to start recording");
+            }
+        }
+
         info!(session=?self, ?channel, "Opening shell");
         let _ = self
             .session_handle

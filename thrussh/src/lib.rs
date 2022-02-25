@@ -277,6 +277,8 @@ extern crate thrussh_libsodium as sodium;
 #[macro_use]
 extern crate thiserror;
 
+use std::fmt::{Display, Formatter};
+
 pub use cryptovec::CryptoVec;
 mod auth;
 mod cipher;
@@ -605,6 +607,12 @@ impl ChannelOpenFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// The identifier of a channel.
 pub struct ChannelId(u32);
+
+impl Display for ChannelId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// The parameters of a channel.
 #[derive(Debug)]

@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
 
     init_logging();
 
-    let state = State::new(load_config()?);
+    let state = State::new(load_config()?)?;
     let state = Arc::new(Mutex::new(state));
 
     let admin = warpgate_admin::AdminServer::new(state.clone());
