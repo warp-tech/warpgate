@@ -68,14 +68,14 @@ impl ServerSession {
     pub async fn new(
         remote_address: std::net::SocketAddr,
         state: Arc<Mutex<State>>,
-    ) -> Arc<Mutex<Self>> {
+    ) -> Result<Arc<Mutex<Self>>> {
         let (session_handle, mut session_handle_rx) = SSHSessionHandle::new();
 
         let session_state = Arc::new(Mutex::new(SessionState::new(
             remote_address,
             Box::new(session_handle),
         )));
-        let id = state.lock().await.register_session(&session_state);
+        let id = state.lock().await.register_session(&session_state).await?;
 
         let mut rc_handles = RemoteClient::create(id);
 
@@ -159,7 +159,7 @@ impl ServerSession {
             }
         });
 
-        this
+        Ok(this)
     }
 
     pub async fn emit_service_message(&mut self, msg: &str) {

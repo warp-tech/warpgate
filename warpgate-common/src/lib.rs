@@ -1,4 +1,11 @@
+#[macro_use]
+extern crate diesel;
+
+#[macro_use]
+extern crate diesel_migrations;
+
 mod config;
+mod db;
 mod handle;
 mod recorder;
 mod state;

@@ -44,7 +44,14 @@ impl SSHProtocolServer {
         while let Ok((socket, remote_address)) = socket.accept().await {
             let config = config.clone();
 
-            let client = ServerSession::new(remote_address, self.state.clone()).await;
+            let client = match ServerSession::new(remote_address, self.state.clone()).await {
+                Ok(client) => client,
+                Err(error) => {
+                    error!(%error, "Error setting up session");
+                    continue;
+                }
+            };
+
             let id = { client.lock().await.id };
 
             let handler = ServerHandler {

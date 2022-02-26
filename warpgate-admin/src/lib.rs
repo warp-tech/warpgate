@@ -2,7 +2,7 @@
 use anyhow::Result;
 use futures::stream;
 use futures::StreamExt;
-use helpers::{ApiError, ApiResult, EmptyResponse, UuidParam};
+use helpers::{ApiError, ApiResult, EmptyResponse};
 use rocket::fs::{relative, FileServer, Options};
 use rocket::serde::json::Json;
 use rocket::{delete, get, Config};
@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{SessionId, SessionState, State};
+use warpgate_common::{SessionId, SessionState, State, UUID};
 
 mod helpers;
 
@@ -76,10 +76,10 @@ async fn api_get_all_sessions(state: &rocket::State<Arc<Mutex<State>>>) -> Json<
 #[get("/sessions/<id>")]
 async fn api_get_session(
     state: &rocket::State<Arc<Mutex<State>>>,
-    id: UuidParam,
+    id: UUID,
 ) -> ApiResult<SessionData> {
     let state = state.lock().await;
-    let session = state.sessions.get(id.as_ref()).ok_or(ApiError::NotFound)?;
+    let session = state.sessions.get(&id).ok_or(ApiError::NotFound)?;
     let session = session.lock().await;
     Ok(Json(SessionData::new(id.into(), &session)))
 }

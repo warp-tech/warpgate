@@ -12,3 +12,10 @@ tokio = {version = "1.16.1", features = ["tracing"]}
 tracing = "0.1.30"
 uuid = {version = "0.8.2", features = ["v4", "serde"]}
 data-encoding = "2.3"
+diesel = { version = "1.4", features = ["sqlite", "chrono"] }
+diesel_migrations = "1.4.0"
+schemars = {version = "0.8.8", features = ["uuid"]}
+rocket = "0.5.0-rc.1"
+rocket_okapi = {version = "0.8.0-rc.1", features = ["swagger"]}
+chrono = "0.4.19"                   # Date and time library for Rust
+tokio-diesel = "0.3.0"
