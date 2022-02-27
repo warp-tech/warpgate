@@ -9,19 +9,19 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
-pub struct ServerHandle {
+pub struct WarpgateServerHandle {
     id: SessionId,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
 }
 
-impl ServerHandle {
+impl WarpgateServerHandle {
     pub fn new(
         id: SessionId,
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<SessionState>>,
     ) -> Self {
-        ServerHandle {
+        WarpgateServerHandle {
             id,
             state,
             session_state,
@@ -78,7 +78,7 @@ impl ServerHandle {
     }
 }
 
-impl Drop for ServerHandle {
+impl Drop for WarpgateServerHandle {
     fn drop(&mut self) {
         let id = self.id;
         let state = self.state.clone();
