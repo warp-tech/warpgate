@@ -7,7 +7,7 @@ mod state;
 mod types;
 
 pub use config::*;
-pub use handle::{SessionHandle, ServerHandle};
+pub use handle::{SessionHandle, WarpgateServerHandle};
 pub use state::{SessionState, State};
 pub use types::*;
 pub use recorder::*;

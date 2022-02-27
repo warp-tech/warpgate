@@ -15,7 +15,7 @@ use thrussh::MethodSet;
 use thrussh_keys::load_secret_key;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{ServerHandle, SessionState, State};
+use warpgate_common::{WarpgateServerHandle, SessionState, State};
 
 use crate::ssh::server::session_handle::SSHSessionHandle;
 
@@ -57,7 +57,7 @@ impl SSHProtocolServer {
                 .await
                 .register_session(&session_state)
                 .await?;
-            let server_handle = ServerHandle::new(id, self.state.clone(), session_state);
+            let server_handle = WarpgateServerHandle::new(id, self.state.clone(), session_state);
 
             let session = match ServerSession::new(
                 remote_address,
