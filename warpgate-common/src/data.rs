@@ -1,26 +1,32 @@
+use chrono::NaiveDateTime;
 use rocket_okapi::JsonSchema;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use warpgate_db_entities::Session;
 
-use crate::{SessionId, SessionState, Target, User};
+use crate::{SessionId, Target, User};
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SessionSnapshot {
     id: SessionId,
     user: Option<UserSnapshot>,
     target: Option<TargetSnapshot>,
+    started: NaiveDateTime,
+    ended: Option<NaiveDateTime>,
 }
 
-impl SessionSnapshot {
-    pub fn new(id: SessionId, session: &SessionState) -> Self {
+impl From<Session::Model> for SessionSnapshot {
+    fn from(model: Session::Model) -> Self {
         Self {
-            id,
-            user: session.user.as_ref().map(UserSnapshot::new),
-            target: session.target.as_ref().map(TargetSnapshot::new),
+            id: model.id,
+            user: model.user_snapshot.and_then(|s| serde_json::from_str(&s).ok()),
+            target: model.target_snapshot.and_then(|s| serde_json::from_str(&s).ok()),
+            started: model.started,
+            ended: model.ended,
         }
     }
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct TargetSnapshot {
     host: String,
     port: u16,
@@ -35,7 +41,7 @@ impl TargetSnapshot {
     }
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct UserSnapshot {
     username: String,
 }

@@ -1,19 +1,17 @@
 #![feature(decl_macro, proc_macro_hygiene, async_stream)]
 use anyhow::Result;
-use futures::stream;
-use futures::StreamExt;
 use helpers::{ApiError, ApiResult, EmptyResponse};
 use rocket::fs::{relative, FileServer, Options};
 use rocket::serde::json::Json;
 use rocket::{delete, get, Config};
 use rocket_okapi::swagger_ui::{make_swagger_ui, SwaggerUIConfig};
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
+use sea_orm::{EntityTrait, QueryOrder};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{State, UUID, SessionSnapshot};
-
+use warpgate_common::{SessionSnapshot, State, UUID};
 mod helpers;
 
 pub struct AdminServer {
@@ -27,16 +25,22 @@ struct IndexResponse {
 
 #[openapi]
 #[get("/sessions")]
-async fn api_get_all_sessions(state: &rocket::State<Arc<Mutex<State>>>) -> Json<Vec<SessionSnapshot>> {
+async fn api_get_all_sessions(
+    state: &rocket::State<Arc<Mutex<State>>>,
+) -> ApiResult<Vec<SessionSnapshot>> {
+    use warpgate_db_entities::Session;
+
     let state = state.lock().await;
-
-    let sessions = stream::iter(state.sessions.iter()).then(|(id, s)| async move {
-        let session = s.lock().await;
-        SessionSnapshot::new(*id, &session)
-    });
-    let sessions = sessions.collect::<Vec<_>>().await;
-
-    Json(sessions)
+    let sessions: Vec<Session::Model> = Session::Entity::find()
+        .order_by_desc(Session::Column::Started)
+        .all(&state.db)
+        .await
+        .or(Err(ApiError::ServerError))?;
+    let sessions = sessions
+        .into_iter()
+        .map(|s| s.into())
+        .collect::<Vec<SessionSnapshot>>();
+    Ok(Json(sessions))
 }
 
 #[openapi]
@@ -45,10 +49,17 @@ async fn api_get_session(
     state: &rocket::State<Arc<Mutex<State>>>,
     id: UUID,
 ) -> ApiResult<SessionSnapshot> {
+    use warpgate_db_entities::Session;
+
     let state = state.lock().await;
-    let session = state.sessions.get(&id).ok_or(ApiError::NotFound)?;
-    let session = session.lock().await;
-    Ok(Json(SessionSnapshot::new(id.into(), &session)))
+
+    let session = Session::Entity::find_by_id(id.into())
+        .one(&state.db)
+        .await
+        .or(Err(ApiError::ServerError))?
+        .ok_or(ApiError::NotFound)?;
+
+    Ok(Json(session.into()))
 }
 
 #[openapi]

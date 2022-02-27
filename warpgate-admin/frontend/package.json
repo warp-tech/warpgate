@@ -11,11 +11,12 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint src",
     "postinstall": "yarn run openapi-client",
-    "openapi-schema": "curl http://localhost:8888/openapi.json > openapi-schema.json",
+    "openapi-schema": "curl http://localhost:8888/api/openapi.json > openapi-schema.json",
     "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && npm run build",
     "openapi": "yarn run openapi-schema && yarn run openapi-client"
   },
   "devDependencies": {
+    "@fortawesome/free-solid-svg-icons": "^6.0.0",
     "@openapitools/openapi-generator-cli": "^2.4.26",
     "@sveltejs/vite-plugin-svelte": "^1.0.0-next.30",
     "@tsconfig/svelte": "^3.0.0",
@@ -32,6 +33,7 @@
     "sass": "^1.49.8",
     "svelte": "^3.44.0",
     "svelte-check": "^2.2.7",
+    "svelte-fa": "^2.4.0",
     "svelte-preprocess": "^4.9.8",
     "svelte-spa-router": "^3.2.0",
     "sveltestrap": "^5.8.5",

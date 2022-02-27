@@ -4,6 +4,11 @@
     "title": "warpgate-admin",
     "version": "0.1.0"
   },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
   "paths": {
     "/sessions": {
       "get": {
@@ -16,8 +21,18 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SessionData"
+                    "$ref": "#/components/schemas/SessionSnapshot"
                   }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyResponse"
                 }
               }
             }
@@ -49,9 +64,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
+              "$ref": "#/components/schemas/Uuid"
             }
           }
         ],
@@ -61,7 +74,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionData"
+                  "$ref": "#/components/schemas/SessionSnapshot"
                 }
               }
             }
@@ -82,21 +95,21 @@
   },
   "components": {
     "schemas": {
-      "SessionData": {
+      "SessionSnapshot": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "started"
         ],
         "properties": {
           "id": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0.0
+            "type": "string",
+            "format": "uuid"
           },
           "user": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/UserData"
+                "$ref": "#/components/schemas/UserSnapshot"
               }
             ],
             "nullable": true
@@ -104,14 +117,23 @@
           "target": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/TargetData"
+                "$ref": "#/components/schemas/TargetSnapshot"
               }
             ],
+            "nullable": true
+          },
+          "started": {
+            "type": "string",
+            "format": "partial-date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "partial-date-time",
             "nullable": true
           }
         }
       },
-      "UserData": {
+      "UserSnapshot": {
         "type": "object",
         "required": [
           "username"
@@ -122,7 +144,7 @@
           }
         }
       },
-      "TargetData": {
+      "TargetSnapshot": {
         "type": "object",
         "required": [
           "host",
@@ -141,6 +163,10 @@
       },
       "EmptyResponse": {
         "type": "object"
+      },
+      "Uuid": {
+        "type": "string",
+        "format": "uuid"
       }
     }
   }

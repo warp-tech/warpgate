@@ -12,6 +12,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize, JsonSchema)]
 pub enum ApiError {
     NotFound,
+    ServerError,
     // InvalidRequestParameter,
 }
 
@@ -24,6 +25,7 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for ApiError {
     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o> {
         match self {
             ApiError::NotFound => return Err(Status::NotFound),
+            ApiError::ServerError => return Err(Status::InternalServerError),
             // ApiError::InvalidRequestParameter => return Err(Status::BadRequest),
         };
     }

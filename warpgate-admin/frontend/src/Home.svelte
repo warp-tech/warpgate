@@ -1,4 +1,6 @@
 <script lang="ts">
+    import Fa from 'svelte-fa'
+    import { faCircle } from '@fortawesome/free-solid-svg-icons'
     // import logo from './assets/svelte.png';
     import { Spinner, Button } from 'sveltestrap'
     import { onDestroy } from 'svelte'
@@ -29,13 +31,30 @@
                     href="/sessions/{session.id}"
                     use:link
                     class:active={i === 0}>
-                    {session.id}:
-                    {#if session.user }
-                        User: <code>{session.user.username}</code>
-                    {/if}
-                    {#if session.target }
-                        Target: <code>{session.target.host}:{session.target.port}</code>
-                    {/if}
+                    <div class="main">
+                        <div class:text-success={!session.ended}>
+                            <Fa icon={faCircle} />
+                        </div>
+
+                        <strong>
+                            {session.id}
+                        </strong>
+
+                        {#if session.user }
+                        <div>
+                            User: <code>{session.user.username}</code>
+                        </div>
+                        {/if}
+
+                        {#if session.target }
+                        <div>
+                            Target: <code>{session.target.host}:{session.target.port}</code>
+                        </div>
+                        {/if}
+                    </div>
+                    <div class="meta">
+                        <small>{session.started}</small>
+                    </div>
                 </a>
             {/each}
             {/if}
@@ -43,6 +62,19 @@
     {/if}
 </main>
 
-<style>
+<style lang="scss">
+.list-group-item {
+    .main {
+        display: flex;
+        align-items: center;
 
+        > * {
+            margin-right: 20px;
+        }
+    }
+
+    .meta {
+        opacity: .75;
+    }
+}
 </style>

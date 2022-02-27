@@ -1,4 +1,3 @@
-use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 
@@ -10,8 +9,8 @@ pub struct Model {
     pub target_snapshot: Option<String>,
     pub user_snapshot: Option<String>,
     pub remote_address: String,
-    pub started: NaiveDateTime,
-    pub ended: Option<NaiveDateTime>,
+    pub started: DateTime,
+    pub ended: Option<DateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
