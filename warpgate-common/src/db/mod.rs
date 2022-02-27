@@ -1,8 +1,6 @@
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{
-    ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter};
 use std::path::Path;
 use std::time::Duration;
 use warpgate_db_migrations::{Migrator, MigratorTrait};
@@ -36,7 +34,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<()> {
 
     Session::Entity::update_many()
         .set(Session::ActiveModel {
-            ended: Set(Some(chrono::Utc::now().naive_utc())),
+            ended: Set(Some(chrono::Utc::now())),
             ..Default::default()
         })
         .filter(Expr::col(Session::Column::Ended).is_null())

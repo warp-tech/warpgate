@@ -15,7 +15,7 @@ use thrussh::MethodSet;
 use thrussh_keys::load_secret_key;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{WarpgateServerHandle, SessionState, State};
+use warpgate_common::{SessionState, State, WarpgateServerHandle};
 
 use crate::ssh::server::session_handle::SSHSessionHandle;
 

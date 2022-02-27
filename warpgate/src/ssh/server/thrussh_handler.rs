@@ -5,10 +5,10 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::future::{ready, Ready};
 use futures::FutureExt;
-use tracing::*;
 use thrussh::server::{Auth, Session};
 use thrussh::{ChannelId, Pty};
 use tokio::sync::Mutex;
+use tracing::*;
 use warpgate_common::SessionId;
 
 use super::super::common::{PtyRequest, ServerChannelId};
@@ -210,24 +210,24 @@ impl thrussh::server::Handler for ServerHandler {
             self.session
                 .lock()
                 .await
-                ._channel_eof(
-                    ServerChannelId(channel),
-                )
+                ._channel_eof(ServerChannelId(channel))
                 .await;
             Ok((self, session))
         }
         .boxed()
     }
 
-    fn signal(self, channel: ChannelId, signal_name: thrussh::Sig, session: Session) -> Self::FutureUnit {
+    fn signal(
+        self,
+        channel: ChannelId,
+        signal_name: thrussh::Sig,
+        session: Session,
+    ) -> Self::FutureUnit {
         async move {
             self.session
                 .lock()
                 .await
-                ._channel_signal(
-                    ServerChannelId(channel),
-                    signal_name,
-                )
+                ._channel_signal(ServerChannelId(channel), signal_name)
                 .await;
             Ok((self, session))
         }
@@ -246,8 +246,6 @@ impl thrussh::server::Handler for ServerHandler {
         }
         .boxed()
     }
-
-
 
     // -----
 
@@ -320,11 +318,11 @@ impl Drop for ServerHandler {
     fn drop(&mut self) {
         debug!("Dropped");
         let client = self.session.clone();
-        tokio::task::Builder::new().name(
-            &format!("SSH {} cleanup", self.id)
-        ).spawn(async move {
-            client.lock().await._disconnect().await;
-        });
+        tokio::task::Builder::new()
+            .name(&format!("SSH {} cleanup", self.id))
+            .spawn(async move {
+                client.lock().await._disconnect().await;
+            });
     }
 }
 

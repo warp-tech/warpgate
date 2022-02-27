@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use thrussh::{ChannelId, Pty, Sig};
 
-
 #[derive(Clone, Debug)]
 pub struct PtyRequest {
     pub term: String,
@@ -24,10 +23,7 @@ pub enum ChannelOperation {
     RequestExec(String),
     RequestSubsystem(String),
     Data(Bytes),
-    ExtendedData {
-        data: Bytes,
-        ext: u32,
-    },
+    ExtendedData { data: Bytes, ext: u32 },
     Close,
     Eof,
     Signal(Sig),

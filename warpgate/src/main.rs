@@ -1,6 +1,6 @@
 #![feature(type_alias_impl_trait, let_else)]
 use anyhow::Result;
-use std::net::{ToSocketAddrs, SocketAddr};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{format_description, UtcOffset};
@@ -16,9 +16,9 @@ mod compat;
 mod config;
 mod ssh;
 
-use warpgate_common::State;
 use crate::config::load_config;
 use crate::ssh::SSHProtocolServer;
+use warpgate_common::State;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -44,10 +44,10 @@ fn init_logging() {
 
     let r = tracing_subscriber::registry();
 
-    #[cfg(all(debug_assertions, feature="console-subscriber"))]
+    #[cfg(all(debug_assertions, feature = "console-subscriber"))]
     let console_layer = console_subscriber::spawn();
 
-    #[cfg(all(debug_assertions, feature="console-subscriber"))]
+    #[cfg(all(debug_assertions, feature = "console-subscriber"))]
     let r = r.with(console_layer);
 
     r.with(fmt_layer).init();
@@ -59,6 +59,9 @@ async fn main() -> Result<()> {
     let _profiler = dhat::Profiler::new_heap();
 
     init_logging();
+
+    let version = env!("CARGO_PKG_VERSION");
+    info!(%version, "Warpgate");
 
     let state = State::new(load_config()?).await?;
     let state = Arc::new(Mutex::new(state));

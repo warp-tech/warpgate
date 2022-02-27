@@ -4,12 +4,12 @@ use crate::{SessionHandle, SessionId, Target, User, WarpgateConfig};
 use anyhow::{Context, Result};
 use sea_orm::ActiveModelTrait;
 use sea_orm::{DatabaseConnection, EntityTrait};
-use uuid::Uuid;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
+use uuid::Uuid;
 use warpgate_db_entities::Session;
 
 pub struct State {
@@ -48,7 +48,7 @@ impl State {
 
             let values = Session::ActiveModel {
                 id: Set(id.clone()),
-                started: Set(chrono::Utc::now().naive_utc()),
+                started: Set(chrono::Utc::now()),
                 remote_address: Set(session.lock().await.remote_address.to_string()),
                 ..Default::default()
             };
@@ -76,7 +76,7 @@ impl State {
             .await?
             .ok_or(anyhow::anyhow!("Session not found"))?;
         let mut model: Session::ActiveModel = session.into();
-        model.ended = Set(Some(chrono::Utc::now().naive_utc()));
+        model.ended = Set(Some(chrono::Utc::now()));
         model.update(&self.db).await?;
         Ok(())
     }

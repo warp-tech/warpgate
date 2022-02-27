@@ -1,4 +1,4 @@
-use crate::{SessionId, SessionState, State, Target, User, TargetSnapshot, UserSnapshot};
+use crate::{SessionId, SessionState, State, Target, TargetSnapshot, User, UserSnapshot};
 use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;

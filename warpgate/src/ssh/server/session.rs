@@ -16,7 +16,9 @@ use thrussh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
-use warpgate_common::{ServerHandle, SessionId, SessionRecorder, State, Target, User, UserAuth};
+use warpgate_common::{
+    SessionId, SessionRecorder, State, Target, User, UserAuth, WarpgateServerHandle,
+};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -53,7 +55,7 @@ pub struct ServerSession {
     rc_state: RCState,
     remote_address: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
-    server_handle: ServerHandle,
+    server_handle: WarpgateServerHandle,
     target: TargetSelection,
 }
 
@@ -67,7 +69,7 @@ impl ServerSession {
     pub async fn new(
         remote_address: std::net::SocketAddr,
         state: Arc<Mutex<State>>,
-        server_handle: ServerHandle,
+        server_handle: WarpgateServerHandle,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
         let mut rc_handles = RemoteClient::create(server_handle.id());

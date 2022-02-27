@@ -9,14 +9,14 @@ pub struct Model {
     pub target_snapshot: Option<String>,
     pub user_snapshot: Option<String>,
     pub remote_address: String,
-    pub started: DateTime,
-    pub ended: Option<DateTime>,
+    pub started: DateTimeUtc,
+    pub ended: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     // #[sea_orm(has_many = "super::fruit::Entity")]
-    // Fruit,
+// Fruit,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

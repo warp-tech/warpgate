@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "warpgate-admin",
+    "title": "Hello World",
     "version": "0.1.0"
   },
   "servers": [
@@ -9,10 +9,10 @@
       "url": "/api"
     }
   ],
+  "tags": [],
   "paths": {
     "/sessions": {
       "get": {
-        "operationId": "api_get_all_sessions",
         "responses": {
           "200": {
             "description": "",
@@ -26,46 +26,31 @@
                 }
               }
             }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmptyResponse"
-                }
-              }
-            }
           }
-        }
+        },
+        "operationId": "get_sessions"
       },
       "delete": {
-        "operationId": "api_close_all_sessions",
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmptyResponse"
-                }
-              }
-            }
+            "description": ""
           }
-        }
+        },
+        "operationId": "close_all_sessions"
       }
     },
     "/sessions/{id}": {
       "get": {
-        "operationId": "api_get_session",
         "parameters": [
           {
             "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
             "in": "path",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Uuid"
-            }
+            "deprecated": false
           }
         ],
         "responses": {
@@ -80,16 +65,10 @@
             }
           },
           "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmptyResponse"
-                }
-              }
-            }
+            "description": ""
           }
-        }
+        },
+        "operationId": "get_session"
       }
     }
   },
@@ -107,40 +86,18 @@
             "format": "uuid"
           },
           "user": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UserSnapshot"
-              }
-            ],
-            "nullable": true
+            "$ref": "#/components/schemas/UserSnapshot"
           },
           "target": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetSnapshot"
-              }
-            ],
-            "nullable": true
+            "$ref": "#/components/schemas/TargetSnapshot"
           },
           "started": {
             "type": "string",
-            "format": "partial-date-time"
+            "format": "date-time"
           },
           "ended": {
             "type": "string",
-            "format": "partial-date-time",
-            "nullable": true
-          }
-        }
-      },
-      "UserSnapshot": {
-        "type": "object",
-        "required": [
-          "username"
-        ],
-        "properties": {
-          "username": {
-            "type": "string"
+            "format": "date-time"
           }
         }
       },
@@ -156,17 +113,20 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16",
-            "minimum": 0.0
+            "format": "uint16"
           }
         }
       },
-      "EmptyResponse": {
-        "type": "object"
-      },
-      "Uuid": {
-        "type": "string",
-        "format": "uuid"
+      "UserSnapshot": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        }
       }
     }
   }

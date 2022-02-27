@@ -18,13 +18,9 @@ pub struct Target {
 #[serde(tag = "type")]
 pub enum UserAuth {
     #[serde(rename = "password")]
-    Password {
-        password: String,
-    },
+    Password { password: String },
     #[serde(rename = "publickey")]
-    PublicKey {
-        key: String,
-    },
+    PublicKey { key: String },
 }
 
 #[derive(Debug, Deserialize, Clone)]

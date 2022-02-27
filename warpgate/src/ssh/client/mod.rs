@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
-use warpgate_common::SessionId;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -13,6 +12,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
+use warpgate_common::SessionId;
 
 mod handler;
 use handler::ClientHandler;

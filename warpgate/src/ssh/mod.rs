@@ -1,7 +1,7 @@
-mod server;
-mod common;
 mod client;
+mod common;
+mod server;
 
-pub use server::SSHProtocolServer;
-pub use common::*;
 pub use client::*;
+pub use common::*;
+pub use server::SSHProtocolServer;

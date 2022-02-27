@@ -2,8 +2,6 @@ use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-use rocket::request::FromParam;
-use schemars::JsonSchema;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -28,9 +26,9 @@ impl From<Uuid> for UUID {
     }
 }
 
-impl Into<Uuid> for UUID {
-    fn into(self) -> Uuid {
-        self.0
+impl From<UUID> for Uuid {
+    fn from(uuid: UUID) -> Uuid {
+        uuid.0
     }
 }
 
@@ -66,28 +64,6 @@ impl PartialEq for UUID {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq(&other.0)
     }
-
-    fn ne(&self, other: &Self) -> bool {
-        self.0.ne(&other.0)
-    }
 }
 
 impl Eq for UUID {}
-
-impl JsonSchema for UUID {
-    fn schema_name() -> String {
-        Uuid::schema_name()
-    }
-
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        Uuid::json_schema(gen)
-    }
-}
-
-impl<'a> FromParam<'a> for UUID {
-    type Error = anyhow::Error;
-
-    fn from_param(param: &'a str) -> Result<Self, Self::Error> {
-        UUID::parse_str(param).map_err(|_| anyhow::anyhow!("Failed to parse UUID"))
-    }
-}

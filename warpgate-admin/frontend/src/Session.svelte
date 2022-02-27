@@ -3,13 +3,13 @@ import { api } from 'lib/api';
 
 import { Alert, Spinner } from 'sveltestrap'
 
-export let params = { id: 0 }
+export let params = { id: '' }
 
 let error: Error|null = null
 let session: any = null
 
 async function load () {
-    session = await api.apiGetSession(params)
+    session = await api.getSession(params)
 }
 
 load().catch(e => {

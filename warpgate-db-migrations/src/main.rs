@@ -1,5 +1,5 @@
-use warpgate_db_migrations::Migrator;
 use sea_schema::migration::*;
+use warpgate_db_migrations::Migrator;
 
 #[async_std::main]
 async fn main() {
