@@ -2,15 +2,14 @@ use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-use diesel::FromSqlRow;
 use rocket::request::FromParam;
 use schemars::JsonSchema;
 use serde::Serialize;
 use uuid::Uuid;
 
-pub type SessionId = UUID;
+pub type SessionId = Uuid;
 
-#[derive(Debug, FromSqlRow, Copy, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, Serialize)]
 pub struct UUID(pub Uuid);
 
 impl UUID {
@@ -26,6 +25,12 @@ impl UUID {
 impl From<Uuid> for UUID {
     fn from(uuid: Uuid) -> Self {
         UUID(uuid)
+    }
+}
+
+impl Into<Uuid> for UUID {
+    fn into(self) -> Uuid {
+        self.0
     }
 }
 

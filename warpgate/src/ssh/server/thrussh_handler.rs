@@ -16,7 +16,7 @@ use super::session::ServerSession;
 
 pub struct ServerHandler {
     pub id: SessionId,
-    pub client: Arc<Mutex<ServerSession>>,
+    pub session: Arc<Mutex<ServerSession>>,
 }
 
 impl thrussh::server::Handler for ServerHandler {
@@ -42,7 +42,7 @@ impl thrussh::server::Handler for ServerHandler {
 
     fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_open_session(ServerChannelId(channel), &mut session)
@@ -60,7 +60,7 @@ impl thrussh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let name = name.to_string();
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_subsystem_request(ServerChannelId(channel), name)
@@ -84,7 +84,7 @@ impl thrussh::server::Handler for ServerHandler {
         let term = term.to_string();
         let modes = modes.to_vec();
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_pty_request(
@@ -106,7 +106,7 @@ impl thrussh::server::Handler for ServerHandler {
 
     fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_shell_request(ServerChannelId(channel))
@@ -120,7 +120,7 @@ impl thrussh::server::Handler for ServerHandler {
         let user = user.to_string();
         let key = key.clone();
         async move {
-            let result = self.client.lock().await._auth_publickey(user, &key).await;
+            let result = self.session.lock().await._auth_publickey(user, &key).await;
             Ok((self, result))
         }
         .boxed()
@@ -134,7 +134,7 @@ impl thrussh::server::Handler for ServerHandler {
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._data(ServerChannelId(channel), data)
@@ -153,7 +153,7 @@ impl thrussh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._extended_data(ServerChannelId(channel), code, data)
@@ -165,7 +165,7 @@ impl thrussh::server::Handler for ServerHandler {
 
     fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_close(ServerChannelId(channel))
@@ -185,7 +185,7 @@ impl thrussh::server::Handler for ServerHandler {
         session: Session,
     ) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._window_change_request(
@@ -207,7 +207,7 @@ impl thrussh::server::Handler for ServerHandler {
 
     fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_eof(
@@ -221,7 +221,7 @@ impl thrussh::server::Handler for ServerHandler {
 
     fn signal(self, channel: ChannelId, signal_name: thrussh::Sig, session: Session) -> Self::FutureUnit {
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_signal(
@@ -237,7 +237,7 @@ impl thrussh::server::Handler for ServerHandler {
     fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
-            self.client
+            self.session
                 .lock()
                 .await
                 ._channel_exec_request(ServerChannelId(channel), data.freeze())
@@ -319,7 +319,7 @@ impl thrussh::server::Handler for ServerHandler {
 impl Drop for ServerHandler {
     fn drop(&mut self) {
         debug!("Dropped");
-        let client = self.client.clone();
+        let client = self.session.clone();
         tokio::task::Builder::new().name(
             &format!("SSH {} cleanup", self.id)
         ).spawn(async move {

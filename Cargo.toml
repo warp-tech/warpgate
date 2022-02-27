@@ -3,10 +3,12 @@ members = [
     "warpgate",
     "warpgate-admin",
     "warpgate-common",
+    "warpgate-db-migrations",
     "thrussh",
     "thrussh-keys",
     "thrussh-libsodium",
 ]
+default-members = ["warpgate"]
 
 [profile.release]
 # strip = true

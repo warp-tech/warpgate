@@ -13,4 +13,4 @@ users:
     key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtbl2EekdtAGGuilLQJebKP3pSOlI4KNVCnXPThbD4I
 
 recordings_path: data/recordings
-database_url: data/db.sqlite3
+database_url: sqlite:data/db.sqlite3?mode=rwc

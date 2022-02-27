@@ -15,7 +15,9 @@ use thrussh::MethodSet;
 use thrussh_keys::load_secret_key;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::State;
+use warpgate_common::{ServerHandle, SessionState, State};
+
+use crate::ssh::server::session_handle::SSHSessionHandle;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -44,20 +46,37 @@ impl SSHProtocolServer {
         while let Ok((socket, remote_address)) = socket.accept().await {
             let config = config.clone();
 
-            let client = match ServerSession::new(remote_address, self.state.clone()).await {
-                Ok(client) => client,
+            let (session_handle, session_handle_rx) = SSHSessionHandle::new();
+            let session_state = Arc::new(Mutex::new(SessionState::new(
+                remote_address,
+                Box::new(session_handle),
+            )));
+            let id = self
+                .state
+                .lock()
+                .await
+                .register_session(&session_state)
+                .await?;
+            let server_handle = ServerHandle::new(id, self.state.clone(), session_state);
+
+            let session = match ServerSession::new(
+                remote_address,
+                self.state.clone(),
+                server_handle,
+                session_handle_rx,
+            )
+            .await
+            {
+                Ok(session) => session,
                 Err(error) => {
                     error!(%error, "Error setting up session");
                     continue;
                 }
             };
 
-            let id = { client.lock().await.id };
+            let id = { session.lock().await.id };
 
-            let handler = ServerHandler {
-                id,
-                client,
-            };
+            let handler = ServerHandler { id, session };
 
             tokio::task::Builder::new()
                 .name(&format!("SSH {id} protocol"))

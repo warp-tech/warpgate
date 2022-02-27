@@ -1,3 +1,8 @@
+use super::super::{
+    ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
+};
+use super::session_handle::SessionHandleCommand;
+use crate::compat::ContextExt;
 use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -8,16 +13,10 @@ use thrussh::Sig;
 use thrussh::{server::Session, CryptoVec};
 use thrussh_keys::key::PublicKey;
 use thrussh_keys::PublicKeyBase64;
-use tokio::sync::oneshot;
-use tokio::sync::{mpsc::UnboundedSender, Mutex};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{oneshot, Mutex};
 use tracing::*;
-
-use super::super::{
-    ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
-};
-use super::session_handle::{SSHSessionHandle, SessionHandleCommand};
-use crate::compat::ContextExt;
-use warpgate_common::{SessionState, State, Target, User, UserAuth, SessionId, SessionRecorder};
+use warpgate_common::{ServerHandle, SessionId, SessionRecorder, State, Target, User, UserAuth};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -54,7 +53,7 @@ pub struct ServerSession {
     rc_state: RCState,
     remote_address: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
-    session_state: Arc<Mutex<SessionState>>,
+    server_handle: ServerHandle,
     target: TargetSelection,
 }
 
@@ -68,19 +67,14 @@ impl ServerSession {
     pub async fn new(
         remote_address: std::net::SocketAddr,
         state: Arc<Mutex<State>>,
+        server_handle: ServerHandle,
+        mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
-        let (session_handle, mut session_handle_rx) = SSHSessionHandle::new();
-
-        let session_state = Arc::new(Mutex::new(SessionState::new(
-            remote_address,
-            Box::new(session_handle),
-        )));
-        let id = state.lock().await.register_session(&session_state).await?;
-
-        let mut rc_handles = RemoteClient::create(id);
+        let mut rc_handles = RemoteClient::create(server_handle.id());
+        let id = server_handle.id();
 
         let this = Self {
-            id,
+            id: server_handle.id(),
             session_handle: None,
             pty_channels: vec![],
             all_channels: vec![],
@@ -90,7 +84,7 @@ impl ServerSession {
             rc_state: RCState::NotInitialized,
             remote_address,
             state,
-            session_state,
+            server_handle,
             target: TargetSelection::None,
         };
 
@@ -426,7 +420,16 @@ impl ServerSession {
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
 
-        match self.state.lock().await.recordings.lock().await.start(&self.id, format!("shell-channel-{}", channel.0)).await {
+        match self
+            .state
+            .lock()
+            .await
+            .recordings
+            .lock()
+            .await
+            .start(&self.id, format!("shell-channel-{}", channel.0))
+            .await
+        {
             Ok(recorder) => {
                 self.channel_recorders.insert(channel, recorder);
             }
@@ -517,23 +520,25 @@ impl ServerSession {
     async fn _auth_accept(&mut self, user: User, selector: Selector) -> thrussh::server::Auth {
         info!(session=?self, "Authenticated");
 
-        let state = self.state.lock().await;
-        let target = state
-            .config
-            .targets
-            .iter()
-            .find(|x| x.name == selector.target_name);
+        let target = {
+            let state = self.state.lock().await;
+            state
+                .config
+                .targets
+                .iter()
+                .find(|x| x.name == selector.target_name)
+                .map(Target::clone)
+        };
 
+        let _ = self.server_handle.set_user(&user).await;
         let Some(target) = target else {
             self.target = TargetSelection::NotFound(selector.target_name);
             info!(session=?self, "Selected target not found");
             return thrussh::server::Auth::Accept;
         };
 
-        let mut session_state = self.session_state.lock().await;
-        session_state.user = Some(user);
-        session_state.target = Some(target.clone());
-        self.target = TargetSelection::Found(target.clone());
+        let _ = self.server_handle.set_target(&target).await;
+        self.target = TargetSelection::Found(target);
         thrussh::server::Auth::Accept
     }
 
@@ -590,11 +595,6 @@ impl ServerSession {
 
 impl Drop for ServerSession {
     fn drop(&mut self) {
-        let id = self.id;
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            state.lock().await.remove_session(id);
-        });
         info!(session=?self, "Closed connection");
         debug!("Dropped");
     }

@@ -1,11 +1,5 @@
 use std::io::Write;
 
-use diesel::backend::Backend;
-use diesel::expression::AsExpression;
-use diesel::expression::bound::Bound;
-use diesel::sql_types::Binary;
-use diesel::types::{FromSql, ToSql};
-
 use crate::UUID;
 
 impl<B: Backend> FromSql<Binary, B> for UUID

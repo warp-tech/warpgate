@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{SessionId, SessionState, State, UUID};
+use warpgate_common::{State, UUID, SessionSnapshot};
 
 mod helpers;
 
@@ -21,51 +21,18 @@ pub struct AdminServer {
 }
 
 #[derive(Serialize, JsonSchema)]
-struct TargetData {
-    host: String,
-    port: u16,
-}
-
-#[derive(Serialize, JsonSchema)]
-struct UserData {
-    username: String,
-}
-
-#[derive(Serialize, JsonSchema)]
-struct SessionData {
-    id: SessionId,
-    user: Option<UserData>,
-    target: Option<TargetData>,
-}
-
-#[derive(Serialize, JsonSchema)]
 struct IndexResponse {
-    sessions: Vec<SessionData>,
-}
-
-impl SessionData {
-    fn new(id: SessionId, session: &SessionState) -> Self {
-        Self {
-            id,
-            user: session.user.as_ref().map(|user| UserData {
-                username: user.username.clone(),
-            }),
-            target: session.target.as_ref().map(|target| TargetData {
-                host: target.host.clone(),
-                port: target.port.clone(),
-            }),
-        }
-    }
+    sessions: Vec<SessionSnapshot>,
 }
 
 #[openapi]
 #[get("/sessions")]
-async fn api_get_all_sessions(state: &rocket::State<Arc<Mutex<State>>>) -> Json<Vec<SessionData>> {
+async fn api_get_all_sessions(state: &rocket::State<Arc<Mutex<State>>>) -> Json<Vec<SessionSnapshot>> {
     let state = state.lock().await;
 
     let sessions = stream::iter(state.sessions.iter()).then(|(id, s)| async move {
         let session = s.lock().await;
-        SessionData::new(*id, &session)
+        SessionSnapshot::new(*id, &session)
     });
     let sessions = sessions.collect::<Vec<_>>().await;
 
@@ -77,11 +44,11 @@ async fn api_get_all_sessions(state: &rocket::State<Arc<Mutex<State>>>) -> Json<
 async fn api_get_session(
     state: &rocket::State<Arc<Mutex<State>>>,
     id: UUID,
-) -> ApiResult<SessionData> {
+) -> ApiResult<SessionSnapshot> {
     let state = state.lock().await;
     let session = state.sessions.get(&id).ok_or(ApiError::NotFound)?;
     let session = session.lock().await;
-    Ok(Json(SessionData::new(id.into(), &session)))
+    Ok(Json(SessionSnapshot::new(id.into(), &session)))
 }
 
 #[openapi]

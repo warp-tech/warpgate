@@ -1,0 +1,9 @@
+[package]
+name = "warpgate-db-entities"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sea-orm = {version = "^0.6", features = ["macros"], default-features = false}
+chrono = "0.4.19" # Date and time library for Rust
+uuid = {version = "0.8.2", features = ["v4", "serde"]}
