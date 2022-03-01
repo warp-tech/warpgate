@@ -1,12 +1,16 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::BytesMut;
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 use tracing::*;
+use uuid::Uuid;
+use warpgate_db_entities::Recording;
 
 use crate::SessionId;
 
@@ -30,11 +34,17 @@ struct Record<'a> {
 }
 
 pub struct SessionRecorder {
+    id: Uuid,
+    db: Arc<Mutex<DatabaseConnection>>,
     sender: mpsc::Sender<BytesMut>,
 }
 
 impl SessionRecorder {
-    async fn new(path: PathBuf) -> Result<Self> {
+    async fn new(
+        path: PathBuf,
+        model: Recording::Model,
+        db: Arc<Mutex<DatabaseConnection>>,
+    ) -> Result<Self> {
         let mut file = File::create(&path).await?;
         let started_at = Instant::now();
         let (sender, mut receiver) = mpsc::channel::<BytesMut>(1024);
@@ -57,7 +67,12 @@ impl SessionRecorder {
                 error!(%error, ?path, "Failed to write recording");
             }
         });
-        Ok(SessionRecorder { sender })
+
+        Ok(SessionRecorder {
+            id: model.id,
+            db,
+            sender,
+        })
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {
@@ -66,14 +81,41 @@ impl SessionRecorder {
     }
 }
 
+impl Drop for SessionRecorder {
+    fn drop(&mut self) {
+        use sea_orm::ActiveValue::Set;
+        let id = self.id.clone();
+        let db = self.db.clone();
+        tokio::spawn(async move {
+            if let Err(error) = async {
+                let db = db.lock().await;
+                let recording = Recording::Entity::find_by_id(id)
+                    .one(&*db)
+                    .await?
+                    .ok_or(anyhow::anyhow!("Recording not found"))?;
+                let mut model: Recording::ActiveModel = recording.into();
+                model.ended = Set(Some(chrono::Utc::now()));
+                model.update(&*db).await?;
+                Ok::<(), anyhow::Error>(())
+            }
+            .await
+            {
+                error!(%error, ?id, "Failed to insert recording");
+            }
+        });
+    }
+}
+
 pub struct SessionRecordings {
+    db: Arc<Mutex<DatabaseConnection>>,
     path: PathBuf,
 }
 
 impl SessionRecordings {
-    pub fn new(path: String) -> Result<Self> {
+    pub fn new(db: Arc<Mutex<DatabaseConnection>>, path: String) -> Result<Self> {
         std::fs::create_dir_all(&path)?;
         Ok(Self {
+            db,
             path: PathBuf::from(path),
         })
     }
@@ -83,6 +125,24 @@ impl SessionRecordings {
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join(&name);
         info!(%name, path=?path, "Recording session {}", id);
-        SessionRecorder::new(path).await
+
+        let model = {
+            use sea_orm::ActiveValue::Set;
+            let values = Recording::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                started: Set(chrono::Utc::now()),
+                session_id: Set(id.clone()),
+                name: Set(name),
+                ..Default::default()
+            };
+
+            let db = self.db.lock().await;
+            values
+                .insert(&*db)
+                .await
+                .context("Error inserting recording")?
+        };
+
+        SessionRecorder::new(path, model, self.db.clone()).await
     }
 }

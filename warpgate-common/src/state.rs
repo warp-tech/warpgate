@@ -16,17 +16,20 @@ pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
     pub config: WarpgateConfig,
     pub recordings: Arc<Mutex<SessionRecordings>>,
-    pub db: DatabaseConnection,
+    pub db: Arc<Mutex<DatabaseConnection>>,
 }
 
 impl State {
     pub async fn new(config: WarpgateConfig) -> Result<Self> {
-        let recordings = Arc::new(Mutex::new(SessionRecordings::new(
-            config.recordings_path.clone(),
-        )?));
-
         let mut db = connect_to_db(&config).await?;
         sanitize_db(&mut db).await?;
+
+        let db = Arc::new(Mutex::new(db));
+
+        let recordings = Arc::new(Mutex::new(SessionRecordings::new(
+            db.clone(),
+            config.recordings_path.clone(),
+        )?));
 
         Ok(State {
             sessions: HashMap::new(),
@@ -52,8 +55,10 @@ impl State {
                 remote_address: Set(session.lock().await.remote_address.to_string()),
                 ..Default::default()
             };
+
+            let db = self.db.lock().await;
             values
-                .insert(&self.db)
+                .insert(&*db)
                 .await
                 .context("Error inserting session")?;
         }
@@ -71,13 +76,14 @@ impl State {
 
     async fn mark_session_complete(&mut self, id: Uuid) -> Result<()> {
         use sea_orm::ActiveValue::Set;
+        let db = self.db.lock().await;
         let session = Session::Entity::find_by_id(id)
-            .one(&self.db)
+            .one(&*db)
             .await?
             .ok_or(anyhow::anyhow!("Session not found"))?;
         let mut model: Session::ActiveModel = session.into();
         model.ended = Set(Some(chrono::Utc::now()));
-        model.update(&self.db).await?;
+        model.update(&*db).await?;
         Ok(())
     }
 }

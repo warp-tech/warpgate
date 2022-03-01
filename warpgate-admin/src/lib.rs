@@ -35,6 +35,7 @@ impl AdminServer {
         .server("/api");
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
+        let db = state.lock().await.db.clone();
         let app = Route::new()
             .nest("/swagger", ui)
             .nest("/api", api_service)
@@ -47,6 +48,7 @@ impl AdminServer {
                 "/",
                 StaticFileEndpoint::new("./warpgate-admin/frontend/dist/index.html"),
             )
+            .with(AddData::new(db))
             .with(AddData::new(state));
         Server::new(TcpListener::bind(address)).run(app).await?;
         Ok(())

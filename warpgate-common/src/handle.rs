@@ -39,7 +39,9 @@ impl WarpgateServerHandle {
             self.session_state.lock().await.user = Some(user.clone());
         }
 
-        let db = &self.state.lock().await.db;
+        let state = self.state.lock().await;
+        let db = state.db.lock().await;
+
         Session::Entity::update_many()
             .set(Session::ActiveModel {
                 user_snapshot: Set(Some(
@@ -49,7 +51,7 @@ impl WarpgateServerHandle {
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))
-            .exec(db)
+            .exec(&*db)
             .await?;
 
         Ok(())
@@ -61,7 +63,9 @@ impl WarpgateServerHandle {
             self.session_state.lock().await.target = Some(target.clone());
         }
 
-        let db = &self.state.lock().await.db;
+        let state = self.state.lock().await;
+        let db = state.db.lock().await;
+
         Session::Entity::update_many()
             .set(Session::ActiveModel {
                 target_snapshot: Set(Some(
@@ -71,7 +75,7 @@ impl WarpgateServerHandle {
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))
-            .exec(db)
+            .exec(&*db)
             .await?;
 
         Ok(())
