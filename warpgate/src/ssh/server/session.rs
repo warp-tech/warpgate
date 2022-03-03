@@ -8,7 +8,7 @@ use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use thrussh::Sig;
 use thrussh::{server::Session, CryptoVec};
@@ -54,27 +54,31 @@ pub struct ServerSession {
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
-    remote_address: std::net::SocketAddr,
+    remote_address: SocketAddr,
     state: Arc<Mutex<State>>,
     server_handle: WarpgateServerHandle,
     target: TargetSelection,
 }
 
+fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
+    format!("[{} - {}]", id, remote_address)
+}
+
 impl std::fmt::Debug for ServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{} - {}]", self.id, self.remote_address)
+        write!(f, "{}", session_debug_tag(&self.id, &self.remote_address))
     }
 }
 
 impl ServerSession {
     pub async fn new(
-        remote_address: std::net::SocketAddr,
+        remote_address: SocketAddr,
         state: Arc<Mutex<State>>,
         server_handle: WarpgateServerHandle,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
-        let mut rc_handles = RemoteClient::create(server_handle.id());
         let id = server_handle.id();
+        let mut rc_handles = RemoteClient::create(id, session_debug_tag(&id, &remote_address));
 
         let this = Self {
             id: server_handle.id(),
@@ -380,8 +384,10 @@ impl ServerSession {
         info!(session=?self, %channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
-        self.rc_tx
-            .send(RCCommand::Channel(channel, ChannelOperation::OpenDirectTCPIP(params)))?;
+        self.rc_tx.send(RCCommand::Channel(
+            channel,
+            ChannelOperation::OpenDirectTCPIP(params),
+        ))?;
         Ok(())
     }
 

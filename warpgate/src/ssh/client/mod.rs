@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
 use std::collections::HashMap;
@@ -14,12 +14,16 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use warpgate_common::SessionId;
 
+mod channel_direct_tcpip;
+mod channel_session;
 mod handler;
+use channel_direct_tcpip::DirectTCPIPChannel;
+use channel_session::SessionChannel;
 use handler::ClientHandler;
 
 use self::handler::ClientHandlerEvent;
 
-use super::{ChannelOperation, ServerChannelId, DirectTCPIPParams};
+use super::{ChannelOperation, DirectTCPIPParams, ServerChannelId};
 
 #[derive(Clone, Debug)]
 pub enum RCEvent {
@@ -72,6 +76,7 @@ pub struct RemoteClient {
     client_handler_rx: Option<UnboundedReceiver<ClientHandlerEvent>>,
     abort_rx: Option<Fuse<oneshot::Receiver<()>>>,
     child_tasks: Vec<JoinHandle<Result<()>>>,
+    session_tag: String,
 }
 
 pub struct RemoteClientHandles {
@@ -81,7 +86,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId) -> RemoteClientHandles {
+    pub fn create(id: SessionId, session_tag: String) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = oneshot::channel();
@@ -97,6 +102,7 @@ impl RemoteClient {
             client_handler_rx: None,
             abort_rx: Some(abort_rx.fuse()),
             child_tasks: vec![],
+            session_tag,
         };
         this.start();
         return RemoteClientHandles {
@@ -156,7 +162,9 @@ impl RemoteClient {
                             channel_pipes.remove(&channel_id);
                         }
                     },
-                    None => debug!(channel=%channel_id, "operation for unknown channel"),
+                    None => {
+                        debug!(channel=%channel_id, session=%self.session_tag, "operation for unknown channel")
+                    }
                 }
             }
         }
@@ -181,7 +189,7 @@ impl RemoteClient {
                                     }
                                     Err(e) => {
                                         self.set_disconnected();
-                                        debug!("Connect error: {}", e);
+                                        debug!(session=%self.session_tag, "Connect error: {}", e);
                                         break
                                     }
                                 },
@@ -198,7 +206,7 @@ impl RemoteClient {
                             }
                         }
                         Some(client_event) = OptionFuture::from(self.client_handler_rx.as_mut().map(|x| x.recv())) => {
-                            debug!("Client handler event: {:?}", client_event);
+                            debug!(session=%self.session_tag, "Client handler event: {:?}", client_event);
                             match client_event {
                                 Some(ClientHandlerEvent::Disconnect) => {
                                     self._on_disconnect().await?;
@@ -209,7 +217,7 @@ impl RemoteClient {
                             }
                         }
                         Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
-                            debug!("Abort requested");
+                            debug!(session=%self.session_tag, "Abort requested");
                             self.disconnect().await?;
                             break
                         }
@@ -219,16 +227,16 @@ impl RemoteClient {
             }
             .await
             .map_err(|error| {
-                error!(?error, "error in command loop");
+                error!(?error, session=%self.session_tag, "error in command loop");
                 anyhow::anyhow!("Error in command loop: {error}")
             })?;
-            debug!("No more commmands");
+            debug!(session=%self.session_tag, "No more commmands");
             Ok::<(), anyhow::Error>(())
         });
     }
 
     async fn connect(&mut self, address: SocketAddr) -> Result<()> {
-        info!(?address, "Connecting");
+        info!(?address, session=%self.session_tag, "Connecting");
         // let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
         // .with_context(|| "load_secret_key()")?;
         // let client_key = Arc::new(client_key);
@@ -250,14 +258,14 @@ impl RemoteClient {
 
         tokio::select! {
             Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
-                info!("Abort requested");
+                info!(session=%self.session_tag, "Abort requested");
                 self.set_disconnected();
                 anyhow::bail!("Aborted");
             }
             session = fut_connect => {
                 if let Err(err) = session {
                     self.tx.send(RCEvent::ConnectionError)?;
-                    error!(error=?err, "Connection error");
+                    error!(error=?err, session=%self.session_tag, "Connection error");
                     anyhow::bail!("Error connecting: {}", err);
                 }
 
@@ -270,7 +278,7 @@ impl RemoteClient {
                     .with_context(|| "authenticate()")?;
                 if !auth_result {
                     self.tx.send(RCEvent::AuthError)?;
-                    error!("Auth rejected");
+                    error!(session=%self.session_tag, "Auth rejected");
                     let _ = session
                         .disconnect(thrussh::Disconnect::ByApplication, "", "")
                         .await;
@@ -279,7 +287,7 @@ impl RemoteClient {
 
                 self.session = Some(Arc::new(Mutex::new(session)));
 
-                info!(?address, "Connected");
+                info!(?address, session=%self.session_tag, "Connected");
                 Ok(())
             }
         }
@@ -288,191 +296,53 @@ impl RemoteClient {
     async fn open_shell(&mut self, channel_id: ServerChannelId) -> Result<()> {
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
-            let mut channel = session.channel_open_session().await?;
+            let channel = session.channel_open_session().await?;
 
-            let (tx, mut rx) = unbounded_channel();
+            let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
+            let channel = SessionChannel::new(channel, channel_id,
+                rx,
+                self.tx.clone(),
+                self.session_tag.clone());
             self.child_tasks.push(tokio::task::Builder::new().name(
                 &format!("SSH {} {:?} ops", self.id, channel_id.0),
-            ).spawn({
-                let tx = self.tx.clone();
-                async move {
-                    loop {
-                        tokio::select! {
-                            incoming_data = rx.recv() => {
-                                match incoming_data {
-                                    Some(ChannelOperation::Data(data)) => {
-                                        channel.data(&*data).await.context("data")?;
-                                    }
-                                    Some(ChannelOperation::ExtendedData { ext, data }) => {
-                                        channel.extended_data(ext, &*data).await.context("extended data")?;
-                                    }
-                                    Some(ChannelOperation::RequestPty(request)) => {
-                                        channel.request_pty(
-                                            true,
-                                            &request.term,
-                                            request.col_width,
-                                            request.row_height,
-                                            request.pix_width,
-                                            request.pix_height,
-                                            &request.modes,
-                                        ).await.context("request_pty")?;
-                                    }
-                                    Some(ChannelOperation::ResizePty(request)) => {
-                                        channel.window_change(
-                                            request.col_width,
-                                            request.row_height,
-                                            request.pix_width,
-                                            request.pix_height,
-                                        ).await.context("resize_pty")?;
-                                    },
-                                    Some(ChannelOperation::RequestShell) => {
-                                        channel.request_shell(true).await.context("request_shell")?;
-                                    },
-                                    Some(ChannelOperation::RequestEnv(name, value)) => {
-                                        channel.set_env(true, name, value).await.context("request_env")?;
-                                    },
-                                    Some(ChannelOperation::RequestExec(command)) => {
-                                        channel.exec(true, command).await.context("request_exec")?;
-                                    },
-                                    Some(ChannelOperation::RequestSubsystem(name)) => {
-                                        channel.request_subsystem(true, &name).await.context("request_subsystem")?;
-                                    },
-                                    Some(ChannelOperation::Eof) => {
-                                        channel.eof().await.context("eof")?;
-                                    },
-                                    Some(ChannelOperation::Signal(signal)) => {
-                                        channel.signal(signal).await.context("signal")?;
-                                    },
-                                    Some(ChannelOperation::OpenShell) => unreachable!(),
-                                    Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
-                                    Some(ChannelOperation::Close) => break,
-                                    None => break,
-                                }
-                            }
-                            channel_event = channel.wait() => {
-                                match channel_event {
-                                    Some(thrussh::ChannelMsg::Data { data }) => {
-                                        let bytes: &[u8] = &data;
-                                        tx.send(RCEvent::Output(
-                                            channel_id,
-                                            Bytes::from(BytesMut::from(bytes)),
-                                        ))?;
-                                    }
-                                    Some(thrussh::ChannelMsg::Close) => {
-                                        tx.send(RCEvent::Close(channel_id))?;
-                                    },
-                                    Some(thrussh::ChannelMsg::Success) => {
-                                        tx.send(RCEvent::Success(channel_id))?;
-                                    },
-                                    Some(thrussh::ChannelMsg::Eof) => {
-                                        tx.send(RCEvent::Eof(channel_id))?;
-                                    }
-                                    Some(thrussh::ChannelMsg::ExitStatus { exit_status }) => {
-                                        tx.send(RCEvent::ExitStatus(channel_id, exit_status))?;
-                                    }
-                                    Some(thrussh::ChannelMsg::WindowAdjusted { .. }) => { },
-                                    Some(thrussh::ChannelMsg::ExitSignal {
-                                        core_dumped, error_message, lang_tag, signal_name
-                                    }) => {
-                                        tx.send(RCEvent::ExitSignal {
-                                            channel_id, core_dumped, error_message, lang_tag, signal_name
-                                        })?;
-                                    },
-                                    Some(thrussh::ChannelMsg::XonXoff { client_can_do: _ }) => {
-                                    }
-                                    Some(thrussh::ChannelMsg::ExtendedData { data, ext }) => {
-                                        let data: &[u8] = &data;
-                                        tx.send(RCEvent::ExtendedData {
-                                            channel_id,
-                                            data: Bytes::from(BytesMut::from(data)),
-                                            ext,
-                                        })?;
-                                    }
-                                    None => {
-                                        tx.send(RCEvent::Close(channel_id))?;
-                                        break
-                                    },
-                                }
-                            }
-                        }
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }
-            }));
+            ).spawn(channel.run()));
         }
         Ok(())
     }
 
-
-    async fn open_direct_tcpip(&mut self, channel_id: ServerChannelId, params: DirectTCPIPParams) -> Result<()> {
+    async fn open_direct_tcpip(
+        &mut self,
+        channel_id: ServerChannelId,
+        params: DirectTCPIPParams,
+    ) -> Result<()> {
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
-            let mut channel = session.channel_open_direct_tcpip(
-                params.host_to_connect,
-                params.port_to_connect,
-                params.originator_address,
-                params.originator_port,
-            ).await?;
+            let channel = session
+                .channel_open_direct_tcpip(
+                    params.host_to_connect,
+                    params.port_to_connect,
+                    params.originator_address,
+                    params.originator_port,
+                )
+                .await?;
 
-            let (tx, mut rx) = unbounded_channel();
+            let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            self.child_tasks.push(tokio::task::Builder::new().name(
-                &format!("SSH {} {:?} ops", self.id, channel_id.0),
-            ).spawn({
-                let tx = self.tx.clone();
-                async move {
-                    loop {
-                        tokio::select! {
-                            incoming_data = rx.recv() => {
-                                match incoming_data {
-                                    Some(ChannelOperation::Data(data)) => {
-                                        channel.data(&*data).await.context("data")?;
-                                    }
-                                    Some(ChannelOperation::Eof) => {
-                                        channel.eof().await.context("eof")?;
-                                    },
-                                    Some(ChannelOperation::Close) => break,
-                                    None => break,
-                                    Some(operation) => {
-                                        warn!(channel=%channel_id, ?operation, "unexpected channel operation");
-                                    }
-                                }
-                            }
-                            channel_event = channel.wait() => {
-                                match channel_event {
-                                    Some(thrussh::ChannelMsg::Data { data }) => {
-                                        let bytes: &[u8] = &data;
-                                        tx.send(RCEvent::Output(
-                                            channel_id,
-                                            Bytes::from(BytesMut::from(bytes)),
-                                        ))?;
-                                    }
-                                    Some(thrussh::ChannelMsg::Close) => {
-                                        tx.send(RCEvent::Close(channel_id))?;
-                                    },
-                                    Some(thrussh::ChannelMsg::Success) => {
-                                        tx.send(RCEvent::Success(channel_id))?;
-                                    },
-                                    Some(thrussh::ChannelMsg::Eof) => {
-                                        tx.send(RCEvent::Eof(channel_id))?;
-                                    }
-                                    None => {
-                                        tx.send(RCEvent::Close(channel_id))?;
-                                        break
-                                    },
-                                    Some(operation) => {
-                                        warn!(channel=%channel_id, ?operation, "unexpected channel operation");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }
-            }));
+            let channel = DirectTCPIPChannel::new(
+                channel,
+                channel_id,
+                rx,
+                self.tx.clone(),
+                self.session_tag.clone(),
+            );
+            self.child_tasks.push(
+                tokio::task::Builder::new()
+                    .name(&format!("SSH {} {:?} ops", self.id, channel_id.0))
+                    .spawn(channel.run()),
+            );
         }
         Ok(())
     }
@@ -500,7 +370,7 @@ impl Drop for RemoteClient {
         for task in self.child_tasks.drain(..) {
             let _ = task.abort();
         }
-        info!("Closed connection");
-        debug!("Dropped");
+        info!(session=%self.session_tag, "Closed connection");
+        debug!(session=%self.session_tag, "Dropped");
     }
 }
