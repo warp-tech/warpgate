@@ -11,6 +11,8 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::SessionId;
 
+use crate::ssh::DirectTCPIPParams;
+
 use super::super::common::{PtyRequest, ServerChannelId};
 use super::session::ServerSession;
 
@@ -257,10 +259,42 @@ impl thrussh::server::Handler for ServerHandler {
         let variable_name = variable_name.to_string();
         let variable_value = variable_value.to_string();
         async move {
+            self.session.lock().await._channel_env_request(
+                ServerChannelId(channel),
+                variable_name,
+                variable_value,
+            );
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn channel_open_direct_tcpip(
+        self,
+        channel: ChannelId,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        originator_address: &str,
+        originator_port: u32,
+        mut session: Session,
+    ) -> Self::FutureUnit {
+        let host_to_connect = host_to_connect.to_string();
+        let originator_address = originator_address.to_string();
+        async move {
             self.session
                 .lock()
                 .await
-                ._channel_env_request(ServerChannelId(channel), variable_name, variable_value);
+                ._channel_open_direct_tcpip(
+                    ServerChannelId(channel),
+                    DirectTCPIPParams {
+                        host_to_connect,
+                        port_to_connect,
+                        originator_address,
+                        originator_port,
+                    },
+                    &mut session,
+                )
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -290,19 +324,6 @@ impl thrussh::server::Handler for ServerHandler {
     // ) -> Self::FutureUnit {
     //     self.finished(session)
     // }
-
-    // fn channel_open_direct_tcpip(
-    //     self,
-    //     channel: ChannelId,
-    //     host_to_connect: &str,
-    //     port_to_connect: u32,
-    //     originator_address: &str,
-    //     originator_port: u32,
-    //     session: Session,
-    // ) -> Self::FutureUnit {
-    //     self.finished(session)
-    // }
-
     // fn x11_request(
     //     self,
     //     channel: ChannelId,

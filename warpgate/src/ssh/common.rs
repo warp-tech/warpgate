@@ -1,4 +1,4 @@
-use std::fmt::{Formatter, Display};
+use std::fmt::{Display, Formatter};
 
 use bytes::Bytes;
 use thrussh::{ChannelId, Pty, Sig};
@@ -23,8 +23,17 @@ impl Display for ServerChannelId {
 }
 
 #[derive(Debug)]
+pub struct DirectTCPIPParams {
+    pub host_to_connect: String,
+    pub port_to_connect: u32,
+    pub originator_address: String,
+    pub originator_port: u32,
+}
+
+#[derive(Debug)]
 pub enum ChannelOperation {
     OpenShell,
+    OpenDirectTCPIP(DirectTCPIPParams),
     RequestPty(PtyRequest),
     ResizePty(PtyRequest),
     RequestShell,
@@ -32,7 +41,10 @@ pub enum ChannelOperation {
     RequestExec(String),
     RequestSubsystem(String),
     Data(Bytes),
-    ExtendedData { data: Bytes, ext: u32 },
+    ExtendedData {
+        data: Bytes,
+        ext: u32,
+    },
     Close,
     Eof,
     Signal(Sig),

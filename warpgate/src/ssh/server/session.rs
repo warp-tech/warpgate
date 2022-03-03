@@ -3,6 +3,7 @@ use super::super::{
 };
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
+use crate::ssh::DirectTCPIPParams;
 use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -362,11 +363,25 @@ impl ServerSession {
         channel: ServerChannelId,
         session: &mut Session,
     ) -> Result<()> {
-        debug!(session=?self, %channel, "Opening channel");
+        info!(session=?self, %channel, "Opening session channel");
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::OpenShell))?;
+        Ok(())
+    }
+
+    pub async fn _channel_open_direct_tcpip(
+        &mut self,
+        channel: ServerChannelId,
+        params: DirectTCPIPParams,
+        session: &mut Session,
+    ) -> Result<()> {
+        info!(session=?self, %channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
+        self.all_channels.push(channel);
+        self.session_handle = Some(session.handle());
+        self.rc_tx
+            .send(RCCommand::Channel(channel, ChannelOperation::OpenDirectTCPIP(params)))?;
         Ok(())
     }
 

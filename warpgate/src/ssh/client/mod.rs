@@ -19,7 +19,7 @@ use handler::ClientHandler;
 
 use self::handler::ClientHandlerEvent;
 
-use super::{ChannelOperation, ServerChannelId};
+use super::{ChannelOperation, ServerChannelId, DirectTCPIPParams};
 
 #[derive(Clone, Debug)]
 pub enum RCEvent {
@@ -112,6 +112,9 @@ impl RemoteClient {
             if let ChannelOperation::OpenShell = op {
                 let _ = self.tx.send(RCEvent::Close(id));
             }
+            if let ChannelOperation::OpenDirectTCPIP { .. } = op {
+                let _ = self.tx.send(RCEvent::Close(id));
+            }
         }
         let _ = self.set_state(RCState::Disconnected);
         let _ = self.tx.send(RCEvent::Done);
@@ -138,6 +141,11 @@ impl RemoteClient {
                 self.open_shell(channel_id)
                     .await
                     .context("failed to open shell")?;
+            }
+            ChannelOperation::OpenDirectTCPIP(params) => {
+                self.open_direct_tcpip(channel_id, params)
+                    .await
+                    .context("failed to open direct tcp/ip channel")?;
             }
             op => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
@@ -338,6 +346,7 @@ impl RemoteClient {
                                         channel.signal(signal).await.context("signal")?;
                                     },
                                     Some(ChannelOperation::OpenShell) => unreachable!(),
+                                    Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
                                     Some(ChannelOperation::Close) => break,
                                     None => break,
                                 }
@@ -385,6 +394,78 @@ impl RemoteClient {
                                         tx.send(RCEvent::Close(channel_id))?;
                                         break
                                     },
+                                }
+                            }
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+            }));
+        }
+        Ok(())
+    }
+
+
+    async fn open_direct_tcpip(&mut self, channel_id: ServerChannelId, params: DirectTCPIPParams) -> Result<()> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+            let mut channel = session.channel_open_direct_tcpip(
+                params.host_to_connect,
+                params.port_to_connect,
+                params.originator_address,
+                params.originator_port,
+            ).await?;
+
+            let (tx, mut rx) = unbounded_channel();
+            self.channel_pipes.lock().await.insert(channel_id, tx);
+
+            self.child_tasks.push(tokio::task::Builder::new().name(
+                &format!("SSH {} {:?} ops", self.id, channel_id.0),
+            ).spawn({
+                let tx = self.tx.clone();
+                async move {
+                    loop {
+                        tokio::select! {
+                            incoming_data = rx.recv() => {
+                                match incoming_data {
+                                    Some(ChannelOperation::Data(data)) => {
+                                        channel.data(&*data).await.context("data")?;
+                                    }
+                                    Some(ChannelOperation::Eof) => {
+                                        channel.eof().await.context("eof")?;
+                                    },
+                                    Some(ChannelOperation::Close) => break,
+                                    None => break,
+                                    Some(operation) => {
+                                        warn!(channel=%channel_id, ?operation, "unexpected channel operation");
+                                    }
+                                }
+                            }
+                            channel_event = channel.wait() => {
+                                match channel_event {
+                                    Some(thrussh::ChannelMsg::Data { data }) => {
+                                        let bytes: &[u8] = &data;
+                                        tx.send(RCEvent::Output(
+                                            channel_id,
+                                            Bytes::from(BytesMut::from(bytes)),
+                                        ))?;
+                                    }
+                                    Some(thrussh::ChannelMsg::Close) => {
+                                        tx.send(RCEvent::Close(channel_id))?;
+                                    },
+                                    Some(thrussh::ChannelMsg::Success) => {
+                                        tx.send(RCEvent::Success(channel_id))?;
+                                    },
+                                    Some(thrussh::ChannelMsg::Eof) => {
+                                        tx.send(RCEvent::Eof(channel_id))?;
+                                    }
+                                    None => {
+                                        tx.send(RCEvent::Close(channel_id))?;
+                                        break
+                                    },
+                                    Some(operation) => {
+                                        warn!(channel=%channel_id, ?operation, "unexpected channel operation");
+                                    }
                                 }
                             }
                         }
