@@ -259,7 +259,7 @@ impl ServerSession {
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
                     if let Err(error) = recorder.write(&data).await {
-                        error!(session=?self, ?channel, ?error, "Failed to record session data");
+                        error!(session=?self, %channel, ?error, "Failed to record session data");
                         self.channel_recorders.remove(&channel);
                     }
                 }
@@ -362,7 +362,7 @@ impl ServerSession {
         channel: ServerChannelId,
         session: &mut Session,
     ) -> Result<()> {
-        debug!(session=?self, ?channel, "Opening channel");
+        debug!(session=?self, %channel, "Opening channel");
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
         self.rc_tx
@@ -403,11 +403,11 @@ impl ServerSession {
     ) -> Result<()> {
         match std::str::from_utf8(&data) {
             Err(e) => {
-                error!(session=?self, channel=?channel.0, ?data, "Requested exec - invalid UTF-8");
+                error!(session=?self, channel=%channel.0, ?data, "Requested exec - invalid UTF-8");
                 anyhow::bail!(e)
             }
             Ok::<&str, _>(command) => {
-                debug!(session=?self, channel=?channel.0, %command, "Requested exec");
+                debug!(session=?self, channel=%channel.0, %command, "Requested exec");
                 let _ = self.maybe_connect_remote().await;
                 self.send_command(RCCommand::Channel(
                     channel,
@@ -416,6 +416,14 @@ impl ServerSession {
             }
         }
         Ok(())
+    }
+
+    pub fn _channel_env_request(&mut self, channel: ServerChannelId, name: String, value: String) {
+        info!(session=?self, %channel, %name, %value, "Environment");
+        self.send_command(RCCommand::Channel(
+            channel,
+            ChannelOperation::RequestEnv(name, value),
+        ));
     }
 
     pub async fn _channel_shell_request(&mut self, channel: ServerChannelId) -> Result<()> {
@@ -436,11 +444,11 @@ impl ServerSession {
                 self.channel_recorders.insert(channel, recorder);
             }
             Err(error) => {
-                error!(session=?self, ?channel, ?error, "Failed to start recording");
+                error!(session=?self, %channel, ?error, "Failed to start recording");
             }
         }
 
-        info!(session=?self, ?channel, "Opening shell");
+        info!(session=?self, %channel, "Opening shell");
         let _ = self
             .session_handle
             .as_mut()
@@ -452,7 +460,7 @@ impl ServerSession {
     }
 
     pub async fn _channel_subsystem_request(&mut self, channel: ServerChannelId, name: String) {
-        info!(session=?self, ?channel, "Requesting subsystem {}", &name);
+        info!(session=?self, %channel, "Requesting subsystem {}", &name);
         self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::RequestSubsystem(name),
@@ -460,9 +468,9 @@ impl ServerSession {
     }
 
     pub async fn _data(&mut self, channel: ServerChannelId, data: BytesMut) {
-        debug!(session=?self, channel=?channel.0, ?data, "Data");
+        debug!(session=?self, channel=%channel.0, ?data, "Data");
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
-            info!(session=?self, ?channel, "User requested connection abort (Ctrl-C)");
+            info!(session=?self, %channel, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return;
         }
@@ -473,7 +481,7 @@ impl ServerSession {
     }
 
     pub async fn _extended_data(&mut self, channel: ServerChannelId, code: u32, data: BytesMut) {
-        debug!(session=?self, channel=?channel.0, ?data, "Data");
+        debug!(session=?self, channel=%channel.0, ?data, "Data");
         self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::ExtendedData {
@@ -545,17 +553,17 @@ impl ServerSession {
     }
 
     pub async fn _channel_close(&mut self, channel: ServerChannelId) {
-        debug!(session=?self, ?channel, "Closing channel");
+        debug!(session=?self, %channel, "Closing channel");
         self.send_command(RCCommand::Channel(channel, ChannelOperation::Close));
     }
 
     pub async fn _channel_eof(&mut self, channel: ServerChannelId) {
-        debug!(session=?self, ?channel, "EOF");
+        debug!(session=?self, %channel, "EOF");
         self.send_command(RCCommand::Channel(channel, ChannelOperation::Eof));
     }
 
     pub async fn _channel_signal(&mut self, channel: ServerChannelId, signal: Sig) {
-        debug!(session=?self, ?channel, ?signal, "Signal");
+        debug!(session=?self, %channel, ?signal, "Signal");
         self.send_command(RCCommand::Channel(
             channel,
             ChannelOperation::Signal(signal),

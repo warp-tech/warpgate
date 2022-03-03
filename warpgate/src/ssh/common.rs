@@ -1,3 +1,5 @@
+use std::fmt::{Formatter, Display};
+
 use bytes::Bytes;
 use thrussh::{ChannelId, Pty, Sig};
 
@@ -14,12 +16,19 @@ pub struct PtyRequest {
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub struct ServerChannelId(pub ChannelId);
 
+impl Display for ServerChannelId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug)]
 pub enum ChannelOperation {
     OpenShell,
     RequestPty(PtyRequest),
     ResizePty(PtyRequest),
     RequestShell,
+    RequestEnv(String, String),
     RequestExec(String),
     RequestSubsystem(String),
     Data(Bytes),

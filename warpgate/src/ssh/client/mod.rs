@@ -148,7 +148,7 @@ impl RemoteClient {
                             channel_pipes.remove(&channel_id);
                         }
                     },
-                    None => debug!(channel=?channel_id, "operation for unknown channel"),
+                    None => debug!(channel=%channel_id, "operation for unknown channel"),
                 }
             }
         }
@@ -321,6 +321,9 @@ impl RemoteClient {
                                     },
                                     Some(ChannelOperation::RequestShell) => {
                                         channel.request_shell(true).await.context("request_shell")?;
+                                    },
+                                    Some(ChannelOperation::RequestEnv(name, value)) => {
+                                        channel.set_env(true, name, value).await.context("request_env")?;
                                     },
                                     Some(ChannelOperation::RequestExec(command)) => {
                                         channel.exec(true, command).await.context("request_exec")?;

@@ -247,6 +247,25 @@ impl thrussh::server::Handler for ServerHandler {
         .boxed()
     }
 
+    fn env_request(
+        self,
+        channel: ChannelId,
+        variable_name: &str,
+        variable_value: &str,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let variable_name = variable_name.to_string();
+        let variable_value = variable_value.to_string();
+        async move {
+            self.session
+                .lock()
+                .await
+                ._channel_env_request(ServerChannelId(channel), variable_name, variable_value);
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
     // -----
 
     // fn auth_none(self, user: &str) -> Self::FutureAuth {
@@ -296,15 +315,6 @@ impl thrussh::server::Handler for ServerHandler {
     //     self.finished(session)
     // }
 
-    // fn env_request(
-    //     self,
-    //     channel: ChannelId,
-    //     variable_name: &str,
-    //     variable_value: &str,
-    //     session: Session,
-    // ) -> Self::FutureUnit {
-    //     self.finished(session)
-    // }
     // fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
     //     self.finished_bool(false, session)
     // }
