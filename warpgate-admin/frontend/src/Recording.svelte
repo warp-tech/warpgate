@@ -11,7 +11,7 @@ let playerContainer: HTMLDivElement
 
 async function load () {
     recording = await api.getRecording(params)
-    AsciinemaPlayer.create(`/cast/${params.id}`, playerContainer)
+    AsciinemaPlayer.create(`/api/recordings/${params.id}/cast`, playerContainer)
 }
 
 load().catch(e => {

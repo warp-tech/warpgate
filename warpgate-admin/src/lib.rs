@@ -38,7 +38,7 @@ impl AdminServer {
         let spec = api_service.spec_endpoint();
         let db = state.lock().await.db.clone();
         let app = Route::new()
-            .nest("/swagger", ui)
+            .nest("/api/swagger", ui)
             .nest("/api", api_service)
             .nest("/api/openapi.json", spec)
             .nest(
@@ -49,7 +49,7 @@ impl AdminServer {
                 "/",
                 StaticFileEndpoint::new("./warpgate-admin/frontend/dist/index.html"),
             )
-            .at("/cast/:id", crate::api::recordings_detail::api_get_recording_cast)
+            .at("/api/recordings/:id/cast", crate::api::recordings_detail::api_get_recording_cast)
             .with(AddData::new(db))
             .with(AddData::new(state));
         Server::new(TcpListener::bind(address)).run(app).await?;
