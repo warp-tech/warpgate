@@ -22,6 +22,7 @@
     "@tsconfig/svelte": "^3.0.0",
     "@typescript-eslint/eslint-plugin": "^5.12.0",
     "@typescript-eslint/parser": "^5.12.0",
+    "asciinema-player": "3.0.0-rc.1",
     "bootstrap": "^5.1.3",
     "eslint": "^8.9.0",
     "eslint-config-standard": "^16.0.3",

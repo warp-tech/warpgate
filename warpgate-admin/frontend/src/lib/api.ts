@@ -5,3 +5,4 @@ const configuration = new Configuration({
 })
 
 export const api = new DefaultApi(configuration)
+export * from '../../api-client/src/models'

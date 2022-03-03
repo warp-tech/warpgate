@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-use bytes::BytesMut;
+use bytes::{BytesMut, Bytes};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::File;
@@ -15,22 +15,31 @@ use warpgate_db_entities::Recording;
 use crate::SessionId;
 
 mod serde_base64 {
+    use bytes::Bytes;
     use data_encoding::BASE64;
-    use serde::Serializer;
+    use serde::{Serializer, Deserialize};
 
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_str(&BASE64.encode(bytes))
     }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Bytes, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BASE64.decode(s.as_bytes()).map_err(serde::de::Error::custom)?.into())
+    }
 }
 
-#[derive(Serialize, Debug)]
-struct Record<'a> {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Record {
     pub time: f32,
     #[serde(with = "serde_base64")]
-    pub data: &'a [u8],
+    pub data: Bytes,
 }
 
 pub struct SessionRecorder {
@@ -55,10 +64,11 @@ impl SessionRecorder {
                     let bytes = bytes.freeze();
                     let record = Record {
                         time: now.duration_since(started_at).as_secs_f32(),
-                        data: &bytes,
+                        data: bytes,
                     };
-                    let serialized_record = serde_yaml::to_vec(&record)?;
+                    let serialized_record = serde_json::to_vec(&record)?;
                     file.write_all(&serialized_record).await?;
+                    file.write_all(b"\n").await?;
                 }
                 Ok::<(), anyhow::Error>(())
             }
@@ -121,9 +131,8 @@ impl SessionRecordings {
     }
 
     pub async fn start(&self, id: &SessionId, name: String) -> Result<SessionRecorder> {
-        let dir = self.path.join(id.to_string());
-        tokio::fs::create_dir_all(&dir).await?;
-        let path = dir.join(&name);
+        let path = self.path_for(id, &name);
+        tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
         info!(%name, path=?path, "Recording session {}", id);
 
         let model = {
@@ -144,5 +153,9 @@ impl SessionRecordings {
         };
 
         SessionRecorder::new(path, model, self.db.clone()).await
+    }
+
+    pub fn path_for(&self, session_id: &SessionId, name: &dyn AsRef<std::path::Path>) -> PathBuf {
+        self.path.join(session_id.to_string()).join(&name)
     }
 }

@@ -23,6 +23,13 @@
     chalk "^2.0.0"
     js-tokens "^4.0.0"
 
+"@babel/runtime@^7.15.4":
+  version "7.17.2"
+  resolved "https://registry.yarnpkg.com/@babel/runtime/-/runtime-7.17.2.tgz#66f68591605e59da47523c631416b18508779941"
+  integrity sha512-hzeyJyMA1YGdJTuWU0e/j4wKXrU4OMFvY2MSlaI9B7VQb0r5cxTE3EAIS2Q7Tn2RIcDkRvTA/v2JsAEhxe99uw==
+  dependencies:
+    regenerator-runtime "^0.13.4"
+
 "@cush/relative@^1.0.0":
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/@cush/relative/-/relative-1.0.0.tgz#8cd1769bf9bde3bb27dac356b1bc94af40f6cc16"
@@ -362,6 +369,14 @@ array.prototype.flat@^1.2.5:
     call-bind "^1.0.2"
     define-properties "^1.1.3"
     es-abstract "^1.19.0"
+
+asciinema-player@3.0.0-rc.1:
+  version "3.0.0-rc.1"
+  resolved "https://registry.yarnpkg.com/asciinema-player/-/asciinema-player-3.0.0-rc.1.tgz#dfb6394307490ecfac49bead9381de5c52ebf243"
+  integrity sha512-r0yRCnifQ+UuyInLBwanupOUk7FPIs1NgD3D+egaSCXzK1+PSQf0aHo/dfpZFY2sml9mA0cqUHJFQ4KnuUJS1Q==
+  dependencies:
+    "@babel/runtime" "^7.15.4"
+    solid-js "^1.1.6"
 
 axios@0.24.0:
   version "0.24.0"
@@ -1909,6 +1924,11 @@ reflect-metadata@0.1.13:
   resolved "https://registry.yarnpkg.com/reflect-metadata/-/reflect-metadata-0.1.13.tgz#67ae3ca57c972a2aa1642b10fe363fe32d49dc08"
   integrity sha512-Ts1Y/anZELhSsjMcU605fU9RE4Oi3p5ORujwbIKXfWa+0Zxs510Qrmrce5/Jowq3cHSZSJqBjypxmHarc+vEWg==
 
+regenerator-runtime@^0.13.4:
+  version "0.13.9"
+  resolved "https://registry.yarnpkg.com/regenerator-runtime/-/regenerator-runtime-0.13.9.tgz#8925742a98ffd90814988d7566ad30ca3b263b52"
+  integrity sha512-p3VT+cOEgxFsRRA9X4lkI1E+k2/CtnKtU4gcxyaCUreilL/vqI6CdZ3wxVUx3UOUg+gnUOQQcRI7BmSI656MYA==
+
 regexparam@2.0.0:
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/regexparam/-/regexparam-2.0.0.tgz#059476767d5f5f87f735fc7922d133fd1a118c8c"
@@ -2083,6 +2103,11 @@ slash@^3.0.0:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/slash/-/slash-3.0.0.tgz#6539be870c165adbd5240220dbe361f1bc4d4634"
   integrity sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==
+
+solid-js@^1.1.6:
+  version "1.3.9"
+  resolved "https://registry.yarnpkg.com/solid-js/-/solid-js-1.3.9.tgz#a4247ce6a72c82b5abcbeaaf8fe2273784daa396"
+  integrity sha512-BZyDen2oj3XA8g8xe0hhVIzGP2d+TV2dn3w90lXjNYLxveAXeN4aA5pxdO4vn7FKd0e0p4nqWtbWtG7NyaPs2A==
 
 sorcery@^0.10.0:
   version "0.10.0"

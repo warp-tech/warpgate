@@ -8,7 +8,10 @@
         }),
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte')
-        })
+        }),
+        '/recordings/:id': wrap({
+            asyncComponent: () => import('./Recording.svelte')
+        }),
     }
 </script>
 

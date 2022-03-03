@@ -1,4 +1,4 @@
-#![feature(decl_macro, proc_macro_hygiene)]
+#![feature(decl_macro, proc_macro_hygiene, let_else)]
 use anyhow::Result;
 use poem::endpoint::{StaticFileEndpoint, StaticFilesEndpoint};
 use poem::listener::TcpListener;
@@ -28,6 +28,7 @@ impl AdminServer {
             (
                 crate::api::sessions_all::Api,
                 crate::api::sessions_detail::Api,
+                crate::api::recordings_detail::Api,
             ),
             "Hello World",
             env!("CARGO_PKG_VERSION"),
@@ -48,6 +49,7 @@ impl AdminServer {
                 "/",
                 StaticFileEndpoint::new("./warpgate-admin/frontend/dist/index.html"),
             )
+            .at("/cast/:id", crate::api::recordings_detail::api_get_recording_cast)
             .with(AddData::new(db))
             .with(AddData::new(state));
         Server::new(TcpListener::bind(address)).run(app).await?;

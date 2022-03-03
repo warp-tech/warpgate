@@ -9,7 +9,7 @@
     import { api } from 'lib/api'
 
     async function closeAllSesssions () {
-        await api.apiCloseAllSessions()
+        await api.closeAllSessions()
     }
 
     reloadSessions()
