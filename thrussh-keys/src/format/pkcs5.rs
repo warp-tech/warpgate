@@ -33,6 +33,6 @@ pub fn decode_pkcs5(
         };
         super::decode_rsa(&sec)
     } else {
-        Err(Error::KeyIsEncrypted.into())
+        Err(Error::KeyIsEncrypted)
     }
 }

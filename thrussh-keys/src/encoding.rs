@@ -153,11 +153,11 @@ impl Encoding for CryptoVec {
 /// A cursor-like trait to read SSH-encoded things.
 pub trait Reader {
     /// Create an SSH reader for `self`.
-    fn reader<'a>(&'a self, starting_at: usize) -> Position<'a>;
+    fn reader(&self, starting_at: usize) -> Position;
 }
 
 impl Reader for CryptoVec {
-    fn reader<'a>(&'a self, starting_at: usize) -> Position<'a> {
+    fn reader(&self, starting_at: usize) -> Position {
         Position {
             s: &self,
             position: starting_at,
@@ -166,7 +166,7 @@ impl Reader for CryptoVec {
 }
 
 impl Reader for [u8] {
-    fn reader<'a>(&'a self, starting_at: usize) -> Position<'a> {
+    fn reader(&self, starting_at: usize) -> Position {
         Position {
             s: self,
             position: starting_at,
@@ -205,7 +205,7 @@ impl<'a> Position<'a> {
     }
     /// Read one byte from this reader.
     pub fn read_byte(&mut self) -> Result<u8, Error> {
-        if self.position + 1 <= self.s.len() {
+        if self.position < self.s.len() {
             let u = self.s[self.position];
             self.position += 1;
             Ok(u)

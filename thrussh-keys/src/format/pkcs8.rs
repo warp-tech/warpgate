@@ -13,18 +13,18 @@ use std::borrow::Cow;
 use yasna;
 use yasna::BERReaderSeq;
 
-const PBES2: &'static [u64] = &[1, 2, 840, 113549, 1, 5, 13];
-const PBKDF2: &'static [u64] = &[1, 2, 840, 113549, 1, 5, 12];
-const HMAC_SHA256: &'static [u64] = &[1, 2, 840, 113549, 2, 9];
-const AES256CBC: &'static [u64] = &[2, 16, 840, 1, 101, 3, 4, 1, 42];
-const ED25519: &'static [u64] = &[1, 3, 101, 112];
+const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
+const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];
+const HMAC_SHA256: &[u64] = &[1, 2, 840, 113549, 2, 9];
+const AES256CBC: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 1, 42];
+const ED25519: &[u64] = &[1, 3, 101, 112];
 #[cfg(feature = "openssl")]
-const RSA: &'static [u64] = &[1, 2, 840, 113549, 1, 1, 1];
+const RSA: &[u64] = &[1, 2, 840, 113549, 1, 1, 1];
 
 /// Decode a PKCS#8-encoded private key.
 pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::KeyPair, Error> {
     let secret = if let Some(pass) = password {
-        Cow::Owned(yasna::parse_der(&ciphertext, |reader| {
+        Cow::Owned(yasna::parse_der(ciphertext, |reader| {
             reader.read_sequence(|reader| {
                 // Encryption parameters
                 let parameters = reader.next().read_sequence(|reader| {
@@ -32,7 +32,7 @@ pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::K
                     if oid.components().as_slice() == PBES2 {
                         asn1_read_pbes2(reader)
                     } else {
-                        Ok(Err(Error::UnknownAlgorithm(oid)).into())
+                        Ok(Err(Error::UnknownAlgorithm(oid)))
                     }
                 })?;
                 // Ciphertext
@@ -51,7 +51,7 @@ pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::K
             } else if version == 1 {
                 Ok(read_key_v1(reader))
             } else {
-                Ok(Err(Error::CouldNotReadKey.into()))
+                Ok(Err(Error::CouldNotReadKey))
             }
         })
     })?
@@ -129,7 +129,7 @@ fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &key::ed25519::SecretK
         .next()
         .write_tagged(yasna::Tag::context(1), |writer| {
             let public = &secret.key[32..];
-            writer.write_bitvec(&BitVec::from_bytes(&public))
+            writer.write_bitvec(&BitVec::from_bytes(public))
         })
 }
 
@@ -156,7 +156,7 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         };
         Ok(key::KeyPair::Ed25519(secret))
     } else {
-        Err(Error::CouldNotReadKey.into())
+        Err(Error::CouldNotReadKey)
     }
 }
 
@@ -214,7 +214,7 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
             reader.read_sequence(|reader| {
                 let version = reader.next().read_u32()?;
                 if version != 0 {
-                    return Ok(Err(Error::CouldNotReadKey.into()));
+                    return Ok(Err(Error::CouldNotReadKey));
                 }
                 use openssl::bn::BigNum;
                 let mut read_key = || -> Result<Rsa<Private>, Error> {
@@ -237,7 +237,7 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
             hash: SignatureHash::SHA2_256,
         })
     } else {
-        Err(Error::CouldNotReadKey.into())
+        Err(Error::CouldNotReadKey)
     }
 }
 

@@ -72,10 +72,9 @@ impl Signature {
                 hash: SignatureHash::SHA2_512,
                 bytes: bytes.to_vec(),
             }),
-            _ => Err((Error::UnknownSignatureType {
+            _ => Err(Error::UnknownSignatureType {
                 sig_type: std::str::from_utf8(typ).unwrap_or("").to_string(),
-            })
-            .into()),
+            }),
         }
     }
 }

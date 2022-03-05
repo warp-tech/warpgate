@@ -250,7 +250,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                 let mut public = PublicKey::new_zeroed();
                 let mut secret = SecretKey::new_zeroed();
                 public.key.clone_from_slice(&public_[..32]);
-                secret.key.clone_from_slice(&concat[..]);
+                secret.key.clone_from_slice(concat);
                 writebuf.push(msg::SUCCESS);
                 (self.buf[pos0..pos1].to_vec(), key::KeyPair::Ed25519(secret))
             }
@@ -284,13 +284,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     q,
                     dp,
                     dq,
-                    BigNum::from_slice(&q_inv)?,
+                    BigNum::from_slice(q_inv)?,
                 )?;
 
                 let len0 = writebuf.len();
                 writebuf.extend_ssh_string(b"ssh-rsa");
-                writebuf.extend_ssh_mpint(&e);
-                writebuf.extend_ssh_mpint(&n);
+                writebuf.extend_ssh_mpint(e);
+                writebuf.extend_ssh_mpint(n);
                 let blob = writebuf[len0..].to_vec();
                 writebuf.resize(len0);
                 writebuf.push(msg::SUCCESS);

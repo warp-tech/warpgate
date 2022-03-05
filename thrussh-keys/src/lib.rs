@@ -138,8 +138,8 @@ impl From<yasna::ASN1Error> for Error {
     }
 }
 
-const KEYTYPE_ED25519: &'static [u8] = b"ssh-ed25519";
-const KEYTYPE_RSA: &'static [u8] = b"ssh-rsa";
+const KEYTYPE_ED25519: &[u8] = b"ssh-ed25519";
+const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 
 /// Load a public key from a file. Ed25519 and RSA keys are supported.
 ///
@@ -155,7 +155,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
     match (split.next(), split.next()) {
         (Some(_), Some(key)) => parse_public_key_base64(key),
         (Some(key), None) => parse_public_key_base64(key),
-        _ => Err(Error::CouldNotReadKey.into()),
+        _ => Err(Error::CouldNotReadKey),
     }
 }
 
@@ -168,7 +168,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
-    Ok(key::parse_public_key(&base)?)
+    key::parse_public_key(&base)
 }
 
 pub trait PublicKeyBase64 {
@@ -218,7 +218,7 @@ impl PublicKeyBase64 for key::KeyPair {
             key::KeyPair::Ed25519(ref key) => {
                 let public = &key.key[32..];
                 s.write_u32::<BigEndian>(32).unwrap();
-                s.extend_from_slice(&public);
+                s.extend_from_slice(public);
             }
             #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => {
@@ -253,9 +253,9 @@ pub fn load_secret_key<P: AsRef<Path>>(
 }
 
 fn is_base64_char(c: char) -> bool {
-    (c >= 'a' && c <= 'z')
-        || (c >= 'A' && c <= 'Z')
-        || (c >= '0' && c <= '9')
+    ('a'..='z').contains(&c)
+        || ('A'..='Z').contains(&c)
+        || ('0'..='9').contains(&c)
         || c == '/'
         || c == '+'
         || c == '='
@@ -289,7 +289,7 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
     file.seek(SeekFrom::End(0))?;
     let mut file = std::io::BufWriter::new(file);
     if !ends_in_newline {
-        file.write(b"\n")?;
+        file.write_all(b"\n")?;
     }
     if port != 22 {
         write!(file, "[{}]:{} ", host, port)?
@@ -297,7 +297,7 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
         write!(file, "{} ", host)?
     }
     write_public_key_base64(&mut file, pubkey)?;
-    file.write(b"\n")?;
+    file.write_all(b"\n")?;
     Ok(())
 }
 
@@ -333,19 +333,16 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
             let hosts = s.next();
             let _ = s.next();
             let key = s.next();
-            match (hosts, key) {
-                (Some(h), Some(k)) => {
-                    debug!("{:?} {:?}", h, k);
-                    let host_matches = h.split(',').any(|x| x == host_port);
-                    if host_matches {
-                        if &parse_public_key_base64(k)? == pubkey {
-                            return Ok(true);
-                        } else {
-                            return Err((Error::KeyChanged { line }).into());
-                        }
+            if let (Some(h), Some(k)) = (hosts, key) {
+                debug!("{:?} {:?}", h, k);
+                let host_matches = h.split(',').any(|x| x == host_port);
+                if host_matches {
+                    if &parse_public_key_base64(k)? == pubkey {
+                        return Ok(true);
+                    } else {
+                        return Err(Error::KeyChanged { line });
                     }
                 }
-                _ => {}
             }
         }
         buffer.clear();
@@ -398,7 +395,7 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
         known_host_file.push("known_hosts");
         check_known_hosts_path(host, port, pubkey, &known_host_file)
     } else {
-        Err(Error::NoHomeDir.into())
+        Err(Error::NoHomeDir)
     }
 }
 
