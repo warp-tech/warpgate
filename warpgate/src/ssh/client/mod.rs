@@ -34,14 +34,14 @@ pub enum RCEvent {
     Close(ServerChannelId),
     ExitStatus(ServerChannelId, u32),
     ExitSignal {
-        channel_id: ServerChannelId,
+        channel: ServerChannelId,
         signal_name: Sig,
         core_dumped: bool,
         error_message: String,
         lang_tag: String,
     },
     ExtendedData {
-        channel_id: ServerChannelId,
+        channel: ServerChannelId,
         data: Bytes,
         ext: u32,
     },

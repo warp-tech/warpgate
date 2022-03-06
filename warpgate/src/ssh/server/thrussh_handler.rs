@@ -134,7 +134,7 @@ impl thrussh::server::Handler for ServerHandler {
     }
 
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
-        let data = BytesMut::from(data);
+        let data = BytesMut::from(data).freeze();
         async move {
             self.session
                 .lock()

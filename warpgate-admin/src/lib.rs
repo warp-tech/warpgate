@@ -30,7 +30,7 @@ impl AdminServer {
                 crate::api::sessions_detail::Api,
                 crate::api::recordings_detail::Api,
             ),
-            "Hello World",
+            "Warpgate",
             env!("CARGO_PKG_VERSION"),
         )
         .server("/api");

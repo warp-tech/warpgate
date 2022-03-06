@@ -7,12 +7,13 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::Serialize;
-use tokio::fs::File;
-use tokio::io::{BufReader, AsyncBufReadExt};
 use std::sync::Arc;
+use tokio::fs::File;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{State, Record};
+use warpgate_common::recordings::TerminalRecordingItem;
+use warpgate_common::State;
 use warpgate_db_entities::Recording;
 
 pub struct Api;
@@ -94,13 +95,15 @@ pub async fn api_get_recording_cast(
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
     while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
-        let entry: Record = serde_json::from_str(&line[..]).map_err(InternalServerError)?;
+        let entry: TerminalRecordingItem =
+            serde_json::from_str(&line[..]).map_err(InternalServerError)?;
         response.push_str(
             &serde_json::to_string(&Cast::Output(
                 entry.time,
                 "o".to_string(),
                 String::from_utf8_lossy(&entry.data[..]).to_string(),
-            )).map_err(InternalServerError)?
+            ))
+            .map_err(InternalServerError)?,
         );
         response.push_str("\n");
     }
@@ -116,9 +119,17 @@ enum Cast {
         height: u32,
         title: String,
     },
-    Output(
-        f32,
-        String,
-        String
-    ),
+    Output(f32, String, String),
 }
+
+// #[handler]
+// pub async fn api_get_recording_stream(
+//     ws: WebSocket,
+//     db: Data<&Arc<Mutex<DatabaseConnection>>>,
+//     state: Data<&Arc<Mutex<State>>>,
+//     id: poem::web::Path<Uuid>,
+// ) -> impl IntoResponse {
+//     ws.on_upgrade(|socket| async move {
+
+//     })
+// }

@@ -8,7 +8,8 @@ use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs, Ipv4Addr};
+use std::str::FromStr;
 use std::sync::Arc;
 use thrussh::Sig;
 use thrussh::{server::Session, CryptoVec};
@@ -17,9 +18,8 @@ use thrussh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
-use warpgate_common::{
-    SessionId, SessionRecorder, State, Target, User, UserAuth, WarpgateServerHandle,
-};
+use warpgate_common::recordings::{TerminalRecorder, TrafficRecorder, ConnectionRecorder, TrafficConnectionParams};
+use warpgate_common::{SessionId, State, Target, User, UserAuth, WarpgateServerHandle};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -44,13 +44,12 @@ impl From<&str> for Selector {
         }
     }
 }
-
 pub struct ServerSession {
     pub id: SessionId,
     session_handle: Option<thrussh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
     all_channels: Vec<ServerChannelId>,
-    channel_recorders: HashMap<ServerChannelId, SessionRecorder>,
+    channel_recorders: HashMap<ServerChannelId, TerminalRecorder>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
@@ -58,6 +57,8 @@ pub struct ServerSession {
     state: Arc<Mutex<State>>,
     server_handle: WarpgateServerHandle,
     target: TargetSelection,
+    traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
+    traffic_connection_recorders: HashMap<ServerChannelId, ConnectionRecorder>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -93,6 +94,8 @@ impl ServerSession {
             state,
             server_handle,
             target: TargetSelection::None,
+            traffic_recorders: HashMap::new(),
+            traffic_connection_recorders: HashMap::new(),
         };
 
         info!(session=?this, "New connection");
@@ -264,8 +267,15 @@ impl ServerSession {
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
                     if let Err(error) = recorder.write(&data).await {
-                        error!(session=?self, %channel, ?error, "Failed to record session data");
+                        error!(session=?self, %channel, ?error, "Failed to record terminal data");
                         self.channel_recorders.remove(&channel);
+                    }
+                }
+
+                if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel) {
+                    if let Err(error) = recorder.write_rx(&data).await {
+                        error!(session=?self, %channel, ?error, "Failed to record traffic data");
+                        self.traffic_connection_recorders.remove(&channel);
                     }
                 }
 
@@ -309,7 +319,7 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::ExitSignal {
-                channel_id,
+                channel: channel_id,
                 signal_name,
                 core_dumped,
                 error_message,
@@ -331,14 +341,16 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::Done => {}
-            RCEvent::ExtendedData {
-                channel_id,
-                data,
-                ext,
-            } => {
+            RCEvent::ExtendedData { channel, data, ext } => {
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
+                    if let Err(error) = recorder.write(&data).await {
+                        error!(session=?self, %channel, ?error, "Failed to record session data");
+                        self.channel_recorders.remove(&channel);
+                    }
+                }
                 self.maybe_with_session(|handle| async move {
                     handle
-                        .extended_data(channel_id.0, ext, CryptoVec::from_slice(&data))
+                        .extended_data(channel.0, ext, CryptoVec::from_slice(&data))
                         .await
                         .map_err(|_| ())
                         .context("failed to send extended data")?;
@@ -382,6 +394,23 @@ impl ServerSession {
         session: &mut Session,
     ) -> Result<()> {
         info!(session=?self, %channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
+
+        let recorder = self
+            .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
+            .await;
+        if let Some(recorder) = recorder {
+            let mut recorder = recorder.connection(TrafficConnectionParams {
+                dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
+                dst_port: params.port_to_connect as u16,
+                src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
+                src_port: params.originator_port as u16,
+            });
+            if let Err(error) = recorder.write_connection_setup().await {
+                error!(session=?self, %channel, ?error, "Failed to record connection setup");
+            }
+            self.traffic_connection_recorders.insert(channel, recorder);
+        }
+
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
         self.rc_tx.send(RCCommand::Channel(
@@ -447,6 +476,34 @@ impl ServerSession {
         ));
     }
 
+    async fn traffic_recorder_for(
+        &mut self,
+        host: &String,
+        port: u32,
+    ) -> Option<&mut TrafficRecorder> {
+        if !self.traffic_recorders.contains_key(&(host.clone(), port)) {
+            match self
+                .state
+                .lock()
+                .await
+                .recordings
+                .lock()
+                .await
+                .start(&self.id, format!("direct-tcpip-{host}-{port}"))
+                .await
+            {
+                Ok(recorder) => {
+                    self.traffic_recorders
+                        .insert((host.clone(), port), recorder);
+                }
+                Err(error) => {
+                    error!(session=?self, %host, %port, ?error, "Failed to start recording");
+                }
+            }
+        }
+        self.traffic_recorders.get_mut(&(host.clone(), port))
+    }
+
     pub async fn _channel_shell_request(&mut self, channel: ServerChannelId) -> Result<()> {
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
@@ -488,16 +545,24 @@ impl ServerSession {
         ));
     }
 
-    pub async fn _data(&mut self, channel: ServerChannelId, data: BytesMut) {
+    pub async fn _data(&mut self, channel: ServerChannelId, data: Bytes) {
         debug!(session=?self, channel=%channel.0, ?data, "Data");
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
             info!(session=?self, %channel, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return;
         }
+
+        if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel) {
+            if let Err(error) = recorder.write_tx(&data).await {
+                error!(session=?self, %channel, ?error, "Failed to record traffic data");
+                self.traffic_connection_recorders.remove(&channel);
+            }
+        }
+
         self.send_command(RCCommand::Channel(
             channel,
-            ChannelOperation::Data(data.freeze()),
+            ChannelOperation::Data(data),
         ));
     }
 

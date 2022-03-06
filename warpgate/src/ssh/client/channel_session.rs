@@ -111,7 +111,7 @@ impl SessionChannel {
                             core_dumped, error_message, lang_tag, signal_name
                         }) => {
                             self.events_tx.send(RCEvent::ExitSignal {
-                                channel_id: self.server_channel_id, core_dumped, error_message, lang_tag, signal_name
+                                channel: self.server_channel_id, core_dumped, error_message, lang_tag, signal_name
                             })?;
                         },
                         Some(thrussh::ChannelMsg::XonXoff { client_can_do: _ }) => {
@@ -119,7 +119,7 @@ impl SessionChannel {
                         Some(thrussh::ChannelMsg::ExtendedData { data, ext }) => {
                             let data: &[u8] = &data;
                             self.events_tx.send(RCEvent::ExtendedData {
-                                channel_id: self.server_channel_id,
+                                channel: self.server_channel_id,
                                 data: Bytes::from(BytesMut::from(data)),
                                 ext,
                             })?;

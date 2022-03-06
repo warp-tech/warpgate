@@ -2,8 +2,12 @@ use anyhow::Result;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use thrussh::MethodSet;
+use thrussh_keys::load_secret_key;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
+use tracing::*;
 
 mod session;
 mod session_handle;
@@ -11,13 +15,8 @@ mod thrussh_handler;
 pub use session::ServerSession;
 pub use thrussh_handler::ServerHandler;
 
-use thrussh::MethodSet;
-use thrussh_keys::load_secret_key;
-use tokio::sync::Mutex;
-use tracing::*;
-use warpgate_common::{SessionState, State, WarpgateServerHandle};
-
 use crate::ssh::server::session_handle::SSHSessionHandle;
+use warpgate_common::{SessionState, State, WarpgateServerHandle};
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {

@@ -1,7 +1,16 @@
-use poem_openapi::Object;
+use poem_openapi::{Object, Enum};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
+#[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
+pub enum RecordingKind {
+    #[sea_orm(string_value = "terminal")]
+    Terminal,
+    #[sea_orm(string_value = "traffic")]
+    Traffic,
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "recordings")]
@@ -13,6 +22,7 @@ pub struct Model {
     pub started: DateTimeUtc,
     pub ended: Option<DateTimeUtc>,
     pub session_id: Uuid,
+    pub kind: RecordingKind,
 }
 
 // #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

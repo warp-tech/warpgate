@@ -1,5 +1,5 @@
 use crate::db::{connect_to_db, sanitize_db};
-use crate::recorder::SessionRecordings;
+use crate::recordings::SessionRecordings;
 use crate::{SessionHandle, SessionId, Target, User, WarpgateConfig};
 use anyhow::{Context, Result};
 use sea_orm::ActiveModelTrait;
