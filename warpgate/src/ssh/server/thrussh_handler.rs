@@ -129,8 +129,13 @@ impl thrussh::server::Handler for ServerHandler {
     }
 
     fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
-        println!("Auth {:?} with pw {:?}", user, password);
-        async { Ok((self, Auth::Accept)) }.boxed()
+        let user = user.to_string();
+        let password = password.to_string();
+        async move {
+            let result = self.session.lock().await._auth_password(user, password).await;
+            Ok((self, result))
+        }
+        .boxed()
     }
 
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {

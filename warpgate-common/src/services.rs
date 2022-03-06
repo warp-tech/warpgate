@@ -4,7 +4,7 @@ use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 
-use crate::{WarpgateConfig, State};
+use crate::{WarpgateConfig, State, ConfigProvider, FileConfigProvider};
 use crate::db::{connect_to_db, sanitize_db};
 use crate::recordings::SessionRecordings;
 
@@ -14,6 +14,7 @@ pub struct Services {
     pub recordings: Arc<Mutex<SessionRecordings>>,
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub state: Arc<Mutex<State>>,
+    pub config_provider: Arc<Mutex<dyn ConfigProvider + Send>>,
 }
 
 impl Services {
@@ -28,11 +29,14 @@ impl Services {
         )?;
         let recordings = Arc::new(Mutex::new(recordings));
 
+        let config = Arc::new(Mutex::new(config));
+
         Ok(Self {
             db: db.clone(),
             recordings,
-            config: Arc::new(Mutex::new(config)),
+            config: config.clone(),
             state: Arc::new(Mutex::new(State::new(&db))),
+            config_provider: Arc::new(Mutex::new(FileConfigProvider::new(&config).await)),
         })
     }
 }

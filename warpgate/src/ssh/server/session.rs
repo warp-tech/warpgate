@@ -21,7 +21,7 @@ use tracing::*;
 use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
 };
-use warpgate_common::{Services, SessionId, Target, User, UserAuth, WarpgateServerHandle};
+use warpgate_common::{Services, SessionId, Target, WarpgateServerHandle, AuthResult, AuthCredential};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -61,6 +61,7 @@ pub struct ServerSession {
     target: TargetSelection,
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
     traffic_connection_recorders: HashMap<ServerChannelId, ConnectionRecorder>,
+    credentials: Vec<AuthCredential>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -98,6 +99,7 @@ impl ServerSession {
             target: TargetSelection::None,
             traffic_recorders: HashMap::new(),
             traffic_connection_recorders: HashMap::new(),
+            credentials: vec![],
         };
 
         info!(session=?this, "New connection");
@@ -577,39 +579,57 @@ impl ServerSession {
         user: String,
         key: &PublicKey,
     ) -> thrussh::server::Auth {
-        info!(session=?self, "Public key auth as {} with key FP {}", user, key.fingerprint());
         let selector: Selector = user[..].into();
-        let user = {
-            self.services
-                .config
-                .lock()
-                .await
-                .users
-                .iter()
-                .find(|x| x.username == selector.username)
-                .map(User::to_owned)
-        };
-        let Some(user) = user else {
-            self.emit_service_message(&format!("Selected user not found: {}", selector.username)).await;
-            return thrussh::server::Auth::Reject;
-        };
 
-        let UserAuth::PublicKey { key: ref user_key } = user.auth else {
-            return thrussh::server::Auth::Reject;
-        };
+        info!(session=?self, "Public key auth as {} with key FP {}", selector.username, key.fingerprint());
 
-        let client_key = format!("{} {}", key.name(), key.public_key_base64());
-        debug!(session=?self, "Client key: {}", client_key);
+        self.credentials.push(AuthCredential::PublicKey {
+            kind: key.name().to_string(),
+            public_key_bytes: Bytes::from(key.public_key_bytes()),
+        });
 
-        if &client_key != user_key {
-            error!(session=?self, "Client key does not match");
-            return thrussh::server::Auth::Reject;
+        match self.try_auth(&selector).await {
+            Ok(AuthResult::Accepted) => thrussh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => thrussh::server::Auth::Reject,
+            Err(_) => {
+                error!(session=?self, "Failed to verify credentials");
+                thrussh::server::Auth::Reject
+            }
         }
-
-        self._auth_accept(user, selector).await
     }
 
-    async fn _auth_accept(&mut self, user: User, selector: Selector) -> thrussh::server::Auth {
+    pub async fn _auth_password(
+        &mut self,
+        username: String,
+        password: String,
+    ) -> thrussh::server::Auth {
+        let selector: Selector = username[..].into();
+        info!(session=?self, "Password key auth as {}", selector.username);
+
+        self.credentials.push(AuthCredential::Password(password));
+
+        match self.try_auth(&selector).await {
+            Ok(AuthResult::Accepted) => thrussh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => thrussh::server::Auth::Reject,
+            Err(_) => {
+                error!(session=?self, "Failed to verify credentials");
+                thrussh::server::Auth::Reject
+            }
+        }
+    }
+
+    async fn try_auth(&mut self, selector: &Selector) -> Result<AuthResult> {
+        let result =self.services.config_provider.lock().await.authorize_user(&selector.username, &self.credentials).await;
+        match result? {
+            AuthResult::Accepted => {
+                self._auth_accept(selector).await;
+                Ok(AuthResult::Accepted)
+            }
+            AuthResult::Rejected => Ok(AuthResult::Rejected),
+        }
+    }
+
+    async fn _auth_accept(&mut self, selector: &Selector) {
         info!(session=?self, "Authenticated");
 
         let target = {
@@ -623,16 +643,15 @@ impl ServerSession {
                 .map(Target::clone)
         };
 
-        let _ = self.server_handle.set_username(user.username.clone()).await;
+        let _ = self.server_handle.set_username(selector.username.clone()).await;
         let Some(target) = target else {
-            self.target = TargetSelection::NotFound(selector.target_name);
+            self.target = TargetSelection::NotFound(selector.target_name.clone());
             info!(session=?self, "Selected target not found");
-            return thrussh::server::Auth::Accept;
+            return;
         };
 
         let _ = self.server_handle.set_target(&target).await;
         self.target = TargetSelection::Found(target);
-        thrussh::server::Auth::Accept
     }
 
     pub async fn _channel_close(&mut self, channel: ServerChannelId) {

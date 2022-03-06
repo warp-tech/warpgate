@@ -1,3 +1,4 @@
+#![feature(let_else)]
 mod config;
 mod config_providers;
 mod data;

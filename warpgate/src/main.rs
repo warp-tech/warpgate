@@ -70,8 +70,16 @@ async fn main() -> Result<()> {
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
-        _ = SSHProtocolServer::new(&services).run(address) => {}
-        _ = admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()) => {}
+        result = SSHProtocolServer::new(&services).run(address) => {
+            if let Err(error) = result {
+                error!(?error, "SSH server error");
+            }
+        }
+        result = admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()) => {
+            if let Err(error) = result {
+                error!(?error, "Admin server error");
+            }
+        }
     }
 
     info!("Exiting");

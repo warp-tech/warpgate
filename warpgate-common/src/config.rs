@@ -16,7 +16,7 @@ pub struct Target {
 #[derive(Debug, Deserialize, Clone)]
 #[allow(unused)]
 #[serde(tag = "type")]
-pub enum UserAuth {
+pub enum UserAuthCredential {
     #[serde(rename = "password")]
     Password { password: String },
     #[serde(rename = "publickey")]
@@ -27,7 +27,7 @@ pub enum UserAuth {
 #[allow(unused)]
 pub struct User {
     pub username: String,
-    pub auth: UserAuth,
+    pub credentials: Vec<UserAuthCredential>,
 }
 
 #[derive(Debug, Deserialize)]

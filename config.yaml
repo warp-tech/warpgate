@@ -8,9 +8,11 @@ targets:
 
 users:
 - username: user
-  auth:
-    type: publickey
+  credentials:
+  - type: publickey
     key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtbl2EekdtAGGuilLQJebKP3pSOlI4KNVCnXPThbD4I
+  - type: password
+    password: "123"
 
 recordings_path: data/recordings
 database_url: sqlite:data/db.sqlite3?mode=rwc

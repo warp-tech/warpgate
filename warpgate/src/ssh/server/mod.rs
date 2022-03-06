@@ -31,7 +31,7 @@ impl SSHProtocolServer {
     pub async fn run(self, address: SocketAddr) -> Result<()> {
         let mut config = thrussh::server::Config {
             auth_rejection_time: std::time::Duration::from_secs(1),
-            methods: MethodSet::PUBLICKEY,
+            methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
             ..Default::default()
         };
         config.keys.push(load_secret_key("host_key", None).unwrap());
