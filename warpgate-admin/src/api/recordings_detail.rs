@@ -12,8 +12,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::recordings::TerminalRecordingItem;
-use warpgate_common::State;
+use warpgate_common::recordings::{TerminalRecordingItem, SessionRecordings};
 use warpgate_db_entities::Recording;
 
 pub struct Api;
@@ -55,7 +54,7 @@ impl Api {
 #[handler]
 pub async fn api_get_recording_cast(
     db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    state: Data<&Arc<Mutex<State>>>,
+    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> ApiResult<String> {
     let db = db.lock().await;
@@ -70,10 +69,7 @@ pub async fn api_get_recording_cast(
     };
 
     let path = {
-        state
-            .lock()
-            .await
-            .recordings
+        recordings
             .lock()
             .await
             .path_for(&recording.session_id, &recording.name)

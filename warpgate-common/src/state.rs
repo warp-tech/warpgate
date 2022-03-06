@@ -1,6 +1,4 @@
-use crate::db::{connect_to_db, sanitize_db};
-use crate::recordings::SessionRecordings;
-use crate::{SessionHandle, SessionId, Target, User, WarpgateConfig};
+use crate::{SessionHandle, SessionId, Target};
 use anyhow::{Context, Result};
 use sea_orm::ActiveModelTrait;
 use sea_orm::{DatabaseConnection, EntityTrait};
@@ -14,29 +12,19 @@ use warpgate_db_entities::Session;
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
-    pub config: WarpgateConfig,
-    pub recordings: Arc<Mutex<SessionRecordings>>,
+    // pub config: WarpgateConfig,
+    // pub recordings: Arc<Mutex<SessionRecordings>>,
     pub db: Arc<Mutex<DatabaseConnection>>,
 }
 
 impl State {
-    pub async fn new(config: WarpgateConfig) -> Result<Self> {
-        let mut db = connect_to_db(&config).await?;
-        sanitize_db(&mut db).await?;
-
-        let db = Arc::new(Mutex::new(db));
-
-        let recordings = Arc::new(Mutex::new(SessionRecordings::new(
-            db.clone(),
-            config.recordings_path.clone(),
-        )?));
-
-        Ok(State {
+    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+        State {
             sessions: HashMap::new(),
-            config,
-            recordings,
-            db,
-        })
+            // config,
+            // recordings,
+            db: db.clone(),
+        }
     }
 
     pub async fn register_session(
@@ -90,7 +78,7 @@ impl State {
 
 pub struct SessionState {
     pub remote_address: SocketAddr,
-    pub user: Option<User>,
+    pub username: Option<String>,
     pub target: Option<Target>,
     pub handle: Box<dyn SessionHandle + Send>,
 }
@@ -99,7 +87,7 @@ impl SessionState {
     pub fn new(remote_address: SocketAddr, handle: Box<dyn SessionHandle + Send>) -> Self {
         SessionState {
             remote_address,
-            user: None,
+            username: None,
             target: None,
             handle,
         }

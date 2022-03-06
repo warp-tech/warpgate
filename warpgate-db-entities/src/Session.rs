@@ -7,7 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub target_snapshot: Option<String>,
-    pub user_snapshot: Option<String>,
+    pub username: Option<String>,
     pub remote_address: String,
     pub started: DateTimeUtc,
     pub ended: Option<DateTimeUtc>,

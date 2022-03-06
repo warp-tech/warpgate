@@ -16,16 +16,16 @@ pub use session::ServerSession;
 pub use thrussh_handler::ServerHandler;
 
 use crate::ssh::server::session_handle::SSHSessionHandle;
-use warpgate_common::{SessionState, State, WarpgateServerHandle};
+use warpgate_common::{SessionState, WarpgateServerHandle, Services};
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
-    state: Arc<Mutex<State>>,
+    services: Services,
 }
 
 impl SSHProtocolServer {
-    pub fn new(state: Arc<Mutex<State>>) -> Self {
-        SSHProtocolServer { state }
+    pub fn new(services: &Services) -> Self {
+        SSHProtocolServer { services: services.clone() }
     }
 
     pub async fn run(self, address: SocketAddr) -> Result<()> {
@@ -50,17 +50,17 @@ impl SSHProtocolServer {
                 remote_address,
                 Box::new(session_handle),
             )));
-            let id = self
+            let id = self.services
                 .state
                 .lock()
                 .await
                 .register_session(&session_state)
                 .await?;
-            let server_handle = WarpgateServerHandle::new(id, self.state.clone(), session_state);
+            let server_handle = WarpgateServerHandle::new(id, self.services.state.clone(), session_state);
 
             let session = match ServerSession::new(
                 remote_address,
-                self.state.clone(),
+                &self.services,
                 server_handle,
                 session_handle_rx,
             )

@@ -77,9 +77,9 @@ impl ConnectionRecorder {
     }
 
     async fn write_packet(&mut self, data: Bytes) -> Result<()> {
-        // let dt = Instant::now().duration_since(self.started_at).as_nanos();
-        // TODO timestamp
-        self.writer.write(&[0, 0, 0, 0, 0, 0, 0, 0]).await?;
+        let ms = Instant::now().duration_since(self.started_at).as_micros();
+        self.writer.write(&u32::to_le_bytes((ms / 10u128.pow(6)) as u32)).await?;
+        self.writer.write(&u32::to_le_bytes((ms % 10u128.pow(6)) as u32)).await?;
         self.writer
             .write(&u32::to_le_bytes(data.len() as u32))
             .await?;

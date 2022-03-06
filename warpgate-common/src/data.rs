@@ -8,7 +8,7 @@ use crate::{SessionId, Target, User};
 #[derive(Serialize, Deserialize, Object)]
 pub struct SessionSnapshot {
     id: SessionId,
-    user: Option<UserSnapshot>,
+    username: Option<String>,
     target: Option<TargetSnapshot>,
     started: DateTime<Utc>,
     ended: Option<DateTime<Utc>>,
@@ -18,9 +18,7 @@ impl From<Session::Model> for SessionSnapshot {
     fn from(model: Session::Model) -> Self {
         Self {
             id: model.id,
-            user: model
-                .user_snapshot
-                .and_then(|s| serde_json::from_str(&s).ok()),
+            username: model.username,
             target: model
                 .target_snapshot
                 .and_then(|s| serde_json::from_str(&s).ok()),

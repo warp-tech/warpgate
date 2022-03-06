@@ -20,3 +20,4 @@ warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-db-migrations = {version = "*", path = "../warpgate-db-migrations"}
 packet = "0.1.4"
 rand = "0.8.5"
+async-trait = "0.1.52"

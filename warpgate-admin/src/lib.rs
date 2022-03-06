@@ -7,23 +7,21 @@ use poem::EndpointExt;
 use poem::{Route, Server};
 use poem_openapi::OpenApiService;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use warpgate_common::State;
+use warpgate_common::Services;
 mod api;
 mod helpers;
 
 pub struct AdminServer {
-    state: Arc<Mutex<State>>,
+    services: Services,
 }
 
 impl AdminServer {
-    pub fn new(state: Arc<Mutex<State>>) -> Self {
-        AdminServer { state }
+    pub fn new(services: &Services) -> Self {
+        AdminServer { services: services.clone() }
     }
 
     pub async fn run(self, address: SocketAddr) -> Result<()> {
-        let state = self.state.clone();
+        let state = self.services.state.clone();
         let api_service = OpenApiService::new(
             (
                 crate::api::sessions_all::Api,
@@ -36,7 +34,7 @@ impl AdminServer {
         .server("/api");
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
-        let db = state.lock().await.db.clone();
+        let db = self.services.db.clone();
         let app = Route::new()
             .nest("/api/swagger", ui)
             .nest("/api", api_service)

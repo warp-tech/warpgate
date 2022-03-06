@@ -1,4 +1,4 @@
-use crate::{SessionId, SessionState, State, Target, TargetSnapshot, User, UserSnapshot};
+use crate::{SessionId, SessionState, State, Target, TargetSnapshot};
 use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -32,11 +32,11 @@ impl WarpgateServerHandle {
         self.id
     }
 
-    pub async fn set_user(&mut self, user: &User) -> Result<()> {
+    pub async fn set_username(&mut self, username: String) -> Result<()> {
         use sea_orm::ActiveValue::Set;
 
         {
-            self.session_state.lock().await.user = Some(user.clone());
+            self.session_state.lock().await.username = Some(username.clone())
         }
 
         let state = self.state.lock().await;
@@ -44,10 +44,7 @@ impl WarpgateServerHandle {
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
-                user_snapshot: Set(Some(
-                    serde_json::to_string(&UserSnapshot::new(&user))
-                        .context("Error serializing user")?,
-                )),
+                username: Set(Some(username)),
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))

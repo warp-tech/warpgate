@@ -4,7 +4,6 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{format_description, UtcOffset};
-use tokio::sync::Mutex;
 use tracing::*;
 use tracing_subscriber::filter::dynamic_filter_fn;
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -18,7 +17,7 @@ mod ssh;
 
 use crate::config::load_config;
 use crate::ssh::SSHProtocolServer;
-use warpgate_common::State;
+use warpgate_common::Services;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -63,16 +62,15 @@ async fn main() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     info!(%version, "Warpgate");
 
-    let state = State::new(load_config()?).await?;
-    let state = Arc::new(Mutex::new(state));
+    let services = Services::new(load_config()?).await?;
 
-    let admin = warpgate_admin::AdminServer::new(state.clone());
+    let admin = warpgate_admin::AdminServer::new(&services);
 
     let address = "0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap();
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
-        _ = SSHProtocolServer::new(state).run(address) => {}
+        _ = SSHProtocolServer::new(&services).run(address) => {}
         _ = admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()) => {}
     }
 

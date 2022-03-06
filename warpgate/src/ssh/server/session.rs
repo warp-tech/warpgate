@@ -8,7 +8,7 @@ use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs, Ipv4Addr};
+use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::sync::Arc;
 use thrussh::Sig;
@@ -18,8 +18,10 @@ use thrussh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
-use warpgate_common::recordings::{TerminalRecorder, TrafficRecorder, ConnectionRecorder, TrafficConnectionParams};
-use warpgate_common::{SessionId, State, Target, User, UserAuth, WarpgateServerHandle};
+use warpgate_common::recordings::{
+    ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
+};
+use warpgate_common::{Services, SessionId, Target, User, UserAuth, WarpgateServerHandle};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -54,7 +56,7 @@ pub struct ServerSession {
     rc_abort_tx: Option<oneshot::Sender<()>>,
     rc_state: RCState,
     remote_address: SocketAddr,
-    state: Arc<Mutex<State>>,
+    services: Services,
     server_handle: WarpgateServerHandle,
     target: TargetSelection,
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
@@ -74,7 +76,7 @@ impl std::fmt::Debug for ServerSession {
 impl ServerSession {
     pub async fn new(
         remote_address: SocketAddr,
-        state: Arc<Mutex<State>>,
+        services: &Services,
         server_handle: WarpgateServerHandle,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
@@ -91,7 +93,7 @@ impl ServerSession {
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
             remote_address,
-            state,
+            services: services.clone(),
             server_handle,
             target: TargetSelection::None,
             traffic_recorders: HashMap::new(),
@@ -483,9 +485,7 @@ impl ServerSession {
     ) -> Option<&mut TrafficRecorder> {
         if !self.traffic_recorders.contains_key(&(host.clone(), port)) {
             match self
-                .state
-                .lock()
-                .await
+                .services
                 .recordings
                 .lock()
                 .await
@@ -509,9 +509,7 @@ impl ServerSession {
             .send(RCCommand::Channel(channel, ChannelOperation::RequestShell))?;
 
         match self
-            .state
-            .lock()
-            .await
+            .services
             .recordings
             .lock()
             .await
@@ -560,10 +558,7 @@ impl ServerSession {
             }
         }
 
-        self.send_command(RCCommand::Channel(
-            channel,
-            ChannelOperation::Data(data),
-        ));
+        self.send_command(RCCommand::Channel(channel, ChannelOperation::Data(data)));
     }
 
     pub async fn _extended_data(&mut self, channel: ServerChannelId, code: u32, data: BytesMut) {
@@ -585,9 +580,10 @@ impl ServerSession {
         info!(session=?self, "Public key auth as {} with key FP {}", user, key.fingerprint());
         let selector: Selector = user[..].into();
         let user = {
-            let state = self.state.lock().await;
-            state
+            self.services
                 .config
+                .lock()
+                .await
                 .users
                 .iter()
                 .find(|x| x.username == selector.username)
@@ -617,16 +613,17 @@ impl ServerSession {
         info!(session=?self, "Authenticated");
 
         let target = {
-            let state = self.state.lock().await;
-            state
+            self.services
                 .config
+                .lock()
+                .await
                 .targets
                 .iter()
                 .find(|x| x.name == selector.target_name)
                 .map(Target::clone)
         };
 
-        let _ = self.server_handle.set_user(&user).await;
+        let _ = self.server_handle.set_username(user.username.clone()).await;
         let Some(target) = target else {
             self.target = TargetSelection::NotFound(selector.target_name);
             info!(session=?self, "Selected target not found");
