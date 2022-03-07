@@ -13,7 +13,7 @@ pub struct Target {
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[allow(unused)]
 #[serde(tag = "type")]
 pub enum UserAuthCredential {
@@ -28,6 +28,7 @@ pub enum UserAuthCredential {
 pub struct User {
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
+    pub require: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

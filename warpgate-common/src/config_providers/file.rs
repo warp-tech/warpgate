@@ -22,6 +22,13 @@ impl FileConfigProvider {
     }
 }
 
+fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
+    match c {
+        UserAuthCredential::Password { .. } => k == "password",
+        UserAuthCredential::PublicKey { .. } => k == "publickey",
+    }
+}
+
 #[async_trait]
 impl ConfigProvider for FileConfigProvider {
     async fn authorize_user(
@@ -43,6 +50,8 @@ impl ConfigProvider for FileConfigProvider {
             return Ok(AuthResult::Rejected);
         };
 
+        let mut valid_credentials = vec![];
+
         for client_credential in credentials {
             if let AuthCredential::PublicKey {
                 kind,
@@ -59,7 +68,8 @@ impl ConfigProvider for FileConfigProvider {
                 for credential in user.credentials.iter() {
                     if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
                         if &client_key == user_key {
-                            return Ok(AuthResult::Accepted);
+                            valid_credentials.push(credential);
+                            break;
                         }
                     }
                 }
@@ -72,7 +82,8 @@ impl ConfigProvider for FileConfigProvider {
                     if let UserAuthCredential::Password { password: ref user_password_hash } = credential {
                         match verify_password_hash(client_password, user_password_hash) {
                             Ok(true) => {
-                                return Ok(AuthResult::Accepted)
+                                valid_credentials.push(credential);
+                                break;
                             },
                             Ok(false) => continue,
                             Err(e) => {
@@ -82,6 +93,20 @@ impl ConfigProvider for FileConfigProvider {
                         }
                     }
                 }
+            }
+        }
+
+        if valid_credentials.len() > 0 {
+            match user.require {
+                Some(ref required_kinds) => {
+                    for kind in required_kinds {
+                        if !valid_credentials.iter().any(|x| credential_is_type(x, kind)) {
+                            return Ok(AuthResult::Rejected);
+                        }
+                    }
+                    return Ok(AuthResult::Accepted);
+                },
+                None => return Ok(AuthResult::Accepted)
             }
         }
 
