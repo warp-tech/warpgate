@@ -9,6 +9,7 @@ mod state;
 mod types;
 pub mod recordings;
 pub mod helpers;
+pub mod hash;
 
 pub use config::*;
 pub use config_providers::*;

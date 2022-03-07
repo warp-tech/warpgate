@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
 
+use crate::hash::verify_password_hash;
 use crate::{AuthCredential, AuthResult, User, UserAuthCredential, WarpgateConfig};
 
 use super::ConfigProvider;
@@ -68,16 +69,23 @@ impl ConfigProvider for FileConfigProvider {
         for client_credential in credentials {
             if let AuthCredential::Password(client_password) = client_credential {
                 for credential in user.credentials.iter() {
-                    if let UserAuthCredential::Password { password: ref user_password } = credential {
-                        if client_password == user_password {
-                            return Ok(AuthResult::Accepted);
+                    if let UserAuthCredential::Password { password: ref user_password_hash } = credential {
+                        match verify_password_hash(client_password, user_password_hash) {
+                            Ok(true) => {
+                                return Ok(AuthResult::Accepted)
+                            },
+                            Ok(false) => continue,
+                            Err(e) => {
+                                error!(%username, "Error verifying password hash: {}", e);
+                                continue;
+                            }
                         }
                     }
                 }
             }
         }
 
-        error!(%username, "Client credentials do not match");
+        warn!(%username, "Client credentials did not match");
         Ok(AuthResult::Rejected)
     }
 }

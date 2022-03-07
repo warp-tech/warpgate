@@ -2,6 +2,7 @@
 members = [
     "warpgate",
     "warpgate-admin",
+    "warpgate-cli",
     "warpgate-common",
     "warpgate-db-migrations",
     "thrussh",
