@@ -301,13 +301,18 @@ impl RemoteClient {
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            let channel = SessionChannel::new(channel, channel_id,
+            let channel = SessionChannel::new(
+                channel,
+                channel_id,
                 rx,
                 self.tx.clone(),
-                self.session_tag.clone());
-            self.child_tasks.push(tokio::task::Builder::new().name(
-                &format!("SSH {} {:?} ops", self.id, channel_id.0),
-            ).spawn(channel.run()));
+                self.session_tag.clone(),
+            );
+            self.child_tasks.push(
+                tokio::task::Builder::new()
+                    .name(&format!("SSH {} {:?} ops", self.id, channel_id.0))
+                    .spawn(channel.run()),
+            );
         }
         Ok(())
     }

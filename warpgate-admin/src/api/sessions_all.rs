@@ -2,7 +2,7 @@ use crate::helpers::ApiResult;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{EntityTrait, QueryOrder, DatabaseConnection};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryOrder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warpgate_common::{SessionSnapshot, State};

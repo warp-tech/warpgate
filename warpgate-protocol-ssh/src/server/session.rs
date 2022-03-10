@@ -3,7 +3,7 @@ use super::super::{
 };
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
-use crate::ssh::DirectTCPIPParams;
+use crate::DirectTCPIPParams;
 use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -21,7 +21,9 @@ use tracing::*;
 use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
 };
-use warpgate_common::{Services, SessionId, Target, WarpgateServerHandle, AuthResult, AuthCredential};
+use warpgate_common::{
+    AuthCredential, AuthResult, Services, SessionId, Target, WarpgateServerHandle,
+};
 
 #[derive(Clone)]
 enum TargetSelection {
@@ -619,11 +621,29 @@ impl ServerSession {
     }
 
     async fn try_auth(&mut self, selector: &Selector) -> Result<AuthResult> {
-        let result =self.services.config_provider.lock().await.authorize_user(&selector.username, &self.credentials).await;
-        match result? {
+        let user_auth_result = self
+            .services
+            .config_provider
+            .lock()
+            .await
+            .authorize_user(&selector.username, &self.credentials)
+            .await;
+        match user_auth_result? {
             AuthResult::Accepted => {
-                self._auth_accept(selector).await;
-                Ok(AuthResult::Accepted)
+                let target_auth_result = self
+                    .services
+                    .config_provider
+                    .lock()
+                    .await
+                    .authorize_target(&selector.username, &selector.target_name)
+                    .await?;
+                if target_auth_result {
+                    self._auth_accept(selector).await;
+                    Ok(AuthResult::Accepted)
+                } else {
+                    warn!("Target {} not authorized for user {}", selector.target_name, selector.username);
+                    Ok(AuthResult::Rejected)
+                }
             }
             AuthResult::Rejected => Ok(AuthResult::Rejected),
         }
@@ -643,7 +663,10 @@ impl ServerSession {
                 .map(Target::clone)
         };
 
-        let _ = self.server_handle.set_username(selector.username.clone()).await;
+        let _ = self
+            .server_handle
+            .set_username(selector.username.clone())
+            .await;
         let Some(target) = target else {
             self.target = TargetSelection::NotFound(selector.target_name.clone());
             info!(session=?self, "Selected target not found");

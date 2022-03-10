@@ -11,10 +11,9 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::SessionId;
 
-use crate::ssh::DirectTCPIPParams;
-
-use super::super::common::{PtyRequest, ServerChannelId};
 use super::session::ServerSession;
+use crate::common::{PtyRequest, ServerChannelId};
+use crate::DirectTCPIPParams;
 
 pub struct ServerHandler {
     pub id: SessionId,
@@ -132,7 +131,12 @@ impl thrussh::server::Handler for ServerHandler {
         let user = user.to_string();
         let password = password.to_string();
         async move {
-            let result = self.session.lock().await._auth_password(user, password).await;
+            let result = self
+                .session
+                .lock()
+                .await
+                ._auth_password(user, password)
+                .await;
             Ok((self, result))
         }
         .boxed()

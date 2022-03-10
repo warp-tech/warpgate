@@ -1,6 +1,7 @@
 #![feature(type_alias_impl_trait, let_else)]
 use anyhow::Result;
-use std::net::{SocketAddr, ToSocketAddrs};
+use futures::{pin_mut, StreamExt};
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::{format_description, UtcOffset};
@@ -11,13 +12,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-mod compat;
 mod config;
-mod ssh;
-
 use crate::config::load_config;
-use crate::ssh::SSHProtocolServer;
-use warpgate_common::Services;
+use warpgate_common::{ProtocolServer, Services};
+use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -66,18 +64,32 @@ async fn main() -> Result<()> {
 
     let admin = warpgate_admin::AdminServer::new(&services);
 
-    let address = "0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap();
+    let mut protocol_futures = futures::stream::FuturesUnordered::new();
+    protocol_futures
+        .push(SSHProtocolServer::new(&services).run(SocketAddr::from_str("0.0.0.0:2222")?));
 
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        result = SSHProtocolServer::new(&services).run(address) => {
-            if let Err(error) = result {
-                error!(?error, "SSH server error");
+    let admin_run_future = admin.run(SocketAddr::from_str("0.0.0.0:8888")?);
+    pin_mut!(admin_run_future);
+
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                break
             }
-        }
-        result = admin.run(SocketAddr::from_str("0.0.0.0:8888").unwrap()) => {
-            if let Err(error) = result {
-                error!(?error, "Admin server error");
+            result = protocol_futures.next() => {
+                match result {
+                    Some(Err(error)) => {
+                        error!(?error, "SSH server error");
+                    },
+                    None => break,
+                    _ => (),
+                }
+            }
+            result = &mut admin_run_future => {
+                if let Err(error) = result {
+                    error!(?error, "Admin server error");
+                }
+                break
             }
         }
     }

@@ -15,10 +15,8 @@ pub fn hash_password(password: &str) -> String {
 }
 
 pub fn verify_password_hash(password: &str, hash: &str) -> Result<bool> {
-    let parsed_hash = PasswordHash::new(hash)
-        .map_err(|e| anyhow::anyhow!(e))?;
-    match Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash) {
+    let parsed_hash = PasswordHash::new(hash).map_err(|e| anyhow::anyhow!(e))?;
+    match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
         Ok(()) => Ok(true),
         Err(Error::Password) => Ok(false),
         Err(e) => Err(anyhow::anyhow!(e)),

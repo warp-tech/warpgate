@@ -17,7 +17,9 @@ pub struct AdminServer {
 
 impl AdminServer {
     pub fn new(services: &Services) -> Self {
-        AdminServer { services: services.clone() }
+        AdminServer {
+            services: services.clone(),
+        }
     }
 
     pub async fn run(self, address: SocketAddr) -> Result<()> {
@@ -47,7 +49,10 @@ impl AdminServer {
                 "/",
                 StaticFileEndpoint::new("./warpgate-admin/frontend/dist/index.html"),
             )
-            .at("/api/recordings/:id/cast", crate::api::recordings_detail::api_get_recording_cast)
+            .at(
+                "/api/recordings/:id/cast",
+                crate::api::recordings_detail::api_get_recording_cast,
+            )
             .with(AddData::new(db))
             .with(AddData::new(state));
         Server::new(TcpListener::bind(address)).run(app).await?;

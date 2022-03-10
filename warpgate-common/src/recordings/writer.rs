@@ -57,9 +57,7 @@ impl RecordingWriter {
             }
         });
 
-        Ok(RecordingWriter {
-            sender,
-        })
+        Ok(RecordingWriter { sender })
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {

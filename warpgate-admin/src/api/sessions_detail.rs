@@ -3,12 +3,12 @@ use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{DatabaseConnection, EntityTrait, QueryOrder, ColumnTrait, QueryFilter};
-use warpgate_db_entities::{Recording, Session};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::SessionSnapshot;
+use warpgate_db_entities::{Recording, Session};
 
 pub struct Api;
 
@@ -47,7 +47,11 @@ impl Api {
         }
     }
 
-    #[oai(path = "/sessions/:id/recordings", method = "get", operation_id = "get_session_recordings")]
+    #[oai(
+        path = "/sessions/:id/recordings",
+        method = "get",
+        operation_id = "get_session_recordings"
+    )]
     async fn api_get_session_recordings(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -62,5 +66,4 @@ impl Api {
             .map_err(poem::error::InternalServerError)?;
         Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
     }
-
 }

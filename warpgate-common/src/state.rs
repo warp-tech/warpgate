@@ -1,10 +1,10 @@
-use crate::{SessionHandle, SessionId, Target};
+use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle};
 use anyhow::{Context, Result};
 use sea_orm::ActiveModelTrait;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
@@ -12,25 +12,25 @@ use warpgate_db_entities::Session;
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
-    // pub config: WarpgateConfig,
-    // pub recordings: Arc<Mutex<SessionRecordings>>,
     pub db: Arc<Mutex<DatabaseConnection>>,
+    this: Weak<Mutex<Self>>,
 }
 
 impl State {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
-        State {
-            sessions: HashMap::new(),
-            // config,
-            // recordings,
-            db: db.clone(),
-        }
+    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Arc<Mutex<Self>> {
+        Arc::<Mutex<Self>>::new_cyclic(|me| {
+            Mutex::new(Self {
+                sessions: HashMap::new(),
+                db: db.clone(),
+                this: me.clone(),
+            })
+        })
     }
 
     pub async fn register_session(
         &mut self,
         session: &Arc<Mutex<SessionState>>,
-    ) -> Result<SessionId> {
+    ) -> Result<WarpgateServerHandle> {
         let id = uuid::Uuid::new_v4().into();
         self.sessions.insert(id, session.clone());
 
@@ -51,7 +51,10 @@ impl State {
                 .context("Error inserting session")?;
         }
 
-        Ok(id)
+        match self.this.upgrade() {
+            Some(this) => Ok(WarpgateServerHandle::new(id, this, session.clone())),
+            None => anyhow::bail!("State is being detroyed"),
+        }
     }
 
     pub async fn remove_session(&mut self, id: SessionId) {

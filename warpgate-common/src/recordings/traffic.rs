@@ -78,8 +78,12 @@ impl ConnectionRecorder {
 
     async fn write_packet(&mut self, data: Bytes) -> Result<()> {
         let ms = Instant::now().duration_since(self.started_at).as_micros();
-        self.writer.write(&u32::to_le_bytes((ms / 10u128.pow(6)) as u32)).await?;
-        self.writer.write(&u32::to_le_bytes((ms % 10u128.pow(6)) as u32)).await?;
+        self.writer
+            .write(&u32::to_le_bytes((ms / 10u128.pow(6)) as u32))
+            .await?;
+        self.writer
+            .write(&u32::to_le_bytes((ms % 10u128.pow(6)) as u32))
+            .await?;
         self.writer
             .write(&u32::to_le_bytes(data.len() as u32))
             .await?;

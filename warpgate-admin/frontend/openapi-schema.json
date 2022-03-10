@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Hello World",
+    "title": "Warpgate",
     "version": "0.1.0"
   },
   "servers": [
@@ -144,7 +144,8 @@
           "id",
           "name",
           "started",
-          "session_id"
+          "session_id",
+          "kind"
         ],
         "properties": {
           "id": {
@@ -165,8 +166,18 @@
           "session_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecordingKind"
           }
         }
+      },
+      "RecordingKind": {
+        "type": "string",
+        "enum": [
+          "Terminal",
+          "Traffic"
+        ]
       },
       "SessionSnapshot": {
         "type": "object",
@@ -179,8 +190,8 @@
             "type": "string",
             "format": "uuid"
           },
-          "user": {
-            "$ref": "#/components/schemas/UserSnapshot"
+          "username": {
+            "type": "string"
           },
           "target": {
             "$ref": "#/components/schemas/TargetSnapshot"
@@ -208,17 +219,6 @@
           "port": {
             "type": "integer",
             "format": "uint16"
-          }
-        }
-      },
-      "UserSnapshot": {
-        "type": "object",
-        "required": [
-          "username"
-        ],
-        "properties": {
-          "username": {
-            "type": "string"
           }
         }
       }

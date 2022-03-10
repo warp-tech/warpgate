@@ -9,8 +9,8 @@ use warpgate_db_entities::Recording::{self, RecordingKind};
 
 use crate::SessionId;
 mod terminal;
-mod writer;
 mod traffic;
+mod writer;
 pub use terminal::*;
 pub use traffic::*;
 use writer::RecordingWriter;

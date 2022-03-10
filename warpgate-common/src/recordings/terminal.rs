@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::Recorder;
 use super::writer::RecordingWriter;
+use super::Recorder;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TerminalRecordingItem {

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,8 +16,8 @@ mod thrussh_handler;
 pub use session::ServerSession;
 pub use thrussh_handler::ServerHandler;
 
-use crate::ssh::server::session_handle::SSHSessionHandle;
-use warpgate_common::{SessionState, WarpgateServerHandle, Services};
+use crate::server::session_handle::SSHSessionHandle;
+use warpgate_common::{ProtocolServer, Services, SessionState};
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -25,10 +26,15 @@ pub struct SSHProtocolServer {
 
 impl SSHProtocolServer {
     pub fn new(services: &Services) -> Self {
-        SSHProtocolServer { services: services.clone() }
+        SSHProtocolServer {
+            services: services.clone(),
+        }
     }
+}
 
-    pub async fn run(self, address: SocketAddr) -> Result<()> {
+#[async_trait]
+impl ProtocolServer for SSHProtocolServer {
+    async fn run(self, address: SocketAddr) -> Result<()> {
         let mut config = thrussh::server::Config {
             auth_rejection_time: std::time::Duration::from_secs(1),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
@@ -50,13 +56,14 @@ impl SSHProtocolServer {
                 remote_address,
                 Box::new(session_handle),
             )));
-            let id = self.services
+
+            let server_handle = self
+                .services
                 .state
                 .lock()
                 .await
                 .register_session(&session_state)
                 .await?;
-            let server_handle = WarpgateServerHandle::new(id, self.services.state.clone(), session_state);
 
             let session = match ServerSession::new(
                 remote_address,

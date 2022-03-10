@@ -4,7 +4,7 @@ use thrussh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 
-use crate::ssh::{ChannelOperation, RCEvent, ServerChannelId};
+use crate::{ChannelOperation, RCEvent, ServerChannelId};
 
 pub struct DirectTCPIPChannel {
     channel: Channel,

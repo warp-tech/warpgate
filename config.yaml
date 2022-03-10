@@ -1,10 +1,15 @@
 targets:
 - name: qa233
   host: 192.168.78.233
+  roles: [qa, admin]
+
 - name: qa221
   host: 192.168.78.221
+  roles: [qa, admin]
+
 - name: bad
   host: 192.168.1.1
+  roles: [admin]
 
 users:
 - username: user
@@ -13,7 +18,12 @@ users:
     key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtbl2EekdtAGGuilLQJebKP3pSOlI4KNVCnXPThbD4I
   - type: password
     password: '$argon2id$v=19$m=4096,t=3,p=1$hb5PNgUGKrpb/+lfuaJzhA$FjBFacz27XoPgToFywtYO+lGp8JBQm4lJGAr/lHj5Yg'
-  require: [publickey, password]
+  # require: [publickey, password]
+  roles: [qa]
+
+roles:
+- name: qa
+- name: admin
 
 
 recordings_path: data/recordings

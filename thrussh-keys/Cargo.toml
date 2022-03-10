@@ -31,7 +31,7 @@ include = [
 [dependencies]
 data-encoding = "2.3"
 byteorder = "1.4"
-tokio = { version = "1.6", features = [ "io-util", "rt-multi-thread", "time", "net" ] }
+tokio = { version = "1.17.0", features = [ "io-util", "rt-multi-thread", "time", "net" ] }
 tokio-stream = { version = "0.1", features = [ "net" ] }
 futures = "0.3"
 cryptovec = "0.6.0"

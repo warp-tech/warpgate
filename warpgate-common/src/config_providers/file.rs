@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use data_encoding::BASE64_MIME;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
@@ -36,6 +37,10 @@ impl ConfigProvider for FileConfigProvider {
         username: &str,
         credentials: &Vec<AuthCredential>,
     ) -> Result<AuthResult> {
+        if credentials.is_empty() {
+            return Ok(AuthResult::Rejected);
+        }
+
         let user = {
             self.config
                 .lock()
@@ -79,12 +84,15 @@ impl ConfigProvider for FileConfigProvider {
         for client_credential in credentials {
             if let AuthCredential::Password(client_password) = client_credential {
                 for credential in user.credentials.iter() {
-                    if let UserAuthCredential::Password { password: ref user_password_hash } = credential {
+                    if let UserAuthCredential::Password {
+                        password: ref user_password_hash,
+                    } = credential
+                    {
                         match verify_password_hash(client_password, user_password_hash) {
                             Ok(true) => {
                                 valid_credentials.push(credential);
                                 break;
-                            },
+                            }
                             Ok(false) => continue,
                             Err(e) => {
                                 error!(%username, "Error verifying password hash: {}", e);
@@ -100,17 +108,59 @@ impl ConfigProvider for FileConfigProvider {
             match user.require {
                 Some(ref required_kinds) => {
                     for kind in required_kinds {
-                        if !valid_credentials.iter().any(|x| credential_is_type(x, kind)) {
+                        if !valid_credentials
+                            .iter()
+                            .any(|x| credential_is_type(x, kind))
+                        {
                             return Ok(AuthResult::Rejected);
                         }
                     }
                     return Ok(AuthResult::Accepted);
-                },
-                None => return Ok(AuthResult::Accepted)
+                }
+                None => return Ok(AuthResult::Accepted),
             }
         }
 
         warn!(%username, "Client credentials did not match");
         Ok(AuthResult::Rejected)
+    }
+
+    async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {
+        let config = self.config.lock().await;
+        let user = config
+            .users
+            .iter()
+            .find(|x| x.username == username)
+            .map(User::to_owned);
+        let target = config.targets.iter().find(|x| x.name == target_name);
+
+        let Some(user) = user else {
+            error!("Selected user not found: {}", username);
+            return Ok(false);
+        };
+
+        let Some(target) = target else {
+            error!("Selected target not found: {}", target_name);
+            return Ok(false);
+        };
+
+        let user_roles = user
+            .roles
+            .iter()
+            .map(|x| config.roles.iter().find(|y| &y.name == x))
+            .filter(|x| x.is_some())
+            .map(|x| x.unwrap().to_owned())
+            .collect::<HashSet<_>>();
+        let target_roles = target
+            .roles
+            .iter()
+            .map(|x| config.roles.iter().find(|y| &y.name == x))
+            .filter(|x| x.is_some())
+            .map(|x| x.unwrap().to_owned())
+            .collect::<HashSet<_>>();
+
+        let intersect = user_roles.intersection(&target_roles).count() > 0;
+
+        Ok(intersect)
     }
 }

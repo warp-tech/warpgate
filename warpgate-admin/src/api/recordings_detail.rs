@@ -12,7 +12,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::recordings::{TerminalRecordingItem, SessionRecordings};
+use warpgate_common::recordings::{SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording;
 
 pub struct Api;
