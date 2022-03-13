@@ -11,6 +11,7 @@ use russh::server::Session;
 use russh::{CryptoVec, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
+use std::collections::hash_map::Entry::Vacant;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
@@ -229,7 +230,7 @@ impl ServerSession {
                             ))
                             .await;
                             self.disconnect_server().await;
-                            return Err(error)
+                            return Err(error);
                         }
                     }
                 }
@@ -487,7 +488,7 @@ impl ServerSession {
         host: &String,
         port: u32,
     ) -> Option<&mut TrafficRecorder> {
-        if !self.traffic_recorders.contains_key(&(host.clone(), port)) {
+        if let Vacant(e) = self.traffic_recorders.entry((host.clone(), port)) {
             match self
                 .services
                 .recordings
@@ -497,8 +498,7 @@ impl ServerSession {
                 .await
             {
                 Ok(recorder) => {
-                    self.traffic_recorders
-                        .insert((host.clone(), port), recorder);
+                    e.insert(recorder);
                 }
                 Err(error) => {
                     error!(session=?self, %host, %port, ?error, "Failed to start recording");
