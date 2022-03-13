@@ -105,16 +105,16 @@ impl RemoteClient {
             session_tag,
         };
         this.start();
-        return RemoteClientHandles {
+        RemoteClientHandles {
             event_rx,
             command_tx,
             abort_tx: Some(abort_tx),
-        };
+        }
     }
 
     fn set_disconnected(&mut self) {
         self.session = None;
-        for (id, op) in self.pending_ops.drain(..).into_iter() {
+        for (id, op) in self.pending_ops.drain(..) {
             if let ChannelOperation::OpenShell = op {
                 let _ = self.tx.send(RCEvent::Close(id));
             }

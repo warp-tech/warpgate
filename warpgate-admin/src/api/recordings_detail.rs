@@ -45,7 +45,7 @@ impl Api {
             .map_err(poem::error::InternalServerError)?;
 
         match recording {
-            Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording.into()))),
+            Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
             None => Ok(GetRecordingResponse::NotFound),
         }
     }
@@ -85,7 +85,7 @@ pub async fn api_get_recording_cast(
         })
         .map_err(InternalServerError)?,
     );
-    response.push_str("\n");
+    response.push('\n');
 
     let file = File::open(&path).await.map_err(InternalServerError)?;
     let reader = BufReader::new(file);
@@ -101,7 +101,7 @@ pub async fn api_get_recording_cast(
             ))
             .map_err(InternalServerError)?,
         );
-        response.push_str("\n");
+        response.push('\n');
     }
     Ok(response)
 }

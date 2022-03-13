@@ -43,7 +43,7 @@ impl TargetSnapshot {
         Self {
             name: target.name.clone(),
             host: target.host.clone(),
-            port: target.port.clone(),
+            port: target.port,
         }
     }
 }

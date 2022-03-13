@@ -32,7 +32,7 @@ pub trait ConfigProvider {
     async fn authorize(
         &mut self,
         selector: &str,
-        credentials: &Vec<AuthCredential>,
+        credentials: &[AuthCredential],
     ) -> Result<AuthResult>;
 
     async fn authorize_target(&mut self, username: &str, target: &str) -> Result<bool>;

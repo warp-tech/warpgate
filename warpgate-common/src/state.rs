@@ -30,14 +30,14 @@ impl State {
         &mut self,
         session: &Arc<Mutex<SessionState>>,
     ) -> Result<WarpgateServerHandle> {
-        let id = uuid::Uuid::new_v4().into();
+        let id = uuid::Uuid::new_v4();
         self.sessions.insert(id, session.clone());
 
         {
             use sea_orm::ActiveValue::Set;
 
             let values = Session::ActiveModel {
-                id: Set(id.clone()),
+                id: Set(id),
                 started: Set(chrono::Utc::now()),
                 remote_address: Set(session.lock().await.remote_address.to_string()),
                 ..Default::default()

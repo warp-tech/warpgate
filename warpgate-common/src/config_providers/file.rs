@@ -37,7 +37,7 @@ impl FileConfigProvider {
     async fn authorize_user(
         &mut self,
         selector: &str,
-        credentials: &Vec<AuthCredential>,
+        credentials: &[AuthCredential],
     ) -> Result<AuthResult> {
         if credentials.is_empty() {
             return Ok(AuthResult::Rejected);
@@ -106,7 +106,7 @@ impl FileConfigProvider {
             }
         }
 
-        if valid_credentials.len() > 0 {
+        if !valid_credentials.is_empty() {
             match user.require {
                 Some(ref required_kinds) => {
                     for kind in required_kinds {
@@ -170,7 +170,7 @@ impl ConfigProvider for FileConfigProvider {
     async fn authorize(
         &mut self,
         selector: &str,
-        credentials: &Vec<AuthCredential>,
+        credentials: &[AuthCredential],
     ) -> Result<AuthResult> {
         if selector
             .to_string()

@@ -40,7 +40,7 @@ impl RecordingWriter {
                 writer.flush().await?;
 
                 use sea_orm::ActiveValue::Set;
-                let id = model.id.clone();
+                let id = model.id;
                 let db = db.lock().await;
                 let recording = Recording::Entity::find_by_id(id)
                     .one(&*db)

@@ -47,7 +47,7 @@ impl SessionRecordings {
             let values = Recording::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 started: Set(chrono::Utc::now()),
-                session_id: Set(id.clone()),
+                session_id: Set(*id),
                 name: Set(name),
                 kind: Set(T::kind()),
                 ..Default::default()

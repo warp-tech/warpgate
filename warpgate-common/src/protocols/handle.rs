@@ -66,7 +66,7 @@ impl WarpgateServerHandle {
         Session::Entity::update_many()
             .set(Session::ActiveModel {
                 target_snapshot: Set(Some(
-                    serde_json::to_string(&TargetSnapshot::new(&target))
+                    serde_json::to_string(&TargetSnapshot::new(target))
                         .context("Error serializing target")?,
                 )),
                 ..Default::default()

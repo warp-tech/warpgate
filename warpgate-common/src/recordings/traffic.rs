@@ -26,7 +26,7 @@ pub struct TrafficConnectionParams {
 
 impl TrafficRecorder {
     pub fn connection(&mut self, params: TrafficConnectionParams) -> ConnectionRecorder {
-        ConnectionRecorder::new(params, self.writer.clone(), self.started_at.clone())
+        ConnectionRecorder::new(params, self.writer.clone(), self.started_at)
     }
 }
 

@@ -229,7 +229,7 @@ impl ServerSession {
                             ))
                             .await;
                             self.disconnect_server().await;
-                            Err(error)?
+                            return Err(error)
                         }
                     }
                 }
@@ -256,7 +256,7 @@ impl ServerSession {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.emit_service_message(&"Connected").await;
+                        self.emit_service_message("Connected").await;
                     }
                     RCState::Disconnected => {
                         self.disconnect_server().await;
@@ -265,10 +265,10 @@ impl ServerSession {
                 }
             }
             RCEvent::ConnectionError => {
-                self.emit_service_message(&"Connection failed").await;
+                self.emit_service_message("Connection failed").await;
             }
             RCEvent::AuthError => {
-                self.emit_service_message(&"Authentication failed").await;
+                self.emit_service_message("Authentication failed").await;
             }
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {

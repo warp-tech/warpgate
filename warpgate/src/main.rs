@@ -26,8 +26,8 @@ fn init_logging() {
         std::env::set_var("RUST_LOG", "warpgate=info")
     }
 
-    let offset =
-        UtcOffset::current_local_offset().unwrap_or(UtcOffset::from_whole_seconds(0).unwrap());
+    let offset = UtcOffset::current_local_offset()
+        .unwrap_or_else(|_| UtcOffset::from_whole_seconds(0).unwrap());
 
     let env_filter = Arc::new(EnvFilter::from_default_env());
     let fmt_layer = tracing_subscriber::fmt::layer()
