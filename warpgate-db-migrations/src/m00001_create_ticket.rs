@@ -1,5 +1,6 @@
 use sea_schema::migration::sea_orm::Schema;
-use sea_schema::migration::{sea_query::*, *};
+use sea_schema::migration::sea_query::*;
+use sea_schema::migration::*;
 
 pub mod ticket {
     use sea_orm::entity::prelude::*;
@@ -18,8 +19,7 @@ pub mod ticket {
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {
-    }
+    pub enum Relation {}
 
     impl ActiveModelBehavior for ActiveModel {}
 }

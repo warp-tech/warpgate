@@ -1,6 +1,7 @@
 #![feature(let_else)]
 mod config;
 mod config_providers;
+pub mod consts;
 mod data;
 mod db;
 pub mod hash;
@@ -10,7 +11,6 @@ pub mod recordings;
 mod services;
 mod state;
 mod types;
-pub mod consts;
 
 pub use config::*;
 pub use config_providers::*;

@@ -1,7 +1,6 @@
 use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle};
 use anyhow::{Context, Result};
-use sea_orm::ActiveModelTrait;
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};

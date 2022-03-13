@@ -67,7 +67,6 @@ pub struct TicketSnapshot {
     pub target: String,
 }
 
-
 impl From<Ticket::Model> for TicketSnapshot {
     fn from(model: Ticket::Model) -> Self {
         Self {

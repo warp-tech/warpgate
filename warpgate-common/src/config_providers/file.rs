@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use data_encoding::BASE64_MIME;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, ActiveModelTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -12,8 +12,8 @@ use warpgate_db_entities::Ticket;
 
 use crate::hash::verify_password_hash;
 use crate::{
-    AuthCredential, AuthResult, TargetSnapshot, User, UserAuthCredential,
-    UserSnapshot, WarpgateConfig,
+    AuthCredential, AuthResult, TargetSnapshot, User, UserAuthCredential, UserSnapshot,
+    WarpgateConfig,
 };
 
 use super::ConfigProvider;
@@ -73,9 +73,7 @@ impl FileConfigProvider {
                 debug!(username=%user.username, "Client key: {}", client_key);
 
                 for credential in user.credentials.iter() {
-                    if let UserAuthCredential::PublicKey { key: ref user_key } =
-                        credential
-                    {
+                    if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
                         if &client_key == user_key {
                             valid_credentials.push(credential);
                             break;
@@ -86,17 +84,13 @@ impl FileConfigProvider {
         }
 
         for client_credential in credentials {
-            if let AuthCredential::Password(client_password) = client_credential
-            {
+            if let AuthCredential::Password(client_password) = client_credential {
                 for credential in user.credentials.iter() {
                     if let UserAuthCredential::Password {
                         password: ref user_password_hash,
                     } = credential
                     {
-                        match verify_password_hash(
-                            client_password,
-                            user_password_hash,
-                        ) {
+                        match verify_password_hash(client_password, user_password_hash) {
                             Ok(true) => {
                                 valid_credentials.push(credential);
                                 break;
@@ -182,8 +176,7 @@ impl ConfigProvider for FileConfigProvider {
             .to_string()
             .starts_with(crate::consts::TICKET_SELECTOR_PREFIX)
         {
-            let ticket_secret =
-                &selector[crate::consts::TICKET_SELECTOR_PREFIX.len()..];
+            let ticket_secret = &selector[crate::consts::TICKET_SELECTOR_PREFIX.len()..];
             let ticket = {
                 let db = self.db.lock().await;
                 Ticket::Entity::find()
@@ -220,11 +213,7 @@ impl ConfigProvider for FileConfigProvider {
         }
     }
 
-    async fn authorize_target(
-        &mut self,
-        username: &str,
-        target_name: &str,
-    ) -> Result<bool> {
+    async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {
         let config = self.config.lock().await;
         let user = config
             .users

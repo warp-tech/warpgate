@@ -1,5 +1,6 @@
 use sea_schema::migration::sea_orm::Schema;
-use sea_schema::migration::{sea_query::*, *};
+use sea_schema::migration::sea_query::*;
+use sea_schema::migration::*;
 
 pub mod session {
     use crate::m00001_create_ticket::ticket;

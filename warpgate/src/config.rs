@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use config::{Config, Environment, File};
 use std::os::unix::fs::PermissionsExt;
 use tracing::*;
@@ -13,7 +13,8 @@ pub fn load_config() -> Result<WarpgateConfig> {
         .add_source(File::with_name(path))
         .add_source(Environment::with_prefix("WARPGATE"))
         .build()?
-        .try_deserialize().context("Could not load config")?;
+        .try_deserialize()
+        .context("Could not load config")?;
     info!(
         "Using config: {path} (users: {}, targets: {}, roles: {})",
         config.users.len(),

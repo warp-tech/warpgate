@@ -1,5 +1,6 @@
 use sea_schema::migration::sea_orm::Schema;
-use sea_schema::migration::{sea_query::*, *};
+use sea_schema::migration::sea_query::*;
+use sea_schema::migration::*;
 
 pub mod recording {
     use crate::m00002_create_session::session;

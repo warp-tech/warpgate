@@ -1,20 +1,20 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use russh::MethodSet;
+use russh_keys::load_secret_key;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use russh::MethodSet;
-use russh_keys::load_secret_key;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::*;
 
+mod russh_handler;
 mod session;
 mod session_handle;
-mod russh_handler;
-pub use session::ServerSession;
 pub use russh_handler::ServerHandler;
+pub use session::ServerSession;
 
 use crate::server::session_handle::SSHSessionHandle;
 use warpgate_common::{ProtocolServer, Services, SessionState};
