@@ -8,7 +8,6 @@ publish = false
 
 [dependencies]
 sea-schema = { version = "0.5.0", default-features = false, features = [ "migration", "debug-print" ] }
-warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 uuid = {version = "0.8.2", features = ["v4", "serde"]}
 chrono = "0.4.19"
 sea-orm = {version = "^0.6", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}

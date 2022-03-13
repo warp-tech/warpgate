@@ -134,6 +134,46 @@
         },
         "operationId": "get_recording"
       }
+    },
+    "/users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserSnapshot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_users"
+      }
+    },
+    "/targets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetSnapshot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_targets"
+      }
     }
   },
   "components": {
@@ -203,22 +243,41 @@
           "ended": {
             "type": "string",
             "format": "date-time"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
       "TargetSnapshot": {
         "type": "object",
         "required": [
+          "name",
           "host",
           "port"
         ],
         "properties": {
+          "name": {
+            "type": "string"
+          },
           "host": {
             "type": "string"
           },
           "port": {
             "type": "integer",
             "format": "uint16"
+          }
+        }
+      },
+      "UserSnapshot": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
           }
         }
       }

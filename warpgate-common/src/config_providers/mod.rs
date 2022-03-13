@@ -3,9 +3,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use file::FileConfigProvider;
+use uuid::Uuid;
+
+use crate::{UserSnapshot, TargetSnapshot, TicketSnapshot};
 
 pub enum AuthResult {
-    Accepted,
+    Accepted { username: String, via_ticket: Option<TicketSnapshot> },
     Rejected,
 }
 
@@ -19,9 +22,17 @@ pub enum AuthCredential {
 
 #[async_trait]
 pub trait ConfigProvider {
-    async fn authorize_user(
+    async fn list_users(
         &mut self,
-        username: &str,
+    ) -> Result<Vec<UserSnapshot>>;
+
+    async fn list_targets(
+        &mut self,
+    ) -> Result<Vec<TargetSnapshot>>;
+
+    async fn authorize(
+        &mut self,
+        selector: &str,
         credentials: &Vec<AuthCredential>,
     ) -> Result<AuthResult>;
 
@@ -30,4 +41,9 @@ pub trait ConfigProvider {
         username: &str,
         target: &str,
     ) -> Result<bool>;
+
+    async fn consume_ticket(
+        &mut self,
+        ticket_id: &Uuid,
+    ) -> Result<()>;
 }

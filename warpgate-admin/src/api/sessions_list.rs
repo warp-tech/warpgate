@@ -31,14 +31,14 @@ impl Api {
         use warpgate_db_entities::Session;
 
         let db = db.lock().await;
-        let sessions: Vec<Session::Model> = Session::Entity::find()
+        let sessions = Session::Entity::find()
             .order_by_desc(Session::Column::Started)
             .all(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
         let sessions = sessions
             .into_iter()
-            .map(|s| s.into())
+            .map(Into::into)
             .collect::<Vec<SessionSnapshot>>();
         Ok(GetSessionsResponse::Ok(Json(sessions)))
     }

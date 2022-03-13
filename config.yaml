@@ -4,7 +4,7 @@ targets:
   roles: [qa, admin]
 
 - name: qa221
-  host: 192.168.78.221
+  host: 192.168.76.221
   roles: [qa, admin]
 
 - name: bad
@@ -20,6 +20,12 @@ users:
     password: '$argon2id$v=19$m=4096,t=3,p=1$hb5PNgUGKrpb/+lfuaJzhA$FjBFacz27XoPgToFywtYO+lGp8JBQm4lJGAr/lHj5Yg'
   # require: [publickey, password]
   roles: [qa]
+
+- username: admin
+  credentials:
+  - type: publickey
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtbl2EekdtAGGuilLQJebKP3pSOlI4KNVCnXPThbD4I
+  roles: [admin]
 
 roles:
 - name: qa

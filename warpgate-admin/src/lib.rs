@@ -26,9 +26,11 @@ impl AdminServer {
         let state = self.services.state.clone();
         let api_service = OpenApiService::new(
             (
-                crate::api::sessions_all::Api,
+                crate::api::sessions_list::Api,
                 crate::api::sessions_detail::Api,
                 crate::api::recordings_detail::Api,
+                crate::api::users_list::Api,
+                crate::api::targets_list::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),
@@ -54,7 +56,8 @@ impl AdminServer {
                 crate::api::recordings_detail::api_get_recording_cast,
             )
             .with(AddData::new(db))
-            .with(AddData::new(state));
+            .with(AddData::new(state))
+            .with(AddData::new(self.services.config_provider.clone()));
         Server::new(TcpListener::bind(address)).run(app).await?;
         Ok(())
     }

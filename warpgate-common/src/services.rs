@@ -23,17 +23,20 @@ impl Services {
         sanitize_db(&mut db).await?;
         let db = Arc::new(Mutex::new(db));
 
-        let recordings = SessionRecordings::new(db.clone(), config.recordings_path.clone())?;
+        let recordings =
+            SessionRecordings::new(db.clone(), config.recordings_path.clone())?;
         let recordings = Arc::new(Mutex::new(recordings));
 
         let config = Arc::new(Mutex::new(config));
+        let config_provider =
+            Arc::new(Mutex::new(FileConfigProvider::new(&db, &config).await));
 
         Ok(Self {
             db: db.clone(),
             recordings,
             config: config.clone(),
             state: State::new(&db),
-            config_provider: Arc::new(Mutex::new(FileConfigProvider::new(&config).await)),
+            config_provider,
         })
     }
 }
