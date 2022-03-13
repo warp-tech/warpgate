@@ -1,5 +1,5 @@
-use thrussh::client::Session;
-use thrussh_keys::key::PublicKey;
+use russh::client::Session;
+use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::*;
 
@@ -12,7 +12,7 @@ pub enum ClientHandlerEvent {
     Disconnect,
 }
 
-impl thrussh::client::Handler for ClientHandler {
+impl russh::client::Handler for ClientHandler {
     type Error = anyhow::Error;
     type FutureUnit = futures::future::Ready<Result<(Self, Session), anyhow::Error>>;
     type FutureBool = futures::future::Ready<Result<(Self, bool), anyhow::Error>>;

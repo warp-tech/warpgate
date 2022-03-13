@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
-use thrussh::client::Channel;
+use russh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 
@@ -87,36 +87,36 @@ impl SessionChannel {
                 }
                 channel_event = self.channel.wait() => {
                     match channel_event {
-                        Some(thrussh::ChannelMsg::Data { data }) => {
+                        Some(russh::ChannelMsg::Data { data }) => {
                             let bytes: &[u8] = &data;
                             self.events_tx.send(RCEvent::Output(
                                 self.server_channel_id,
                                 Bytes::from(BytesMut::from(bytes)),
                             ))?;
                         }
-                        Some(thrussh::ChannelMsg::Close) => {
+                        Some(russh::ChannelMsg::Close) => {
                             self.events_tx.send(RCEvent::Close(self.server_channel_id))?;
                         },
-                        Some(thrussh::ChannelMsg::Success) => {
+                        Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.server_channel_id))?;
                         },
-                        Some(thrussh::ChannelMsg::Eof) => {
+                        Some(russh::ChannelMsg::Eof) => {
                             self.events_tx.send(RCEvent::Eof(self.server_channel_id))?;
                         }
-                        Some(thrussh::ChannelMsg::ExitStatus { exit_status }) => {
+                        Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
                             self.events_tx.send(RCEvent::ExitStatus(self.server_channel_id, exit_status))?;
                         }
-                        Some(thrussh::ChannelMsg::WindowAdjusted { .. }) => { },
-                        Some(thrussh::ChannelMsg::ExitSignal {
+                        Some(russh::ChannelMsg::WindowAdjusted { .. }) => { },
+                        Some(russh::ChannelMsg::ExitSignal {
                             core_dumped, error_message, lang_tag, signal_name
                         }) => {
                             self.events_tx.send(RCEvent::ExitSignal {
                                 channel: self.server_channel_id, core_dumped, error_message, lang_tag, signal_name
                             })?;
                         },
-                        Some(thrussh::ChannelMsg::XonXoff { client_can_do: _ }) => {
+                        Some(russh::ChannelMsg::XonXoff { client_can_do: _ }) => {
                         }
-                        Some(thrussh::ChannelMsg::ExtendedData { data, ext }) => {
+                        Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
                             let data: &[u8] = &data;
                             self.events_tx.send(RCEvent::ExtendedData {
                                 channel: self.server_channel_id,

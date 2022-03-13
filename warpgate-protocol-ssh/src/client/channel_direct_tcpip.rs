@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
-use thrussh::client::Channel;
+use russh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 
@@ -51,20 +51,20 @@ impl DirectTCPIPChannel {
                 }
                 channel_event = self.channel.wait() => {
                     match channel_event {
-                        Some(thrussh::ChannelMsg::Data { data }) => {
+                        Some(russh::ChannelMsg::Data { data }) => {
                             let bytes: &[u8] = &data;
                             self.events_tx.send(RCEvent::Output(
                                 self.server_channel_id,
                                 Bytes::from(BytesMut::from(bytes)),
                             ))?;
                         }
-                        Some(thrussh::ChannelMsg::Close) => {
+                        Some(russh::ChannelMsg::Close) => {
                             self.events_tx.send(RCEvent::Close(self.server_channel_id))?;
                         },
-                        Some(thrussh::ChannelMsg::Success) => {
+                        Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.server_channel_id))?;
                         },
-                        Some(thrussh::ChannelMsg::Eof) => {
+                        Some(russh::ChannelMsg::Eof) => {
                             self.events_tx.send(RCEvent::Eof(self.server_channel_id))?;
                         }
                         None => {

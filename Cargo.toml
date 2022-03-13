@@ -7,9 +7,6 @@ members = [
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-protocol-ssh",
-    "thrussh",
-    "thrussh-keys",
-    "thrussh-libsodium",
 ]
 default-members = ["warpgate"]
 

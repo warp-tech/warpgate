@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use thrussh::MethodSet;
-use thrussh_keys::load_secret_key;
+use russh::MethodSet;
+use russh_keys::load_secret_key;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -12,9 +12,9 @@ use tracing::*;
 
 mod session;
 mod session_handle;
-mod thrussh_handler;
+mod russh_handler;
 pub use session::ServerSession;
-pub use thrussh_handler::ServerHandler;
+pub use russh_handler::ServerHandler;
 
 use crate::server::session_handle::SSHSessionHandle;
 use warpgate_common::{ProtocolServer, Services, SessionState};
@@ -35,7 +35,7 @@ impl SSHProtocolServer {
 #[async_trait]
 impl ProtocolServer for SSHProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
-        let mut config = thrussh::server::Config {
+        let mut config = russh::server::Config {
             auth_rejection_time: std::time::Duration::from_secs(1),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
             ..Default::default()
@@ -93,14 +93,14 @@ impl ProtocolServer for SSHProtocolServer {
 }
 
 async fn _run_stream<R>(
-    config: Arc<thrussh::server::Config>,
+    config: Arc<russh::server::Config>,
     socket: R,
     handler: ServerHandler,
 ) -> Result<()>
 where
     R: AsyncRead + AsyncWrite + Unpin + Debug,
 {
-    thrussh::server::run_stream(config, socket, handler).await?;
+    russh::server::run_stream(config, socket, handler).await?;
     Ok(())
 }
 

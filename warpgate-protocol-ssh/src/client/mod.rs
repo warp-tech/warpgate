@@ -5,8 +5,8 @@ use futures::FutureExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use thrussh::client::Handle;
-use thrussh::Sig;
+use russh::client::Handle;
+use russh::Sig;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -240,7 +240,7 @@ impl RemoteClient {
         // let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
         // .with_context(|| "load_secret_key()")?;
         // let client_key = Arc::new(client_key);
-        let config = thrussh::client::Config {
+        let config = russh::client::Config {
             ..Default::default()
         };
         let config = Arc::new(config);
@@ -254,7 +254,7 @@ impl RemoteClient {
         //     "Connecting now...\r\n".as_bytes(),
         // )))?;
 
-        let fut_connect = thrussh::client::connect(config, address, handler);
+        let fut_connect = russh::client::connect(config, address, handler);
 
         tokio::select! {
             Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
@@ -280,7 +280,7 @@ impl RemoteClient {
                     self.tx.send(RCEvent::AuthError)?;
                     error!(session=%self.session_tag, "Auth rejected");
                     let _ = session
-                        .disconnect(thrussh::Disconnect::ByApplication, "", "")
+                        .disconnect(russh::Disconnect::ByApplication, "", "")
                         .await;
                     anyhow::bail!("Auth rejected");
                 }
@@ -357,7 +357,7 @@ impl RemoteClient {
             let _ = session
                 .lock()
                 .await
-                .disconnect(thrussh::Disconnect::ByApplication, "", "")
+                .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
             self.set_disconnected();
         }

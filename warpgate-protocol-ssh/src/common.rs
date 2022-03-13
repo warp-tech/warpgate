@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use bytes::Bytes;
-use thrussh::{ChannelId, Pty, Sig};
+use russh::{ChannelId, Pty, Sig};
 
 #[derive(Clone, Debug)]
 pub struct PtyRequest {

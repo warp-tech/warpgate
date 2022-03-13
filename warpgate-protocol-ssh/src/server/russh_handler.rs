@@ -5,8 +5,8 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::future::{ready, Ready};
 use futures::FutureExt;
-use thrussh::server::{Auth, Session};
-use thrussh::{ChannelId, Pty};
+use russh::server::{Auth, Session};
+use russh::{ChannelId, Pty};
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::SessionId;
@@ -20,7 +20,7 @@ pub struct ServerHandler {
     pub session: Arc<Mutex<ServerSession>>,
 }
 
-impl thrussh::server::Handler for ServerHandler {
+impl russh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
     type FutureAuth =
         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
@@ -117,7 +117,7 @@ impl thrussh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn auth_publickey(self, user: &str, key: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
+    fn auth_publickey(self, user: &str, key: &russh_keys::key::PublicKey) -> Self::FutureAuth {
         let user = user.to_string();
         let key = key.clone();
         async move {
@@ -231,7 +231,7 @@ impl thrussh::server::Handler for ServerHandler {
     fn signal(
         self,
         channel: ChannelId,
-        signal_name: thrussh::Sig,
+        signal_name: russh::Sig,
         session: Session,
     ) -> Self::FutureUnit {
         async move {
@@ -319,7 +319,7 @@ impl thrussh::server::Handler for ServerHandler {
     //     self,
     //     user: &str,
     //     submethods: &str,
-    //     response: Option<thrussh::server::Response>,
+    //     response: Option<russh::server::Response>,
     // ) -> Self::FutureAuth {
     //     self.finished_auth(Auth::Reject)
     // }

@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::sync::Arc;
-use thrussh::Sig;
-use thrussh::{server::Session, CryptoVec};
-use thrussh_keys::key::PublicKey;
-use thrussh_keys::PublicKeyBase64;
+use russh::Sig;
+use russh::{server::Session, CryptoVec};
+use russh_keys::key::PublicKey;
+use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
@@ -50,7 +50,7 @@ impl From<&str> for Selector {
 }
 pub struct ServerSession {
     pub id: SessionId,
-    session_handle: Option<thrussh::server::Handle>,
+    session_handle: Option<russh::server::Handle>,
     pty_channels: Vec<ServerChannelId>,
     all_channels: Vec<ServerChannelId>,
     channel_recorders: HashMap<ServerChannelId, TerminalRecorder>,
@@ -370,7 +370,7 @@ impl ServerSession {
 
     async fn maybe_with_session<'a, FN, FT, R>(&'a mut self, f: FN) -> Result<R>
     where
-        FN: FnOnce(&'a mut thrussh::server::Handle) -> FT + 'a,
+        FN: FnOnce(&'a mut russh::server::Handle) -> FT + 'a,
         FT: futures::Future<Output = Result<R>>,
         R: Default,
     {
@@ -580,7 +580,7 @@ impl ServerSession {
         &mut self,
         user: String,
         key: &PublicKey,
-    ) -> thrussh::server::Auth {
+    ) -> russh::server::Auth {
         let selector: Selector = user[..].into();
 
         info!(session=?self, "Public key auth as {} with key FP {}", selector.username, key.fingerprint());
@@ -591,11 +591,11 @@ impl ServerSession {
         });
 
         match self.try_auth(&selector).await {
-            Ok(AuthResult::Accepted) => thrussh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => thrussh::server::Auth::Reject,
+            Ok(AuthResult::Accepted) => russh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Err(_) => {
                 error!(session=?self, "Failed to verify credentials");
-                thrussh::server::Auth::Reject
+                russh::server::Auth::Reject
             }
         }
     }
@@ -604,18 +604,18 @@ impl ServerSession {
         &mut self,
         username: String,
         password: String,
-    ) -> thrussh::server::Auth {
+    ) -> russh::server::Auth {
         let selector: Selector = username[..].into();
         info!(session=?self, "Password key auth as {}", selector.username);
 
         self.credentials.push(AuthCredential::Password(password));
 
         match self.try_auth(&selector).await {
-            Ok(AuthResult::Accepted) => thrussh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => thrussh::server::Auth::Reject,
+            Ok(AuthResult::Accepted) => russh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Err(_) => {
                 error!(session=?self, "Failed to verify credentials");
-                thrussh::server::Auth::Reject
+                russh::server::Auth::Reject
             }
         }
     }
