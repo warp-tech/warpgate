@@ -30,6 +30,7 @@ impl AdminServer {
                 crate::api::recordings_detail::Api,
                 crate::api::users_list::Api,
                 crate::api::targets_list::Api,
+                crate::api::tickets_list::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),

@@ -1,4 +1,5 @@
 #![feature(let_else)]
+pub mod auth;
 mod config;
 mod config_providers;
 pub mod consts;

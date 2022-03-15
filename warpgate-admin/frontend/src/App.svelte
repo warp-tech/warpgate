@@ -12,6 +12,12 @@
         '/recordings/:id': wrap({
             asyncComponent: () => import('./Recording.svelte')
         }),
+        '/tickets': wrap({
+            asyncComponent: () => import('./Tickets.svelte')
+        }),
+        '/tickets/create': wrap({
+            asyncComponent: () => import('./CreateTicket.svelte')
+        }),
     }
 </script>
 

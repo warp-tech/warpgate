@@ -2,7 +2,10 @@ use anyhow::Result;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use data_encoding::HEXLOWER;
 use password_hash::errors::Error;
+use rand::Rng;
+use secrecy::Secret;
 
 pub fn hash_password(password: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
@@ -20,4 +23,10 @@ pub fn verify_password_hash(password: &str, hash: &str) -> Result<bool> {
         Err(Error::Password) => Ok(false),
         Err(e) => Err(anyhow::anyhow!(e)),
     }
+}
+
+pub fn generate_ticket_secret() -> Secret<String> {
+    let mut bytes = [0; 32];
+    rand::thread_rng().fill(&mut bytes[..]);
+    Secret::new(HEXLOWER.encode(&bytes))
 }

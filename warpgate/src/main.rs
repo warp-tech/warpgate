@@ -1,6 +1,8 @@
 #![feature(type_alias_impl_trait, let_else)]
 use anyhow::Result;
+use clap::StructOpt;
 use futures::{pin_mut, StreamExt};
+use std::io::stdin;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -11,6 +13,7 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
+use warpgate_common::hash::hash_password;
 
 mod config;
 use crate::config::load_config;
@@ -20,6 +23,22 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[derive(clap::Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+struct Cli {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Run Warpgate
+    Run,
+    /// Create a password hash for use in the config file
+    Hash,
+}
 
 fn init_logging() {
     if std::env::var("RUST_LOG").is_err() {
@@ -50,13 +69,7 @@ fn init_logging() {
     r.with(fmt_layer).init();
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
-    init_logging();
-
+async fn cmd_run() -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     info!(%version, "Warpgate");
 
@@ -96,4 +109,35 @@ async fn main() -> Result<()> {
 
     info!("Exiting");
     Ok(())
+}
+
+async fn cmd_hash() -> Result<()> {
+    let mut input = String::new();
+
+    if atty::is(atty::Stream::Stdin) {
+        input = dialoguer::Password::new()
+            .with_prompt("Password to be hashed")
+            .interact()?;
+    } else {
+        stdin().read_line(&mut input)?;
+    }
+
+    let hash = hash_password(&input);
+    println!("{}", hash);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
+    init_logging();
+
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Commands::Run => cmd_run().await,
+        Commands::Hash => cmd_hash().await,
+    }
 }

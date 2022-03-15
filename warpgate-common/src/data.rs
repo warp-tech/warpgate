@@ -64,6 +64,7 @@ impl UserSnapshot {
 #[derive(Serialize, Deserialize, Object)]
 pub struct TicketSnapshot {
     pub id: Uuid,
+    pub username: String,
     pub target: String,
 }
 
@@ -71,6 +72,7 @@ impl From<Ticket::Model> for TicketSnapshot {
     fn from(model: Ticket::Model) -> Self {
         Self {
             id: model.id,
+            username: model.username,
             target: model.target,
         }
     }

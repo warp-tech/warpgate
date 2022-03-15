@@ -40,9 +40,9 @@
                             {session.id}
                         </strong>
 
-                        {#if session.user }
+                        {#if session.username }
                         <div>
-                            User: <code>{session.user.username}</code>
+                            User: <code>{session.username}</code>
                         </div>
                         {/if}
 

@@ -1,6 +1,5 @@
-import type { SessionSnapshot } from '../../api-client/src'
 import { writable } from 'svelte/store'
-import { api } from './api'
+import { api, SessionSnapshot } from './api'
 
 export const sessions = writable<SessionSnapshot[]|null>(null)
 

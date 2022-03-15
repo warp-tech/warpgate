@@ -1,4 +1,4 @@
-projects := "warpgate warpgate-admin warpgate-cli warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-protocol-ssh"
+projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-protocol-ssh"
 
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done

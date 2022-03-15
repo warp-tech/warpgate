@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, SessionSnapshot } from 'lib/api'
+import { api, SessionSnapshot, Recording } from 'lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert, Spinner } from 'sveltestrap'
 
@@ -7,7 +7,7 @@ export let params = { id: '' }
 
 let error: Error|null = null
 let session: SessionSnapshot|null = null
-let recordings: any = null
+let recordings: Recording[]|null = null
 
 async function load () {
     session = await api.getSession(params)

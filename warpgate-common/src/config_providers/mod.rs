@@ -1,17 +1,19 @@
 mod file;
+use crate::{TargetSnapshot, TicketSnapshot, UserSnapshot};
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use file::FileConfigProvider;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use secrecy::{ExposeSecret, Secret};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::*;
 use uuid::Uuid;
-
-use crate::{TargetSnapshot, TicketSnapshot, UserSnapshot};
+use warpgate_db_entities::Ticket;
 
 pub enum AuthResult {
-    Accepted {
-        username: String,
-        via_ticket: Option<TicketSnapshot>,
-    },
+    Accepted { username: String },
     Rejected,
 }
 
@@ -31,11 +33,46 @@ pub trait ConfigProvider {
 
     async fn authorize(
         &mut self,
-        selector: &str,
+        username: &String,
         credentials: &[AuthCredential],
     ) -> Result<AuthResult>;
 
     async fn authorize_target(&mut self, username: &str, target: &str) -> Result<bool>;
 
     async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<()>;
+}
+
+//temp
+pub async fn authorize_ticket(
+    db: &Arc<Mutex<DatabaseConnection>>,
+    secret: &Secret<String>,
+) -> Result<Option<TicketSnapshot>> {
+    let ticket = {
+        let db = db.lock().await;
+        Ticket::Entity::find()
+            .filter(Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
+            .one(&*db)
+            .await?
+    };
+    match ticket {
+        Some(ticket) => {
+            if let Some(0) = ticket.uses_left {
+                warn!("Ticket is used up: {}", &ticket.id);
+                return Ok(None);
+            }
+
+            if let Some(datetime) = ticket.expiry {
+                if datetime < chrono::Utc::now() {
+                    warn!("Ticket has expired: {}", &ticket.id);
+                    return Ok(None);
+                }
+            }
+
+            return Ok(Some(ticket.into()));
+        }
+        None => {
+            warn!("Ticket not found: {}", &secret.expose_secret());
+            return Ok(None);
+        }
+    }
 }

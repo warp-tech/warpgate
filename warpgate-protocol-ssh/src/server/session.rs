@@ -1,9 +1,9 @@
-use super::super::{
-    ChannelOperation, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient, ServerChannelId,
-};
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
-use crate::DirectTCPIPParams;
+use crate::{
+    ChannelOperation, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient,
+    ServerChannelId,
+};
 use ansi_term::Colour;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -19,11 +19,12 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
+use warpgate_common::auth::AuthSelector;
 use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
 };
 use warpgate_common::{
-    AuthCredential, AuthResult, Services, SessionId, Target, WarpgateServerHandle,
+    authorize_ticket, AuthCredential, AuthResult, Services, SessionId, Target, WarpgateServerHandle,
 };
 
 #[derive(Clone)]
@@ -33,22 +34,6 @@ enum TargetSelection {
     Found(Target),
 }
 
-struct Selector {
-    username: String,
-    target_name: String,
-}
-
-impl From<&str> for Selector {
-    fn from(s: &str) -> Self {
-        let mut parts = s.splitn(2, ':');
-        let username = parts.next().unwrap_or("").to_string();
-        let target_name = parts.next().unwrap_or("").to_string();
-        Selector {
-            username,
-            target_name,
-        }
-    }
-}
 pub struct ServerSession {
     pub id: SessionId,
     session_handle: Option<russh::server::Handle>,
@@ -576,10 +561,14 @@ impl ServerSession {
         ));
     }
 
-    pub async fn _auth_publickey(&mut self, user: String, key: &PublicKey) -> russh::server::Auth {
-        let selector: Selector = user[..].into();
+    pub async fn _auth_publickey(
+        &mut self,
+        ssh_username: String,
+        key: &PublicKey,
+    ) -> russh::server::Auth {
+        let selector: AuthSelector = ssh_username.into();
 
-        info!(session=?self, "Public key auth as {} with key FP {}", selector.username, key.fingerprint());
+        info!(session=?self, "Public key auth as {:?} with key FP {}", selector, key.fingerprint());
 
         self.credentials.push(AuthCredential::PublicKey {
             kind: key.name().to_string(),
@@ -598,11 +587,11 @@ impl ServerSession {
 
     pub async fn _auth_password(
         &mut self,
-        username: String,
+        ssh_username: String,
         password: String,
     ) -> russh::server::Auth {
-        let selector: Selector = username[..].into();
-        info!(session=?self, "Password key auth as {}", selector.username);
+        let selector: AuthSelector = ssh_username.into();
+        info!(session=?self, "Password key auth as {:?}", selector);
 
         self.credentials.push(AuthCredential::Password(password));
 
@@ -616,56 +605,66 @@ impl ServerSession {
         }
     }
 
-    async fn try_auth(&mut self, selector: &Selector) -> Result<AuthResult> {
-        let user_auth_result = {
-            self.services
-                .config_provider
-                .lock()
-                .await
-                .authorize(&selector.username, &self.credentials)
-                .await
-        };
-        match user_auth_result? {
-            AuthResult::Accepted {
+    async fn try_auth(&mut self, selector: &AuthSelector) -> Result<AuthResult> {
+        match selector {
+            AuthSelector::User {
                 username,
-                via_ticket,
+                target_name,
             } => {
-                let target_name: &str;
-                let target_auth_result = if let Some(ref ticket) = via_ticket {
+                let user_auth_result: AuthResult = {
                     self.services
                         .config_provider
                         .lock()
                         .await
-                        .consume_ticket(&ticket.id)
-                        .await?;
-                    info!(session=?self, "Authorized for {} with a ticket", ticket.target);
-                    target_name = &ticket.target;
-                    true
-                } else {
-                    target_name = &selector.target_name;
-                    self.services
-                        .config_provider
-                        .lock()
-                        .await
-                        .authorize_target(&username, &selector.target_name)
+                        .authorize(username, &self.credentials)
                         .await?
                 };
 
-                if target_auth_result {
-                    self._auth_accept(&username, target_name).await;
-                    Ok(AuthResult::Accepted {
-                        username,
-                        via_ticket,
-                    })
-                } else {
-                    warn!(
-                        "Target {} not authorized for user {}",
-                        selector.target_name, username
-                    );
-                    Ok(AuthResult::Rejected)
+                match user_auth_result {
+                    AuthResult::Accepted { username } => {
+                        let target_auth_result = {
+                            self.services
+                                .config_provider
+                                .lock()
+                                .await
+                                .authorize_target(&username, &target_name)
+                                .await?
+                        };
+                        if !target_auth_result {
+                            warn!(
+                                "Target {} not authorized for user {}",
+                                target_name, username
+                            );
+                            return Ok(AuthResult::Rejected);
+                        }
+                        self._auth_accept(&username, &target_name).await;
+                        return Ok(AuthResult::Accepted { username });
+                    }
+                    AuthResult::Rejected => {
+                        return Ok(AuthResult::Rejected);
+                    }
                 }
             }
-            AuthResult::Rejected => Ok(AuthResult::Rejected),
+            AuthSelector::Ticket { secret } => {
+                match authorize_ticket(&self.services.db, secret).await? {
+                    Some(ticket) => {
+                        info!(session=?self, "Authorized for {} with a ticket", ticket.target);
+                        self.services
+                            .config_provider
+                            .lock()
+                            .await
+                            .consume_ticket(&ticket.id)
+                            .await?;
+                        self._auth_accept(&ticket.username, &ticket.target).await;
+                        return Ok(AuthResult::Accepted {
+                            username: ticket.username.clone(),
+                        });
+                    }
+                    None => {
+                        return Ok(AuthResult::Rejected);
+                    }
+                }
+            }
         }
     }
 

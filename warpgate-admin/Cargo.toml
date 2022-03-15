@@ -17,3 +17,4 @@ uuid = {version = "0.8.2", features = ["v4", "serde"]}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 poem-openapi = {version="1.3.5", features=["swagger-ui", "chrono","uuid","static-files"]}
+secrecy = "0.8.0"

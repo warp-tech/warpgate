@@ -1,22 +1,20 @@
+use super::ConfigProvider;
+use crate::hash::verify_password_hash;
+use crate::{
+    AuthCredential, AuthResult, TargetSnapshot, User, UserAuthCredential, UserSnapshot,
+    WarpgateConfig,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use data_encoding::BASE64_MIME;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
-
-use crate::hash::verify_password_hash;
-use crate::{
-    AuthCredential, AuthResult, TargetSnapshot, User, UserAuthCredential, UserSnapshot,
-    WarpgateConfig,
-};
-
-use super::ConfigProvider;
 
 pub struct FileConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
@@ -33,10 +31,42 @@ impl FileConfigProvider {
             config: config.clone(),
         }
     }
+}
 
-    async fn authorize_user(
+fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
+    match c {
+        UserAuthCredential::Password { .. } => k == "password",
+        UserAuthCredential::PublicKey { .. } => k == "publickey",
+    }
+}
+
+#[async_trait]
+impl ConfigProvider for FileConfigProvider {
+    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>> {
+        Ok(self
+            .config
+            .lock()
+            .await
+            .users
+            .iter()
+            .map(UserSnapshot::new)
+            .collect::<Vec<_>>())
+    }
+
+    async fn list_targets(&mut self) -> Result<Vec<TargetSnapshot>> {
+        Ok(self
+            .config
+            .lock()
+            .await
+            .targets
+            .iter()
+            .map(TargetSnapshot::new)
+            .collect::<Vec<_>>())
+    }
+
+    async fn authorize(
         &mut self,
-        selector: &str,
+        username: &String,
         credentials: &[AuthCredential],
     ) -> Result<AuthResult> {
         if credentials.is_empty() {
@@ -49,11 +79,11 @@ impl FileConfigProvider {
                 .await
                 .users
                 .iter()
-                .find(|x| x.username == selector)
+                .find(|x| &x.username == username)
                 .map(User::to_owned)
         };
         let Some(user) = user else {
-            error!("Selected user not found: {}", selector);
+            error!("Selected user not found: {}", username);
             return Ok(AuthResult::Rejected);
         };
 
@@ -119,13 +149,11 @@ impl FileConfigProvider {
                     }
                     return Ok(AuthResult::Accepted {
                         username: user.username.clone(),
-                        via_ticket: None,
                     });
                 }
                 None => {
                     return Ok(AuthResult::Accepted {
                         username: user.username.clone(),
-                        via_ticket: None,
                     })
                 }
             }
@@ -133,84 +161,6 @@ impl FileConfigProvider {
 
         warn!(username=%user.username, "Client credentials did not match");
         Ok(AuthResult::Rejected)
-    }
-}
-
-fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
-    match c {
-        UserAuthCredential::Password { .. } => k == "password",
-        UserAuthCredential::PublicKey { .. } => k == "publickey",
-    }
-}
-
-#[async_trait]
-impl ConfigProvider for FileConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>> {
-        Ok(self
-            .config
-            .lock()
-            .await
-            .users
-            .iter()
-            .map(UserSnapshot::new)
-            .collect::<Vec<_>>())
-    }
-
-    async fn list_targets(&mut self) -> Result<Vec<TargetSnapshot>> {
-        Ok(self
-            .config
-            .lock()
-            .await
-            .targets
-            .iter()
-            .map(TargetSnapshot::new)
-            .collect::<Vec<_>>())
-    }
-
-    async fn authorize(
-        &mut self,
-        selector: &str,
-        credentials: &[AuthCredential],
-    ) -> Result<AuthResult> {
-        if selector
-            .to_string()
-            .starts_with(crate::consts::TICKET_SELECTOR_PREFIX)
-        {
-            let ticket_secret = &selector[crate::consts::TICKET_SELECTOR_PREFIX.len()..];
-            let ticket = {
-                let db = self.db.lock().await;
-                Ticket::Entity::find()
-                    .filter(Ticket::Column::Secret.eq(ticket_secret))
-                    .one(&*db)
-                    .await?
-            };
-            match ticket {
-                Some(ticket) => {
-                    if let Some(0) = ticket.uses_left {
-                        warn!("Ticket is used up: {}", &selector);
-                        return Ok(AuthResult::Rejected);
-                    }
-
-                    if let Some(datetime) = ticket.expiry {
-                        if datetime < chrono::Utc::now() {
-                            warn!("Ticket has expired: {}", &selector);
-                            return Ok(AuthResult::Rejected);
-                        }
-                    }
-
-                    return Ok(AuthResult::Accepted {
-                        username: ticket.username.clone(),
-                        via_ticket: Some(ticket.into()),
-                    });
-                }
-                None => {
-                    warn!("Ticket not found: {}", &selector);
-                    return Ok(AuthResult::Rejected);
-                }
-            }
-        } else {
-            self.authorize_user(selector, credentials).await
-        }
     }
 
     async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {
