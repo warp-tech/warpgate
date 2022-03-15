@@ -25,9 +25,12 @@
     <nav class="navbar navbar-dark bg-dark">
         <div class="container-fluid">
             <a class="navbar-brand" href="/" use:link>Navbar</a>
-            <ul class="navbar-nav me-auto">
+            <ul class="navbar-nav me-auto flex-row">
+                <li class="nav-item me-3">
+                    <a class="nav-link active" href="/" use:link>Sessions</a>
+                </li>
                 <li class="nav-item">
-                    <a class="nav-link active" href="/" use:link>Home</a>
+                    <a class="nav-link active" href="/tickets" use:link>Tickets</a>
                 </li>
             </ul>
         </div>

@@ -229,6 +229,31 @@
         },
         "operationId": "create_ticket"
       }
+    },
+    "/tickets/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_ticket"
+      }
     }
   },
   "components": {

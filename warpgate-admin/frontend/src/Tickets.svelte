@@ -15,7 +15,8 @@ load().catch(e => {
 })
 
 async function deleteTicket (ticket: TicketSnapshot) {
-
+    await api.deleteTicket(ticket)
+    load()
 }
 
 </script>

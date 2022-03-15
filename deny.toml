@@ -73,6 +73,7 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    "WTFPL",
 ]
 # List of explicitly disallowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
@@ -88,7 +89,7 @@ copyleft = "warn"
 # * osi-only - The license will be approved if is OSI-approved *AND NOT* FSF
 # * fsf-only - The license will be approved if is FSF *AND NOT* OSI-approved
 # * neither - This predicate is ignored and the default lint level is used
-allow-osi-fsf-free = "neither"
+allow-osi-fsf-free = "either"
 # Lint level used when no other predicates are matched
 # 1. License isn't in the allow or deny lists
 # 2. License isn't copyleft
@@ -195,11 +196,3 @@ unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = []
-
-[sources.allow-org]
-# 1 or more github.com organizations to allow git sources for
-github = [""]
-# 1 or more gitlab.com organizations to allow git sources for
-gitlab = [""]
-# 1 or more bitbucket.org organizations to allow git sources for
-bitbucket = [""]
