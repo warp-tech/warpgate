@@ -42,7 +42,7 @@ pub trait ConfigProvider {
     async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<()>;
 }
 
-//temp
+//TODO: move this somewhere
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,

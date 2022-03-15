@@ -2,17 +2,18 @@
 name = "warpgate-protocol-ssh"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
-ansi_term = "0.12.1"
-anyhow = "1.0.53"
-bytes = "1.1.0"
-futures = "0.3.19"
+ansi_term = "0.12"
+anyhow = "1.0"
+bytes = "1.1"
+futures = "0.3"
 russh = {version = "0.34.0-beta.1", features = ["openssl"]}
 russh-keys = {version = "0.22.0-beta.1", features = ["openssl"]}
-time = "0.3.7"
-tokio = {version = "1.17.0", features = ["tracing", "signal"]}
-tracing = "0.1.30"
+time = "0.3"
+tokio = {version = "1.17", features = ["tracing", "signal"]}
+tracing = "0.1"
 warpgate-common = {version = "*", path = "../warpgate-common"}
-async-trait = "0.1.52"
-secrecy = "0.8.0"
+async-trait = "0.1"
+secrecy = "0.8"

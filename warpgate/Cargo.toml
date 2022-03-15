@@ -2,21 +2,22 @@
 edition = "2021"
 name = "warpgate"
 version = "0.1.0"
+license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.53"
-async-trait = "0.1.52"
-bytes = "1.1.0"
-clap = {version = "3.1.6", features = ["derive"]}
-config = "0.12.0"
-console-subscriber = {version = "0.1.2", optional = true}
-dhat = {version = "0.3.0", optional = true}
-dialoguer = "0.10.0"
-futures = "0.3.19"
-time = "0.3.7"
-tokio = {version = "1.17.0", features = ["tracing", "signal"]}
-tracing = "0.1.30"
-tracing-subscriber = {version = "0.3.8", features = ["env-filter", "local-time"]}
+anyhow = "1.0"
+async-trait = "0.1"
+bytes = "1.1"
+clap = {version = "3.1", features = ["derive"]}
+config = "0.12"
+console-subscriber = {version = "0.1", optional = true}
+dhat = {version = "0.3", optional = true}
+dialoguer = "0.10"
+futures = "0.3"
+time = "0.3"
+tokio = {version = "1.17", features = ["tracing", "signal"]}
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
