@@ -66,7 +66,7 @@ impl ConfigProvider for FileConfigProvider {
 
     async fn authorize(
         &mut self,
-        username: &String,
+        username: &str,
         credentials: &[AuthCredential],
     ) -> Result<AuthResult> {
         if credentials.is_empty() {
@@ -79,7 +79,7 @@ impl ConfigProvider for FileConfigProvider {
                 .await
                 .users
                 .iter()
-                .find(|x| &x.username == username)
+                .find(|x| x.username == username)
                 .map(User::to_owned)
         };
         let Some(user) = user else {

@@ -3,7 +3,7 @@ projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpga
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
 
-clippy +ARGS:
+clippy *ARGS:
     for p in {{projects}}; do cargo clippy -p $p {{ARGS}}; done
 
 watch:

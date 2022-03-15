@@ -70,7 +70,7 @@ impl State {
         let session = Session::Entity::find_by_id(id)
             .one(&*db)
             .await?
-            .ok_or(anyhow::anyhow!("Session not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
         let mut model: Session::ActiveModel = session.into();
         model.ended = Set(Some(chrono::Utc::now()));
         model.update(&*db).await?;

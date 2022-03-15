@@ -201,8 +201,10 @@ impl ServerSession {
                     match address_str
                         .to_socket_addrs()
                         .map_err(|e| anyhow::anyhow!("{}", e))
-                        .and_then(|mut x| x.next().ok_or(anyhow::anyhow!("Cannot resolve address")))
-                    {
+                        .and_then(|mut x| {
+                            x.next()
+                                .ok_or_else(|| anyhow::anyhow!("Cannot resolve address"))
+                        }) {
                         Ok(address) => {
                             self.rc_tx.send(RCCommand::Connect(address))?;
                             self.emit_service_message(&format!("Connecting to {address}"))
@@ -627,7 +629,7 @@ impl ServerSession {
                                 .config_provider
                                 .lock()
                                 .await
-                                .authorize_target(&username, &target_name)
+                                .authorize_target(&username, target_name)
                                 .await?
                         };
                         if !target_auth_result {
@@ -637,12 +639,10 @@ impl ServerSession {
                             );
                             return Ok(AuthResult::Rejected);
                         }
-                        self._auth_accept(&username, &target_name).await;
-                        return Ok(AuthResult::Accepted { username });
+                        self._auth_accept(&username, target_name).await;
+                        Ok(AuthResult::Accepted { username })
                     }
-                    AuthResult::Rejected => {
-                        return Ok(AuthResult::Rejected);
-                    }
+                    AuthResult::Rejected => Ok(AuthResult::Rejected),
                 }
             }
             AuthSelector::Ticket { secret } => {
@@ -656,13 +656,11 @@ impl ServerSession {
                             .consume_ticket(&ticket.id)
                             .await?;
                         self._auth_accept(&ticket.username, &ticket.target).await;
-                        return Ok(AuthResult::Accepted {
+                        Ok(AuthResult::Accepted {
                             username: ticket.username.clone(),
-                        });
+                        })
                     }
-                    None => {
-                        return Ok(AuthResult::Rejected);
-                    }
+                    None => Ok(AuthResult::Rejected),
                 }
             }
         }

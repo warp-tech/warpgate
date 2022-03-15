@@ -17,8 +17,8 @@ pub enum AuthSelector {
 // Consume string so the ticket secret can't be accidentally leaked from it
 impl From<String> for AuthSelector {
     fn from(selector: String) -> Self {
-        if selector.starts_with(TICKET_SELECTOR_PREFIX) {
-            let secret = Secret::new(selector[TICKET_SELECTOR_PREFIX.len()..].into());
+        if let Some(secret) = selector.strip_prefix(TICKET_SELECTOR_PREFIX) {
+            let secret = Secret::new(secret.into());
             return AuthSelector::Ticket { secret };
         }
 

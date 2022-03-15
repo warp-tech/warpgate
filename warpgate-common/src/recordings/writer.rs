@@ -45,7 +45,7 @@ impl RecordingWriter {
                 let recording = Recording::Entity::find_by_id(id)
                     .one(&*db)
                     .await?
-                    .ok_or(anyhow::anyhow!("Recording not found"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
                 let mut model: Recording::ActiveModel = recording.into();
                 model.ended = Set(Some(chrono::Utc::now()));
                 model.update(&*db).await?;

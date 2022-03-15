@@ -33,7 +33,7 @@ pub trait ConfigProvider {
 
     async fn authorize(
         &mut self,
-        username: &String,
+        username: &str,
         credentials: &[AuthCredential],
     ) -> Result<AuthResult>;
 
@@ -68,11 +68,11 @@ pub async fn authorize_ticket(
                 }
             }
 
-            return Ok(Some(ticket.into()));
+            Ok(Some(ticket.into()))
         }
         None => {
             warn!("Ticket not found: {}", &secret.expose_secret());
-            return Ok(None);
+            Ok(None)
         }
     }
 }
