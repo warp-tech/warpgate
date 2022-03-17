@@ -1,8 +1,6 @@
-use std::fmt::Debug;
-
-use secrecy::Secret;
-
 use crate::consts::TICKET_SELECTOR_PREFIX;
+use crate::Secret;
+use std::fmt::Debug;
 
 pub enum AuthSelector {
     User {
@@ -14,9 +12,8 @@ pub enum AuthSelector {
     },
 }
 
-// Consume string so the ticket secret can't be accidentally leaked from it
-impl From<String> for AuthSelector {
-    fn from(selector: String) -> Self {
+impl From<&String> for AuthSelector {
+    fn from(selector: &String) -> Self {
         if let Some(secret) = selector.strip_prefix(TICKET_SELECTOR_PREFIX) {
             let secret = Secret::new(secret.into());
             return AuthSelector::Ticket { secret };

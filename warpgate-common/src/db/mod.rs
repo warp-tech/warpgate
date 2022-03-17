@@ -10,7 +10,7 @@ use crate::helpers::fs::secure_file;
 use crate::WarpgateConfig;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
-    let mut url = url::Url::parse(&config.store.database_url[..])?;
+    let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
     if url.scheme() == "sqlite" {
         let path = url.path();
         let mut abs_path = config.paths_relative_to.clone();

@@ -24,7 +24,8 @@ use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
 };
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Services, SessionId, Target, WarpgateServerHandle,
+    authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
+    WarpgateServerHandle,
 };
 
 #[derive(Clone)]
@@ -568,7 +569,7 @@ impl ServerSession {
         ssh_username: String,
         key: &PublicKey,
     ) -> russh::server::Auth {
-        let selector: AuthSelector = ssh_username.into();
+        let selector: AuthSelector = (&ssh_username).into();
 
         info!(session=?self, "Public key auth as {:?} with key FP {}", selector, key.fingerprint());
 
@@ -589,10 +590,10 @@ impl ServerSession {
 
     pub async fn _auth_password(
         &mut self,
-        ssh_username: String,
-        password: String,
+        ssh_username: Secret<String>,
+        password: Secret<String>,
     ) -> russh::server::Auth {
-        let selector: AuthSelector = ssh_username.into();
+        let selector: AuthSelector = ssh_username.expose_secret().into();
         info!(session=?self, "Password key auth as {:?}", selector);
 
         self.credentials.push(AuthCredential::Password(password));

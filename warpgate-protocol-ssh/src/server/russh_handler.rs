@@ -9,7 +9,7 @@ use russh::server::{Auth, Session};
 use russh::{ChannelId, Pty};
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::SessionId;
+use warpgate_common::{Secret, SessionId};
 
 use super::session::ServerSession;
 use crate::common::{PtyRequest, ServerChannelId};
@@ -135,7 +135,7 @@ impl russh::server::Handler for ServerHandler {
                 .session
                 .lock()
                 .await
-                ._auth_password(user, password)
+                ._auth_password(Secret::new(user), Secret::new(password))
                 .await;
             Ok((self, result))
         }

@@ -16,4 +16,3 @@ tokio = {version = "1.17", features = ["tracing", "signal"]}
 tracing = "0.1"
 warpgate-common = {version = "*", path = "../warpgate-common"}
 async-trait = "0.1"
-secrecy = "0.8"

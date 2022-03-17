@@ -107,7 +107,7 @@ impl ConfigProvider for FileConfigProvider {
 
                 for credential in user.credentials.iter() {
                     if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
-                        if &client_key == user_key {
+                        if &client_key == user_key.expose_secret() {
                             valid_credentials.push(credential);
                             break;
                         }
@@ -123,7 +123,10 @@ impl ConfigProvider for FileConfigProvider {
                         password: ref user_password_hash,
                     } = credential
                     {
-                        match verify_password_hash(client_password, user_password_hash) {
+                        match verify_password_hash(
+                            client_password.expose_secret(),
+                            user_password_hash.expose_secret(),
+                        ) {
                             Ok(true) => {
                                 valid_credentials.push(credential);
                                 break;

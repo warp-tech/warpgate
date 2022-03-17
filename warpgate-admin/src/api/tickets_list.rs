@@ -5,7 +5,6 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
-use secrecy::ExposeSecret;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;

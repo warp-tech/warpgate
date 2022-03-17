@@ -1,11 +1,10 @@
 mod file;
-use crate::{TargetSnapshot, TicketSnapshot, UserSnapshot};
+use crate::{Secret, TargetSnapshot, TicketSnapshot, UserSnapshot};
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use file::FileConfigProvider;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use secrecy::{ExposeSecret, Secret};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
@@ -18,7 +17,7 @@ pub enum AuthResult {
 }
 
 pub enum AuthCredential {
-    Password(String),
+    Password(Secret<String>),
     PublicKey {
         kind: String,
         public_key_bytes: Bytes,

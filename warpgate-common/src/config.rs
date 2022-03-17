@@ -1,6 +1,7 @@
+use serde::Deserialize;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use crate::Secret;
 
 fn _default_false() -> bool {
     false
@@ -14,8 +15,8 @@ fn _default_recordings_path() -> String {
     "./recordings".to_owned()
 }
 
-fn _default_database_url() -> String {
-    "sqlite:db".to_owned()
+fn _default_database_url() -> Secret<String> {
+    Secret::new("sqlite:db".to_owned())
 }
 
 fn _default_web_admin_listen() -> String {
@@ -37,9 +38,9 @@ pub struct Target {
 #[serde(tag = "type")]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
-    Password { password: String },
+    Password { password: Secret<String> },
     #[serde(rename = "publickey")]
-    PublicKey { key: String },
+    PublicKey { key: Secret<String> },
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -122,7 +123,7 @@ pub struct WarpgateConfigStore {
     pub web_admin: WebAdminConfig,
 
     #[serde(default = "_default_database_url")]
-    pub database_url: String,
+    pub database_url: Secret<String>,
 
     pub ssh: SSHConfig,
 }

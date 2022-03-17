@@ -24,6 +24,5 @@ tracing = "0.1"
 uuid = {version = "0.8", features = ["v4", "serde"]}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-db-migrations = {version = "*", path = "../warpgate-db-migrations"}
-secrecy = "0.8"
 thiserror = "1.0"
 url = "2.2"
