@@ -47,7 +47,7 @@ impl ProtocolServer for SSHProtocolServer {
         let config = Arc::new(config);
 
         let socket = TcpListener::bind(&address).await?;
-        info!("Starting server on {address}");
+        info!(?address, "Listening");
         while let Ok((socket, remote_address)) = socket.accept().await {
             let config = config.clone();
 

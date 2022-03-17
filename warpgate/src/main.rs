@@ -1,10 +1,11 @@
 #![feature(type_alias_impl_trait, let_else)]
-use anyhow::Result;
+use crate::config::load_config;
+use anyhow::{Context, Result};
 use clap::StructOpt;
-use futures::{pin_mut, StreamExt};
+use futures::StreamExt;
 use std::io::stdin;
-use std::net::SocketAddr;
-use std::str::FromStr;
+use std::net::ToSocketAddrs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use time::{format_description, UtcOffset};
 use tracing::*;
@@ -14,11 +15,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use warpgate_common::hash::hash_password;
+use warpgate_common::{ProtocolServer, Services, WarpgateConfig};
+use warpgate_protocol_ssh::SSHProtocolServer;
 
 mod config;
-use crate::config::load_config;
-use warpgate_common::{ProtocolServer, Services};
-use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -30,6 +30,9 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
+
+    #[clap(long, short)]
+    config: PathBuf,
 }
 
 #[derive(clap::Subcommand)]
@@ -38,6 +41,8 @@ enum Commands {
     Run,
     /// Create a password hash for use in the config file
     Hash,
+    /// Validate config file
+    Check,
 }
 
 fn init_logging() {
@@ -69,20 +74,42 @@ fn init_logging() {
     r.with(fmt_layer).init();
 }
 
-async fn cmd_run() -> Result<()> {
+async fn cmd_run(config: WarpgateConfig) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     info!(%version, "Warpgate");
 
-    let services = Services::new(load_config()?).await?;
+    let services = Services::new(config.clone()).await?;
 
-    let admin = warpgate_admin::AdminServer::new(&services);
-
+    let mut other_futures = futures::stream::FuturesUnordered::new();
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
-    protocol_futures
-        .push(SSHProtocolServer::new(&services).run(SocketAddr::from_str("0.0.0.0:2222")?));
 
-    let admin_run_future = admin.run(SocketAddr::from_str("0.0.0.0:8888")?);
-    pin_mut!(admin_run_future);
+    protocol_futures.push(
+        SSHProtocolServer::new(&services).run(
+            config
+                .store
+                .ssh
+                .listen
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
+        ),
+    );
+
+    if config.store.web_admin.enable {
+        let admin = warpgate_admin::AdminServer::new(&services);
+        let admin_future = admin.run(
+            config
+                .store
+                .web_admin
+                .listen
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Failed to resolve the listen address for the admin server")
+                })?,
+        );
+        other_futures.push(admin_future);
+    }
 
     loop {
         tokio::select! {
@@ -98,11 +125,14 @@ async fn cmd_run() -> Result<()> {
                     _ => (),
                 }
             }
-            result = &mut admin_run_future => {
-                if let Err(error) = result {
-                    error!(?error, "Admin server error");
+            result = other_futures.next(), if !other_futures.is_empty() => {
+                match result {
+                    Some(Err(error)) => {
+                        error!(?error, "Error");
+                    },
+                    None => break,
+                    _ => (),
                 }
-                break
             }
         }
     }
@@ -127,6 +157,23 @@ async fn cmd_hash() -> Result<()> {
     Ok(())
 }
 
+async fn cmd_check(config: WarpgateConfig) -> Result<()> {
+    config
+        .store
+        .ssh
+        .listen
+        .to_socket_addrs()
+        .context("Failed to parse SSH listen address")?;
+    config
+        .store
+        .web_admin
+        .listen
+        .to_socket_addrs()
+        .context("Failed to parse admin server listen address")?;
+    info!("No problems found");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(feature = "dhat-heap")]
@@ -135,9 +182,11 @@ async fn main() -> Result<()> {
     init_logging();
 
     let cli = Cli::parse();
+    let config = load_config(&cli.config)?;
 
     match &cli.command {
-        Commands::Run => cmd_run().await,
+        Commands::Run => cmd_run(config).await,
         Commands::Hash => cmd_hash().await,
+        Commands::Check => cmd_check(config).await,
     }
 }

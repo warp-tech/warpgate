@@ -14,7 +14,7 @@ pub struct Services {
     pub recordings: Arc<Mutex<SessionRecordings>>,
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub state: Arc<Mutex<State>>,
-    pub config_provider: Arc<Mutex<dyn ConfigProvider + Send>>,
+    pub config_provider: Arc<Mutex<dyn ConfigProvider + Send + 'static>>,
 }
 
 impl Services {
@@ -23,7 +23,7 @@ impl Services {
         sanitize_db(&mut db).await?;
         let db = Arc::new(Mutex::new(db));
 
-        let recordings = SessionRecordings::new(db.clone(), config.recordings_path.clone())?;
+        let recordings = SessionRecordings::new(db.clone(), &config)?;
         let recordings = Arc::new(Mutex::new(recordings));
 
         let config = Arc::new(Mutex::new(config));

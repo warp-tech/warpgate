@@ -674,6 +674,7 @@ impl ServerSession {
                 .config
                 .lock()
                 .await
+                .store
                 .targets
                 .iter()
                 .find(|x| x.name == target_name)

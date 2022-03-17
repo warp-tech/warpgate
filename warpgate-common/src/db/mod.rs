@@ -1,19 +1,42 @@
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter};
-use std::path::Path;
+use sea_orm::{
+    ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+};
 use std::time::Duration;
 use warpgate_db_migrations::{Migrator, MigratorTrait};
 
+use crate::helpers::fs::secure_file;
 use crate::WarpgateConfig;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
-    if config.database_url.ends_with(".sqlite3") {
-        if let Some(parent) = Path::new(&config.database_url).parent() {
+    let mut url = url::Url::parse(&config.store.database_url[..])?;
+    if url.scheme() == "sqlite" {
+        let path = url.path();
+        let mut abs_path = config.paths_relative_to.clone();
+        abs_path.push(path);
+        abs_path.push("db.sqlite3");
+
+        if let Some(parent) = abs_path.parent() {
             std::fs::create_dir_all(parent)?
         }
+
+        url.set_path(
+            abs_path
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Failed to convert database path to string"))?,
+        );
+
+        url.set_query(Some("mode=rwc"));
+
+        let db = Database::connect(ConnectOptions::new(url.to_string())).await?;
+        db.begin().await?.commit().await?;
+        drop(db);
+
+        secure_file(&abs_path)?;
     }
-    let mut opt = ConnectOptions::new(config.database_url.clone());
+
+    let mut opt = ConnectOptions::new(url.to_string());
     opt.max_connections(100)
         .min_connections(5)
         .connect_timeout(Duration::from_secs(8))

@@ -47,6 +47,7 @@ impl ConfigProvider for FileConfigProvider {
             .config
             .lock()
             .await
+            .store
             .users
             .iter()
             .map(UserSnapshot::new)
@@ -58,6 +59,7 @@ impl ConfigProvider for FileConfigProvider {
             .config
             .lock()
             .await
+            .store
             .targets
             .iter()
             .map(TargetSnapshot::new)
@@ -77,6 +79,7 @@ impl ConfigProvider for FileConfigProvider {
             self.config
                 .lock()
                 .await
+                .store
                 .users
                 .iter()
                 .find(|x| x.username == username)
@@ -166,11 +169,12 @@ impl ConfigProvider for FileConfigProvider {
     async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {
         let config = self.config.lock().await;
         let user = config
+            .store
             .users
             .iter()
             .find(|x| x.username == username)
             .map(User::to_owned);
-        let target = config.targets.iter().find(|x| x.name == target_name);
+        let target = config.store.targets.iter().find(|x| x.name == target_name);
 
         let Some(user) = user else {
             error!("Selected user not found: {}", username);
@@ -185,14 +189,14 @@ impl ConfigProvider for FileConfigProvider {
         let user_roles = user
             .roles
             .iter()
-            .map(|x| config.roles.iter().find(|y| &y.name == x))
+            .map(|x| config.store.roles.iter().find(|y| &y.name == x))
             .filter(|x| x.is_some())
             .map(|x| x.unwrap().to_owned())
             .collect::<HashSet<_>>();
         let target_roles = target
             .roles
             .iter()
-            .map(|x| config.roles.iter().find(|y| &y.name == x))
+            .map(|x| config.store.roles.iter().find(|y| &y.name == x))
             .filter(|x| x.is_some())
             .map(|x| x.unwrap().to_owned())
             .collect::<HashSet<_>>();

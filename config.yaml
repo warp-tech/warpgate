@@ -31,6 +31,14 @@ roles:
 - name: qa
 - name: admin
 
+recordings:
+  enable: false
+  path: data/recordings
 
-recordings_path: data/recordings
-database_url: sqlite:data/db.sqlite3?mode=rwc
+database_url: sqlite:data/db
+
+ssh:
+  listen: 0.0.0.0:2222
+
+web_admin:
+  enable: true

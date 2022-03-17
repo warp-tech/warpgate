@@ -1,11 +1,11 @@
 use crate::helpers::ApiResult;
 use poem::web::Data;
+use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use poem_openapi::param::Path;
 
 pub struct Api;
 
@@ -20,7 +20,11 @@ enum DeleteTicketResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(path = "/tickets/:id", method = "delete", operation_id = "delete_ticket")]
+    #[oai(
+        path = "/tickets/:id",
+        method = "delete",
+        operation_id = "delete_ticket"
+    )]
     async fn api_delete_ticket(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -36,9 +40,12 @@ impl Api {
 
         match ticket {
             Some(ticket) => {
-                ticket.delete(&*db).await.map_err(poem::error::InternalServerError)?;
+                ticket
+                    .delete(&*db)
+                    .await
+                    .map_err(poem::error::InternalServerError)?;
                 Ok(DeleteTicketResponse::Deleted)
-            },
+            }
             None => Ok(DeleteTicketResponse::NotFound),
         }
     }

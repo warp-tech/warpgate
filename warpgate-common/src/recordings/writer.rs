@@ -1,4 +1,6 @@
-use anyhow::Result;
+use crate::helpers::fs::secure_file;
+
+use super::{Error, Result};
 use bytes::{Bytes, BytesMut};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::path::PathBuf;
@@ -21,6 +23,7 @@ impl RecordingWriter {
         db: Arc<Mutex<DatabaseConnection>>,
     ) -> Result<Self> {
         let file = File::create(&path).await?;
+        secure_file(&path)?;
         let mut writer = BufWriter::new(file);
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         tokio::spawn(async move {
@@ -61,7 +64,10 @@ impl RecordingWriter {
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {
-        self.sender.send(BytesMut::from(data).freeze()).await?;
+        self.sender
+            .send(BytesMut::from(data).freeze())
+            .await
+            .map_err(|_| Error::Closed)?;
         Ok(())
     }
 }

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 
@@ -9,8 +10,8 @@ pub struct Model {
     pub target_snapshot: Option<String>,
     pub username: Option<String>,
     pub remote_address: String,
-    pub started: DateTimeUtc,
-    pub ended: Option<DateTimeUtc>,
+    pub started: DateTime<Utc>,
+    pub ended: Option<DateTime<Utc>>,
     pub ticket_id: Option<Uuid>,
 }
 

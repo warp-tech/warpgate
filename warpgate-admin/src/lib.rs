@@ -1,11 +1,12 @@
 #![feature(decl_macro, proc_macro_hygiene, let_else)]
-use anyhow::Result;
+use anyhow::{Context, Result};
 use poem::endpoint::{StaticFileEndpoint, StaticFilesEndpoint};
 use poem::listener::TcpListener;
 use poem::middleware::AddData;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 use std::net::SocketAddr;
+use tracing::*;
 use warpgate_common::Services;
 mod api;
 mod helpers;
@@ -40,6 +41,7 @@ impl AdminServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
         let db = self.services.db.clone();
+        let config_provider = self.services.config_provider.clone();
         let app = Route::new()
             .nest("/api/swagger", ui)
             .nest("/api", api_service)
@@ -57,9 +59,13 @@ impl AdminServer {
                 crate::api::recordings_detail::api_get_recording_cast,
             )
             .with(AddData::new(db))
-            .with(AddData::new(state))
-            .with(AddData::new(self.services.config_provider.clone()));
-        Server::new(TcpListener::bind(address)).run(app).await?;
-        Ok(())
+            .with(AddData::new(config_provider))
+            .with(AddData::new(state));
+
+        info!(?address, "Listening");
+        Server::new(TcpListener::bind(address))
+            .run(app)
+            .await
+            .context("Failed to start admin server")
     }
 }

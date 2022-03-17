@@ -1,3 +1,4 @@
+use chrono::{Utc, DateTime};
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 
@@ -10,7 +11,7 @@ pub struct Model {
     pub username: String,
     pub target: String,
     pub uses_left: Option<u32>,
-    pub expiry: Option<DateTimeUtc>,
+    pub expiry: Option<DateTime<Utc>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

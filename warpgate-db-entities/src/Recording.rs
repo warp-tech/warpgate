@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
@@ -19,8 +20,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
-    pub started: DateTimeUtc,
-    pub ended: Option<DateTimeUtc>,
+    pub started: DateTime<Utc>,
+    pub ended: Option<DateTime<Utc>>,
     pub session_id: Uuid,
     pub kind: RecordingKind,
 }
