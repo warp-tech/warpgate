@@ -15,7 +15,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use warpgate_common::hash::hash_password;
-use warpgate_common::{ProtocolServer, Services, WarpgateConfig};
+use warpgate_common::{ProtocolServer, Services, WarpgateConfig, TargetTestError, Target};
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 mod config;
@@ -43,6 +43,8 @@ enum Commands {
     Hash,
     /// Validate config file
     Check,
+    /// Test the connection to a target host
+    TestTarget { target_name: String },
 }
 
 fn init_logging() {
@@ -174,6 +176,44 @@ async fn cmd_check(config: WarpgateConfig) -> Result<()> {
     Ok(())
 }
 
+async fn cmd_test_target(config: WarpgateConfig, target_name: &String) -> Result<()> {
+    let Some(target) = config
+        .store
+        .targets
+        .iter()
+        .find(|x| &x.name == target_name)
+        .map(Target::clone) else {
+        error!(%target_name, "Target not found");
+        return Ok(());
+    };
+
+    let services = Services::new(config.clone()).await?;
+
+    let s = warpgate_protocol_ssh::SSHProtocolServer::new(&services);
+    match s.test_target(target).await {
+        Err(TargetTestError::AuthenticationError) => {
+            error!("Authentication failed");
+        }
+        Err(TargetTestError::ConnectionError(error)) => {
+            error!(?error, "Connection error");
+        }
+        Err(TargetTestError::Io(error)) => {
+            error!(?error, "I/O error");
+        }
+        Err(TargetTestError::Misconfigured(error)) => {
+            error!(?error, "Misconfigured");
+        }
+        Err(TargetTestError::Unreachable) => {
+            error!("Target is unreachable");
+        }
+        Ok(()) => {
+            info!("Connection successful!");
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(feature = "dhat-heap")]
@@ -188,5 +228,6 @@ async fn main() -> Result<()> {
         Commands::Run => cmd_run(config).await,
         Commands::Hash => cmd_hash().await,
         Commands::Check => cmd_check(config).await,
+        Commands::TestTarget { target_name } => cmd_test_target(config, target_name).await,
     }
 }

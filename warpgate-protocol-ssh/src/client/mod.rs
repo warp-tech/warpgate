@@ -45,7 +45,7 @@ pub enum RCEvent {
         data: Bytes,
         ext: u32,
     },
-    ConnectionError,
+    ConnectionError(String),
     AuthError,
     Done,
 }
@@ -264,7 +264,7 @@ impl RemoteClient {
             }
             session = fut_connect => {
                 if let Err(err) = session {
-                    self.tx.send(RCEvent::ConnectionError)?;
+                    self.tx.send(RCEvent::ConnectionError(format!("{:?}", err)))?;
                     error!(error=?err, session=%self.session_tag, "Connection error");
                     anyhow::bail!("Error connecting: {}", err);
                 }

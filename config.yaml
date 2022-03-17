@@ -11,6 +11,10 @@ targets:
   host: 192.168.1.1
   roles: [admin]
 
+- name: localhost
+  host: localhost
+  roles: [admin]
+
 users:
 - username: user
   credentials:

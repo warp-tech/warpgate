@@ -1,7 +1,12 @@
+mod russh_handler;
+mod session;
+mod session_handle;
+use crate::server::session_handle::SSHSessionHandle;
 use anyhow::Result;
-use async_trait::async_trait;
 use russh::MethodSet;
+pub use russh_handler::ServerHandler;
 use russh_keys::load_secret_key;
+pub use session::ServerSession;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,87 +14,62 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::*;
+use warpgate_common::{Services, SessionState};
 
-mod russh_handler;
-mod session;
-mod session_handle;
-pub use russh_handler::ServerHandler;
-pub use session::ServerSession;
+pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
+    let mut config = russh::server::Config {
+        auth_rejection_time: std::time::Duration::from_secs(1),
+        methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
+        ..Default::default()
+    };
+    config.keys.push(load_secret_key("host_key", None).unwrap());
+    config
+        .keys
+        .push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
+    let config = Arc::new(config);
 
-use crate::server::session_handle::SSHSessionHandle;
-use warpgate_common::{ProtocolServer, Services, SessionState};
+    let socket = TcpListener::bind(&address).await?;
+    info!(?address, "Listening");
+    while let Ok((socket, remote_address)) = socket.accept().await {
+        let config = config.clone();
 
-#[derive(Clone)]
-pub struct SSHProtocolServer {
-    services: Services,
-}
+        let (session_handle, session_handle_rx) = SSHSessionHandle::new();
+        let session_state = Arc::new(Mutex::new(SessionState::new(
+            remote_address,
+            Box::new(session_handle),
+        )));
 
-impl SSHProtocolServer {
-    pub fn new(services: &Services) -> Self {
-        SSHProtocolServer {
-            services: services.clone(),
-        }
-    }
-}
-
-#[async_trait]
-impl ProtocolServer for SSHProtocolServer {
-    async fn run(self, address: SocketAddr) -> Result<()> {
-        let mut config = russh::server::Config {
-            auth_rejection_time: std::time::Duration::from_secs(1),
-            methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
-            ..Default::default()
-        };
-        config.keys.push(load_secret_key("host_key", None).unwrap());
-        config
-            .keys
-            .push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
-        let config = Arc::new(config);
-
-        let socket = TcpListener::bind(&address).await?;
-        info!(?address, "Listening");
-        while let Ok((socket, remote_address)) = socket.accept().await {
-            let config = config.clone();
-
-            let (session_handle, session_handle_rx) = SSHSessionHandle::new();
-            let session_state = Arc::new(Mutex::new(SessionState::new(
-                remote_address,
-                Box::new(session_handle),
-            )));
-
-            let server_handle = self
-                .services
-                .state
-                .lock()
-                .await
-                .register_session(&session_state)
-                .await?;
-
-            let session = match ServerSession::new(
-                remote_address,
-                &self.services,
-                server_handle,
-                session_handle_rx,
-            )
+        let server_handle = services
+            .state
+            .lock()
             .await
-            {
-                Ok(session) => session,
-                Err(error) => {
-                    error!(%error, "Error setting up session");
-                    continue;
-                }
-            };
+            .register_session(&session_state)
+            .await?;
 
-            let id = { session.lock().await.id };
+        let session = match ServerSession::new(
+            remote_address,
+            &services,
+            server_handle,
+            session_handle_rx,
+        )
+        .await
+        {
+            Ok(session) => session,
+            Err(error) => {
+                error!(%error, "Error setting up session");
+                continue;
+            }
+        };
 
-            let handler = ServerHandler { id, session };
+        let id = { session.lock().await.id };
 
-            tokio::task::Builder::new()
-                .name(&format!("SSH {id} protocol"))
-                .spawn(_run_stream(config, socket, handler));
-        }
-        Ok(())
+        let handler = ServerHandler { id, session };
+
+        tokio::task::Builder::new()
+            .name(&format!("SSH {id} protocol"))
+            .spawn(_run_stream(config, socket, handler));
     }
+    Ok(())
 }
 
 async fn _run_stream<R>(
@@ -102,10 +82,4 @@ where
 {
     russh::server::run_stream(config, socket, handler).await?;
     Ok(())
-}
-
-impl Debug for SSHProtocolServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SSHProtocolServer")
-    }
 }

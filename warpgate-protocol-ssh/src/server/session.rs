@@ -253,8 +253,8 @@ impl ServerSession {
                     _ => {}
                 }
             }
-            RCEvent::ConnectionError => {
-                self.emit_service_message("Connection failed").await;
+            RCEvent::ConnectionError(error) => {
+                self.emit_service_message(&format!("Connection failed: {}", error)).await;
             }
             RCEvent::AuthError => {
                 self.emit_service_message("Authentication failed").await;

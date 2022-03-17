@@ -11,6 +11,10 @@ fn _default_port() -> u16 {
     22
 }
 
+fn _default_username() -> String {
+    "root".to_owned()
+}
+
 fn _default_recordings_path() -> String {
     "./recordings".to_owned()
 }
@@ -30,6 +34,8 @@ pub struct Target {
     pub host: String,
     #[serde(default = "_default_port")]
     pub port: u16,
+    #[serde(default = "_default_username")]
+    pub username: String,
     pub roles: Vec<String>,
 }
 
