@@ -1,19 +1,24 @@
 targets:
 - name: qa233
-  host: 192.168.78.233
   roles: [qa, admin]
+  ssh:
+    host: 192.168.78.233
 
 - name: qa221
-  host: 192.168.76.221
   roles: [qa, admin]
+  ssh:
+    host: 192.168.76.221
 
-- name: bad
-  host: 192.168.1.1
-  roles: [admin]
+- name: ai
+  roles: [qa, admin]
+  ssh:
+    username: syslink
+    host: 192.168.72.29
 
 - name: localhost
-  host: localhost
   roles: [admin]
+  ssh:
+    host: localhost
 
 users:
 - username: user
@@ -36,7 +41,7 @@ roles:
 - name: admin
 
 recordings:
-  enable: false
+  enable: true
   path: data/recordings
 
 database_url: sqlite:data/db

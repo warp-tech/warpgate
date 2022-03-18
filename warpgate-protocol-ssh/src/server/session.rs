@@ -13,7 +13,7 @@ use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -25,14 +25,14 @@ use warpgate_common::recordings::{
 };
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
-    WarpgateServerHandle,
+    TargetSSHOptions, WarpgateServerHandle,
 };
 
 #[derive(Clone)]
 enum TargetSelection {
     None,
     NotFound(String),
-    Found(Target),
+    Found(Target, TargetSSHOptions),
 }
 
 pub struct ServerSession {
@@ -71,7 +71,11 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
         let id = server_handle.id();
-        let mut rc_handles = RemoteClient::create(id, session_debug_tag(&id, &remote_address));
+        let mut rc_handles = RemoteClient::create(
+            id,
+            session_debug_tag(&id, &remote_address),
+            services.clone(),
+        );
 
         let this = Self {
             id: server_handle.id(),
@@ -195,32 +199,12 @@ impl ServerSession {
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {}", name);
             }
-            TargetSelection::Found(snapshot) => {
+            TargetSelection::Found(target, ssh_options) => {
                 if self.rc_state == RCState::NotInitialized {
                     self.rc_state = RCState::Connecting;
-                    let address_str = format!("{}:{}", snapshot.host, snapshot.port);
-                    match address_str
-                        .to_socket_addrs()
-                        .map_err(|e| anyhow::anyhow!("{}", e))
-                        .and_then(|mut x| {
-                            x.next()
-                                .ok_or_else(|| anyhow::anyhow!("Cannot resolve address"))
-                        }) {
-                        Ok(address) => {
-                            self.rc_tx.send(RCCommand::Connect(address))?;
-                            self.emit_service_message(&format!("Connecting to {address}"))
-                                .await;
-                        }
-                        Err(error) => {
-                            error!(session=?self, ?error, "Cannot find target address");
-                            self.emit_service_message(&format!(
-                                "Could not resolve target address {address_str}"
-                            ))
-                            .await;
-                            self.disconnect_server().await;
-                            return Err(error);
-                        }
-                    }
+                    self.rc_tx.send(RCCommand::Connect(ssh_options))?;
+                    self.emit_service_message(&format!("Connecting to {}", target.name))
+                        .await;
                 }
             }
         }
@@ -254,7 +238,8 @@ impl ServerSession {
                 }
             }
             RCEvent::ConnectionError(error) => {
-                self.emit_service_message(&format!("Connection failed: {}", error)).await;
+                self.emit_service_message(&format!("Connection failed: {}", error))
+                    .await;
             }
             RCEvent::AuthError => {
                 self.emit_service_message("Authentication failed").await;
@@ -670,6 +655,8 @@ impl ServerSession {
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
         info!(session=?self, "Authenticated");
 
+        let _ = self.server_handle.set_username(username.to_string()).await;
+
         let target = {
             self.services
                 .config
@@ -679,18 +666,18 @@ impl ServerSession {
                 .targets
                 .iter()
                 .find(|x| x.name == target_name)
-                .map(Target::clone)
+                .filter(|x| x.ssh.is_some())
+                .map(|x| (x.clone(), x.ssh.clone().unwrap()))
         };
 
-        let _ = self.server_handle.set_username(username.to_string()).await;
-        let Some(target) = target else {
+        let Some((target, ssh_options)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
             info!(session=?self, "Selected target not found");
             return;
         };
 
         let _ = self.server_handle.set_target(&target).await;
-        self.target = TargetSelection::Found(target);
+        self.target = TargetSelection::Found(target, ssh_options);
     }
 
     pub async fn _channel_close(&mut self, channel: ServerChannelId) {

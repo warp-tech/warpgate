@@ -2,6 +2,7 @@
 mod client;
 mod common;
 mod compat;
+mod known_hosts;
 mod server;
 use crate::client::{RCCommand, RemoteClient};
 use anyhow::Result;
@@ -10,7 +11,7 @@ pub use client::*;
 pub use common::*;
 pub use server::run_server;
 use std::fmt::Debug;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use uuid::Uuid;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 
@@ -34,14 +35,14 @@ impl ProtocolServer for SSHProtocolServer {
     }
 
     async fn test_target(self, target: Target) -> Result<(), TargetTestError> {
-        let mut handles = RemoteClient::create(Uuid::new_v4(), "test".to_owned());
-        let address_str = format!("{}:{}", target.host, target.port);
-        let _ = handles.command_tx.send(RCCommand::Connect(
-            address_str
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| TargetTestError::Unreachable)?
-        ));
+        let Some(ssh_options) = target.ssh else {
+            return Err(TargetTestError::Misconfigured("Not an SSH target".to_owned()));
+        };
+
+        let mut handles =
+            RemoteClient::create(Uuid::new_v4(), "test".to_owned(), self.services.clone());
+
+        let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
 
         loop {
             let Some(event) = handles.event_rx.recv().await else {
@@ -54,17 +55,17 @@ impl ProtocolServer for SSHProtocolServer {
                 RCEvent::AuthError => {
                     return Err(TargetTestError::AuthenticationError);
                 }
-                RCEvent::State(state) => {
-                    match state {
-                        RCState::Connected => {
-                            return Ok(());
-                        }
-                        RCState::Disconnected => {
-                            return Err(TargetTestError::Unreachable);
-                        }
-                        _ => {}
+                RCEvent::State(state) => match state {
+                    RCState::Connected => {
+                        return Ok(());
                     }
-                }
+                    RCState::Disconnected => {
+                        return Err(TargetTestError::ConnectionError(
+                            "Connection failed".to_owned(),
+                        ));
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }

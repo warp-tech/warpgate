@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use poem_openapi::Object;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::Secret;
@@ -27,16 +28,22 @@ fn _default_web_admin_listen() -> String {
     "127.0.0.1:8888".to_owned()
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 #[allow(unused)]
-pub struct Target {
-    pub name: String,
+pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_port")]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[allow(unused)]
+pub struct Target {
+    pub name: String,
     pub roles: Vec<String>,
+    pub ssh: Option<TargetSSHOptions>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]

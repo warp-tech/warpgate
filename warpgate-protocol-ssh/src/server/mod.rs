@@ -46,20 +46,16 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             .register_session(&session_state)
             .await?;
 
-        let session = match ServerSession::new(
-            remote_address,
-            &services,
-            server_handle,
-            session_handle_rx,
-        )
-        .await
-        {
-            Ok(session) => session,
-            Err(error) => {
-                error!(%error, "Error setting up session");
-                continue;
-            }
-        };
+        let session =
+            match ServerSession::new(remote_address, &services, server_handle, session_handle_rx)
+                .await
+            {
+                Ok(session) => session,
+                Err(error) => {
+                    error!(%error, "Error setting up session");
+                    continue;
+                }
+            };
 
         let id = { session.lock().await.id };
 

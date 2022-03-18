@@ -1,29 +1,27 @@
+mod channel_direct_tcpip;
+mod channel_session;
+mod handler;
+use self::handler::ClientHandlerEvent;
+use super::{ChannelOperation, DirectTCPIPParams, ServerChannelId};
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use channel_direct_tcpip::DirectTCPIPChannel;
+use channel_session::SessionChannel;
 use futures::future::{Fuse, OptionFuture};
 use futures::FutureExt;
+use handler::ClientHandler;
 use russh::client::Handle;
 use russh::Sig;
+use russh_keys::load_secret_key;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
-use warpgate_common::SessionId;
-
-mod channel_direct_tcpip;
-mod channel_session;
-mod handler;
-use channel_direct_tcpip::DirectTCPIPChannel;
-use channel_session::SessionChannel;
-use handler::ClientHandler;
-
-use self::handler::ClientHandlerEvent;
-
-use super::{ChannelOperation, DirectTCPIPParams, ServerChannelId};
+use warpgate_common::{Services, SessionId, TargetSSHOptions};
 
 #[derive(Clone, Debug)]
 pub enum RCEvent {
@@ -52,7 +50,7 @@ pub enum RCEvent {
 
 #[derive(Debug)]
 pub enum RCCommand {
-    Connect(SocketAddr),
+    Connect(TargetSSHOptions),
     Channel(ServerChannelId, ChannelOperation),
     Disconnect,
 }
@@ -77,6 +75,7 @@ pub struct RemoteClient {
     abort_rx: Option<Fuse<oneshot::Receiver<()>>>,
     child_tasks: Vec<JoinHandle<Result<()>>>,
     session_tag: String,
+    services: Services,
 }
 
 pub struct RemoteClientHandles {
@@ -86,7 +85,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId, session_tag: String) -> RemoteClientHandles {
+    pub fn create(id: SessionId, session_tag: String, services: Services) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = oneshot::channel();
@@ -103,6 +102,7 @@ impl RemoteClient {
             abort_rx: Some(abort_rx.fuse()),
             child_tasks: vec![],
             session_tag,
+            services,
         };
         this.start();
         RemoteClientHandles {
@@ -179,7 +179,7 @@ impl RemoteClient {
                     tokio::select! {
                         cmd = self.rx.recv() => {
                             match cmd {
-                                Some(RCCommand::Connect(address)) => match self.connect(address).await {
+                                Some(RCCommand::Connect(options)) => match self.connect(options).await {
                                     Ok(_) => {
                                         self.set_state(RCState::Connected)?;
                                         let ops = self.pending_ops.drain(..).collect::<Vec<(ServerChannelId, ChannelOperation)>>();
@@ -235,19 +235,41 @@ impl RemoteClient {
         });
     }
 
-    async fn connect(&mut self, address: SocketAddr) -> Result<()> {
-        info!(?address, session=%self.session_tag, "Connecting");
-        // let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
-        // .with_context(|| "load_secret_key()")?;
-        // let client_key = Arc::new(client_key);
+    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<()> {
+        let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
+        let address = match address_str
+            .to_socket_addrs()
+            .map_err(|e| anyhow::anyhow!("{}", e))
+            .and_then(|mut x| {
+                x.next()
+                    .ok_or_else(|| anyhow::anyhow!("Cannot resolve address"))
+            }) {
+            Ok(address) => address,
+            Err(error) => {
+                let _ = self
+                    .tx
+                    .send(RCEvent::ConnectionError(format!("{:?}", error)));
+                error!(?error, "Cannot resolve target address");
+                self.set_disconnected();
+                return Err(error);
+            }
+        };
+
+        info!(?address, username=?ssh_options.username, session=%self.session_tag, "Connecting");
+        let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
+            .with_context(|| "load_secret_key()")?;
+        let client_key = Arc::new(client_key);
         let config = russh::client::Config {
             ..Default::default()
         };
         let config = Arc::new(config);
-        // tokio::time::sleep(Duration::from_millis(5000)).await;
 
         let (tx, rx) = unbounded_channel();
-        let handler = ClientHandler { tx };
+        let handler = ClientHandler {
+            ssh_options: ssh_options.clone(),
+            tx,
+            services: self.services.clone(),
+        };
         self.client_handler_rx = Some(rx);
 
         // self.tx.send(RCEvent::Output(Bytes::from(
@@ -272,8 +294,8 @@ impl RemoteClient {
                 let mut session = session.with_context(|| "connect()")?;
 
                 let auth_result = session
-                    .authenticate_password("root", "syslink")
-                    // .authenticate_publickey("root", client_key)
+                    // .authenticate_password(ssh_options.username, "syslink")
+                    .authenticate_publickey(ssh_options.username, client_key)
                     .await
                     .with_context(|| "authenticate()")?;
                 if !auth_result {

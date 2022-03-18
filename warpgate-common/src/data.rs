@@ -10,7 +10,7 @@ use crate::{SessionId, Target, User};
 pub struct SessionSnapshot {
     pub id: SessionId,
     pub username: Option<String>,
-    pub target: Option<TargetSnapshot>,
+    pub target: Option<Target>,
     pub started: DateTime<Utc>,
     pub ended: Option<DateTime<Utc>>,
     pub ticket_id: Option<Uuid>,
@@ -27,23 +27,6 @@ impl From<Session::Model> for SessionSnapshot {
             started: model.started,
             ended: model.ended,
             ticket_id: model.ticket_id,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Object)]
-pub struct TargetSnapshot {
-    name: String,
-    host: String,
-    port: u16,
-}
-
-impl TargetSnapshot {
-    pub fn new(target: &Target) -> Self {
-        Self {
-            name: target.name.clone(),
-            host: target.host.clone(),
-            port: target.port,
         }
     }
 }

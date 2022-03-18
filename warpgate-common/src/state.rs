@@ -11,7 +11,7 @@ use warpgate_db_entities::Session;
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
-    pub db: Arc<Mutex<DatabaseConnection>>,
+    db: Arc<Mutex<DatabaseConnection>>,
     this: Weak<Mutex<Self>>,
 }
 
@@ -51,7 +51,12 @@ impl State {
         }
 
         match self.this.upgrade() {
-            Some(this) => Ok(WarpgateServerHandle::new(id, this, session.clone())),
+            Some(this) => Ok(WarpgateServerHandle::new(
+                id,
+                self.db.clone(),
+                this,
+                session.clone(),
+            )),
             None => anyhow::bail!("State is being detroyed"),
         }
     }

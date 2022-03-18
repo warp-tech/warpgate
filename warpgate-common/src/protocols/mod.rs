@@ -1,9 +1,9 @@
 mod handle;
+use crate::Target;
 use anyhow::Result;
 use async_trait::async_trait;
-use std::net::SocketAddr;
-use crate::Target;
 pub use handle::{SessionHandle, WarpgateServerHandle};
+use std::net::SocketAddr;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {
@@ -16,7 +16,7 @@ pub enum TargetTestError {
     #[error("misconfigured")]
     Misconfigured(String),
     #[error("I/O")]
-    Io(#[from] std::io::Error)
+    Io(#[from] std::io::Error),
 }
 
 #[async_trait]

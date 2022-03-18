@@ -15,7 +15,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use warpgate_common::hash::hash_password;
-use warpgate_common::{ProtocolServer, Services, WarpgateConfig, TargetTestError, Target};
+use warpgate_common::{ProtocolServer, Services, Target, TargetTestError, WarpgateConfig};
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 mod config;
@@ -183,7 +183,7 @@ async fn cmd_test_target(config: WarpgateConfig, target_name: &String) -> Result
         .iter()
         .find(|x| &x.name == target_name)
         .map(Target::clone) else {
-        error!(%target_name, "Target not found");
+        error!("Target not found: {}", target_name);
         return Ok(());
     };
 

@@ -4,14 +4,14 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{ConfigProvider, TargetSnapshot};
+use warpgate_common::{ConfigProvider, Target};
 
 pub struct Api;
 
 #[derive(ApiResponse)]
 enum GetTargetsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<TargetSnapshot>>),
+    Ok(Json<Vec<Target>>),
 }
 
 #[OpenApi]

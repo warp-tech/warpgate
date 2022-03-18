@@ -14,6 +14,8 @@ russh-keys = {version = "0.22.0-beta.1", features = ["openssl"]}
 time = "0.3"
 tokio = {version = "1.17", features = ["tracing", "signal"]}
 tracing = "0.1"
+sea-orm = {version = "^0.6", features = ["runtime-tokio-native-tls"], default-features = false}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 async-trait = "0.1"
 uuid = {version = "0.8", features = ["v4"]}
+warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}

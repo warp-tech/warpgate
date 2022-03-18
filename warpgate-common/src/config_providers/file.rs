@@ -1,8 +1,7 @@
 use super::ConfigProvider;
 use crate::hash::verify_password_hash;
 use crate::{
-    AuthCredential, AuthResult, TargetSnapshot, User, UserAuthCredential, UserSnapshot,
-    WarpgateConfig,
+    AuthCredential, AuthResult, Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -54,7 +53,7 @@ impl ConfigProvider for FileConfigProvider {
             .collect::<Vec<_>>())
     }
 
-    async fn list_targets(&mut self) -> Result<Vec<TargetSnapshot>> {
+    async fn list_targets(&mut self) -> Result<Vec<Target>> {
         Ok(self
             .config
             .lock()
@@ -62,7 +61,7 @@ impl ConfigProvider for FileConfigProvider {
             .store
             .targets
             .iter()
-            .map(TargetSnapshot::new)
+            .map(|x| x.to_owned())
             .collect::<Vec<_>>())
     }
 

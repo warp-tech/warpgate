@@ -1,5 +1,5 @@
 mod file;
-use crate::{Secret, TargetSnapshot, TicketSnapshot, UserSnapshot};
+use crate::{Secret, Target, TicketSnapshot, UserSnapshot};
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -28,7 +28,7 @@ pub enum AuthCredential {
 pub trait ConfigProvider {
     async fn list_users(&mut self) -> Result<Vec<UserSnapshot>>;
 
-    async fn list_targets(&mut self) -> Result<Vec<TargetSnapshot>>;
+    async fn list_targets(&mut self) -> Result<Vec<Target>>;
 
     async fn authorize(
         &mut self,
