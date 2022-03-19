@@ -87,6 +87,7 @@ impl ServerSession {
         );
 
         let (hub, event_sender) = EventHub::setup();
+        let mut event_sub = hub.subscribe(|_| true).await;
         let this = Self {
             id: server_handle.id(),
             session_handle: None,
@@ -104,7 +105,7 @@ impl ServerSession {
             traffic_connection_recorders: HashMap::new(),
             credentials: vec![],
             hub,
-            event_sender,
+            event_sender: event_sender.clone(),
         };
 
         info!(session=?this, "New connection");
@@ -137,25 +138,45 @@ impl ServerSession {
 
         let name = format!("SSH {} client events", id);
         tokio::task::Builder::new().name(&name).spawn({
+            let sender = event_sender.clone();
+            let session_debug_tag = session_debug_tag.clone();
+            async move {
+                loop {
+                    if let Some(e) = rc_handles.event_rx.recv().await {
+                        if event_sender.send_once(Event::Client(e)).await.is_err() {
+                            break
+                        }
+                    } else {
+                        break
+                    }
+                }
+                debug!(session=%session_debug_tag, "No more events from RC");
+            }
+        });
+
+
+        let name = format!("SSH {} events", id);
+        tokio::task::Builder::new().name(&name).spawn({
             let this = Arc::downgrade(&this);
             async move {
                 loop {
-                    let Some(e) = rc_handles.event_rx.recv().await else {
-                        break
-                    };
-                    debug!(session=%session_debug_tag, event=?e, "Event");
-                    let Some(this) = this.upgrade() else {
-                        break;
-                    };
-                    let this = &mut this.lock().await;
-                    match e {
-                        RCEvent::Done => break,
-                        e => {
+                    match event_sub.recv().await {
+                        Some(Event::Client(RCEvent::Done)) => {
+                            break
+                        }
+                        Some(Event::Client(e)) => {
+                            debug!(session=%session_debug_tag, event=?e, "Event");
+                            let Some(this) = this.upgrade() else {
+                                break;
+                            };
+                            let this = &mut this.lock().await;
                             if let Err(err) = this.handle_remote_event(e).await {
                                 error!(session=%session_debug_tag, "Event handler error: {:?}", err);
                                 break;
                             }
-                        },
+                        }
+                        None => break,
+                        _ => ()
                     }
                 }
                 debug!(session=%session_debug_tag, "No more events from RC");

@@ -3,9 +3,16 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard};
 
-#[derive(Clone)]
 pub struct EventSender<E> {
     subscriptions: SubscriptionStore<E>,
+}
+
+impl<E> Clone for EventSender<E> {
+    fn clone(&self) -> Self {
+        EventSender {
+            subscriptions: self.subscriptions.clone(),
+        }
+    }
 }
 
 impl<E> EventSender<E> {
@@ -76,7 +83,7 @@ impl<'h, E: Send> EventHub<E> {
     }
 
     pub async fn subscribe<F: Fn(&E) -> bool + Send + 'static>(
-        &'h mut self,
+        &'h self,
         filter: F,
     ) -> EventSubscription<E> {
         let (sender, receiver) = unbounded_channel();
