@@ -106,22 +106,17 @@ impl ServerSession {
             let this = Arc::downgrade(&this);
             async move {
                 loop {
-                    let state = session_handle_rx.recv().await;
-                    match state {
-                        Some(c) => {
-                            debug!(session=%session_debug_tag, command=?c, "Session control");
-                            let Some(this) = this.upgrade() else {
-                                break;
-                            };
-                            let this = &mut this.lock().await;
-                            if let Err(err) = this.handle_session_control(c).await {
-                                error!(session=%session_debug_tag, "Event handler error: {:?}", err);
-                                break;
-                            }
-                        }
-                        None => {
-                            break;
-                        }
+                    let Some(command) = session_handle_rx.recv().await else {
+                        break;
+                    };
+                    debug!(session=%session_debug_tag, ?command, "Session control");
+                    let Some(this) = this.upgrade() else {
+                        break;
+                    };
+                    let this = &mut this.lock().await;
+                    if let Err(err) = this.handle_session_control(command).await {
+                        error!(session=%session_debug_tag, "Event handler error: {:?}", err);
+                        break;
                     }
                 }
                 debug!(session=%session_debug_tag, "No more session control commands");
@@ -133,27 +128,22 @@ impl ServerSession {
             let this = Arc::downgrade(&this);
             async move {
                 loop {
-                    let state = rc_handles.event_rx.recv().await;
-                    match state {
-                        Some(e) => {
-                            debug!(session=%session_debug_tag, event=?e, "Event");
-                            let Some(this) = this.upgrade() else {
+                    let Some(e) = rc_handles.event_rx.recv().await else {
+                        break
+                    };
+                    debug!(session=%session_debug_tag, event=?e, "Event");
+                    let Some(this) = this.upgrade() else {
+                        break;
+                    };
+                    let this = &mut this.lock().await;
+                    match e {
+                        RCEvent::Done => break,
+                        e => {
+                            if let Err(err) = this.handle_remote_event(e).await {
+                                error!(session=%session_debug_tag, "Event handler error: {:?}", err);
                                 break;
-                            };
-                            let this = &mut this.lock().await;
-                            match e {
-                                RCEvent::Done => break,
-                                e => {
-                                    if let Err(err) = this.handle_remote_event(e).await {
-                                        error!(session=%session_debug_tag, "Event handler error: {:?}", err);
-                                        break;
-                                    }
-                                },
                             }
-                        }
-                        None => {
-                            break;
-                        }
+                        },
                     }
                 }
                 debug!(session=%session_debug_tag, "No more events from RC");
@@ -169,7 +159,7 @@ impl ServerSession {
             format!(
                 "{} {}\r\n",
                 Colour::Black.on(Colour::Blue).bold().paint(" warpgate "),
-                msg,
+                msg.replace("\n", "\r\n"),
             )
             .as_bytes(),
         )
@@ -237,10 +227,36 @@ impl ServerSession {
                     _ => {}
                 }
             }
-            RCEvent::ConnectionError(error) => {
-                self.emit_service_message(&format!("Connection failed: {}", error))
+            RCEvent::ConnectionError(error) => match error {
+                ConnectionError::HostKeyMismatch {
+                    received_key_type,
+                    received_key_base64,
+                    known_key_type,
+                    known_key_base64,
+                } => {
+                    let msg = format!(
+                        concat!(
+                            "Host key doesn't match the stored one.\n",
+                            "Stored key   ({}): {}\n",
+                            "Received key ({}): {}",
+                        ),
+                        known_key_type, known_key_base64, received_key_type, received_key_base64
+                    );
+                    self.emit_service_message(&msg).await;
+                    self.emit_service_message(
+                        "If you know that the key is correct (e.g. it has been changed),",
+                    )
                     .await;
-            }
+                    self.emit_service_message(
+                        "you can remove the old key in the Warpgate management UI and try again",
+                    )
+                    .await;
+                }
+                error => {
+                    self.emit_service_message(&format!("Connection failed: {}", error))
+                        .await;
+                }
+            },
             RCEvent::AuthError => {
                 self.emit_service_message("Authentication failed").await;
             }
@@ -339,13 +355,31 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::HostKeyReceived(key) => {
-                todo!()
+                self.emit_service_message(&format!(
+                    "Host key ({}): {}",
+                    key.name(),
+                    key.public_key_base64()
+                ))
+                .await;
             }
             RCEvent::HostKeyUnknown(key, reply) => {
-                todo!()
+                self.handle_unknown_host_key(key, reply).await?;
             }
         }
         Ok(())
+    }
+
+    async fn handle_unknown_host_key(
+        &mut self,
+        key: PublicKey,
+        reply: oneshot::Sender<bool>,
+    ) -> Result<()> {
+        //self.emit_service_message(&format!("Host key ({}): {}", key.name(), key.public_key_base64())).await;
+        self.emit_service_message(&format!(
+            "There is no trusted {} key for this host.",
+            key.name()
+        ))
+        .await;
     }
 
     async fn maybe_with_session<'a, FN, FT, R>(&'a mut self, f: FN) -> Result<R>

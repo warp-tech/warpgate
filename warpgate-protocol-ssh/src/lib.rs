@@ -65,8 +65,8 @@ impl ProtocolServer for SSHProtocolServer {
                             received_key_type, received_key_base64
                         );
                         println!("Host key doesn't match the stored one.");
-                        println!("If you know that the key is correct (e.g. it was changed),");
-                        println!("you can remove the old key in the admin UI and try again");
+                        println!("If you know that the key is correct (e.g. it has been changed),");
+                        println!("you can remove the old key in the Warpgate management UI and try again");
                     }
                     return Err(TargetTestError::ConnectionError(format!("{:?}", err)));
                 }
