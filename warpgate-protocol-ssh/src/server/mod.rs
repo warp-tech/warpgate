@@ -1,11 +1,11 @@
 mod russh_handler;
 mod session;
 mod session_handle;
+use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
 use anyhow::Result;
 use russh::MethodSet;
 pub use russh_handler::ServerHandler;
-use russh_keys::load_secret_key;
 pub use session::ServerSession;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -17,21 +17,22 @@ use tracing::*;
 use warpgate_common::{Services, SessionState};
 
 pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
-    let mut config = russh::server::Config {
-        auth_rejection_time: std::time::Duration::from_secs(1),
-        methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
-        ..Default::default()
+    let russh_config = {
+        let config = services.config.lock().await;
+        russh::server::Config {
+            auth_rejection_time: std::time::Duration::from_secs(1),
+            methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD,
+            keys: load_host_keys(&config)?,
+            ..Default::default()
+        }
     };
-    config.keys.push(load_secret_key("host_key", None).unwrap());
-    config
-        .keys
-        .push(load_secret_key("/Users/eugene/.ssh/id_rsa", None).unwrap());
-    let config = Arc::new(config);
+
+    let russh_config = Arc::new(russh_config);
 
     let socket = TcpListener::bind(&address).await?;
     info!(?address, "Listening");
     while let Ok((socket, remote_address)) = socket.accept().await {
-        let config = config.clone();
+        let russh_config = russh_config.clone();
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
         let session_state = Arc::new(Mutex::new(SessionState::new(
@@ -63,7 +64,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} protocol"))
-            .spawn(_run_stream(config, socket, handler));
+            .spawn(_run_stream(russh_config, socket, handler));
     }
     Ok(())
 }

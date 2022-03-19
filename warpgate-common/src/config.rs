@@ -75,10 +75,17 @@ fn _default_ssh_client_key() -> String {
     "./client_key".to_owned()
 }
 
+fn _default_ssh_keys_path() -> String {
+    "./keys".to_owned()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[allow(unused)]
 pub struct SSHConfig {
     pub listen: String,
+
+    #[serde(default = "_default_ssh_keys_path")]
+    pub keys: String,
 
     #[serde(default = "_default_ssh_client_key")]
     pub client_key: String,

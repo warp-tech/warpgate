@@ -86,7 +86,7 @@ async fn cmd_run(config: WarpgateConfig) -> Result<()> {
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
     protocol_futures.push(
-        SSHProtocolServer::new(&services).run(
+        SSHProtocolServer::new(&services).await?.run(
             config
                 .store
                 .ssh
@@ -189,7 +189,7 @@ async fn cmd_test_target(config: WarpgateConfig, target_name: &String) -> Result
 
     let services = Services::new(config.clone()).await?;
 
-    let s = warpgate_protocol_ssh::SSHProtocolServer::new(&services);
+    let s = warpgate_protocol_ssh::SSHProtocolServer::new(&services).await?;
     match s.test_target(target).await {
         Err(TargetTestError::AuthenticationError) => {
             error!("Authentication failed");

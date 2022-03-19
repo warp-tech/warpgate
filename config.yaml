@@ -48,6 +48,7 @@ database_url: sqlite:data/db
 
 ssh:
   listen: 0.0.0.0:2222
+  keys: data/keys
 
 web_admin:
   enable: true

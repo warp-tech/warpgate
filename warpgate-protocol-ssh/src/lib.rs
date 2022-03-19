@@ -1,8 +1,10 @@
 #![feature(type_alias_impl_trait, let_else)]
 mod client;
 mod common;
+use keys::generate_host_keys;
 use russh_keys::PublicKeyBase64;
 mod compat;
+mod keys;
 mod known_hosts;
 mod server;
 use crate::client::{RCCommand, RemoteClient};
@@ -22,10 +24,12 @@ pub struct SSHProtocolServer {
 }
 
 impl SSHProtocolServer {
-    pub fn new(services: &Services) -> Self {
-        SSHProtocolServer {
+    pub async fn new(services: &Services) -> Result<Self> {
+        let config = services.config.lock().await;
+        generate_host_keys(&config)?;
+        Ok(SSHProtocolServer {
             services: services.clone(),
-        }
+        })
     }
 }
 
