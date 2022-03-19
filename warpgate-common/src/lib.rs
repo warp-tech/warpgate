@@ -1,10 +1,11 @@
-#![feature(let_else)]
+#![feature(let_else, drain_filter)]
 pub mod auth;
 mod config;
 mod config_providers;
 pub mod consts;
 mod data;
 mod db;
+pub mod eventhub;
 pub mod hash;
 pub mod helpers;
 mod protocols;

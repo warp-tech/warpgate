@@ -1,30 +1,51 @@
 use std::sync::Arc;
-use tokio::sync::broadcast::error::SendError;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 #[derive(Clone)]
-pub struct EventSender<'h, E: Clone> {
-    subscriptions: SubscriptionStore<'h, E>,
+pub struct EventSender<E> {
+    subscriptions: SubscriptionStore<E>,
 }
 
-impl<'h, E: Clone + 'h> EventSender<'h, E> {
-    pub async fn send(&'h self, event: E) -> Result<(), SendError<E>> {
+impl<E> EventSender<E> {
+    async fn cleanup_subscriptions<'a>(&'a self) -> MutexGuard<'a, SubscriptionStoreInner<E>> {
         let mut subscriptions = self.subscriptions.lock().await;
         subscriptions
-            .drain_filter(|(ref f, ref s)| {
-                if f(&event) {
-                    s.send(event.clone()).map(|_| false).unwrap_or(true)
-                } else {
-                    false
-                }
-            })
+            .drain_filter(|(_, ref s)| s.is_closed())
             .for_each(drop);
+        subscriptions
+    }
+}
+
+impl<'h, E: Clone + 'h> EventSender<E> {
+    pub async fn send_all(&'h self, event: E) -> Result<(), SendError<E>> {
+        let mut subscriptions = self.cleanup_subscriptions().await;
+
+        for (ref f, ref mut s) in subscriptions.iter_mut().rev() {
+            if f(&event) {
+                let _ = s.send(event.clone());
+            }
+        }
         if subscriptions.is_empty() {
             Err(SendError(event))
         } else {
             Ok(())
         }
+    }
+}
+
+impl<'h, E: 'h> EventSender<E> {
+    pub async fn send_once(&'h self, event: E) -> Result<(), SendError<E>> {
+        let mut subscriptions = self.cleanup_subscriptions().await;
+
+        for (ref f, ref mut s) in subscriptions.iter_mut().rev() {
+            if f(&event) {
+                return s.send(event);
+            }
+        }
+
+        Err(SendError(event))
     }
 }
 
@@ -36,14 +57,15 @@ impl<E> EventSubscription<E> {
     }
 }
 
-type SubscriptionStore<'h, E> = Arc<Mutex<Vec<(Box<dyn Fn(&E) -> bool + 'h>, UnboundedSender<E>)>>>;
+type SubscriptionStoreInner<E> = Vec<(Box<dyn Fn(&E) -> bool + Send>, UnboundedSender<E>)>;
+type SubscriptionStore<E> = Arc<Mutex<SubscriptionStoreInner<E>>>;
 
-pub struct EventHub<'h, E: Clone + Send> {
-    subscriptions: SubscriptionStore<'h, E>,
+pub struct EventHub<E: Send> {
+    subscriptions: SubscriptionStore<E>,
 }
 
-impl<'h, E: Clone + Send> EventHub<'h, E> {
-    pub fn setup() -> (Self, EventSender<'h, E>) {
+impl<'h, E: Send> EventHub<E> {
+    pub fn setup() -> (Self, EventSender<E>) {
         let subscriptions = Arc::new(Mutex::new(vec![]));
         (
             Self {
@@ -53,8 +75,8 @@ impl<'h, E: Clone + Send> EventHub<'h, E> {
         )
     }
 
-    pub async fn subscribe<F: Fn(&E) -> bool + Send + 'h>(
-        &mut self,
+    pub async fn subscribe<F: Fn(&E) -> bool + Send + 'static>(
+        &'h mut self,
         filter: F,
     ) -> EventSubscription<E> {
         let (sender, receiver) = unbounded_channel();

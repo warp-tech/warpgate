@@ -2,7 +2,7 @@ use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::{
     ChannelOperation, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient,
-    ServerChannelId,
+    ServerChannelId, ConnectionError,
 };
 use ansi_term::Colour;
 use anyhow::Result;
@@ -11,13 +11,14 @@ use russh::server::Session;
 use russh::{CryptoVec, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
+use warpgate_common::eventhub::{EventHub, EventSender};
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use tracing::*;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::recordings::{
@@ -33,6 +34,12 @@ enum TargetSelection {
     None,
     NotFound(String),
     Found(Target, TargetSSHOptions),
+}
+
+#[derive(Debug)]
+enum Event {
+    ConsoleInput(Bytes),
+    Client(RCEvent),
 }
 
 pub struct ServerSession {
@@ -51,6 +58,8 @@ pub struct ServerSession {
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
     traffic_connection_recorders: HashMap<ServerChannelId, ConnectionRecorder>,
     credentials: Vec<AuthCredential>,
+    hub: EventHub<Event>,
+    event_sender: EventSender<Event>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -77,6 +86,7 @@ impl ServerSession {
             services.clone(),
         );
 
+        let (hub, event_sender) = EventHub::setup();
         let this = Self {
             id: server_handle.id(),
             session_handle: None,
@@ -93,6 +103,8 @@ impl ServerSession {
             traffic_recorders: HashMap::new(),
             traffic_connection_recorders: HashMap::new(),
             credentials: vec![],
+            hub,
+            event_sender,
         };
 
         info!(session=?this, "New connection");
@@ -380,6 +392,22 @@ impl ServerSession {
             key.name()
         ))
         .await;
+
+        let mut sub = self.hub.subscribe(|e| matches!(e, Event::ConsoleInput(_))).await;
+        tokio::spawn(async move {
+            loop {
+                match sub.recv().await {
+                    Some(Event::ConsoleInput(data)) => {
+                        info!(?data, "Got input");
+                    }
+                    None => break,
+                    _ => (),
+                }
+            }
+            reply.send(false);
+        });
+
+        Ok(())
     }
 
     async fn maybe_with_session<'a, FN, FT, R>(&'a mut self, f: FN) -> Result<R>
@@ -573,6 +601,10 @@ impl ServerSession {
                 error!(session=?self, %channel, ?error, "Failed to record traffic data");
                 self.traffic_connection_recorders.remove(&channel);
             }
+        }
+
+        if self.pty_channels.contains(&channel) {
+            let _ = self.event_sender.send_once(Event::ConsoleInput(data.clone())).await;
         }
 
         self.send_command(RCCommand::Channel(channel, ChannelOperation::Data(data)));
