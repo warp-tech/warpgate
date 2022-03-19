@@ -25,12 +25,11 @@
     {:else}
         <div class="list-group list-group-flush">
             {#if $sessions }
-            {#each $sessions as session, i}
+            {#each $sessions as session}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/sessions/{session.id}"
-                    use:link
-                    class:active={i === 0}>
+                    use:link>
                     <div class="main">
                         <div class:text-success={!session.ended}>
                             <Fa icon={faCircle} />
@@ -48,7 +47,7 @@
 
                         {#if session.target }
                         <div>
-                            Target: <code>{session.target.host}:{session.target.port}</code>
+                            Target: <code>{session.target.ssh?.host}:{session.target.ssh?.port}</code>
                         </div>
                         {/if}
                     </div>

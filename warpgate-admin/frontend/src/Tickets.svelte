@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, TicketSnapshot } from 'lib/api'
 import { link } from 'svelte-spa-router'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 
 let error: Error|undefined
 let tickets: TicketSnapshot[]|undefined

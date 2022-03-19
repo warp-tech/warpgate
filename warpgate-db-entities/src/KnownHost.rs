@@ -1,8 +1,11 @@
+use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
+use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Object, Serialize)]
 #[sea_orm(table_name = "known_hosts")]
+#[oai(rename = "SSHKnownHost")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,

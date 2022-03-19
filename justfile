@@ -9,5 +9,8 @@ clippy *ARGS:
 watch:
     cd warpgate-admin/frontend/ && yarn watch
 
+svelte-check:
+    cd warpgate-admin/frontend/ && yarn run check
+
 openapi:
     cd warpgate-admin/frontend/ && yarn openapi-schema && yarn openapi-client

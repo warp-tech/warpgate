@@ -34,7 +34,7 @@ load().catch(e => {
 
 {#if recordings }
 <div class="list-group list-group-flush">
-    {#each recordings as recording, i}
+    {#each recordings as recording}
         <a
             class="list-group-item list-group-item-action"
             href="/recordings/{recording.id}"

@@ -165,7 +165,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TargetSnapshot"
+                    "$ref": "#/components/schemas/Target"
                   }
                 }
               }
@@ -254,6 +254,51 @@
         },
         "operationId": "delete_ticket"
       }
+    },
+    "/ssh/known-hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_ssh_known_hosts"
+      }
+    },
+    "/ssh/known-hosts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_ssh_known_host"
+      }
     }
   },
   "components": {
@@ -314,6 +359,35 @@
           "Traffic"
         ]
       },
+      "SSHKnownHost": {
+        "type": "object",
+        "required": [
+          "id",
+          "host",
+          "port",
+          "key_type",
+          "key_base64"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "key_type": {
+            "type": "string"
+          },
+          "key_base64": {
+            "type": "string"
+          }
+        }
+      },
       "SessionSnapshot": {
         "type": "object",
         "required": [
@@ -329,7 +403,7 @@
             "type": "string"
           },
           "target": {
-            "$ref": "#/components/schemas/TargetSnapshot"
+            "$ref": "#/components/schemas/Target"
           },
           "started": {
             "type": "string",
@@ -345,23 +419,44 @@
           }
         }
       },
-      "TargetSnapshot": {
+      "Target": {
         "type": "object",
         "required": [
           "name",
-          "host",
-          "port"
+          "roles"
         ],
         "properties": {
           "name": {
             "type": "string"
           },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ssh": {
+            "$ref": "#/components/schemas/TargetSSHOptions"
+          }
+        }
+      },
+      "TargetSSHOptions": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "username"
+        ],
+        "properties": {
           "host": {
             "type": "string"
           },
           "port": {
             "type": "integer",
             "format": "uint16"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },

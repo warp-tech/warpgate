@@ -1,12 +1,12 @@
 <script lang="ts">
-import { api, UserSnapshot, TargetSnapshot, TicketSnapshot, TicketAndSecret } from 'lib/api'
+import { api, UserSnapshot, Target, TicketAndSecret } from 'lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert } from 'sveltestrap'
 
 let error: Error|null = null
-let targets: TargetSnapshot[]|undefined
+let targets: Target[]|undefined
 let users: UserSnapshot[]|undefined
-let selectedTarget: TargetSnapshot|undefined
+let selectedTarget: Target|undefined
 let selectedUser: UserSnapshot|undefined
 let result: TicketAndSecret|undefined
 
@@ -53,7 +53,7 @@ async function create () {
 {:else}
     {#if users}
     <div class="form-group">
-        <label>User</label>
+        <label for=''>User</label>
         <select bind:value={selectedUser} class="form-control">
             {#each users as user}
                 <option value={user}>
@@ -66,7 +66,7 @@ async function create () {
 
     {#if targets}
     <div class="form-group">
-        <label>Target</label>
+        <label for=''>Target</label>
         <select bind:value={selectedTarget} class="form-control">
             {#each targets as target}
                 <option value={target}>

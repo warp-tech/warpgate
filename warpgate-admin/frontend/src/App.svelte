@@ -18,6 +18,9 @@
         '/tickets/create': wrap({
             asyncComponent: () => import('./CreateTicket.svelte')
         }),
+        '/ssh/known-hosts': wrap({
+            asyncComponent: () => import('./SSHKnownHosts.svelte')
+        }),
     }
 </script>
 
@@ -29,8 +32,11 @@
                 <li class="nav-item me-3">
                     <a class="nav-link active" href="/" use:link>Sessions</a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item me-3">
                     <a class="nav-link active" href="/tickets" use:link>Tickets</a>
+                </li>
+                <li class="nav-item me-3">
+                    <a class="nav-link active" href="/ssh/known-hosts" use:link>Known hosts</a>
                 </li>
             </ul>
         </div>
