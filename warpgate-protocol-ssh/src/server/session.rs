@@ -1,8 +1,8 @@
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::{
-    ChannelOperation, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState, RemoteClient,
-    ServerChannelId, ConnectionError,
+    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
+    RemoteClient, ServerChannelId,
 };
 use ansi_term::Colour;
 use anyhow::Result;
@@ -11,16 +11,16 @@ use russh::server::Session;
 use russh::{CryptoVec, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
-use warpgate_common::eventhub::{EventHub, EventSender};
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use tracing::*;
 use warpgate_common::auth::AuthSelector;
+use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
 };
@@ -392,19 +392,29 @@ impl ServerSession {
             key.name()
         ))
         .await;
+        self.emit_service_message(&"Trust this key? (y/n)")
+            .await;
 
-        let mut sub = self.hub.subscribe(|e| matches!(e, Event::ConsoleInput(_))).await;
+        let mut sub = self
+            .hub
+            .subscribe(|e| matches!(e, Event::ConsoleInput(_)))
+            .await;
         tokio::spawn(async move {
             loop {
                 match sub.recv().await {
                     Some(Event::ConsoleInput(data)) => {
-                        info!(?data, "Got input");
+                        if data == "y".as_bytes() {
+                            let _ = reply.send(true);
+                            break;
+                        } else if data == "n".as_bytes() {
+                            let _ = reply.send(false);
+                            break;
+                        }
                     }
                     None => break,
                     _ => (),
                 }
             }
-            reply.send(false);
         });
 
         Ok(())
@@ -604,7 +614,10 @@ impl ServerSession {
         }
 
         if self.pty_channels.contains(&channel) {
-            let _ = self.event_sender.send_once(Event::ConsoleInput(data.clone())).await;
+            let _ = self
+                .event_sender
+                .send_once(Event::ConsoleInput(data.clone()))
+                .await;
         }
 
         self.send_command(RCCommand::Channel(channel, ChannelOperation::Data(data)));

@@ -35,13 +35,13 @@ pub enum ConnectionError {
         known_key_base64: String,
     },
 
-    #[error("I/O")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    #[error("Key")]
+    #[error(transparent)]
     Key(#[from] russh_keys::Error),
 
-    #[error("SSH")]
+    #[error(transparent)]
     SSH(#[from] russh::Error),
 
     #[error("Could not resolve address")]
