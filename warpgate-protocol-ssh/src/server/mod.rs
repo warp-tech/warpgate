@@ -46,6 +46,8 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             .register_session(&session_state)
             .await?;
 
+        let id = server_handle.id();
+
         let session =
             match ServerSession::new(remote_address, &services, server_handle, session_handle_rx)
                 .await
@@ -56,8 +58,6 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
                     continue;
                 }
             };
-
-        let id = { session.lock().await.id };
 
         let handler = ServerHandler { id, session };
 

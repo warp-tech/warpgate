@@ -137,10 +137,10 @@ impl ServerSession {
                 loop {
                     if let Some(e) = rc_handles.event_rx.recv().await {
                         if sender.send_once(Event::Client(e)).await.is_err() {
-                            break
+                            break;
                         }
                     } else {
-                        break
+                        break;
                     }
                 }
             }
@@ -415,8 +415,7 @@ impl ServerSession {
             key.name()
         ))
         .await;
-        self.emit_service_message(&"Trust this key? (y/n)")
-            .await;
+        self.emit_service_message(&"Trust this key? (y/n)").await;
 
         let mut sub = self
             .hub
