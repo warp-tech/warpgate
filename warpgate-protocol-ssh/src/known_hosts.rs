@@ -13,7 +13,10 @@ pub struct KnownHosts {
 
 pub enum KnownHostValidationResult {
     Valid,
-    Invalid,
+    Invalid {
+        key_type: String,
+        key_base64: String,
+    },
     Unknown,
 }
 
@@ -40,8 +43,11 @@ impl KnownHosts {
         if entries.iter().any(|x| x.key_base64 == key_base64) {
             return Ok(KnownHostValidationResult::Valid);
         }
-        if !entries.is_empty() {
-            return Ok(KnownHostValidationResult::Invalid);
+        if let Some(first) = entries.first() {
+            return Ok(KnownHostValidationResult::Invalid {
+                key_type: first.key_type.clone(),
+                key_base64: first.key_base64.clone(),
+            });
         }
         Ok(KnownHostValidationResult::Unknown)
     }

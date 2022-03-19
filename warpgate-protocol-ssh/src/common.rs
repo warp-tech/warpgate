@@ -22,7 +22,7 @@ impl Display for ServerChannelId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DirectTCPIPParams {
     pub host_to_connect: String,
     pub port_to_connect: u32,
@@ -30,7 +30,7 @@ pub struct DirectTCPIPParams {
     pub originator_port: u32,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ChannelOperation {
     OpenShell,
     OpenDirectTCPIP(DirectTCPIPParams),

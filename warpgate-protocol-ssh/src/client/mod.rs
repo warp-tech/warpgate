@@ -1,17 +1,19 @@
 mod channel_direct_tcpip;
 mod channel_session;
 mod handler;
+use crate::client::handler::ClientHandlerError;
+
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams, ServerChannelId};
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-use futures::future::{Fuse, OptionFuture};
-use futures::FutureExt;
+use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
 use russh::Sig;
+use russh_keys::key::PublicKey;
 use russh_keys::load_secret_key;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
@@ -23,7 +25,39 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use warpgate_common::{Services, SessionId, TargetSSHOptions};
 
-#[derive(Clone, Debug)]
+#[derive(Debug, thiserror::Error)]
+pub enum ConnectionError {
+    #[error("Host key mismatch")]
+    HostKeyMismatch {
+        received_key_type: String,
+        received_key_base64: String,
+        known_key_type: String,
+        known_key_base64: String,
+    },
+
+    #[error("I/O")]
+    Io(#[from] std::io::Error),
+
+    #[error("Key")]
+    Key(#[from] russh_keys::Error),
+
+    #[error("SSH")]
+    SSH(#[from] russh::Error),
+
+    #[error("Could not resolve address")]
+    Resolve,
+
+    #[error("Internal error")]
+    Internal,
+
+    #[error("Aborted")]
+    Aborted,
+
+    #[error("Authentication failed")]
+    Authentication,
+}
+
+#[derive(Debug)]
 pub enum RCEvent {
     State(RCState),
     Output(ServerChannelId, Bytes),
@@ -43,12 +77,14 @@ pub enum RCEvent {
         data: Bytes,
         ext: u32,
     },
-    ConnectionError(String),
+    ConnectionError(ConnectionError),
     AuthError,
+    HostKeyReceived(PublicKey),
+    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     Done,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(TargetSSHOptions),
     Channel(ServerChannelId, ChannelOperation),
@@ -63,52 +99,74 @@ pub enum RCState {
     Disconnected,
 }
 
+#[derive(Debug)]
+enum InnerEvent {
+    RCCommand(RCCommand),
+    ClientHandlerEvent(ClientHandlerEvent),
+}
+
 pub struct RemoteClient {
     id: SessionId,
-    rx: UnboundedReceiver<RCCommand>,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
     channel_pipes: Arc<Mutex<HashMap<ServerChannelId, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(ServerChannelId, ChannelOperation)>,
     state: RCState,
-    client_handler_rx: Option<UnboundedReceiver<ClientHandlerEvent>>,
-    abort_rx: Option<Fuse<oneshot::Receiver<()>>>,
+    abort_rx: UnboundedReceiver<()>,
+    inner_event_rx: UnboundedReceiver<InnerEvent>,
+    inner_event_tx: UnboundedSender<InnerEvent>,
     child_tasks: Vec<JoinHandle<Result<()>>>,
-    session_tag: String,
     services: Services,
+    session_tag: String,
 }
 
 pub struct RemoteClientHandles {
     pub event_rx: UnboundedReceiver<RCEvent>,
     pub command_tx: UnboundedSender<RCCommand>,
-    pub abort_tx: Option<oneshot::Sender<()>>,
+    pub abort_tx: UnboundedSender<()>,
 }
 
 impl RemoteClient {
     pub fn create(id: SessionId, session_tag: String, services: Services) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
-        let (command_tx, command_rx) = unbounded_channel();
-        let (abort_tx, abort_rx) = oneshot::channel();
+        let (command_tx, mut command_rx) = unbounded_channel();
+        let (abort_tx, abort_rx) = unbounded_channel();
+
+        let (inner_event_tx, inner_event_rx) = unbounded_channel();
 
         let this = Self {
             id,
-            rx: command_rx,
             tx: event_tx,
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
             pending_ops: vec![],
             state: RCState::NotInitialized,
-            client_handler_rx: None,
-            abort_rx: Some(abort_rx.fuse()),
+            inner_event_rx,
+            inner_event_tx: inner_event_tx.clone(),
             child_tasks: vec![],
             session_tag,
             services,
+            abort_rx,
         };
+
+        tokio::spawn({
+            async move {
+                loop {
+                    match command_rx.recv().await {
+                        Some(e) => inner_event_tx.send(InnerEvent::RCCommand(e))?,
+                        None => break,
+                    }
+                }
+                Ok::<(), anyhow::Error>(())
+            }
+        });
+
         this.start();
+
         RemoteClientHandles {
             event_rx,
             command_tx,
-            abort_tx: Some(abort_tx),
+            abort_tx,
         }
     }
 
@@ -177,46 +235,48 @@ impl RemoteClient {
             async {
                 loop {
                     tokio::select! {
-                        cmd = self.rx.recv() => {
-                            match cmd {
-                                Some(RCCommand::Connect(options)) => match self.connect(options).await {
-                                    Ok(_) => {
-                                        self.set_state(RCState::Connected)?;
-                                        let ops = self.pending_ops.drain(..).collect::<Vec<(ServerChannelId, ChannelOperation)>>();
-                                        for (id, op) in ops {
-                                            self.apply_channel_op(id, op).await?;
+                        Some(event) = self.inner_event_rx.recv() => {
+                            match event {
+                                InnerEvent::RCCommand(cmd) => {
+                                    match cmd {
+                                        RCCommand::Connect(options) => match self.connect(options).await {
+                                            Ok(_) => {
+                                                self.set_state(RCState::Connected)?;
+                                                let ops = self.pending_ops.drain(..).collect::<Vec<(ServerChannelId, ChannelOperation)>>();
+                                                for (id, op) in ops {
+                                                    self.apply_channel_op(id, op).await?;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                debug!(session=%self.session_tag, "Connect error: {}", e);
+                                                let _ = self.tx.send(RCEvent::ConnectionError(e));
+                                                self.set_disconnected();
+                                                break
+                                            }
+                                        },
+                                        RCCommand::Channel(ch, op) => {
+                                            self.apply_channel_op(ch, op).await?;
+                                        }
+                                        RCCommand::Disconnect => {
+                                            self.disconnect().await?;
+                                            break
                                         }
                                     }
-                                    Err(e) => {
-                                        self.set_disconnected();
-                                        debug!(session=%self.session_tag, "Connect error: {}", e);
-                                        break
+                                }
+                                InnerEvent::ClientHandlerEvent(client_event) => {
+                                    debug!(session=%self.session_tag, "Client handler event: {:?}", client_event);
+                                    match client_event {
+                                        ClientHandlerEvent::Disconnect => {
+                                            self._on_disconnect().await?;
+                                        }
+                                        event => {
+                                            error!(session=%self.session_tag, ?event, "Unhandled client handler event");
+                                        },
                                     }
-                                },
-                                Some(RCCommand::Channel(ch, op)) => {
-                                    self.apply_channel_op(ch, op).await?;
-                                }
-                                Some(RCCommand::Disconnect) => {
-                                    self.disconnect().await?;
-                                    break
-                                }
-                                None => {
-                                    break
                                 }
                             }
                         }
-                        Some(client_event) = OptionFuture::from(self.client_handler_rx.as_mut().map(|x| x.recv())) => {
-                            debug!(session=%self.session_tag, "Client handler event: {:?}", client_event);
-                            match client_event {
-                                Some(ClientHandlerEvent::Disconnect) => {
-                                    self._on_disconnect().await?;
-                                }
-                                None => {
-                                    self.client_handler_rx = None
-                                }
-                            }
-                        }
-                        Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
+                        Some(_) = self.abort_rx.recv() => {
                             debug!(session=%self.session_tag, "Abort requested");
                             self.disconnect().await?;
                             break
@@ -235,20 +295,15 @@ impl RemoteClient {
         });
     }
 
-    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<()> {
+    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
         let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
         let address = match address_str
             .to_socket_addrs()
-            .map_err(|e| anyhow::anyhow!("{}", e))
-            .and_then(|mut x| {
-                x.next()
-                    .ok_or_else(|| anyhow::anyhow!("Cannot resolve address"))
-            }) {
+            .map_err(ConnectionError::Io)
+            .and_then(|mut x| x.next().ok_or_else(|| ConnectionError::Resolve))
+        {
             Ok(address) => address,
             Err(error) => {
-                let _ = self
-                    .tx
-                    .send(RCEvent::ConnectionError(format!("{:?}", error)));
                 error!(?error, "Cannot resolve target address");
                 self.set_disconnected();
                 return Err(error);
@@ -256,61 +311,92 @@ impl RemoteClient {
         };
 
         info!(?address, username=?ssh_options.username, session=%self.session_tag, "Connecting");
-        let client_key = load_secret_key("/Users/eugene/.ssh/id_rsa", None)
-            .with_context(|| "load_secret_key()")?;
+        let client_key =
+            load_secret_key("/Users/eugene/.ssh/id_rsa", None).map_err(ConnectionError::Key)?;
         let client_key = Arc::new(client_key);
         let config = russh::client::Config {
             ..Default::default()
         };
         let config = Arc::new(config);
 
-        let (tx, rx) = unbounded_channel();
+        let (event_tx, mut event_rx) = unbounded_channel();
         let handler = ClientHandler {
             ssh_options: ssh_options.clone(),
-            tx,
+            event_tx,
             services: self.services.clone(),
+            session_tag: self.session_tag.clone(),
         };
-        self.client_handler_rx = Some(rx);
-
-        // self.tx.send(RCEvent::Output(Bytes::from(
-        //     "Connecting now...\r\n".as_bytes(),
-        // )))?;
 
         let fut_connect = russh::client::connect(config, address, handler);
+        pin_mut!(fut_connect);
 
-        tokio::select! {
-            Some(Ok(_)) = OptionFuture::from(self.abort_rx.as_mut()) => {
-                info!(session=%self.session_tag, "Abort requested");
-                self.set_disconnected();
-                anyhow::bail!("Aborted");
-            }
-            session = fut_connect => {
-                if let Err(err) = session {
-                    self.tx.send(RCEvent::ConnectionError(format!("{:?}", err)))?;
-                    error!(error=?err, session=%self.session_tag, "Connection error");
-                    anyhow::bail!("Error connecting: {}", err);
+        loop {
+            tokio::select! {
+                Some(event) = event_rx.recv() => {
+                    match event {
+                        ClientHandlerEvent::HostKeyReceived(key) => {
+                            self.tx.send(RCEvent::HostKeyReceived(key)).map_err(|_| ConnectionError::Internal)?;
+                        }
+                        ClientHandlerEvent::HostKeyUnknown(key, reply) => {
+                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).map_err(|_| ConnectionError::Internal)?;
+                        }
+                        _ => {}
+                    }
                 }
-
-                let mut session = session.with_context(|| "connect()")?;
-
-                let auth_result = session
-                    // .authenticate_password(ssh_options.username, "syslink")
-                    .authenticate_publickey(ssh_options.username, client_key)
-                    .await
-                    .with_context(|| "authenticate()")?;
-                if !auth_result {
-                    self.tx.send(RCEvent::AuthError)?;
-                    error!(session=%self.session_tag, "Auth rejected");
-                    let _ = session
-                        .disconnect(russh::Disconnect::ByApplication, "", "")
-                        .await;
-                    anyhow::bail!("Auth rejected");
+                Some(_) = self.abort_rx.recv() => {
+                    info!(session=%self.session_tag, "Abort requested");
+                    self.set_disconnected();
+                    return Err(ConnectionError::Aborted)
                 }
+                session = &mut fut_connect => {
+                    if let Err(error) = session {
+                        let connection_error = match error {
+                            ClientHandlerError::ConnectionError(e) => e,
+                            ClientHandlerError::SSH(e) => ConnectionError::SSH(e),
+                            ClientHandlerError::Internal => ConnectionError::Internal,
+                        };
+                        error!(error=?connection_error, session=%self.session_tag, "Connection error");
+                        return Err(connection_error);
+                    }
 
-                self.session = Some(Arc::new(Mutex::new(session)));
+                    #[allow(clippy::unwrap_used)]
+                    let mut session = session.unwrap();
 
-                info!(?address, session=%self.session_tag, "Connected");
-                Ok(())
+                    let auth_result = session
+                        // .authenticate_password(ssh_options.username, "syslink")
+                        .authenticate_publickey(ssh_options.username, client_key)
+                        .await?;
+                    if !auth_result {
+                        let _ = self.tx.send(RCEvent::AuthError);
+                        error!(session=%self.session_tag, "Auth rejected");
+                        let _ = session
+                            .disconnect(russh::Disconnect::ByApplication, "", "")
+                            .await;
+                        return Err(ConnectionError::Authentication);
+                    }
+
+                    self.session = Some(Arc::new(Mutex::new(session)));
+
+                    info!(?address, session=%self.session_tag, "Connected");
+
+                    tokio::spawn({
+                        let inner_event_tx = self.inner_event_tx.clone();
+                        async move {
+                            loop {
+                                match event_rx.recv().await {
+                                    Some(e) => {
+                                        info!("{:?}", e);
+                                        inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?
+                                    }
+                                    None => break
+                                }
+                            }
+                            Ok::<(), anyhow::Error>(())
+                        }
+                    });
+
+                    return Ok(())
+                }
             }
         }
     }

@@ -17,7 +17,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::recordings::{
@@ -42,7 +42,7 @@ pub struct ServerSession {
     all_channels: Vec<ServerChannelId>,
     channel_recorders: HashMap<ServerChannelId, TerminalRecorder>,
     rc_tx: UnboundedSender<RCCommand>,
-    rc_abort_tx: Option<oneshot::Sender<()>>,
+    rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
     remote_address: SocketAddr,
     services: Services,
@@ -337,6 +337,12 @@ impl ServerSession {
                     Ok(())
                 })
                 .await?;
+            }
+            RCEvent::HostKeyReceived(key) => {
+                todo!()
+            }
+            RCEvent::HostKeyUnknown(key, reply) => {
+                todo!()
             }
         }
         Ok(())
@@ -709,9 +715,7 @@ impl ServerSession {
 
     async fn request_disconnect(&mut self) {
         debug!(session=?self, "Disconnecting");
-        if let Some(s) = self.rc_abort_tx.take() {
-            let _ = s.send(());
-        }
+        let _ = self.rc_abort_tx.send(());
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
             self.send_command(RCCommand::Disconnect);
         }

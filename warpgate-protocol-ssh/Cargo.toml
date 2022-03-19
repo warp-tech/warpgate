@@ -1,21 +1,23 @@
 [package]
-name = "warpgate-protocol-ssh"
-version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+name = "warpgate-protocol-ssh"
+version = "0.1.0"
 
 [dependencies]
 ansi_term = "0.12"
 anyhow = "1.0"
+async-trait = "0.1"
 bytes = "1.1"
+dialoguer = "0.10"
 futures = "0.3"
-russh = {version = "0.34.0-beta.1", features = ["openssl"]}
-russh-keys = {version = "0.22.0-beta.1", features = ["openssl"]}
+russh = {version = "0.34.0-beta.2", features = ["openssl"], path = "../../russh/russh"}
+russh-keys = {version = "0.22.0-beta.1", features = ["openssl"], path = "../../russh/russh-keys"}
+sea-orm = {version = "^0.6", features = ["runtime-tokio-native-tls"], default-features = false}
+thiserror = "1.0"
 time = "0.3"
 tokio = {version = "1.17", features = ["tracing", "signal"]}
 tracing = "0.1"
-sea-orm = {version = "^0.6", features = ["runtime-tokio-native-tls"], default-features = false}
-warpgate-common = {version = "*", path = "../warpgate-common"}
-async-trait = "0.1"
 uuid = {version = "0.8", features = ["v4"]}
+warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
