@@ -3,6 +3,9 @@ projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpga
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
 
+fix *ARGS:
+    for p in {{projects}}; do cargo fix -p $p {{ARGS}}; done
+
 clippy *ARGS:
     for p in {{projects}}; do cargo clippy -p $p {{ARGS}}; done
 

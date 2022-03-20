@@ -1,9 +1,9 @@
 use anyhow::Result;
+use russh_keys::key::{KeyPair, SignatureHash};
 use russh_keys::{encode_pkcs8_pem, load_secret_key};
-use russh_keys::key::{SignatureHash, KeyPair};
-use tracing::*;
 use std::fs::{create_dir_all, File};
 use std::path::PathBuf;
+use tracing::*;
 use warpgate_common::helpers::fs::secure_directory;
 use warpgate_common::WarpgateConfig;
 
