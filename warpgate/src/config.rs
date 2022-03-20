@@ -6,14 +6,15 @@ use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path) -> Result<WarpgateConfig> {
-    secure_file(path)?;
+    secure_file(path).context("Could secure config")?;
 
     let store: WarpgateConfigStore = Config::builder()
         .add_source(File::from(path))
         .add_source(Environment::with_prefix("WARPGATE"))
-        .build()?
+        .build()
+        .context("Could not load config")?
         .try_deserialize()
-        .context("Could not load config")?;
+        .context("Could not parse config")?;
 
     let config = WarpgateConfig {
         store,

@@ -119,7 +119,7 @@ impl ConfigProvider for FileConfigProvider {
             if let AuthCredential::Password(client_password) = client_credential {
                 for credential in user.credentials.iter() {
                     if let UserAuthCredential::Password {
-                        password: ref user_password_hash,
+                        hash: ref user_password_hash,
                     } = credential
                     {
                         match verify_password_hash(

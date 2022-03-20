@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::StructOpt;
 use logging::init_logging;
 use std::path::PathBuf;
+use tracing::*;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -36,13 +37,7 @@ enum Commands {
     TestTarget { target_name: String },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
-    init_logging();
-
+async fn _main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -53,5 +48,18 @@ async fn main() -> Result<()> {
             crate::commands::test_target::command(&cli, target_name).await
         }
         Commands::Setup => crate::commands::setup::command(&cli).await,
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
+    init_logging();
+
+    if let Err(error) = _main().await {
+        error!(?error, "Fatal error");
+        std::process::exit(1);
     }
 }

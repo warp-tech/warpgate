@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
 
@@ -27,6 +27,18 @@ where
     {
         let v = Deserialize::deserialize::<D>(deserializer)?;
         Ok(Self::new(v))
+    }
+}
+
+impl<T> Serialize for Secret<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 

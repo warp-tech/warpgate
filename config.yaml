@@ -1,0 +1,22 @@
+---
+targets: []
+users:
+  - username: admin
+    credentials:
+      - type: password
+        hash: "$argon2id$v=19$m=4096,t=3,p=1$rE0QzRiG8d3ChuPt+Y4KJw$01TkTxkjKRKqbMO+YuLavVVpsw2ZIS5r/2AGpHJ695I"
+    require: ~
+    roles:
+      - "warpgate:admin"
+roles: []
+recordings:
+  enable: true
+  path: "./data/recordings"
+web_admin:
+  enable: true
+  listen: "127.0.0.1:8888"
+database_url: "sqlite:data/db"
+ssh:
+  listen: "0.0.0.0:2222"
+  keys: "./data/keys"
+  client_key: "./client_key"

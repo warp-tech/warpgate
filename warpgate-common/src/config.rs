@@ -4,6 +4,10 @@ use std::path::PathBuf;
 
 use crate::Secret;
 
+fn _default_true() -> bool {
+    true
+}
+
 fn _default_false() -> bool {
     false
 }
@@ -17,11 +21,11 @@ fn _default_username() -> String {
 }
 
 fn _default_recordings_path() -> String {
-    "./recordings".to_owned()
+    "./data/recordings".to_owned()
 }
 
 fn _default_database_url() -> Secret<String> {
-    Secret::new("sqlite:db".to_owned())
+    Secret::new("sqlite:data/db".to_owned())
 }
 
 fn _default_web_admin_listen() -> String {
@@ -46,17 +50,17 @@ pub struct Target {
     pub ssh: Option<TargetSSHOptions>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[allow(unused)]
 #[serde(tag = "type")]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
-    Password { password: Secret<String> },
+    Password { hash: Secret<String> },
     #[serde(rename = "publickey")]
     PublicKey { key: Secret<String> },
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(unused)]
 pub struct User {
     pub username: String,
@@ -65,10 +69,14 @@ pub struct User {
     pub roles: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
 #[allow(unused)]
 pub struct Role {
     pub name: String,
+}
+
+fn _default_ssh_listen() -> String {
+    "0.0.0.0:2222".to_owned()
 }
 
 fn _default_ssh_client_key() -> String {
@@ -76,12 +84,13 @@ fn _default_ssh_client_key() -> String {
 }
 
 fn _default_ssh_keys_path() -> String {
-    "./keys".to_owned()
+    "./data/keys".to_owned()
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(unused)]
 pub struct SSHConfig {
+    #[serde(default = "_default_ssh_listen")]
     pub listen: String,
 
     #[serde(default = "_default_ssh_keys_path")]
@@ -91,7 +100,17 @@ pub struct SSHConfig {
     pub client_key: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+impl Default for SSHConfig {
+    fn default() -> Self {
+        SSHConfig {
+            listen: _default_ssh_listen(),
+            keys: _default_ssh_keys_path(),
+            client_key: _default_ssh_client_key(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(unused)]
 pub struct WebAdminConfig {
     #[serde(default = "_default_false")]
@@ -104,13 +123,13 @@ pub struct WebAdminConfig {
 impl Default for WebAdminConfig {
     fn default() -> Self {
         WebAdminConfig {
-            enable: false,
+            enable: true,
             listen: _default_web_admin_listen(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(unused)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
@@ -129,7 +148,7 @@ impl Default for RecordingsConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(unused)]
 pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
@@ -145,7 +164,22 @@ pub struct WarpgateConfigStore {
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
+    #[serde(default)]
     pub ssh: SSHConfig,
+}
+
+impl Default for WarpgateConfigStore {
+    fn default() -> Self {
+        Self {
+            targets: vec![],
+            users: vec![],
+            roles: vec![],
+            recordings: RecordingsConfig::default(),
+            web_admin: WebAdminConfig::default(),
+            database_url: _default_database_url(),
+            ssh: SSHConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

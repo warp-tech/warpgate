@@ -1,17 +1,18 @@
 #![feature(type_alias_impl_trait, let_else)]
 mod client;
 mod common;
-use keys::generate_host_keys;
-use russh_keys::PublicKeyBase64;
 mod compat;
 mod keys;
 mod known_hosts;
 mod server;
+
 use crate::client::{RCCommand, RemoteClient};
 use anyhow::Result;
 use async_trait::async_trait;
 pub use client::*;
 pub use common::*;
+pub use keys::generate_host_keys;
+use russh_keys::PublicKeyBase64;
 pub use server::run_server;
 use std::fmt::Debug;
 use std::net::SocketAddr;
