@@ -20,3 +20,4 @@ host_key*
 # ---
 
 data
+# config.*.yaml

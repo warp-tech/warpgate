@@ -5,7 +5,7 @@ use warpgate_common::hash::hash_password;
 pub(crate) async fn command() -> Result<()> {
     let mut input = String::new();
 
-    if atty::is(atty::Stream::Stdin) {
+    if console::user_attended() {
         input = dialoguer::Password::new()
             .with_prompt("Password to be hashed")
             .interact()?;

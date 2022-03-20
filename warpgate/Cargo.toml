@@ -13,6 +13,7 @@ config = "0.12"
 console-subscriber = {version = "0.1", optional = true}
 dhat = {version = "0.3", optional = true}
 dialoguer = "0.10"
+console = "0.1"
 futures = "0.3"
 time = "0.3"
 tokio = {version = "1.17", features = ["tracing", "signal"]}
@@ -21,7 +22,6 @@ tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
-atty = "0.2"
 
 [features]
 dhat-ad-hoc = ["dhat"]
