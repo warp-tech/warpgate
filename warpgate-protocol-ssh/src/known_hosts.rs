@@ -66,7 +66,6 @@ impl KnownHosts {
             port: Set(port),
             key_type: Set(key.name().to_owned()),
             key_base64: Set(key.public_key_base64()),
-            ..Default::default()
         };
 
         let db = self.db.lock().await;

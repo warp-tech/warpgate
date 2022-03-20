@@ -31,7 +31,7 @@ pub enum ClientHandlerError {
     ConnectionError(ConnectionError),
 
     #[error("SSH")]
-    SSH(#[from] russh::Error),
+    Ssh(#[from] russh::Error),
 
     #[error("Internal error")]
     Internal,
@@ -106,9 +106,9 @@ impl russh::client::Handler for ClientHandler {
                         {
                             error!(?error, session=%self.session_tag, "Failed to save host key");
                         }
-                        return Ok((self, true));
+                        Ok((self, true))
                     } else {
-                        return Ok((self, false));
+                        Ok((self, false))
                     }
                 }
                 Err(error) => {

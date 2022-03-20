@@ -16,7 +16,7 @@ impl<E> Clone for EventSender<E> {
 }
 
 impl<E> EventSender<E> {
-    async fn cleanup_subscriptions<'a>(&'a self) -> MutexGuard<'a, SubscriptionStoreInner<E>> {
+    async fn cleanup_subscriptions(&self) -> MutexGuard<'_, SubscriptionStoreInner<E>> {
         let mut subscriptions = self.subscriptions.lock().await;
         subscriptions
             .drain_filter(|(_, ref s)| s.is_closed())

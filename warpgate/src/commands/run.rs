@@ -3,7 +3,6 @@ use anyhow::Result;
 use futures::StreamExt;
 use std::net::ToSocketAddrs;
 use tracing::*;
-use tracing_subscriber::Layer;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_ssh::SSHProtocolServer;
 

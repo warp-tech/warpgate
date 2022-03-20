@@ -49,10 +49,7 @@ impl ProtocolServer for SSHProtocolServer {
 
         let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
 
-        loop {
-            let Some(event) = handles.event_rx.recv().await else {
-                break;
-            };
+        while let Some(event) = handles.event_rx.recv().await {
             match event {
                 RCEvent::ConnectionError(err) => {
                     if let ConnectionError::HostKeyMismatch {

@@ -17,3 +17,5 @@ svelte-check:
 
 openapi:
     cd warpgate-admin/frontend/ && yarn openapi-schema && yarn openapi-client
+
+cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt

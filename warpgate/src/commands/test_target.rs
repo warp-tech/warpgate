@@ -1,8 +1,6 @@
 use crate::config::load_config;
 use anyhow::Result;
-use futures::StreamExt;
 use tracing::*;
-use tracing_subscriber::Layer;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 
 pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {

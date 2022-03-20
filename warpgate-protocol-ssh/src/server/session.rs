@@ -118,14 +118,10 @@ impl ServerSession {
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
             async move {
-                loop {
-                    if let Some(command) = session_handle_rx.recv().await {
-                        if sender.send_once(Event::Command(command)).await.is_err() {
-                            break;
-                        }
-                    } else {
+                while let Some(command) = session_handle_rx.recv().await {
+                    if sender.send_once(Event::Command(command)).await.is_err() {
                         break;
-                    };
+                    }
                 }
             }
         });
@@ -134,12 +130,8 @@ impl ServerSession {
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
             async move {
-                loop {
-                    if let Some(e) = rc_handles.event_rx.recv().await {
-                        if sender.send_once(Event::Client(e)).await.is_err() {
-                            break;
-                        }
-                    } else {
+                while let Some(e) = rc_handles.event_rx.recv().await {
+                    if sender.send_once(Event::Client(e)).await.is_err() {
                         break;
                     }
                 }
@@ -194,7 +186,7 @@ impl ServerSession {
             format!(
                 "{} {}\r\n",
                 Colour::Black.on(Colour::Blue).bold().paint(" warpgate "),
-                msg.replace("\n", "\r\n"),
+                msg.replace('\n', "\r\n"),
             )
             .as_bytes(),
         )
@@ -415,7 +407,7 @@ impl ServerSession {
             key.name()
         ))
         .await;
-        self.emit_service_message(&"Trust this key? (y/n)").await;
+        self.emit_service_message("Trust this key? (y/n)").await;
 
         let mut sub = self
             .hub

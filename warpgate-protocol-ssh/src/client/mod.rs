@@ -151,11 +151,8 @@ impl RemoteClient {
 
         tokio::spawn({
             async move {
-                loop {
-                    match command_rx.recv().await {
-                        Some(e) => inner_event_tx.send(InnerEvent::RCCommand(e))?,
-                        None => break,
-                    }
+                while let Some(e) = command_rx.recv().await {
+                    inner_event_tx.send(InnerEvent::RCCommand(e))?
                 }
                 Ok::<(), anyhow::Error>(())
             }
@@ -300,7 +297,7 @@ impl RemoteClient {
         let address = match address_str
             .to_socket_addrs()
             .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or_else(|| ConnectionError::Resolve))
+            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
         {
             Ok(address) => address,
             Err(error) => {
@@ -352,7 +349,7 @@ impl RemoteClient {
                     if let Err(error) = session {
                         let connection_error = match error {
                             ClientHandlerError::ConnectionError(e) => e,
-                            ClientHandlerError::SSH(e) => ConnectionError::SSH(e),
+                            ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
                             ClientHandlerError::Internal => ConnectionError::Internal,
                         };
                         error!(error=?connection_error, session=%self.session_tag, "Connection error");
@@ -382,14 +379,9 @@ impl RemoteClient {
                     tokio::spawn({
                         let inner_event_tx = self.inner_event_tx.clone();
                         async move {
-                            loop {
-                                match event_rx.recv().await {
-                                    Some(e) => {
-                                        info!("{:?}", e);
-                                        inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?
-                                    }
-                                    None => break
-                                }
+                            while let Some(e) = event_rx.recv().await {
+                                info!("{:?}", e);
+                                inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?
                             }
                             Ok::<(), anyhow::Error>(())
                         }

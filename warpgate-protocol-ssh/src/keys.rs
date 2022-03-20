@@ -47,5 +47,5 @@ pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>> {
     let key_path = path.join("host-rsa");
     keys.push(load_secret_key(key_path, None)?);
 
-    return Ok(keys);
+    Ok(keys)
 }
