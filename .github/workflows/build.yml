@@ -3,7 +3,7 @@ name: Build
 on: [push, pull_request]
 
 jobs:
-  build:
+  Build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -33,6 +33,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/release/warpgate
-          asset_name: warpgate-${GITHUB_REF##*/}-x86_64-linux
-          tag: ${GITHUB_REF##*/}
+          asset_name: warpgate-${{github.ref_name}}-x86_64-linux
+          tag: ${{github.ref_name}}
           overwrite: true
