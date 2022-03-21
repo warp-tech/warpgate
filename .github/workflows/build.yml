@@ -22,17 +22,24 @@ jobs:
           command: build
           args: --release
 
+      - name: Rename
+        run: |
+          mkdir dist
+          mv target/release/warpgate dist/warpgate-${{github.ref_name}}-x86_64-linux
+
       # - name: 🔎 Test
       #   uses: actions-rs/cargo@v1
       #   with:
       #     command: test
 
       - name: Upload
+        uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: svenstaro/upload-release-action@v1-release
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/release/warpgate
-          asset_name: warpgate-${{github.ref_name}}-x86_64-linux
-          tag: ${{github.ref_name}}
-          overwrite: true
+          draft: true
+          append_body: true
+          generate_release_notes: true
+          files: dist/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_REPOSITORY: my_gh_org/my_gh_repo
