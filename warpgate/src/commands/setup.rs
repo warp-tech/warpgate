@@ -21,7 +21,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         std::process::exit(1);
     }
 
-    let mut config_dir = cli.config.parent().unwrap_or(Path::new(&"."));
+    let mut config_dir = cli.config.parent().unwrap_or_else(|| Path::new(&"."));
     if config_dir.as_os_str().is_empty() {
         config_dir = Path::new(&".");
     }

@@ -49,7 +49,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         info!("Warpgate is now running.");
         info!("Accepting SSH connections on {}", config.store.ssh.listen);
         if config.store.web_admin.enable {
-            info!("Access admin UI on http://{}", config.store.web_admin.listen);
+            info!(
+                "Access admin UI on http://{}",
+                config.store.web_admin.listen
+            );
         }
         info!("--------------------------------------------");
     }
