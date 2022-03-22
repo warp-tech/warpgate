@@ -83,7 +83,7 @@ pub enum RCEvent {
     AuthError,
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
-    ForwardedTCPIP(Uuid, DirectTCPIPParams),
+    // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
 }
 
@@ -91,8 +91,8 @@ pub enum RCEvent {
 pub enum RCCommand {
     Connect(TargetSSHOptions),
     Channel(Uuid, ChannelOperation),
-    ForwardTCPIP(String, u32),
-    CancelTCPIPForward(String, u32),
+    // ForwardTCPIP(String, u32),
+    // CancelTCPIPForward(String, u32),
     Disconnect,
 }
 
@@ -276,10 +276,10 @@ impl RemoteClient {
                                                 for (id, op) in ops {
                                                     self.apply_channel_op(id, op).await?;
                                                 }
-                                                let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
-                                                for (address, port) in forwards {
-                                                    self.tcpip_forward(address, port).await?;
-                                                }
+                                                // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                                                // for (address, port) in forwards {
+                                                //     self.tcpip_forward(address, port).await?;
+                                                // }
                                             }
                                             Err(e) => {
                                                 debug!(session=%self.session_tag, "Connect error: {}", e);

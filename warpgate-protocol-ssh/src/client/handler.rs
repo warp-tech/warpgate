@@ -1,10 +1,10 @@
 use std::pin::Pin;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::{ConnectionError, DirectTCPIPParams};
+use crate::ConnectionError;
 use futures::FutureExt;
 use russh::client::Session;
-use russh::ChannelId;
+
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
@@ -16,7 +16,7 @@ use warpgate_common::{Services, TargetSSHOptions};
 pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
-    ForwardedTCPIP(ChannelId, DirectTCPIPParams),
+    // ForwardedTCPIP(ChannelId, DirectTCPIPParams),
     Disconnect,
 }
 

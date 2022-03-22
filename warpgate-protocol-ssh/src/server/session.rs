@@ -485,10 +485,10 @@ impl ServerSession {
         session: &mut Session,
     ) -> Result<()> {
         let channel = Uuid::new_v4();
-        self.channel_map.insert(server_channel_id, channel.clone());
+        self.channel_map.insert(server_channel_id, channel);
 
         info!(session=?self, %channel, "Opening session channel");
-        self.all_channels.push(channel.clone());
+        self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
         self.rc_tx
             .send(RCCommand::Channel(channel, ChannelOperation::OpenShell))?;
@@ -519,11 +519,10 @@ impl ServerSession {
             if let Err(error) = recorder.write_connection_setup().await {
                 error!(session=?self, %channel, ?error, "Failed to record connection setup");
             }
-            self.traffic_connection_recorders
-                .insert(uuid.clone(), recorder);
+            self.traffic_connection_recorders.insert(uuid, recorder);
         }
 
-        self.all_channels.push(uuid.clone());
+        self.all_channels.push(uuid);
         self.session_handle = Some(session.handle());
         self.rc_tx.send(RCCommand::Channel(
             uuid,
@@ -870,15 +869,15 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _tcpip_forward(&mut self, address: String, port: u32) {
-        info!(session=?self, %address, %port, "Remote port forwarding requested");
-        self.send_command(RCCommand::ForwardTCPIP(address, port));
-    }
+    // pub async fn _tcpip_forward(&mut self, address: String, port: u32) {
+    //     info!(session=?self, %address, %port, "Remote port forwarding requested");
+    //     self.send_command(RCCommand::ForwardTCPIP(address, port));
+    // }
 
-    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) {
-        info!(session=?self, %address, %port, "Remote port forwarding cancelled");
-        self.send_command(RCCommand::CancelTCPIPForward(address, port));
-    }
+    // pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) {
+    //     info!(session=?self, %address, %port, "Remote port forwarding cancelled");
+    //     self.send_command(RCCommand::CancelTCPIPForward(address, port));
+    // }
 
     pub async fn _channel_signal(
         &mut self,
@@ -912,7 +911,7 @@ impl ServerSession {
     }
 
     async fn disconnect_server(&mut self) {
-        let all_channels = std::mem::replace(&mut self.all_channels, vec![]);
+        let all_channels = std::mem::take(&mut self.all_channels);
         let channels = all_channels
             .into_iter()
             .map(|x| self.map_channel_reverse(&x))
