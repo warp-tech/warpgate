@@ -210,6 +210,20 @@ impl RemoteClient {
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
+    // fn map_channel(&self, ch: &ChannelId) -> Result<Uuid> {
+    //     self.channel_map
+    //         .get_by_left(ch)
+    //         .cloned()
+    //         .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+    // }
+
+    // fn map_channel_reverse(&self, ch: &Uuid) -> Result<ChannelId> {
+    //     self.channel_map
+    //         .get_by_right(ch)
+    //         .cloned()
+    //         .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+    // }
+
     async fn apply_channel_op(&mut self, channel_id: Uuid, op: ChannelOperation) -> Result<()> {
         if self.state != RCState::Connected {
             self.pending_ops.push((channel_id, op));
