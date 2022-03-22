@@ -4,15 +4,16 @@ mod handler;
 use crate::client::handler::ClientHandlerError;
 
 use self::handler::ClientHandlerEvent;
-use super::{ChannelOperation, DirectTCPIPParams, ServerChannelId};
+use super::{ChannelOperation, DirectTCPIPParams};
 use anyhow::{Context, Result};
+use bimap::BiMap;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::Sig;
+use russh::{ChannelId, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::load_secret_key;
 use std::collections::HashMap;
@@ -23,6 +24,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::{Services, SessionId, TargetSSHOptions};
 
 #[derive(Debug, thiserror::Error)]
@@ -60,20 +62,20 @@ pub enum ConnectionError {
 #[derive(Debug)]
 pub enum RCEvent {
     State(RCState),
-    Output(ServerChannelId, Bytes),
-    Success(ServerChannelId),
-    Eof(ServerChannelId),
-    Close(ServerChannelId),
-    ExitStatus(ServerChannelId, u32),
+    Output(Uuid, Bytes),
+    Success(Uuid),
+    Eof(Uuid),
+    Close(Uuid),
+    ExitStatus(Uuid, u32),
     ExitSignal {
-        channel: ServerChannelId,
+        channel: Uuid,
         signal_name: Sig,
         core_dumped: bool,
         error_message: String,
         lang_tag: String,
     },
     ExtendedData {
-        channel: ServerChannelId,
+        channel: Uuid,
         data: Bytes,
         ext: u32,
     },
@@ -81,13 +83,16 @@ pub enum RCEvent {
     AuthError,
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
 }
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(TargetSSHOptions),
-    Channel(ServerChannelId, ChannelOperation),
+    Channel(Uuid, ChannelOperation),
+    ForwardTCPIP(String, u32),
+    CancelTCPIPForward(String, u32),
     Disconnect,
 }
 
@@ -109,8 +114,10 @@ pub struct RemoteClient {
     id: SessionId,
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
-    channel_pipes: Arc<Mutex<HashMap<ServerChannelId, UnboundedSender<ChannelOperation>>>>,
-    pending_ops: Vec<(ServerChannelId, ChannelOperation)>,
+    channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
+    channel_map: BiMap<ChannelId, Uuid>,
+    pending_ops: Vec<(Uuid, ChannelOperation)>,
+    pending_forwards: Vec<(String, u32)>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
@@ -139,7 +146,9 @@ impl RemoteClient {
             tx: event_tx,
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
+            channel_map: BiMap::new(),
             pending_ops: vec![],
+            pending_forwards: vec![],
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -192,6 +201,21 @@ impl RemoteClient {
         channel_id: ServerChannelId,
         op: ChannelOperation,
     ) -> Result<()> {
+    fn map_channel(&self, ch: &ChannelId) -> Result<Uuid> {
+        self.channel_map
+            .get_by_left(ch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+    }
+
+    fn map_channel_reverse(&self, ch: &Uuid) -> Result<ChannelId> {
+        self.channel_map
+            .get_by_right(ch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+    }
+
+    async fn apply_channel_op(&mut self, channel_id: Uuid, op: ChannelOperation) -> Result<()> {
         if self.state != RCState::Connected {
             self.pending_ops.push((channel_id, op));
             return Ok(());
@@ -239,9 +263,13 @@ impl RemoteClient {
                                         RCCommand::Connect(options) => match self.connect(options).await {
                                             Ok(_) => {
                                                 self.set_state(RCState::Connected)?;
-                                                let ops = self.pending_ops.drain(..).collect::<Vec<(ServerChannelId, ChannelOperation)>>();
+                                                let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
                                                 for (id, op) in ops {
                                                     self.apply_channel_op(id, op).await?;
+                                                }
+                                                let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                                                for (address, port) in forwards {
+                                                    self.tcpip_forward(address, port).await?;
                                                 }
                                             }
                                             Err(e) => {
@@ -393,7 +421,7 @@ impl RemoteClient {
         }
     }
 
-    async fn open_shell(&mut self, channel_id: ServerChannelId) -> Result<()> {
+    async fn open_shell(&mut self, channel_id: Uuid) -> Result<()> {
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
             let channel = session.channel_open_session().await?;
@@ -410,7 +438,7 @@ impl RemoteClient {
             );
             self.child_tasks.push(
                 tokio::task::Builder::new()
-                    .name(&format!("SSH {} {:?} ops", self.id, channel_id.0))
+                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
                     .spawn(channel.run()),
             );
         }
@@ -419,7 +447,7 @@ impl RemoteClient {
 
     async fn open_direct_tcpip(
         &mut self,
-        channel_id: ServerChannelId,
+        channel_id: Uuid,
         params: DirectTCPIPParams,
     ) -> Result<()> {
         if let Some(session) = &self.session {
@@ -445,7 +473,7 @@ impl RemoteClient {
             );
             self.child_tasks.push(
                 tokio::task::Builder::new()
-                    .name(&format!("SSH {} {:?} ops", self.id, channel_id.0))
+                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
                     .spawn(channel.run()),
             );
         }

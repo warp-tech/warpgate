@@ -21,3 +21,4 @@ tracing = "0.1"
 uuid = {version = "0.8", features = ["v4"]}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
+bimap = "0.6"

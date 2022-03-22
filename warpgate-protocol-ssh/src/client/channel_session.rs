@@ -3,12 +3,13 @@ use bytes::{Bytes, BytesMut};
 use russh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
+use uuid::Uuid;
 
-use crate::{ChannelOperation, RCEvent, ServerChannelId};
+use crate::{ChannelOperation, RCEvent};
 
 pub struct SessionChannel {
-    channel: Channel,
-    server_channel_id: ServerChannelId,
+    client_channel: Channel,
+    channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
     session_tag: String,
@@ -16,15 +17,15 @@ pub struct SessionChannel {
 
 impl SessionChannel {
     pub fn new(
-        channel: Channel,
-        server_channel_id: ServerChannelId,
+        client_channel: Channel,
+        channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
         session_tag: String,
     ) -> Self {
         SessionChannel {
-            channel,
-            server_channel_id,
+            client_channel,
+            channel_id,
             ops_rx,
             events_tx,
             session_tag,
@@ -37,13 +38,13 @@ impl SessionChannel {
                 incoming_data = self.ops_rx.recv() => {
                     match incoming_data {
                         Some(ChannelOperation::Data(data)) => {
-                            self.channel.data(&*data).await.context("data")?;
+                            self.client_channel.data(&*data).await.context("data")?;
                         }
                         Some(ChannelOperation::ExtendedData { ext, data }) => {
-                            self.channel.extended_data(ext, &*data).await.context("extended data")?;
+                            self.client_channel.extended_data(ext, &*data).await.context("extended data")?;
                         }
                         Some(ChannelOperation::RequestPty(request)) => {
-                            self.channel.request_pty(
+                            self.client_channel.request_pty(
                                 true,
                                 &request.term,
                                 request.col_width,
@@ -54,7 +55,7 @@ impl SessionChannel {
                             ).await.context("request_pty")?;
                         }
                         Some(ChannelOperation::ResizePty(request)) => {
-                            self.channel.window_change(
+                            self.client_channel.window_change(
                                 request.col_width,
                                 request.row_height,
                                 request.pix_width,
@@ -62,22 +63,22 @@ impl SessionChannel {
                             ).await.context("resize_pty")?;
                         },
                         Some(ChannelOperation::RequestShell) => {
-                            self.channel.request_shell(true).await.context("request_shell")?;
+                            self.client_channel.request_shell(true).await.context("request_shell")?;
                         },
                         Some(ChannelOperation::RequestEnv(name, value)) => {
-                            self.channel.set_env(true, name, value).await.context("request_env")?;
+                            self.client_channel.set_env(true, name, value).await.context("request_env")?;
                         },
                         Some(ChannelOperation::RequestExec(command)) => {
-                            self.channel.exec(true, command).await.context("request_exec")?;
+                            self.client_channel.exec(true, command).await.context("request_exec")?;
                         },
                         Some(ChannelOperation::RequestSubsystem(name)) => {
-                            self.channel.request_subsystem(true, &name).await.context("request_subsystem")?;
+                            self.client_channel.request_subsystem(true, &name).await.context("request_subsystem")?;
                         },
                         Some(ChannelOperation::Eof) => {
-                            self.channel.eof().await.context("eof")?;
+                            self.client_channel.eof().await.context("eof")?;
                         },
                         Some(ChannelOperation::Signal(signal)) => {
-                            self.channel.signal(signal).await.context("signal")?;
+                            self.client_channel.signal(signal).await.context("signal")?;
                         },
                         Some(ChannelOperation::OpenShell) => unreachable!(),
                         Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
@@ -85,33 +86,33 @@ impl SessionChannel {
                         None => break,
                     }
                 }
-                channel_event = self.channel.wait() => {
+                channel_event = self.client_channel.wait() => {
                     match channel_event {
                         Some(russh::ChannelMsg::Data { data }) => {
                             let bytes: &[u8] = &data;
                             self.events_tx.send(RCEvent::Output(
-                                self.server_channel_id,
+                                self.channel_id,
                                 Bytes::from(BytesMut::from(bytes)),
                             ))?;
                         }
                         Some(russh::ChannelMsg::Close) => {
-                            self.events_tx.send(RCEvent::Close(self.server_channel_id))?;
+                            self.events_tx.send(RCEvent::Close(self.channel_id))?;
                         },
                         Some(russh::ChannelMsg::Success) => {
-                            self.events_tx.send(RCEvent::Success(self.server_channel_id))?;
+                            self.events_tx.send(RCEvent::Success(self.channel_id))?;
                         },
                         Some(russh::ChannelMsg::Eof) => {
-                            self.events_tx.send(RCEvent::Eof(self.server_channel_id))?;
+                            self.events_tx.send(RCEvent::Eof(self.channel_id))?;
                         }
                         Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
-                            self.events_tx.send(RCEvent::ExitStatus(self.server_channel_id, exit_status))?;
+                            self.events_tx.send(RCEvent::ExitStatus(self.channel_id, exit_status))?;
                         }
                         Some(russh::ChannelMsg::WindowAdjusted { .. }) => { },
                         Some(russh::ChannelMsg::ExitSignal {
                             core_dumped, error_message, lang_tag, signal_name
                         }) => {
                             self.events_tx.send(RCEvent::ExitSignal {
-                                channel: self.server_channel_id, core_dumped, error_message, lang_tag, signal_name
+                                channel: self.channel_id, core_dumped, error_message, lang_tag, signal_name
                             })?;
                         },
                         Some(russh::ChannelMsg::XonXoff { client_can_do: _ }) => {
@@ -119,15 +120,18 @@ impl SessionChannel {
                         Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
                             let data: &[u8] = &data;
                             self.events_tx.send(RCEvent::ExtendedData {
-                                channel: self.server_channel_id,
+                                channel: self.channel_id,
                                 data: Bytes::from(BytesMut::from(data)),
                                 ext,
                             })?;
                         }
                         None => {
-                            self.events_tx.send(RCEvent::Close(self.server_channel_id))?;
+                            self.events_tx.send(RCEvent::Close(self.channel_id))?;
                             break
                         },
+                        Some(operation) => {
+                            warn!(channel=%self.channel_id, ?operation, session=%self.session_tag, "unexpected channel operation");
+                        }
                     }
                 }
             }
@@ -138,6 +142,6 @@ impl SessionChannel {
 
 impl Drop for SessionChannel {
     fn drop(&mut self) {
-        info!(channel=%self.server_channel_id, session=%self.session_tag, "Closed");
+        info!(channel=%self.channel_id, session=%self.session_tag, "Closed");
     }
 }

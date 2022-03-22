@@ -1,9 +1,10 @@
 use std::pin::Pin;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::ConnectionError;
+use crate::{ConnectionError, DirectTCPIPParams};
 use futures::FutureExt;
 use russh::client::Session;
+use russh::ChannelId;
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
@@ -15,6 +16,7 @@ use warpgate_common::{Services, TargetSSHOptions};
 pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    ForwardedTCPIP(ChannelId, DirectTCPIPParams),
     Disconnect,
 }
 
@@ -39,7 +41,9 @@ pub enum ClientHandlerError {
 
 impl russh::client::Handler for ClientHandler {
     type Error = ClientHandlerError;
-    type FutureUnit = futures::future::Ready<Result<(Self, Session), ClientHandlerError>>;
+    type FutureUnit = Pin<
+        Box<dyn core::future::Future<Output = Result<(Self, Session), ClientHandlerError>> + Send>,
+    >;
     type FutureBool = Pin<
         Box<dyn core::future::Future<Output = Result<(Self, bool), ClientHandlerError>> + Send>,
     >;
@@ -49,7 +53,7 @@ impl russh::client::Handler for ClientHandler {
     }
 
     fn finished(self, session: Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
+        async move { Ok((self, session)) }.boxed()
     }
 
     fn check_server_key(self, server_public_key: &PublicKey) -> Self::FutureBool {

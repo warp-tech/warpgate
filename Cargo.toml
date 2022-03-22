@@ -10,6 +10,6 @@ members = [
 default-members = ["warpgate"]
 
 [profile.release]
-# strip = true
 lto = true
 panic = "abort"
+strip = "debuginfo"

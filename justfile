@@ -1,5 +1,8 @@
 projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-protocol-ssh"
 
+run:
+    RUST_LOG=warpgate cargo run -- --config config.yaml run
+
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
 

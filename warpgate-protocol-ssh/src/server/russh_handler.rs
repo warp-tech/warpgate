@@ -3,7 +3,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use futures::future::{ready, Ready};
 use futures::FutureExt;
 use russh::server::{Auth, Session};
 use russh::{ChannelId, Pty};
@@ -26,15 +25,15 @@ impl russh::server::Handler for ServerHandler {
         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
     type FutureUnit =
         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
-    type FutureBool = Ready<anyhow::Result<(Self, Session, bool)>>;
+    type FutureBool =
+        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session, bool)>> + Send>>;
 
     fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-        println!("Finished auth {:?}", auth);
         async { Ok((self, auth)) }.boxed()
     }
 
     fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-        ready(Ok((self, s, b)))
+        async move { Ok((self, s, b)) }.boxed()
     }
 
     fn finished(self, s: Session) -> Self::FutureUnit {
@@ -65,7 +64,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_subsystem_request(ServerChannelId(channel), name)
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -149,7 +148,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._data(ServerChannelId(channel), data)
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -168,7 +167,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._extended_data(ServerChannelId(channel), code, data)
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -180,7 +179,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_close(ServerChannelId(channel))
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -210,7 +209,7 @@ impl russh::server::Handler for ServerHandler {
                         modes: vec![],
                     },
                 )
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -222,7 +221,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_eof(ServerChannelId(channel))
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -239,7 +238,7 @@ impl russh::server::Handler for ServerHandler {
                 .lock()
                 .await
                 ._channel_signal(ServerChannelId(channel), signal_name)
-                .await;
+                .await?;
             Ok((self, session))
         }
         .boxed()
@@ -272,7 +271,7 @@ impl russh::server::Handler for ServerHandler {
                 ServerChannelId(channel),
                 variable_name,
                 variable_value,
-            );
+            )?;
             Ok((self, session))
         }
         .boxed()
