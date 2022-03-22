@@ -196,11 +196,6 @@ impl RemoteClient {
         Ok(())
     }
 
-    async fn apply_channel_op(
-        &mut self,
-        channel_id: ServerChannelId,
-        op: ChannelOperation,
-    ) -> Result<()> {
     fn map_channel(&self, ch: &ChannelId) -> Result<Uuid> {
         self.channel_map
             .get_by_left(ch)
