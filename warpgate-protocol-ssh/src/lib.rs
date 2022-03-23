@@ -2,6 +2,7 @@
 mod client;
 mod common;
 mod compat;
+pub mod helpers;
 mod keys;
 mod known_hosts;
 mod server;
@@ -11,7 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 pub use client::*;
 pub use common::*;
-pub use keys::generate_host_keys;
+pub use keys::*;
 use russh_keys::PublicKeyBase64;
 pub use server::run_server;
 use std::fmt::Debug;
@@ -28,6 +29,7 @@ impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
         generate_host_keys(&config)?;
+        generate_client_keys(&config)?;
         Ok(SSHProtocolServer {
             services: services.clone(),
         })

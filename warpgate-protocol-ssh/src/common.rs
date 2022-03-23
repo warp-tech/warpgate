@@ -31,14 +31,24 @@ pub struct DirectTCPIPParams {
 }
 
 #[derive(Clone, Debug)]
+pub struct X11Request {
+    pub single_conection: bool,
+    pub x11_auth_protocol: String,
+    pub x11_auth_cookie: String,
+    pub x11_screen_number: u32,
+}
+
+#[derive(Clone, Debug)]
 pub enum ChannelOperation {
     OpenShell,
     OpenDirectTCPIP(DirectTCPIPParams),
+    OpenX11(String, u32),
     RequestPty(PtyRequest),
     ResizePty(PtyRequest),
     RequestShell,
     RequestEnv(String, String),
     RequestExec(String),
+    RequestX11(X11Request),
     RequestSubsystem(String),
     Data(Bytes),
     ExtendedData { data: Bytes, ext: u32 },

@@ -1,21 +1,20 @@
 mod channel_direct_tcpip;
 mod channel_session;
 mod handler;
-use crate::client::handler::ClientHandlerError;
-
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
+use crate::client::handler::ClientHandlerError;
+use crate::helpers::PublicKeyAsOpenSSH;
+use crate::keys::load_client_keys;
 use anyhow::{Context, Result};
-use bimap::BiMap;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::{ChannelId, Sig};
+use russh::Sig;
 use russh_keys::key::PublicKey;
-use russh_keys::load_secret_key;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -115,9 +114,7 @@ pub struct RemoteClient {
     tx: UnboundedSender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
-    channel_map: BiMap<ChannelId, Uuid>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
-    pending_forwards: Vec<(String, u32)>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
@@ -146,9 +143,7 @@ impl RemoteClient {
             tx: event_tx,
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
-            channel_map: BiMap::new(),
             pending_ops: vec![],
-            pending_forwards: vec![],
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -194,20 +189,6 @@ impl RemoteClient {
         self.state = state.clone();
         self.tx.send(RCEvent::State(state))?;
         Ok(())
-    }
-
-    fn map_channel(&self, ch: &ChannelId) -> Result<Uuid> {
-        self.channel_map
-            .get_by_left(ch)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Channel not known"))
-    }
-
-    fn map_channel_reverse(&self, ch: &Uuid) -> Result<ChannelId> {
-        self.channel_map
-            .get_by_right(ch)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
     // fn map_channel(&self, ch: &ChannelId) -> Result<Uuid> {
@@ -345,9 +326,6 @@ impl RemoteClient {
         };
 
         info!(?address, username=?ssh_options.username, session=%self.session_tag, "Connecting");
-        let client_key =
-            load_secret_key("/Users/eugene/.ssh/id_rsa", None).map_err(ConnectionError::Key)?;
-        let client_key = Arc::new(client_key);
         let config = russh::client::Config {
             ..Default::default()
         };
@@ -396,10 +374,19 @@ impl RemoteClient {
                     #[allow(clippy::unwrap_used)]
                     let mut session = session.unwrap();
 
-                    let auth_result = session
-                        // .authenticate_password(ssh_options.username, "syslink")
-                        .authenticate_publickey(ssh_options.username, client_key)
-                        .await?;
+                    let mut auth_result = false;
+                    let keys = load_client_keys(&*self.services.config.lock().await)?;
+                    for key in keys.into_iter() {
+                        let key_str = key.as_openssh();
+                        auth_result = session
+                            // .authenticate_password(ssh_options.username, "syslink")
+                            .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
+                            .await?;
+                        if auth_result {
+                            debug!(session=%self.session_tag, key=%key_str, "Autheticated with key");
+                            break;
+                        }
+                    }
                     if !auth_result {
                         let _ = self.tx.send(RCEvent::AuthError);
                         error!(session=%self.session_tag, "Auth rejected");

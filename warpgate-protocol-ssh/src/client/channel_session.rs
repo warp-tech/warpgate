@@ -82,6 +82,16 @@ impl SessionChannel {
                         },
                         Some(ChannelOperation::OpenShell) => unreachable!(),
                         Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
+                        Some(ChannelOperation::OpenX11 { .. }) => unreachable!(),
+                        Some(ChannelOperation::RequestX11(request)) => {
+                            self.client_channel.request_x11(
+                                true,
+                                request.single_conection,
+                                request.x11_auth_protocol,
+                                request.x11_auth_cookie,
+                                request.x11_screen_number,
+                            ).await.context("data")?;
+                        }
                         Some(ChannelOperation::Close) => break,
                         None => break,
                     }
@@ -129,9 +139,6 @@ impl SessionChannel {
                             self.events_tx.send(RCEvent::Close(self.channel_id))?;
                             break
                         },
-                        Some(operation) => {
-                            warn!(channel=%self.channel_id, ?operation, session=%self.session_tag, "unexpected channel operation");
-                        }
                     }
                 }
             }

@@ -27,6 +27,8 @@ struct Cli {
 enum Commands {
     /// Run first-time setup and generate a config file
     Setup,
+    /// Show Warpgate's SSH client keys
+    ClientKeys,
     /// Run Warpgate
     Run,
     /// Create a password hash for use in the config file
@@ -48,6 +50,7 @@ async fn _main() -> Result<()> {
             crate::commands::test_target::command(&cli, target_name).await
         }
         Commands::Setup => crate::commands::setup::command(&cli).await,
+        Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
     }
 }
 

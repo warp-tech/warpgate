@@ -2,10 +2,10 @@ use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
-    RemoteClient, ServerChannelId,
+    RemoteClient, ServerChannelId, X11Request,
 };
 use ansi_term::Colour;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bimap::BiMap;
 use bytes::{Bytes, BytesMut};
 use russh::server::Session;
@@ -585,6 +585,21 @@ impl ServerSession {
                 ));
             }
         }
+        Ok(())
+    }
+
+    pub async fn _channel_x11_request(
+        &mut self,
+        server_channel_id: ServerChannelId,
+        request: X11Request,
+    ) -> Result<()> {
+        let channel_id = self.map_channel(&server_channel_id)?;
+        debug!(session=?self, channel=%channel_id, "Requested X11");
+        let _ = self.maybe_connect_remote().await;
+        self.send_command(RCCommand::Channel(
+            channel_id,
+            ChannelOperation::RequestX11(request),
+        ));
         Ok(())
     }
 

@@ -76,7 +76,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     store.ssh.keys = dialoguer::Input::with_theme(&theme)
         .default(SSHConfig::default().keys)
-        .with_prompt("Directory to store SSH host keys in")
+        .with_prompt("Directory to store SSH keys in")
         .interact_text()?;
 
     // ---
@@ -120,6 +120,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let config = load_config(&cli.config)?;
     Services::new(config.clone()).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
+    warpgate_protocol_ssh::generate_client_keys(&config)?;
 
     info!("");
     info!("Admin user credentials:");

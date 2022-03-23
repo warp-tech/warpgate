@@ -12,7 +12,7 @@ use warpgate_common::{Secret, SessionId};
 
 use super::session::ServerSession;
 use crate::common::{PtyRequest, ServerChannelId};
-use crate::DirectTCPIPParams;
+use crate::{DirectTCPIPParams, X11Request};
 
 pub struct ServerHandler {
     pub id: SessionId,
@@ -308,6 +308,36 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
+    fn x11_request(
+        self,
+        channel: ChannelId,
+        single_conection: bool,
+        x11_auth_protocol: &str,
+        x11_auth_cookie: &str,
+        x11_screen_number: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let x11_auth_protocol = x11_auth_protocol.to_string();
+        let x11_auth_cookie = x11_auth_cookie.to_string();
+        async move {
+            self.session
+                .lock()
+                .await
+                ._channel_x11_request(
+                    ServerChannelId(channel),
+                    X11Request {
+                        single_conection,
+                        x11_auth_protocol,
+                        x11_auth_cookie,
+                        x11_screen_number,
+                    },
+                )
+                .await?;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
     // -----
 
     // fn auth_none(self, user: &str) -> Self::FutureAuth {
@@ -321,27 +351,6 @@ impl russh::server::Handler for ServerHandler {
     //     response: Option<russh::server::Response>,
     // ) -> Self::FutureAuth {
     //     self.finished_auth(Auth::Reject)
-    // }
-
-    // fn channel_open_x11(
-    //     self,
-    //     channel: ChannelId,
-    //     originator_address: &str,
-    //     originator_port: u32,
-    //     session: Session,
-    // ) -> Self::FutureUnit {
-    //     self.finished(session)
-    // }
-    // fn x11_request(
-    //     self,
-    //     channel: ChannelId,
-    //     single_conection: bool,
-    //     x11_auth_protocol: &str,
-    //     x11_auth_cookie: &str,
-    //     x11_screen_number: u32,
-    //     session: Session,
-    // ) -> Self::FutureUnit {
-    //     self.finished(session)
     // }
 
     // fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
