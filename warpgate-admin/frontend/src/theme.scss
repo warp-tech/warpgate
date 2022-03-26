@@ -1,20 +1,18 @@
 @import "bootstrap/scss/functions";
 // @import "bootstrap/scss/variables";
-$body-bg: #191817;
-$body-color: #ddd;
+@import "./vars";
 
-$component-hover-bg: rgba(#fff, .05);
-$component-active-color: hsl(224deg 100% 78%);
-$component-active-bg: hsl(224deg 73% 21% / 52%);
+// $component-hover-bg: rgba(#fff, .05);
+// $component-active-color: hsl(224deg 100% 78%);
+// $component-active-bg: hsl(224deg 73% 21% / 52%);
 
-$list-group-bg: transparent;
-$list-group-color: #bbb;
-$list-group-hover-bg: $component-hover-bg;
-$list-group-action-hover-color: #fff;
+// $list-group-bg: transparent;
+// $list-group-color: #bbb;
+// $list-group-hover-bg: $component-hover-bg;
+// $list-group-action-hover-color: #fff;
 
 
 // Configuration
-@import "bootstrap/scss/variables";
 @import "bootstrap/scss/mixins";
 @import "bootstrap/scss/utilities";
 
@@ -44,7 +42,7 @@ $list-group-action-hover-color: #fff;
 // @import "bootstrap/scss/close";
 // @import "bootstrap/scss/toasts";
 // @import "bootstrap/scss/modal";
-// @import "bootstrap/scss/tooltip";
+@import "bootstrap/scss/tooltip";
 // @import "bootstrap/scss/popover";
 // @import "bootstrap/scss/carousel";
 @import "bootstrap/scss/spinners";
@@ -58,7 +56,26 @@ $list-group-action-hover-color: #fff;
 @import "bootstrap/scss/utilities/api";
 
 
-.list-group-flush > .list-group-item {
-    border-radius: $border-radius;
-    text-shadow: 0 0 1px black;
+// .list-group-flush > .list-group-item {
+//     border-radius: $border-radius;
+//     text-shadow: 0 0 1px black;
+// }
+
+a {
+    text-decoration-color: rgba($body-color, 0.25);
+    text-underline-offset: 2px;
+
+    &:hover, &.active {
+        text-decoration-color: $body-color;
+    }
+}
+
+.page-summary-bar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+
+    h1 {
+        margin: 0;
+    }
 }

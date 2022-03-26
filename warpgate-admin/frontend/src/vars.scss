@@ -1,0 +1,9 @@
+@import "../node_modules/bootstrap/scss/functions";
+
+$body-bg: #fffcf6;
+$body-color: #555;
+$font-family-sans-serif: "Work Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+$link-color: $body-color;
+$list-group-bg: transparent;
+
+@import "../node_modules/bootstrap/scss/variables";

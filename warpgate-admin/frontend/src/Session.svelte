@@ -1,5 +1,6 @@
 <script lang="ts">
 import { api, SessionSnapshot, Recording } from 'lib/api'
+import { timeAgo } from 'lib/time'
 import { link } from 'svelte-spa-router'
 import { Alert, Spinner } from 'sveltestrap'
 
@@ -47,7 +48,7 @@ load().catch(e => {
                 <code>{recording.name}</code>
             </div>
             <div class="meta">
-                <small>{recording.started}</small>
+                <small>Started {timeAgo(recording.started)}</small>
             </div>
         </a>
     {/each}

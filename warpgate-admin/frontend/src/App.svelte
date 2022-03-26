@@ -1,5 +1,6 @@
 <script lang="ts">
     import Router, { link } from 'svelte-spa-router'
+    import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
 
     const routes = {
@@ -24,22 +25,50 @@
     }
 </script>
 
-<main class="container">
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/" use:link>Navbar</a>
-            <ul class="navbar-nav me-auto flex-row">
-                <li class="nav-item me-3">
-                    <a class="nav-link active" href="/" use:link>Sessions</a>
-                </li>
-                <li class="nav-item me-3">
-                    <a class="nav-link active" href="/tickets" use:link>Tickets</a>
-                </li>
-                <li class="nav-item me-3">
-                    <a class="nav-link active" href="/ssh/known-hosts" use:link>Known hosts</a>
-                </li>
-            </ul>
-        </div>
-    </nav>
-    <Router {routes}/>
-</main>
+<div class="app container">
+    <header>
+        <div class="logo">Warpgate</div>
+        <a use:link use:active href="/">Sessions</a>
+        <a use:link use:active href="/tickets">Tickets</a>
+        <a use:link use:active href="/ssh/known-hosts">Known hosts</a>
+    </header>
+    <main>
+        <Router {routes}/>
+    </main>
+    <footer>
+        Footer
+    </footer>
+</div>
+
+<style lang="scss">
+    @import "./vars";
+
+    .app {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    header, footer {
+        flex: none;
+    }
+
+    main {
+        flex: 1 0 0;
+    }
+
+    header {
+        display: flex;
+        padding: 10px 0;
+        margin: 10px 0 20px;
+        border-bottom: 1px solid rgba($body-color, .75);
+
+        a, .logo {
+            font-size: 1.5rem;
+        }
+
+        a {
+            margin-left: 15px;
+        }
+    }
+</style>
