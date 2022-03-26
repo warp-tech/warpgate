@@ -185,7 +185,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TicketSnapshot"
+                    "$ref": "#/components/schemas/Ticket"
                   }
                 }
               }
@@ -299,6 +299,23 @@
         },
         "operationId": "delete_ssh_known_host"
       }
+    },
+    "/instance": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceInfo"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_instance_info"
+      }
     }
   },
   "components": {
@@ -314,6 +331,17 @@
             "type": "string"
           },
           "target_name": {
+            "type": "string"
+          }
+        }
+      },
+      "InstanceInfo": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
             "type": "string"
           }
         }
@@ -460,27 +488,13 @@
           }
         }
       },
-      "TicketAndSecret": {
-        "type": "object",
-        "required": [
-          "ticket",
-          "secret"
-        ],
-        "properties": {
-          "ticket": {
-            "$ref": "#/components/schemas/TicketSnapshot"
-          },
-          "secret": {
-            "type": "string"
-          }
-        }
-      },
-      "TicketSnapshot": {
+      "Ticket": {
         "type": "object",
         "required": [
           "id",
           "username",
-          "target"
+          "target",
+          "created"
         ],
         "properties": {
           "id": {
@@ -491,6 +505,33 @@
             "type": "string"
           },
           "target": {
+            "type": "string"
+          },
+          "uses_left": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TicketAndSecret": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "secret"
+        ],
+        "properties": {
+          "ticket": {
+            "$ref": "#/components/schemas/Ticket"
+          },
+          "secret": {
             "type": "string"
           }
         }

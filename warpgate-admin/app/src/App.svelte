@@ -1,7 +1,14 @@
 <script lang="ts">
+import { api } from 'lib/api';
+
     import Router, { link } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
+
+    let version = ''
+    api.getInstanceInfo().then(info => {
+        version = info.version
+    })
 
     const routes = {
         '/': wrap({
@@ -36,7 +43,7 @@
         <Router {routes}/>
     </main>
     <footer>
-        Footer
+        Warpgate {version}
     </footer>
 </div>
 
@@ -70,5 +77,12 @@
         a {
             margin-left: 15px;
         }
+    }
+
+    footer {
+        display: flex;
+        padding: 10px 0;
+        margin: 20px 0 10px;
+        border-top: 1px solid rgba($body-color, .75);
     }
 </style>

@@ -1,7 +1,8 @@
 <script lang="ts">
 import { api, UserSnapshot, Target, TicketAndSecret } from 'lib/api'
 import { link } from 'svelte-spa-router'
-import { Alert } from 'sveltestrap'
+import { Alert, Button, FormGroup } from 'sveltestrap'
+import { firstBy } from 'thenby'
 
 let error: Error|null = null
 let targets: Target[]|undefined
@@ -15,6 +16,8 @@ async function load () {
         api.getTargets(),
         api.getUsers(),
     ])
+    targets.sort(firstBy('name'))
+    users.sort(firstBy('username'))
 }
 
 load().catch(e => {
@@ -44,16 +47,30 @@ async function create () {
 {/if}
 
 {#if result}
-    <input type="text" class="form-control" readonly value={result.secret} />
+    <div class="page-summary-bar">
+        <h1>Ticket created</h1>
+    </div>
+
+    <Alert color="warning">
+        The secret is only shown once - you won't be able to see it again.
+    </Alert>
+
+    <FormGroup floating label="Access secret">
+        <input type="text" class="form-control" readonly value={result.secret} />
+    </FormGroup>
+
     <a
-        class="btn btn-primary"
+        class="btn btn-secondary"
         href="/tickets"
         use:link
     >Done</a>
 {:else}
+    <div class="page-summary-bar">
+        <h1>Create an access ticket</h1>
+    </div>
+
     {#if users}
-    <div class="form-group">
-        <label for=''>User</label>
+    <FormGroup floating label="Authorize as user">
         <select bind:value={selectedUser} class="form-control">
             {#each users as user}
                 <option value={user}>
@@ -61,12 +78,11 @@ async function create () {
                 </option>
             {/each}
         </select>
-    </div>
+    </FormGroup>
     {/if}
 
     {#if targets}
-    <div class="form-group">
-        <label for=''>Target</label>
+    <FormGroup floating label="Target">
         <select bind:value={selectedTarget} class="form-control">
             {#each targets as target}
                 <option value={target}>
@@ -74,11 +90,11 @@ async function create () {
                 </option>
             {/each}
         </select>
-    </div>
+    </FormGroup>
     {/if}
 
-    <button
-        class="btn btn-primary"
+    <Button
+        outline
         on:click={create}
-    >Create</button>
+    >Create ticket</Button>
 {/if}

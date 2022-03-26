@@ -25,18 +25,24 @@ async function deleteHost (host: SSHKnownHost) {
 {/if}
 
 {#if knownHosts }
+<div class="page-summary-bar">
+    {#if knownHosts.length }
+        <h1>Trusted SSH keys: {knownHosts.length}</h1>
+    {:else}
+        <h1>No trusted SSH keys</h1>
+    {/if}
+</div>
 <div class="list-group list-group-flush">
     {#each knownHosts as host}
         <div class="list-group-item">
-            <div class="main">
+            <div class="d-flex">
                 <strong>
                     {host.host}:{host.port}
                 </strong>
 
-                <code>{host.keyType}</code>
-                <code>{host.keyBase64}</code>
-                <button on:click="{() => deleteHost(host)}">Delete</button>
+                <a class="ms-auto" href={''} on:click|preventDefault={() => deleteHost(host)}>Delete</a>
             </div>
+            <pre>{host.keyType} {host.keyBase64}</pre>
         </div>
     {/each}
 </div>

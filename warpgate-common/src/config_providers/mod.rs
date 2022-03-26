@@ -1,5 +1,5 @@
 mod file;
-use crate::{Secret, Target, TicketSnapshot, UserSnapshot};
+use crate::{Secret, Target, UserSnapshot};
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -45,7 +45,7 @@ pub trait ConfigProvider {
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
-) -> Result<Option<TicketSnapshot>> {
+) -> Result<Option<Ticket::Model>> {
     let ticket = {
         let db = db.lock().await;
         Ticket::Entity::find()

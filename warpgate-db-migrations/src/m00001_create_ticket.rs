@@ -16,6 +16,7 @@ pub mod ticket {
         pub target: String,
         pub uses_left: Option<u32>,
         pub expiry: Option<DateTimeUtc>,
+        pub created: DateTimeUtc,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

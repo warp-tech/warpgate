@@ -5,18 +5,18 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use warpgate_db_entities::Ticket;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::hash::generate_ticket_secret;
-use warpgate_common::TicketSnapshot;
 
 pub struct Api;
 
 #[derive(ApiResponse)]
 enum GetTicketsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<TicketSnapshot>>),
+    Ok(Json<Vec<Ticket::Model>>),
 }
 
 #[derive(Object)]
@@ -27,7 +27,7 @@ struct CreateTicketRequest {
 
 #[derive(Object)]
 struct TicketAndSecret {
-    ticket: TicketSnapshot,
+    ticket: Ticket::Model,
     secret: String,
 }
 
@@ -57,7 +57,7 @@ impl Api {
         let tickets = tickets
             .into_iter()
             .map(Into::into)
-            .collect::<Vec<TicketSnapshot>>();
+            .collect::<Vec<Ticket::Model>>();
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
 
@@ -83,6 +83,7 @@ impl Api {
             secret: Set(secret.expose_secret().to_string()),
             username: Set(body.username.clone()),
             target: Set(body.target_name.clone()),
+            created: Set(chrono::Utc::now()),
             ..Default::default()
         };
 

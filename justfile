@@ -12,13 +12,13 @@ fix *ARGS:
 clippy *ARGS:
     for p in {{projects}}; do cargo clippy -p $p {{ARGS}}; done
 
-watch:
-    cd warpgate-admin/frontend/ && yarn watch
+yarn *ARGS:
+    cd warpgate-admin/app/ && yarn {{ARGS}}
 
 svelte-check:
-    cd warpgate-admin/frontend/ && yarn run check
+    cd warpgate-admin/app/ && yarn run check
 
 openapi:
-    cd warpgate-admin/frontend/ && yarn openapi-schema && yarn openapi-client
+    cd warpgate-admin/app/ && yarn openapi-schema && yarn openapi-client
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt

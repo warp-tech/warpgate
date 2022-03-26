@@ -2,7 +2,7 @@
 import { api, SessionSnapshot, Recording } from 'lib/api'
 import { timeAgo } from 'lib/time'
 import { link } from 'svelte-spa-router'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert, Button, Spinner } from 'sveltestrap'
 
 export let params = { id: '' }
 
@@ -15,6 +15,10 @@ async function load () {
     recordings = await api.getSessionRecordings(params)
 }
 
+async function close () {
+
+}
+
 load().catch(e => {
     error = e
 })
@@ -22,15 +26,23 @@ load().catch(e => {
 </script>
 
 {#if session}
-<h1>{session.id}</h1>
+    <div class="page-summary-bar">
+        <div>
+            <h1>Session</h1>
+            <small class="d-block text-muted">{session.id}</small>
+        </div>
+        <Button class="ms-auto" outline on:click={close}>
+            Close now
+        </Button>
+    </div>
 {/if}
 
 {#if !session && !error}
-<Spinner />
+    <Spinner />
 {/if}
 
 {#if error}
-<Alert color="danger">{error.message}</Alert>
+    <Alert color="danger">{error.message}</Alert>
 {/if}
 
 {#if recordings }

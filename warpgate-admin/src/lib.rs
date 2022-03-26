@@ -35,6 +35,7 @@ impl AdminServer {
                 crate::api::tickets_detail::Api,
                 crate::api::known_hosts_list::Api,
                 crate::api::known_hosts_detail::Api,
+                crate::api::instance::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),
@@ -50,11 +51,11 @@ impl AdminServer {
             .nest("/api/openapi.json", spec)
             .nest(
                 "/assets",
-                StaticFilesEndpoint::new("./warpgate-admin/frontend/dist/assets"),
+                StaticFilesEndpoint::new("./warpgate-admin/app/dist/assets"),
             )
             .at(
                 "/",
-                StaticFileEndpoint::new("./warpgate-admin/frontend/dist/index.html"),
+                StaticFileEndpoint::new("./warpgate-admin/app/dist/index.html"),
             )
             .at(
                 "/api/recordings/:id/cast",

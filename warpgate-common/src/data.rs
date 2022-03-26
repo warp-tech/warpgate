@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warpgate_db_entities::{Session, Ticket};
+use warpgate_db_entities::Session;
 
 use crate::{SessionId, Target, User};
 
@@ -40,23 +40,6 @@ impl UserSnapshot {
     pub fn new(user: &User) -> Self {
         Self {
             username: user.username.clone(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Object)]
-pub struct TicketSnapshot {
-    pub id: Uuid,
-    pub username: String,
-    pub target: String,
-}
-
-impl From<Ticket::Model> for TicketSnapshot {
-    fn from(model: Ticket::Model) -> Self {
-        Self {
-            id: model.id,
-            username: model.username,
-            target: model.target,
         }
     }
 }
