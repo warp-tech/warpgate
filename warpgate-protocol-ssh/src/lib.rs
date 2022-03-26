@@ -74,9 +74,6 @@ impl ProtocolServer for SSHProtocolServer {
                     }
                     return Err(TargetTestError::ConnectionError(format!("{:?}", err)));
                 }
-                RCEvent::AuthError => {
-                    return Err(TargetTestError::AuthenticationError);
-                }
                 RCEvent::HostKeyUnknown(key, reply) => {
                     println!("\nHost key ({}): {}", key.name(), key.public_key_base64());
                     println!("There is no trusted {} key for this host.", key.name());

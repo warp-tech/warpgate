@@ -1,11 +1,13 @@
+use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
+use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
     RemoteClient, ServerChannelId, X11Request,
 };
 use ansi_term::Colour;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::{Bytes, BytesMut};
 use russh::server::Session;
@@ -42,6 +44,7 @@ enum TargetSelection {
 enum Event {
     Command(SessionHandleCommand),
     ConsoleInput(Bytes),
+    ServiceOutput(Bytes),
     Client(RCEvent),
 }
 
@@ -64,6 +67,7 @@ pub struct ServerSession {
     credentials: Vec<AuthCredential>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
+    service_output: ServiceOutput,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -92,6 +96,21 @@ impl ServerSession {
 
         let (hub, event_sender) = EventHub::setup();
         let mut event_sub = hub.subscribe(|_| true).await;
+
+        let (so_tx, mut so_rx) = tokio::sync::mpsc::unbounded_channel();
+        let so_sender = event_sender.clone();
+        tokio::spawn(async move {
+            while let Some(data) = so_rx.recv().await {
+                if so_sender
+                    .send_once(Event::ServiceOutput(data))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
         let this = Self {
             id: server_handle.id(),
             session_handle: None,
@@ -111,6 +130,9 @@ impl ServerSession {
             credentials: vec![],
             hub,
             event_sender: event_sender.clone(),
+            service_output: ServiceOutput::new(Box::new(move |data| {
+                so_tx.send(BytesMut::from(data).freeze()).context("x")
+            })),
         };
 
         info!(session=?this, "New connection");
@@ -173,8 +195,15 @@ impl ServerSession {
                                 break;
                             }
                         }
+                        Some(Event::ServiceOutput(data)) => {
+                            let Some(this) = this.upgrade() else {
+                                break;
+                            };
+                            let this = &mut this.lock().await;
+                            let _ = this.emit_pty_output(&data).await;
+                        }
+                        Some(Event::ConsoleInput(_)) => (),
                         None => break,
-                        _ => ()
                     }
                 }
                 debug!(session=%session_debug_tag, "No more events");
@@ -200,10 +229,12 @@ impl ServerSession {
 
     pub async fn emit_service_message(&mut self, msg: &str) -> Result<()> {
         debug!(session=?self, "Service message: {}", msg);
+
         self.emit_pty_output(
             format!(
-                "{} {}\r\n",
-                Colour::Black.on(Colour::Blue).bold().paint(" warpgate "),
+                "{}{} {}\r\n",
+                ERASE_PROGRESS_SPINNER,
+                Colour::Black.on(Colour::White).paint(" Warpgate "),
                 msg.replace('\n', "\r\n"),
             )
             .as_bytes(),
@@ -241,7 +272,8 @@ impl ServerSession {
                 if self.rc_state == RCState::NotInitialized {
                     self.rc_state = RCState::Connecting;
                     self.rc_tx.send(RCCommand::Connect(ssh_options))?;
-                    self.emit_service_message(&format!("Connecting to {}", target.name))
+                    self.service_output.show_progress();
+                    self.emit_service_message(&format!("Selected target: {}", target.name))
                         .await?;
                 }
             }
@@ -267,46 +299,70 @@ impl ServerSession {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.emit_service_message("Connected").await?;
+                        self.service_output.hide_progress().await;
+                        self.emit_pty_output(
+                            format!(
+                                "{}{}\r\n",
+                                ERASE_PROGRESS_SPINNER,
+                                Colour::Black
+                                    .on(Colour::Green)
+                                    .paint(" ✓ Warpgate connected ")
+                            )
+                            .as_bytes(),
+                        )
+                        .await?;
                     }
                     RCState::Disconnected => {
+                        self.service_output.hide_progress().await;
                         self.disconnect_server().await;
                     }
                     _ => {}
                 }
             }
-            RCEvent::ConnectionError(error) => match error {
-                ConnectionError::HostKeyMismatch {
-                    received_key_type,
-                    received_key_base64,
-                    known_key_type,
-                    known_key_base64,
-                } => {
-                    let msg = format!(
-                        concat!(
-                            "Host key doesn't match the stored one.\n",
-                            "Stored key   ({}): {}\n",
-                            "Received key ({}): {}",
-                        ),
-                        known_key_type, known_key_base64, received_key_type, received_key_base64
-                    );
-                    self.emit_service_message(&msg).await?;
-                    self.emit_service_message(
-                        "If you know that the key is correct (e.g. it has been changed),",
-                    )
-                    .await?;
-                    self.emit_service_message(
+            RCEvent::ConnectionError(error) => {
+                self.service_output.hide_progress().await;
+
+                match error {
+                    ConnectionError::HostKeyMismatch {
+                        received_key_type,
+                        received_key_base64,
+                        known_key_type,
+                        known_key_base64,
+                    } => {
+                        let msg = format!(
+                            concat!(
+                                "Host key doesn't match the stored one.\n",
+                                "Stored key   ({}): {}\n",
+                                "Received key ({}): {}",
+                            ),
+                            known_key_type,
+                            known_key_base64,
+                            received_key_type,
+                            received_key_base64
+                        );
+                        self.emit_service_message(&msg).await?;
+                        self.emit_service_message(
+                            "If you know that the key is correct (e.g. it has been changed),",
+                        )
+                        .await?;
+                        self.emit_service_message(
                         "you can remove the old key in the Warpgate management UI and try again",
                     )
                     .await?;
-                }
-                error => {
-                    self.emit_service_message(&format!("Connection failed: {}", error))
+                    }
+                    error => {
+                        self.emit_pty_output(
+                            format!(
+                                "{}{} {}\r\n",
+                                ERASE_PROGRESS_SPINNER,
+                                Colour::Black.on(Colour::Red).paint(" Connection failed "),
+                                error
+                            )
+                            .as_bytes(),
+                        )
                         .await?;
+                    }
                 }
-            },
-            RCEvent::AuthError => {
-                self.emit_service_message("Authentication failed").await?;
             }
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
@@ -435,7 +491,7 @@ impl ServerSession {
         key: PublicKey,
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
-        //self.emit_service_message(&format!("Host key ({}): {}", key.name(), key.public_key_base64())).await;
+        self.service_output.hide_progress().await;
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
             key.name()
@@ -447,6 +503,8 @@ impl ServerSession {
             .hub
             .subscribe(|e| matches!(e, Event::ConsoleInput(_)))
             .await;
+
+        let mut service_output = self.service_output.clone();
         tokio::spawn(async move {
             loop {
                 match sub.recv().await {
@@ -463,6 +521,7 @@ impl ServerSession {
                     _ => (),
                 }
             }
+            service_output.show_progress();
         });
 
         Ok(())

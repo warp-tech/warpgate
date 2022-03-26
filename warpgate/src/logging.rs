@@ -15,11 +15,12 @@ pub fn init_logging() {
         .unwrap_or_else(|_| UtcOffset::from_whole_seconds(0).unwrap());
 
     let env_filter = Arc::new(EnvFilter::from_default_env());
+    let enable_colors = console::user_attended();
 
     let full_fmt_layer = {
         let env_filter = env_filter.clone();
         tracing_subscriber::fmt::layer()
-            // let fmt_layer = i
+            .with_ansi(enable_colors)
             .with_timer(OffsetTime::new(
                 offset,
                 format_description::parse("[day].[month].[year] [hour]:[minute]:[second]").unwrap(),
@@ -31,6 +32,7 @@ pub fn init_logging() {
     let compact_fmt_layer = {
         tracing_subscriber::fmt::layer()
             .compact()
+            .with_ansi(enable_colors)
             .with_target(false)
             .with_timer(OffsetTime::new(
                 offset,

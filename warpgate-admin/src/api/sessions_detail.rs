@@ -12,6 +12,7 @@ use warpgate_db_entities::{Recording, Session};
 
 pub struct Api;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum GetSessionResponse {
     #[oai(status = 200)]

@@ -33,17 +33,33 @@ fn _default_web_admin_listen() -> String {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
-#[allow(unused)]
 pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_port")]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
+    #[serde(default)]
+    #[oai(skip)]
+    pub auth: SSHTargetAuth,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum SSHTargetAuth {
+    #[serde(rename = "password")]
+    Password { password: Secret<String> },
+    #[serde(rename = "publickey")]
+    PublicKey,
+}
+
+impl Default for SSHTargetAuth {
+    fn default() -> Self {
+        SSHTargetAuth::PublicKey
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
-#[allow(unused)]
 pub struct Target {
     pub name: String,
     pub roles: Vec<String>,
@@ -51,7 +67,6 @@ pub struct Target {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-#[allow(unused)]
 #[serde(tag = "type")]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
@@ -61,7 +76,6 @@ pub enum UserAuthCredential {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[allow(unused)]
 pub struct User {
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
@@ -70,7 +84,6 @@ pub struct User {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
-#[allow(unused)]
 pub struct Role {
     pub name: String,
 }
@@ -88,7 +101,6 @@ fn _default_ssh_keys_path() -> String {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[allow(unused)]
 pub struct SSHConfig {
     #[serde(default = "_default_ssh_listen")]
     pub listen: String,
@@ -111,7 +123,6 @@ impl Default for SSHConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[allow(unused)]
 pub struct WebAdminConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -130,7 +141,6 @@ impl Default for WebAdminConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[allow(unused)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -149,7 +159,6 @@ impl Default for RecordingsConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[allow(unused)]
 pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
     pub users: Vec<User>,

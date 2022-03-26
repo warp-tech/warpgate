@@ -24,7 +24,7 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::{Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SSHTargetAuth, Services, SessionId, TargetSSHOptions};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -79,7 +79,6 @@ pub enum RCEvent {
         ext: u32,
     },
     ConnectionError(ConnectionError),
-    AuthError,
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
@@ -375,20 +374,31 @@ impl RemoteClient {
                     let mut session = session.unwrap();
 
                     let mut auth_result = false;
-                    let keys = load_client_keys(&*self.services.config.lock().await)?;
-                    for key in keys.into_iter() {
-                        let key_str = key.as_openssh();
-                        auth_result = session
-                            // .authenticate_password(ssh_options.username, "syslink")
-                            .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
-                            .await?;
-                        if auth_result {
-                            debug!(session=%self.session_tag, key=%key_str, "Autheticated with key");
-                            break;
+                    match ssh_options.auth {
+                        SSHTargetAuth::Password { password } => {
+                            auth_result = session
+                                .authenticate_password(ssh_options.username, password.expose_secret())
+                                .await?;
+                            if auth_result {
+                                debug!(session=%self.session_tag, "Authenticated with password");
+                            }
+                        }
+                        SSHTargetAuth::PublicKey => {
+                            let keys = load_client_keys(&*self.services.config.lock().await)?;
+                            for key in keys.into_iter() {
+                                let key_str = key.as_openssh();
+                                auth_result = session
+                                    .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
+                                    .await?;
+                                if auth_result {
+                                    debug!(session=%self.session_tag, key=%key_str, "Authenticated with key");
+                                    break;
+                                }
+                            }
                         }
                     }
+
                     if !auth_result {
-                        let _ = self.tx.send(RCEvent::AuthError);
                         error!(session=%self.session_tag, "Auth rejected");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
