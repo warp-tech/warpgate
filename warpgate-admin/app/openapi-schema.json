@@ -32,7 +32,7 @@
       },
       "delete": {
         "responses": {
-          "200": {
+          "201": {
             "description": ""
           }
         },
@@ -101,6 +101,31 @@
           }
         },
         "operationId": "get_session_recordings"
+      }
+    },
+    "/sessions/{id}/close": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "close_session"
       }
     },
     "/recordings/{id}": {

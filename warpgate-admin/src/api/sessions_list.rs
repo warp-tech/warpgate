@@ -17,7 +17,7 @@ enum GetSessionsResponse {
 
 #[derive(ApiResponse)]
 enum CloseAllSessionsResponse {
-    #[oai(status = 200)]
+    #[oai(status = 201)]
     Ok,
 }
 

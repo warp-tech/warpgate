@@ -5,6 +5,7 @@ use bytes::{Bytes, BytesMut};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, Mutex};
@@ -28,10 +29,22 @@ impl RecordingWriter {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         tokio::spawn(async move {
             if let Err(error) = async {
-                while let Some(bytes) = receiver.recv().await {
-                    writer.write_all(&bytes).await?;
+                let mut last_flush = Instant::now();
+                loop {
+                    if Instant::now() - last_flush > Duration::from_secs(5) {
+                        last_flush = Instant::now();
+                        writer.flush().await?;
+                    }
+                    tokio::select! {
+                        data = receiver.recv() => match data {
+                            Some(bytes) => {
+                                writer.write_all(&bytes).await?;
+                            }
+                            None => break,
+                        },
+                        _ = tokio::time::sleep(Duration::from_millis(5000)) => ()
+                    }
                 }
-
                 Ok::<(), anyhow::Error>(())
             }
             .await

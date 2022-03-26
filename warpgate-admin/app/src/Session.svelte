@@ -1,8 +1,11 @@
 <script lang="ts">
 import { api, SessionSnapshot, Recording } from 'lib/api'
 import { timeAgo } from 'lib/time'
+import moment from 'moment'
+import RelativeDate from 'RelativeDate.svelte';
+import { onDestroy } from 'svelte';
 import { link } from 'svelte-spa-router'
-import { Alert, Button, Spinner } from 'sveltestrap'
+import { Alert, Button, FormGroup, Spinner } from 'sveltestrap'
 
 export let params = { id: '' }
 
@@ -16,26 +19,25 @@ async function load () {
 }
 
 async function close () {
+    api.closeSession(session!)
+}
 
+function getTargetDescription () {
+    if (session?.target) {
+        return `${session.target.name} (${session.target.ssh?.host}:${session.target.ssh?.port})`
+    } else {
+        return 'Not selected yet'
+    }
 }
 
 load().catch(e => {
     error = e
 })
 
-</script>
+const interval = setInterval(load, 1000)
+onDestroy(() => clearInterval(interval))
 
-{#if session}
-    <div class="page-summary-bar">
-        <div>
-            <h1>Session</h1>
-            <small class="d-block text-muted">{session.id}</small>
-        </div>
-        <Button class="ms-auto" outline on:click={close}>
-            Close now
-        </Button>
-    </div>
-{/if}
+</script>
 
 {#if !session && !error}
     <Spinner />
@@ -45,26 +47,62 @@ load().catch(e => {
     <Alert color="danger">{error.message}</Alert>
 {/if}
 
-{#if recordings }
-<div class="list-group list-group-flush">
-    {#each recordings as recording}
-        <a
-            class="list-group-item list-group-item-action"
-            href="/recordings/{recording.id}"
-            use:link>
-            <div class="main">
-                <strong>
-                    {recording.id}
-                </strong>
+{#if session}
+    <div class="page-summary-bar">
+        <div>
+            <h1>Session</h1>
+            <div class="text-muted">
+                {#if session.ended}
+                    {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                {:else}
+                    {moment.duration(moment().diff(session.started)).humanize()}
+                {/if}
+            </div>
+        </div>
+        {#if !session.ended}
+            <Button class="ms-auto" outline on:click={close}>
+                Close now
+            </Button>
+        {/if}
+    </div>
 
-                <code>{recording.name}</code>
-            </div>
-            <div class="meta">
-                <small>Started {timeAgo(recording.started)}</small>
-            </div>
-        </a>
-    {/each}
-</div>
+    <div class="row mb-4">
+        <div class="col-12 col-md-6">
+            <FormGroup floating label="User">
+                {#if session.username}
+                    <input type="text" class="form-control" readonly value={session.username} />
+                {:else}
+                    <input type="text" class="form-control" readonly value="Logging in" />
+                {/if}
+            </FormGroup>
+        </div>
+        <div class="col-12 col-md-6">
+            <FormGroup floating label="Target">
+                <input type="text" class="form-control" readonly value={getTargetDescription()} />
+            </FormGroup>
+        </div>
+    </div>
+
+    {#if recordings?.length }
+        <h3>Recordings</h3>
+        <div class="list-group list-group-flush">
+            {#each recordings as recording}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/recordings/{recording.id}"
+                    use:link>
+                    <div class="main">
+                        <strong>
+                            {recording.name}
+                        </strong>
+                        <small class="meta ms-auto">
+                            {timeAgo(recording.started)}
+                        </small>
+                    </div>
+                </a>
+            {/each}
+        </div>
+    {/if}
 {/if}
 
 <style lang="scss">

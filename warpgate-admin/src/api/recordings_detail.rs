@@ -1,5 +1,6 @@
 use crate::helpers::ApiResult;
-use poem::error::InternalServerError;
+use bytes::Bytes;
+use poem::error::{InternalServerError, NotFoundError};
 use poem::handler;
 use poem::web::Data;
 use poem_openapi::param::Path;
@@ -13,7 +14,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::recordings::{SessionRecordings, TerminalRecordingItem};
-use warpgate_db_entities::Recording;
+use warpgate_db_entities::Recording::{self, RecordingKind};
 
 pub struct Api;
 
@@ -42,7 +43,7 @@ impl Api {
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)?;
+            .map_err(InternalServerError)?;
 
         match recording {
             Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
@@ -62,11 +63,15 @@ pub async fn api_get_recording_cast(
     let recording = Recording::Entity::find_by_id(id.0)
         .one(&*db)
         .await
-        .map_err(poem::error::InternalServerError)?;
+        .map_err(InternalServerError)?;
 
     let Some(recording) = recording else {
-        return Err(poem::error::NotFound(std::io::Error::new(std::io::ErrorKind::NotFound, "Not found")));
+        return Err(NotFoundError.into())
     };
+
+    if recording.kind != RecordingKind::Terminal {
+        return Err(NotFoundError.into());
+    }
 
     let path = {
         recordings
@@ -104,6 +109,39 @@ pub async fn api_get_recording_cast(
         response.push('\n');
     }
     Ok(response)
+}
+
+#[handler]
+pub async fn api_get_recording_tcpdump(
+    db: Data<&Arc<Mutex<DatabaseConnection>>>,
+    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    id: poem::web::Path<Uuid>,
+) -> ApiResult<Bytes> {
+    let db = db.lock().await;
+
+    let recording = Recording::Entity::find_by_id(id.0)
+        .one(&*db)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+
+    let Some(recording) = recording else {
+        return Err(NotFoundError.into())
+    };
+
+    if recording.kind != RecordingKind::Traffic {
+        return Err(NotFoundError.into());
+    }
+
+    let path = {
+        recordings
+            .lock()
+            .await
+            .path_for(&recording.session_id, &recording.name)
+    };
+
+    let content = std::fs::read(path).map_err(InternalServerError)?;
+
+    Ok(Bytes::from(content))
 }
 
 #[derive(Serialize)]

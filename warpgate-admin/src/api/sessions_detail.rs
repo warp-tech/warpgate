@@ -7,7 +7,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOr
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::SessionSnapshot;
+use warpgate_common::{SessionSnapshot, State};
 use warpgate_db_entities::{Recording, Session};
 
 pub struct Api;
@@ -25,6 +25,14 @@ enum GetSessionResponse {
 enum GetSessionRecordingsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<Recording::Model>>),
+}
+
+#[derive(ApiResponse)]
+enum CloseSessionResponse {
+    #[oai(status = 201)]
+    Ok,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[OpenApi]
@@ -66,5 +74,26 @@ impl Api {
             .await
             .map_err(poem::error::InternalServerError)?;
         Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
+    }
+
+    #[oai(
+        path = "/sessions/:id/close",
+        method = "post",
+        operation_id = "close_session"
+    )]
+    async fn api_close_session(
+        &self,
+        state: Data<&Arc<Mutex<State>>>,
+        id: Path<Uuid>,
+    ) -> CloseSessionResponse {
+        let state = state.lock().await;
+
+        if let Some(s) = state.sessions.get(&id) {
+            let mut session = s.lock().await;
+            session.handle.close();
+            CloseSessionResponse::Ok
+        } else {
+            CloseSessionResponse::NotFound
+        }
     }
 }

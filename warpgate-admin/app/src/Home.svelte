@@ -71,18 +71,6 @@
                             {describeSession(session)}
                         </strong>
 
-                        <!-- {#if session.username }
-                        <div>
-                            User: <code>{session.username}</code>
-                        </div>
-                        {/if}
-
-                        {#if session.target }
-                        <div>
-                            Target: <code>{session.target.ssh?.host}:{session.target.ssh?.port}</code>
-                            {/if}
-                        </div> -->
-
                         <div class="meta">
                             {#if session.ended }
                                 {moment.duration(moment(session.ended).diff(session.started)).humanize()}

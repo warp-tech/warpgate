@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, Recording } from 'lib/api'
+import { api, Recording, RecordingKind } from 'lib/api'
 import { Alert, Spinner } from 'sveltestrap'
 import * as AsciinemaPlayer from 'asciinema-player'
 
@@ -11,7 +11,13 @@ let playerContainer: HTMLDivElement
 
 async function load () {
     recording = await api.getRecording(params)
-    AsciinemaPlayer.create(`/api/recordings/${params.id}/cast`, playerContainer)
+    if (recording.kind === 'Terminal') {
+        AsciinemaPlayer.create(`/api/recordings/${params.id}/cast`, playerContainer)
+    }
+}
+
+function getTCPDumpURL () {
+    return `/api/recordings/${recording?.id}/tcpdump`
 }
 
 load().catch(e => {
@@ -20,9 +26,10 @@ load().catch(e => {
 
 </script>
 
-{#if recording}
-<h1>{recording.id}</h1>
-{/if}
+
+<div class="page-summary-bar">
+    <h1>Session recording</h1>
+</div>
 
 {#if !recording && !error}
 <Spinner />
@@ -32,6 +39,9 @@ load().catch(e => {
 <Alert color="danger">{error.message}</Alert>
 {/if}
 
+{#if recording?.kind === 'Traffic'}
+    <a href={getTCPDumpURL()}>Download tcpdump file</a>
+{/if}
 <div bind:this={playerContainer}></div>
 
 <style lang="scss">

@@ -45,6 +45,7 @@ impl AdminServer {
         let spec = api_service.spec_endpoint();
         let db = self.services.db.clone();
         let config_provider = self.services.config_provider.clone();
+        let recordings = self.services.recordings.clone();
         let app = Route::new()
             .nest("/api/swagger", ui)
             .nest("/api", api_service)
@@ -61,9 +62,14 @@ impl AdminServer {
                 "/api/recordings/:id/cast",
                 crate::api::recordings_detail::api_get_recording_cast,
             )
+            .at(
+                "/api/recordings/:id/tcpdump",
+                crate::api::recordings_detail::api_get_recording_tcpdump,
+            )
             .with(AddData::new(db))
             .with(AddData::new(config_provider))
-            .with(AddData::new(state));
+            .with(AddData::new(state))
+            .with(AddData::new(recordings));
 
         info!(?address, "Listening");
         Server::new(TcpListener::bind(address))
