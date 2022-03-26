@@ -1,6 +1,6 @@
 use crate::helpers::ApiResult;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, OpenApi, Object};
+use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 
 pub struct Api;
@@ -18,16 +18,10 @@ enum InstanceInfoResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/instance",
-        method = "get",
-        operation_id = "get_instance_info"
-    )]
-    async fn api_get_instance_info(
-        &self,
-    ) -> ApiResult<InstanceInfoResponse> {
-        return Ok(InstanceInfoResponse::Ok(Json(InstanceInfo {
+    #[oai(path = "/instance", method = "get", operation_id = "get_instance_info")]
+    async fn api_get_instance_info(&self) -> ApiResult<InstanceInfoResponse> {
+        Ok(InstanceInfoResponse::Ok(Json(InstanceInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
-        })));
+        })))
     }
 }

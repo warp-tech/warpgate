@@ -67,7 +67,7 @@ pub async fn authorize_ticket(
                 }
             }
 
-            Ok(Some(ticket.into()))
+            Ok(Some(ticket))
         }
         None => {
             warn!("Ticket not found: {}", &secret.expose_secret());
