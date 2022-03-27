@@ -31,6 +31,7 @@ pub mod session {
                 Self::Ticket => Entity::belongs_to(ticket::Entity)
                     .from(Column::TicketId)
                     .to(ticket::Column::Id)
+                    .on_delete(ForeignKeyAction::SetNull)
                     .into(),
             }
         }

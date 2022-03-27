@@ -31,6 +31,7 @@ impl RelationTrait for Relation {
             Self::Ticket => Entity::belongs_to(super::Ticket::Entity)
                 .from(Column::TicketId)
                 .to(super::Ticket::Column::Id)
+                .on_delete(ForeignKeyAction::SetNull)
                 .into(),
         }
     }

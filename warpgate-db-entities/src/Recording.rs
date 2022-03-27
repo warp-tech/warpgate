@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::ForeignKeyAction;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -47,6 +48,7 @@ impl RelationTrait for Relation {
             Self::Session => Entity::belongs_to(super::Session::Entity)
                 .from(Column::SessionId)
                 .to(super::Session::Column::Id)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
         }
     }

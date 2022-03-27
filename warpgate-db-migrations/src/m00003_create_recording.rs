@@ -39,6 +39,7 @@ pub mod recording {
                 Self::Session => Entity::belongs_to(session::Entity)
                     .from(Column::SessionId)
                     .to(session::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .into(),
             }
         }

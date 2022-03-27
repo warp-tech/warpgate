@@ -8,7 +8,7 @@ pub type SessionId = Uuid;
 pub struct Secret<T>(T);
 
 impl<T> Secret<T> {
-    pub fn new(v: T) -> Self {
+    pub const fn new(v: T) -> Self {
         Self(v)
     }
 

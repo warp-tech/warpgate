@@ -1,18 +1,19 @@
 use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::Secret;
 
-fn _default_true() -> bool {
+const fn _default_true() -> bool {
     true
 }
 
-fn _default_false() -> bool {
+const fn _default_false() -> bool {
     false
 }
 
-fn _default_port() -> u16 {
+const fn _default_port() -> u16 {
     22
 }
 
@@ -30,6 +31,10 @@ fn _default_database_url() -> Secret<String> {
 
 fn _default_web_admin_listen() -> String {
     "127.0.0.1:8888".to_owned()
+}
+
+fn _default_retention() -> Duration {
+    Duration::SECOND * 60 * 60 * 24 * 7
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -175,6 +180,9 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub ssh: SSHConfig,
+
+    #[serde(default = "_default_retention", with = "humantime_serde")]
+    pub retention: Duration,
 }
 
 impl Default for WarpgateConfigStore {
@@ -187,6 +195,7 @@ impl Default for WarpgateConfigStore {
             web_admin: WebAdminConfig::default(),
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
+            retention: _default_retention(),
         }
     }
 }

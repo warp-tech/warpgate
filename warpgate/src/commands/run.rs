@@ -3,6 +3,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use std::net::ToSocketAddrs;
 use tracing::*;
+use warpgate_common::db::cleanup_db;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_ssh::SSHProtocolServer;
 
@@ -43,6 +44,21 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         );
         other_futures.push(admin_future);
     }
+
+    tokio::spawn({
+        let services = services.clone();
+        async move {
+            loop {
+                let retention = { services.config.lock().await.store.retention };
+                let interval = retention / 10;
+                match cleanup_db(&mut *services.db.lock().await, &retention).await {
+                    Err(error) => error!(?error, "Failed to cleanup the database"),
+                    Ok(_) => debug!("Database cleaned up, next in {:?}", interval),
+                }
+                tokio::time::sleep(interval).await;
+            }
+        }
+    });
 
     if console::user_attended() {
         info!("--------------------------------------------");

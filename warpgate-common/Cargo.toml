@@ -9,7 +9,7 @@ anyhow = "1.0"
 argon2 = "0.3"
 async-trait = "0.1"
 bytes = "1.1"
-chrono = "0.4"
+chrono = {version = "0.4", features = ["serde"]}
 data-encoding = "2.3"
 packet = "0.1"
 password-hash = "0.3"
@@ -26,3 +26,4 @@ warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-db-migrations = {version = "*", path = "../warpgate-db-migrations"}
 thiserror = "1.0"
 url = "2.2"
+humantime-serde = "1.1"

@@ -1,10 +1,10 @@
-#![feature(let_else, drain_filter)]
+#![feature(let_else, drain_filter, duration_constants)]
 pub mod auth;
 mod config;
 mod config_providers;
 pub mod consts;
 mod data;
-mod db;
+pub mod db;
 pub mod eventhub;
 pub mod hash;
 pub mod helpers;

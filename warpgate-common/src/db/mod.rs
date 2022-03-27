@@ -53,7 +53,16 @@ pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection
 
 pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<()> {
     use sea_orm::ActiveValue::Set;
-    use warpgate_db_entities::Session;
+    use warpgate_db_entities::{Recording, Session};
+
+    Recording::Entity::update_many()
+        .set(Recording::ActiveModel {
+            ended: Set(Some(chrono::Utc::now())),
+            ..Default::default()
+        })
+        .filter(Expr::col(Recording::Column::Ended).is_null())
+        .exec(db)
+        .await?;
 
     Session::Entity::update_many()
         .set(Session::ActiveModel {
@@ -61,6 +70,25 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<()> {
             ..Default::default()
         })
         .filter(Expr::col(Session::Column::Ended).is_null())
+        .exec(db)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn cleanup_db(db: &mut DatabaseConnection, retention: &Duration) -> Result<()> {
+    use warpgate_db_entities::{Recording, Session};
+    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(retention.clone())?;
+
+    Recording::Entity::delete_many()
+        .filter(Expr::col(Session::Column::Ended).is_not_null())
+        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .exec(db)
+        .await?;
+
+    Session::Entity::delete_many()
+        .filter(Expr::col(Session::Column::Ended).is_not_null())
+        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
         .exec(db)
         .await?;
 
