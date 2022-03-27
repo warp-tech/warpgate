@@ -24,6 +24,9 @@ warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
 
+[target.'cfg(target_os = "linux")'.dependencies]
+sd-notify = "0.4"
+
 [features]
 dhat-ad-hoc = ["dhat"]
 dhat-heap = ["dhat"]

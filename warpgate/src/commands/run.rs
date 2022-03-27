@@ -2,10 +2,14 @@ use crate::config::load_config;
 use anyhow::Result;
 use futures::StreamExt;
 use std::net::ToSocketAddrs;
+use std::time::Duration;
 use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_ssh::SSHProtocolServer;
+
+#[cfg(target_os = "linux")]
+use sd_notify::NotifyState;
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
@@ -71,6 +75,25 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             );
         }
         info!("--------------------------------------------");
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Ok(true) = sd_notify::booted() {
+        tokio::spawn(async {
+            if let Err(error) = async {
+                sd_notify::notify(false, &[NotifyState::Ready])?;
+                loop {
+                    sd_notify::notify(false, &[NotifyState::Watchdog])?;
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                }
+                #[allow(unreachable_code)]
+                Ok::<(), anyhow::Error>(())
+            }
+            .await
+            {
+                error!(?error, "Failed to communicate with systemd");
+            }
+        });
     }
 
     loop {
