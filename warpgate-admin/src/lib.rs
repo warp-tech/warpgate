@@ -1,15 +1,21 @@
 #![feature(decl_macro, proc_macro_hygiene, let_else)]
+mod api;
+mod embed;
+mod helpers;
+use crate::embed::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use anyhow::{Context, Result};
-use poem::endpoint::{StaticFileEndpoint, StaticFilesEndpoint};
 use poem::listener::TcpListener;
 use poem::middleware::AddData;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
+use rust_embed::RustEmbed;
 use std::net::SocketAddr;
 use tracing::*;
 use warpgate_common::Services;
-mod api;
-mod helpers;
+
+#[derive(RustEmbed)]
+#[folder = "../warpgate-admin/app/dist"]
+pub struct Assets;
 
 pub struct AdminServer {
     services: Services,
@@ -46,18 +52,13 @@ impl AdminServer {
         let db = self.services.db.clone();
         let config_provider = self.services.config_provider.clone();
         let recordings = self.services.recordings.clone();
+
         let app = Route::new()
             .nest("/api/swagger", ui)
             .nest("/api", api_service)
             .nest("/api/openapi.json", spec)
-            .nest(
-                "/assets",
-                StaticFilesEndpoint::new("./warpgate-admin/app/dist/assets"),
-            )
-            .at(
-                "/",
-                StaticFileEndpoint::new("./warpgate-admin/app/dist/index.html"),
-            )
+            .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
+            .at("/", EmbeddedFileEndpoint::<Assets>::new("index.html"))
             .at(
                 "/api/recordings/:id/cast",
                 crate::api::recordings_detail::api_get_recording_cast,

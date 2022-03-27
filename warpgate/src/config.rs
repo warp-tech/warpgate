@@ -6,7 +6,7 @@ use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path) -> Result<WarpgateConfig> {
-    secure_file(path).context("Could secure config")?;
+    secure_file(path).context("Could not secure config")?;
 
     let store: WarpgateConfigStore = Config::builder()
         .add_source(File::from(path))

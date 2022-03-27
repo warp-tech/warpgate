@@ -2,7 +2,6 @@ use crate::config::load_config;
 use anyhow::Result;
 use futures::StreamExt;
 use std::net::ToSocketAddrs;
-use std::time::Duration;
 use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::{ProtocolServer, Services};
