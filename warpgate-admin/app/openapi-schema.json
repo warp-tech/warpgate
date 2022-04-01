@@ -325,7 +325,7 @@
         "operationId": "delete_ssh_known_host"
       }
     },
-    "/instance": {
+    "/info": {
       "get": {
         "responses": {
           "200": {
@@ -333,13 +333,46 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceInfo"
+                  "$ref": "#/components/schemas/Info"
                 }
               }
             }
           }
         },
-        "operationId": "get_instance_info"
+        "operationId": "get_info"
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "login"
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "operationId": "logout"
       }
     }
   },
@@ -360,13 +393,31 @@
           }
         }
       },
-      "InstanceInfo": {
+      "Info": {
         "type": "object",
         "required": [
           "version"
         ],
         "properties": {
           "version": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
             "type": "string"
           }
         }

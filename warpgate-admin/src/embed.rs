@@ -1,9 +1,20 @@
-use std::marker::PhantomData;
+//! Usage:
+//!
+//! ```
+//! #[derive(RustEmbed)]
+//! #[folder = "app/dist"]
+//! pub struct Assets;
+//!
+//! Route::new()
+//!     .at("/", EmbeddedFileEndpoint::<Assets>::new("index.html"))
+//!     .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
+//! ```
 
 use async_trait::async_trait;
 use poem::http::{header, Method, StatusCode};
 use poem::{Endpoint, Request, Response};
 use rust_embed::RustEmbed;
+use std::marker::PhantomData;
 
 pub struct EmbeddedFileEndpoint<E: RustEmbed + Send + Sync> {
     _embed: PhantomData<E>,

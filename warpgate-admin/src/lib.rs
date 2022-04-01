@@ -6,6 +6,7 @@ use crate::embed::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use anyhow::{Context, Result};
 use poem::listener::TcpListener;
 use poem::middleware::AddData;
+use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 use rust_embed::RustEmbed;
@@ -41,7 +42,8 @@ impl AdminServer {
                 crate::api::tickets_detail::Api,
                 crate::api::known_hosts_list::Api,
                 crate::api::known_hosts_detail::Api,
-                crate::api::instance::Api,
+                crate::api::info::Api,
+                crate::api::auth::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),
@@ -67,6 +69,10 @@ impl AdminServer {
                 "/api/recordings/:id/tcpdump",
                 crate::api::recordings_detail::api_get_recording_tcpdump,
             )
+            .with(ServerSession::new(
+                CookieConfig::default().secure(false),
+                MemoryStorage::default(),
+            ))
             .with(AddData::new(db))
             .with(AddData::new(config_provider))
             .with(AddData::new(state))

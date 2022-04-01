@@ -1,4 +1,4 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{authorized, ApiResult};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -42,18 +42,22 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        session: &poem::session::Session,
     ) -> ApiResult<GetSessionResponse> {
-        let db = db.lock().await;
+        authorized(session, || async move {
+            let db = db.lock().await;
 
-        let session = Session::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+            let session = Session::Entity::find_by_id(id.0)
+                .one(&*db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
 
-        match session {
-            Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
-            None => Ok(GetSessionResponse::NotFound),
-        }
+            match session {
+                Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
+                None => Ok(GetSessionResponse::NotFound),
+            }
+        })
+        .await
     }
 
     #[oai(
@@ -65,15 +69,19 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        session: &poem::session::Session,
     ) -> ApiResult<GetSessionRecordingsResponse> {
-        let db = db.lock().await;
-        let recordings: Vec<Recording::Model> = Recording::Entity::find()
-            .order_by_desc(Recording::Column::Started)
-            .filter(Recording::Column::SessionId.eq(id.0))
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
-        Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
+        authorized(session, || async move {
+            let db = db.lock().await;
+            let recordings: Vec<Recording::Model> = Recording::Entity::find()
+                .order_by_desc(Recording::Column::Started)
+                .filter(Recording::Column::SessionId.eq(id.0))
+                .all(&*db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
+            Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
+        })
+        .await
     }
 
     #[oai(
@@ -85,15 +93,19 @@ impl Api {
         &self,
         state: Data<&Arc<Mutex<State>>>,
         id: Path<Uuid>,
-    ) -> CloseSessionResponse {
-        let state = state.lock().await;
+        session: &poem::session::Session,
+    ) -> ApiResult<CloseSessionResponse> {
+        authorized(session, || async move {
+            let state = state.lock().await;
 
-        if let Some(s) = state.sessions.get(&id) {
-            let mut session = s.lock().await;
-            session.handle.close();
-            CloseSessionResponse::Ok
-        } else {
-            CloseSessionResponse::NotFound
-        }
+            if let Some(s) = state.sessions.get(&id) {
+                let mut session = s.lock().await;
+                session.handle.close();
+                Ok(CloseSessionResponse::Ok)
+            } else {
+                Ok(CloseSessionResponse::NotFound)
+            }
+        })
+        .await
     }
 }

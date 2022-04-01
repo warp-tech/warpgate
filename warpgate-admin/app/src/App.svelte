@@ -1,49 +1,79 @@
 <script lang="ts">
-import { api } from 'lib/api';
+import { faSignOut } from '@fortawesome/free-solid-svg-icons'
+import { api } from 'lib/api'
+import { authenticatedUsername } from 'lib/store'
+import Fa from 'svelte-fa'
 
-    import Router, { link } from 'svelte-spa-router'
-    import active from 'svelte-spa-router/active'
-    import { wrap } from 'svelte-spa-router/wrap'
+import Router, { link, push } from 'svelte-spa-router'
+import active from 'svelte-spa-router/active'
+import { wrap } from 'svelte-spa-router/wrap'
 
-    let version = ''
-    api.getInstanceInfo().then(info => {
-        version = info.version
-    })
+let version = ''
 
-    const routes = {
-        '/': wrap({
-            asyncComponent: () => import('./Home.svelte')
-        }),
-        '/sessions/:id': wrap({
-            asyncComponent: () => import('./Session.svelte')
-        }),
-        '/recordings/:id': wrap({
-            asyncComponent: () => import('./Recording.svelte')
-        }),
-        '/tickets': wrap({
-            asyncComponent: () => import('./Tickets.svelte')
-        }),
-        '/tickets/create': wrap({
-            asyncComponent: () => import('./CreateTicket.svelte')
-        }),
-        '/ssh/known-hosts': wrap({
-            asyncComponent: () => import('./SSHKnownHosts.svelte')
-        }),
+async function init () {
+    const info = await api.getInfo()
+    version = info.version
+    authenticatedUsername.set(info.username ?? null)
+    if (!info.username) {
+        push('/login')
     }
+}
+
+async function logout () {
+    await api.logout()
+    authenticatedUsername.set(null)
+    push('/login')
+}
+
+init()
+
+const routes = {
+    '/': wrap({
+        asyncComponent: () => import('./Home.svelte')
+    }),
+    '/login': wrap({
+        asyncComponent: () => import('./Login.svelte')
+    }),
+    '/sessions/:id': wrap({
+        asyncComponent: () => import('./Session.svelte')
+    }),
+    '/recordings/:id': wrap({
+        asyncComponent: () => import('./Recording.svelte')
+    }),
+    '/tickets': wrap({
+        asyncComponent: () => import('./Tickets.svelte')
+    }),
+    '/tickets/create': wrap({
+        asyncComponent: () => import('./CreateTicket.svelte')
+    }),
+    '/ssh/known-hosts': wrap({
+        asyncComponent: () => import('./SSHKnownHosts.svelte')
+    }),
+}
 </script>
 
 <div class="app container">
     <header>
         <div class="logo">Warpgate</div>
-        <a use:link use:active href="/">Sessions</a>
-        <a use:link use:active href="/tickets">Tickets</a>
-        <a use:link use:active href="/ssh/known-hosts">Known hosts</a>
+        {#if $authenticatedUsername}
+            <a use:link use:active href="/">Sessions</a>
+            <a use:link use:active href="/tickets">Tickets</a>
+            <a use:link use:active href="/ssh/known-hosts">Known hosts</a>
+        {/if}
+        {#if $authenticatedUsername}
+        <div class="username">
+            <!-- {$authenticatedUsername} -->
+        </div>
+        <button class="btn btn-link" on:click={logout}>
+            <Fa icon={faSignOut} fw />
+        </button>
+        {/if}
     </header>
     <main>
         <Router {routes}/>
     </main>
     <footer>
-        Warpgate {version}
+        {version}
     </footer>
 </div>
 
@@ -66,6 +96,7 @@ import { api } from 'lib/api';
 
     header {
         display: flex;
+        align-items: center;
         padding: 10px 0;
         margin: 10px 0 20px;
         border-bottom: 1px solid rgba($body-color, .75);
@@ -76,6 +107,10 @@ import { api } from 'lib/api';
 
         a {
             margin-left: 15px;
+        }
+
+        .username {
+            margin-left: auto;
         }
     }
 

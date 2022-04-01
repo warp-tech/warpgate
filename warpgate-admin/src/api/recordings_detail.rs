@@ -1,7 +1,8 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{authorized, ApiResult};
 use bytes::Bytes;
 use poem::error::{InternalServerError, NotFoundError};
 use poem::handler;
+use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -37,18 +38,22 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        session: &Session,
     ) -> ApiResult<GetRecordingResponse> {
-        let db = db.lock().await;
+        authorized(session, || async move {
+            let db = db.lock().await;
 
-        let recording = Recording::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(InternalServerError)?;
+            let recording = Recording::Entity::find_by_id(id.0)
+                .one(&*db)
+                .await
+                .map_err(InternalServerError)?;
 
-        match recording {
-            Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
-            None => Ok(GetRecordingResponse::NotFound),
-        }
+            match recording {
+                Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
+                None => Ok(GetRecordingResponse::NotFound),
+            }
+        })
+        .await
     }
 }
 
@@ -57,58 +62,62 @@ pub async fn api_get_recording_cast(
     db: Data<&Arc<Mutex<DatabaseConnection>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
+    session: &Session,
 ) -> ApiResult<String> {
-    let db = db.lock().await;
+    authorized(session, || async move {
+        let db = db.lock().await;
 
-    let recording = Recording::Entity::find_by_id(id.0)
-        .one(&*db)
-        .await
-        .map_err(InternalServerError)?;
-
-    let Some(recording) = recording else {
-        return Err(NotFoundError.into())
-    };
-
-    if recording.kind != RecordingKind::Terminal {
-        return Err(NotFoundError.into());
-    }
-
-    let path = {
-        recordings
-            .lock()
+        let recording = Recording::Entity::find_by_id(id.0)
+            .one(&*db)
             .await
-            .path_for(&recording.session_id, &recording.name)
-    };
+            .map_err(InternalServerError)?;
 
-    let mut response = String::new();
-    response.push_str(
-        &serde_json::to_string(&Cast::Header {
-            version: 2,
-            width: 80,
-            height: 25,
-            title: recording.name,
-        })
-        .map_err(InternalServerError)?,
-    );
-    response.push('\n');
+        let Some(recording) = recording else {
+            return Err(NotFoundError.into())
+        };
 
-    let file = File::open(&path).await.map_err(InternalServerError)?;
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
-    while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
-        let entry: TerminalRecordingItem =
-            serde_json::from_str(&line[..]).map_err(InternalServerError)?;
+        if recording.kind != RecordingKind::Terminal {
+            return Err(NotFoundError.into());
+        }
+
+        let path = {
+            recordings
+                .lock()
+                .await
+                .path_for(&recording.session_id, &recording.name)
+        };
+
+        let mut response = String::new();
         response.push_str(
-            &serde_json::to_string(&Cast::Output(
-                entry.time,
-                "o".to_string(),
-                String::from_utf8_lossy(&entry.data[..]).to_string(),
-            ))
+            &serde_json::to_string(&Cast::Header {
+                version: 2,
+                width: 80,
+                height: 25,
+                title: recording.name,
+            })
             .map_err(InternalServerError)?,
         );
         response.push('\n');
-    }
-    Ok(response)
+
+        let file = File::open(&path).await.map_err(InternalServerError)?;
+        let reader = BufReader::new(file);
+        let mut lines = reader.lines();
+        while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
+            let entry: TerminalRecordingItem =
+                serde_json::from_str(&line[..]).map_err(InternalServerError)?;
+            response.push_str(
+                &serde_json::to_string(&Cast::Output(
+                    entry.time,
+                    "o".to_string(),
+                    String::from_utf8_lossy(&entry.data[..]).to_string(),
+                ))
+                .map_err(InternalServerError)?,
+            );
+            response.push('\n');
+        }
+        Ok(response)
+    })
+    .await
 }
 
 #[handler]
@@ -116,32 +125,36 @@ pub async fn api_get_recording_tcpdump(
     db: Data<&Arc<Mutex<DatabaseConnection>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
+    session: &Session,
 ) -> ApiResult<Bytes> {
-    let db = db.lock().await;
+    authorized(session, || async move {
+        let db = db.lock().await;
 
-    let recording = Recording::Entity::find_by_id(id.0)
-        .one(&*db)
-        .await
-        .map_err(poem::error::InternalServerError)?;
-
-    let Some(recording) = recording else {
-        return Err(NotFoundError.into())
-    };
-
-    if recording.kind != RecordingKind::Traffic {
-        return Err(NotFoundError.into());
-    }
-
-    let path = {
-        recordings
-            .lock()
+        let recording = Recording::Entity::find_by_id(id.0)
+            .one(&*db)
             .await
-            .path_for(&recording.session_id, &recording.name)
-    };
+            .map_err(poem::error::InternalServerError)?;
 
-    let content = std::fs::read(path).map_err(InternalServerError)?;
+        let Some(recording) = recording else {
+            return Err(NotFoundError.into())
+        };
 
-    Ok(Bytes::from(content))
+        if recording.kind != RecordingKind::Traffic {
+            return Err(NotFoundError.into());
+        }
+
+        let path = {
+            recordings
+                .lock()
+                .await
+                .path_for(&recording.session_id, &recording.name)
+        };
+
+        let content = std::fs::read(path).map_err(InternalServerError)?;
+
+        Ok(Bytes::from(content))
+    })
+    .await
 }
 
 #[derive(Serialize)]

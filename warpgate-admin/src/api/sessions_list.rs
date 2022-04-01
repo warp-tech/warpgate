@@ -1,4 +1,5 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{authorized, ApiResult};
+use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -27,20 +28,24 @@ impl Api {
     async fn api_get_all_sessions(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        session: &Session,
     ) -> ApiResult<GetSessionsResponse> {
-        use warpgate_db_entities::Session;
+        authorized(session, || async move {
+            use warpgate_db_entities::Session;
 
-        let db = db.lock().await;
-        let sessions = Session::Entity::find()
-            .order_by_desc(Session::Column::Started)
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
-        let sessions = sessions
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<SessionSnapshot>>();
-        Ok(GetSessionsResponse::Ok(Json(sessions)))
+            let db = db.lock().await;
+            let sessions = Session::Entity::find()
+                .order_by_desc(Session::Column::Started)
+                .all(&*db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
+            let sessions = sessions
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<SessionSnapshot>>();
+            Ok(GetSessionsResponse::Ok(Json(sessions)))
+        })
+        .await
     }
 
     #[oai(
@@ -51,14 +56,18 @@ impl Api {
     async fn api_close_all_sessions(
         &self,
         state: Data<&Arc<Mutex<State>>>,
-    ) -> CloseAllSessionsResponse {
-        let state = state.lock().await;
+        session: &Session,
+    ) -> ApiResult<CloseAllSessionsResponse> {
+        authorized(session, || async move {
+            let state = state.lock().await;
 
-        for s in state.sessions.values() {
-            let mut session = s.lock().await;
-            session.handle.close();
-        }
+            for s in state.sessions.values() {
+                let mut session = s.lock().await;
+                session.handle.close();
+            }
 
-        CloseAllSessionsResponse::Ok
+            Ok(CloseAllSessionsResponse::Ok)
+        })
+        .await
     }
 }

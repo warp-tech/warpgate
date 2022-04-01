@@ -1,5 +1,6 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{authorized, ApiResult};
 use anyhow::Context;
+use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -46,19 +47,23 @@ impl Api {
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        session: &Session,
     ) -> ApiResult<GetTicketsResponse> {
-        use warpgate_db_entities::Ticket;
+        authorized(session, || async move {
+            use warpgate_db_entities::Ticket;
 
-        let db = db.lock().await;
-        let tickets = Ticket::Entity::find()
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
-        let tickets = tickets
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<Ticket::Model>>();
-        Ok(GetTicketsResponse::Ok(Json(tickets)))
+            let db = db.lock().await;
+            let tickets = Ticket::Entity::find()
+                .all(&*db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
+            let tickets = tickets
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<Ticket::Model>>();
+            Ok(GetTicketsResponse::Ok(Json(tickets)))
+        })
+        .await
     }
 
     #[oai(path = "/tickets", method = "post", operation_id = "create_ticket")]
@@ -66,32 +71,36 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateTicketRequest>,
+        session: &Session,
     ) -> ApiResult<CreateTicketResponse> {
-        use warpgate_db_entities::Ticket;
+        authorized(session, || async move {
+            use warpgate_db_entities::Ticket;
 
-        if body.username.is_empty() {
-            return Ok(CreateTicketResponse::BadRequest(Json("username".into())));
-        }
-        if body.target_name.is_empty() {
-            return Ok(CreateTicketResponse::BadRequest(Json("target_name".into())));
-        }
+            if body.username.is_empty() {
+                return Ok(CreateTicketResponse::BadRequest(Json("username".into())));
+            }
+            if body.target_name.is_empty() {
+                return Ok(CreateTicketResponse::BadRequest(Json("target_name".into())));
+            }
 
-        let db = db.lock().await;
-        let secret = generate_ticket_secret();
-        let values = Ticket::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            secret: Set(secret.expose_secret().to_string()),
-            username: Set(body.username.clone()),
-            target: Set(body.target_name.clone()),
-            created: Set(chrono::Utc::now()),
-            ..Default::default()
-        };
+            let db = db.lock().await;
+            let secret = generate_ticket_secret();
+            let values = Ticket::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                secret: Set(secret.expose_secret().to_string()),
+                username: Set(body.username.clone()),
+                target: Set(body.target_name.clone()),
+                created: Set(chrono::Utc::now()),
+                ..Default::default()
+            };
 
-        let ticket = values.insert(&*db).await.context("Error saving ticket")?;
+            let ticket = values.insert(&*db).await.context("Error saving ticket")?;
 
-        Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
-            secret: secret.expose_secret().to_string(),
-            ticket,
-        })))
+            Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
+                secret: secret.expose_secret().to_string(),
+                ticket,
+            })))
+        })
+        .await
     }
 }

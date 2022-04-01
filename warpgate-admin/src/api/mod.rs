@@ -1,4 +1,5 @@
-pub mod instance;
+pub mod auth;
+pub mod info;
 pub mod known_hosts_detail;
 pub mod known_hosts_list;
 pub mod recordings_detail;

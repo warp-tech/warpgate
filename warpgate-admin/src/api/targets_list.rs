@@ -1,4 +1,5 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{authorized, ApiResult};
+use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -20,8 +21,12 @@ impl Api {
     async fn api_get_all_targets(
         &self,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,
+        session: &Session,
     ) -> ApiResult<GetTargetsResponse> {
-        let targets = config_provider.lock().await.list_targets().await?;
-        Ok(GetTargetsResponse::Ok(Json(targets)))
+        authorized(session, || async move {
+            let targets = config_provider.lock().await.list_targets().await?;
+            Ok(GetTargetsResponse::Ok(Json(targets)))
+        })
+        .await
     }
 }
