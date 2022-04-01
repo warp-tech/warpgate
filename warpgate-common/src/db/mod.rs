@@ -78,7 +78,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<()> {
 
 pub async fn cleanup_db(db: &mut DatabaseConnection, retention: &Duration) -> Result<()> {
     use warpgate_db_entities::{Recording, Session};
-    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(retention.clone())?;
+    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
 
     Recording::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())

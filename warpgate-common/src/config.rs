@@ -68,10 +68,8 @@ impl Default for SSHTargetAuth {
     }
 }
 
-
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct TargetWebAdminOptions {
-}
+pub struct TargetWebAdminOptions {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {

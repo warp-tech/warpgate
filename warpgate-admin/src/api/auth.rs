@@ -51,14 +51,13 @@ impl Api {
             AuthResult::Accepted { username } => {
                 let targets = config_provider.list_targets().await?;
                 for target in targets {
-                    if target.web_admin.is_some() {
-                        if config_provider
+                    if target.web_admin.is_some()
+                        && config_provider
                             .authorize_target(&username, &target.name)
                             .await?
-                        {
-                            session.set("username", username);
-                            return Ok(LoginResponse::Success);
-                        }
+                    {
+                        session.set("username", username);
+                        return Ok(LoginResponse::Success);
                     }
                 }
                 Ok(LoginResponse::Failure)
