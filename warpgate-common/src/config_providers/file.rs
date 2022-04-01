@@ -196,7 +196,7 @@ impl ConfigProvider for FileConfigProvider {
             .map(|x| x.unwrap().to_owned())
             .collect::<HashSet<_>>();
         let target_roles = target
-            .roles
+            .allow_roles
             .iter()
             .map(|x| config.store.roles.iter().find(|y| &y.name == x))
             .filter(|x| x.is_some())

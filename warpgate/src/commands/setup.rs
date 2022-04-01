@@ -7,8 +7,8 @@ use std::path::Path;
 use tracing::*;
 use warpgate_common::hash::hash_password;
 use warpgate_common::{
-    RecordingsConfig, SSHConfig, Secret, Services, User, UserAuthCredential, WarpgateConfigStore,
-    WebAdminConfig,
+    RecordingsConfig, Role, SSHConfig, Secret, Services, Target, TargetWebAdminOptions, User,
+    UserAuthCredential, WarpgateConfigStore, WebAdminConfig,
 };
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
@@ -34,7 +34,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     );
 
     let theme = ColorfulTheme::default();
-    let mut store = WarpgateConfigStore::default();
+    let mut store = WarpgateConfigStore {
+        roles: vec![Role {
+            name: "warpgate:admin".to_owned(),
+        }],
+        ..Default::default()
+    };
 
     // ---
 
@@ -49,6 +54,17 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         .default(WebAdminConfig::default().listen)
         .with_prompt("Endpoint to expose admin web interface on")
         .interact_text()?;
+
+    if store.web_admin.enable {
+        store.targets.push(Target {
+            name: "web-admin".to_owned(),
+            allow_roles: vec!["warpgate:admin".to_owned()],
+            ssh: None,
+            web_admin: Some(TargetWebAdminOptions {
+                ..Default::default()
+            }),
+        });
+    }
 
     // ---
 

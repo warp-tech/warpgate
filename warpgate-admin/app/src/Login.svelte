@@ -7,11 +7,11 @@ import { Alert, Button, FormGroup } from 'sveltestrap'
 let error: Error|null = null
 let username = ''
 let password = ''
-let wrongPassword = false
+let incorrectCredentials = false
 
 async function login () {
     error = null
-    wrongPassword = false
+    incorrectCredentials = false
     try {
         await api.login({
             loginRequest: {
@@ -21,7 +21,7 @@ async function login () {
         })
     } catch (error) {
         if (error.status === 401) {
-            wrongPassword = true
+            incorrectCredentials = true
         } else {
             error = error
         }
@@ -40,8 +40,8 @@ async function login () {
             <h1>Welcome</h1>
         </div>
 
-        {#if wrongPassword}
-            <Alert color="danger">Wrong password</Alert>
+        {#if incorrectCredentials}
+            <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if error}
             <Alert color="danger">{error.message}</Alert>

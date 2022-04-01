@@ -37,6 +37,10 @@ fn _default_retention() -> Duration {
     Duration::SECOND * 60 * 60 * 24 * 7
 }
 
+fn _default_empty_string_vec() -> Vec<String> {
+    vec![]
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
@@ -64,11 +68,20 @@ impl Default for SSHTargetAuth {
     }
 }
 
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
+pub struct TargetWebAdminOptions {
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
     pub name: String,
-    pub roles: Vec<String>,
+    #[serde(default = "_default_empty_string_vec")]
+    pub allow_roles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<TargetSSHOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_admin: Option<TargetWebAdminOptions>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -84,6 +97,7 @@ pub enum UserAuthCredential {
 pub struct User {
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub require: Option<Vec<String>>,
     pub roles: Vec<String>,
 }

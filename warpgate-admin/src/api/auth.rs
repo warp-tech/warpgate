@@ -49,8 +49,19 @@ impl Api {
             .map_err(|e| e.context("Failed to authorize user"))?;
         match result {
             AuthResult::Accepted { username } => {
-                session.set("username", username);
-                Ok(LoginResponse::Success)
+                let targets = config_provider.list_targets().await?;
+                for target in targets {
+                    if target.web_admin.is_some() {
+                        if config_provider
+                            .authorize_target(&username, &target.name)
+                            .await?
+                        {
+                            session.set("username", username);
+                            return Ok(LoginResponse::Success);
+                        }
+                    }
+                }
+                Ok(LoginResponse::Failure)
             }
             AuthResult::Rejected => Ok(LoginResponse::Failure),
         }
