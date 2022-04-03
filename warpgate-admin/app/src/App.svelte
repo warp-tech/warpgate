@@ -4,6 +4,8 @@ import { api } from 'lib/api'
 import { authenticatedUsername } from 'lib/store'
 import Fa from 'svelte-fa'
 
+import logo from '../public/assets/logo.svg'
+
 import Router, { link, push } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
@@ -57,7 +59,9 @@ const routes = {
 
 <div class="app container">
     <header>
-        <div class="logo">Warpgate</div>
+        <a use:link use:active href="/" class="d-flex">
+            <img class="logo" src={logo} alt="Logo" />
+        </a>
         {#if $authenticatedUsername}
             <a use:link use:active href="/">Sessions</a>
             <a use:link use:active href="/targets">Targets</a>
@@ -90,6 +94,11 @@ const routes = {
         flex-direction: column;
     }
 
+    .logo {
+        width: 40px;
+        padding-top: 2px;
+    }
+
     header, footer {
         flex: none;
     }
@@ -109,7 +118,7 @@ const routes = {
             font-size: 1.5rem;
         }
 
-        a {
+        a:not(:first-child) {
             margin-left: 15px;
         }
 

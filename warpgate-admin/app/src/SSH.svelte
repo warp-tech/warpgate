@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, SSHKnownHost } from 'lib/api'
+import { api, SSHKey, SSHKnownHost } from 'lib/api'
 import { Alert } from 'sveltestrap'
 
 let error: Error|undefined
