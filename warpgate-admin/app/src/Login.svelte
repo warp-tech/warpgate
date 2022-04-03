@@ -9,6 +9,12 @@ let username = ''
 let password = ''
 let incorrectCredentials = false
 
+function onInputKey (event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+        login()
+    }
+}
+
 async function login () {
     error = null
     incorrectCredentials = false
@@ -40,26 +46,34 @@ async function login () {
             <h1>Welcome</h1>
         </div>
 
-        {#if incorrectCredentials}
-            <Alert color="danger">Incorrect credentials</Alert>
-        {/if}
-        {#if error}
-            <Alert color="danger">{error.message}</Alert>
-        {/if}
-
         <FormGroup floating label="Username">
             <!-- svelte-ignore a11y-autofocus -->
-            <input bind:value={username} class="form-control" autofocus />
+            <input
+                bind:value={username}
+                on:keypress={onInputKey}
+                class="form-control"
+                autofocus />
         </FormGroup>
 
         <FormGroup floating label="Password">
-            <input bind:value={password} type="password" class="form-control" />
+            <input
+                bind:value={password}
+                on:keypress={onInputKey}
+                type="password"
+                class="form-control" />
         </FormGroup>
 
         <Button
             outline
             on:click={login}
         >Login</Button>
+
+        {#if incorrectCredentials}
+            <Alert color="danger">Incorrect credentials</Alert>
+        {/if}
+        {#if error}
+            <Alert color="danger">{error}</Alert>
+        {/if}
 
     </div>
     <div class="col-12 col-md-3"></div>

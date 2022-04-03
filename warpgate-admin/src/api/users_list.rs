@@ -24,7 +24,8 @@ impl Api {
         session: &Session,
     ) -> ApiResult<GetUsersResponse> {
         authorized(session, || async move {
-            let users = config_provider.lock().await.list_users().await?;
+            let mut users = config_provider.lock().await.list_users().await?;
+            users.sort_by(|a, b| a.username.cmp(&b.username));
             Ok(GetUsersResponse::Ok(Json(users)))
         })
         .await

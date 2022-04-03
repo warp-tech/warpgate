@@ -374,6 +374,26 @@
         },
         "operationId": "logout"
       }
+    },
+    "/ssh/own-keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_ssh_own_keys"
+      }
     }
   },
   "components": {
@@ -463,6 +483,21 @@
           "Traffic"
         ]
       },
+      "SSHKey": {
+        "type": "object",
+        "required": [
+          "kind",
+          "public_key_base64"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "public_key_base64": {
+            "type": "string"
+          }
+        }
+      },
       "SSHKnownHost": {
         "type": "object",
         "required": [
@@ -527,13 +562,13 @@
         "type": "object",
         "required": [
           "name",
-          "roles"
+          "allow_roles"
         ],
         "properties": {
           "name": {
             "type": "string"
           },
-          "roles": {
+          "allow_roles": {
             "type": "array",
             "items": {
               "type": "string"
@@ -541,6 +576,9 @@
           },
           "ssh": {
             "$ref": "#/components/schemas/TargetSSHOptions"
+          },
+          "web_admin": {
+            "$ref": "#/components/schemas/TargetWebAdminOptions"
           }
         }
       },
@@ -563,6 +601,9 @@
             "type": "string"
           }
         }
+      },
+      "TargetWebAdminOptions": {
+        "type": "object"
       },
       "Ticket": {
         "type": "object",

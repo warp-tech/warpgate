@@ -39,9 +39,9 @@
 @import "bootstrap/scss/alert";
 // @import "bootstrap/scss/progress";
 @import "bootstrap/scss/list-group";
-// @import "bootstrap/scss/close";
+@import "bootstrap/scss/close";
 // @import "bootstrap/scss/toasts";
-// @import "bootstrap/scss/modal";
+@import "bootstrap/scss/modal";
 @import "bootstrap/scss/tooltip";
 // @import "bootstrap/scss/popover";
 // @import "bootstrap/scss/carousel";
@@ -78,4 +78,15 @@ a {
     h1 {
         margin: 0;
     }
+}
+
+.alert {
+    background: none !important;
+    border-top-style: none;
+    border-bottom-style: none;
+    border-right-style: none;
+    border-left-width: 2px;
+    font-style: italic;
+    padding: 0 10px;
+    margin: 20px 0;
 }

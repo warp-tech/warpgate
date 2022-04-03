@@ -43,7 +43,7 @@ async function create () {
 </script>
 
 {#if error}
-<Alert color="danger">{error.message}</Alert>
+<Alert color="danger">{error}</Alert>
 {/if}
 
 {#if result}
@@ -51,13 +51,21 @@ async function create () {
         <h1>Ticket created</h1>
     </div>
 
-    <Alert color="warning">
+    <Alert color="warning" fade={false}>
         The secret is only shown once - you won't be able to see it again.
     </Alert>
 
-    <FormGroup floating label="Access secret">
-        <input type="text" class="form-control" readonly value={result.secret} />
-    </FormGroup>
+    {#if selectedTarget?.ssh}
+        <h3>Connection instructions</h3>
+
+        <FormGroup floating label="SSH username">
+            <input type="text" class="form-control" readonly value={"ticket-" + result.secret} />
+        </FormGroup>
+
+        <FormGroup floating label="Example command">
+            <input type="text" class="form-control" readonly value={"ssh ticket-" + result.secret + "@warpgate-host -p warpgate-port"} />
+        </FormGroup>
+    {/if}
 
     <a
         class="btn btn-secondary"

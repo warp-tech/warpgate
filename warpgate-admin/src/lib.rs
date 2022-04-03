@@ -44,6 +44,7 @@ impl AdminServer {
                 crate::api::known_hosts_detail::Api,
                 crate::api::info::Api,
                 crate::api::auth::Api,
+                crate::api::ssh_keys::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),
@@ -52,6 +53,7 @@ impl AdminServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
         let db = self.services.db.clone();
+        let config = self.services.config.clone();
         let config_provider = self.services.config_provider.clone();
         let recordings = self.services.recordings.clone();
 
@@ -76,7 +78,8 @@ impl AdminServer {
             .with(AddData::new(db))
             .with(AddData::new(config_provider))
             .with(AddData::new(state))
-            .with(AddData::new(recordings));
+            .with(AddData::new(recordings))
+            .with(AddData::new(config));
 
         info!(?address, "Listening");
         Server::new(TcpListener::bind(address))

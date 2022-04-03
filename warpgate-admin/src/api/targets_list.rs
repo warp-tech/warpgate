@@ -24,7 +24,8 @@ impl Api {
         session: &Session,
     ) -> ApiResult<GetTargetsResponse> {
         authorized(session, || async move {
-            let targets = config_provider.lock().await.list_targets().await?;
+            let mut targets = config_provider.lock().await.list_targets().await?;
+            targets.sort_by(|a, b| a.name.cmp(&b.name));
             Ok(GetTargetsResponse::Ok(Json(targets)))
         })
         .await

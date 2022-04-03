@@ -46,8 +46,11 @@ const routes = {
     '/tickets/create': wrap({
         asyncComponent: () => import('./CreateTicket.svelte')
     }),
-    '/ssh/known-hosts': wrap({
-        asyncComponent: () => import('./SSHKnownHosts.svelte')
+    '/targets': wrap({
+        asyncComponent: () => import('./Targets.svelte')
+    }),
+    '/ssh': wrap({
+        asyncComponent: () => import('./SSH.svelte')
     }),
 }
 </script>
@@ -57,8 +60,9 @@ const routes = {
         <div class="logo">Warpgate</div>
         {#if $authenticatedUsername}
             <a use:link use:active href="/">Sessions</a>
+            <a use:link use:active href="/targets">Targets</a>
             <a use:link use:active href="/tickets">Tickets</a>
-            <a use:link use:active href="/ssh/known-hosts">Known hosts</a>
+            <a use:link use:active href="/ssh">SSH</a>
         {/if}
         {#if $authenticatedUsername}
         <div class="username">

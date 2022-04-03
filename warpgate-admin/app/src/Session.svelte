@@ -44,7 +44,7 @@ onDestroy(() => clearInterval(interval))
 {/if}
 
 {#if error}
-    <Alert color="danger">{error.message}</Alert>
+    <Alert color="danger">{error}</Alert>
 {/if}
 
 {#if session}
@@ -72,7 +72,7 @@ onDestroy(() => clearInterval(interval))
                 {#if session.username}
                     <input type="text" class="form-control" readonly value={session.username} />
                 {:else}
-                    <input type="text" class="form-control" readonly value="Logging in" />
+                    <input type="text" class="form-control" readonly value="Not logged in" />
                 {/if}
             </FormGroup>
         </div>

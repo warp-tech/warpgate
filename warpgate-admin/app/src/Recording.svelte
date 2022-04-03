@@ -36,7 +36,7 @@ load().catch(e => {
 {/if}
 
 {#if error}
-<Alert color="danger">{error.message}</Alert>
+<Alert color="danger">{error}</Alert>
 {/if}
 
 {#if recording?.kind === 'Traffic'}

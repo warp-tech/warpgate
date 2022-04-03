@@ -74,8 +74,6 @@
                         <div class="meta">
                             {#if session.ended }
                                 {moment.duration(moment(session.ended).diff(session.started)).humanize()}
-                            {:else}
-                                {moment.duration(moment().diff(session.started)).humanize()}
                             {/if}
                         </div>
 
