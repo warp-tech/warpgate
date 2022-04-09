@@ -33,7 +33,7 @@
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.0.0",
     "eslint-plugin-svelte3": "^3.4.0",
-    "moment": "^2.29.1",
+    "moment": "^2.29.2",
     "sass": "^1.49.8",
     "svelte": "^3.44.0",
     "svelte-check": "^2.2.7",
