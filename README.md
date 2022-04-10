@@ -7,6 +7,8 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 * Single-file statically linked binary with no dependencies.
 * Written in 100% safe Rust.
 
+<img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
+
 ## Getting started
 
 See the [Getting started](https://github.com/Eugeny/warpgate/wiki/Getting-started) wiki page.
