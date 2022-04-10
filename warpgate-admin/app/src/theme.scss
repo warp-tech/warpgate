@@ -1,0 +1,92 @@
+@import "bootstrap/scss/functions";
+// @import "bootstrap/scss/variables";
+@import "./vars";
+
+// $component-hover-bg: rgba(#fff, .05);
+// $component-active-color: hsl(224deg 100% 78%);
+// $component-active-bg: hsl(224deg 73% 21% / 52%);
+
+// $list-group-bg: transparent;
+// $list-group-color: #bbb;
+// $list-group-hover-bg: $component-hover-bg;
+// $list-group-action-hover-color: #fff;
+
+
+// Configuration
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/utilities";
+
+// Layout & components
+@import "bootstrap/scss/root";
+@import "bootstrap/scss/reboot";
+@import "bootstrap/scss/type";
+// @import "bootstrap/scss/images";
+@import "bootstrap/scss/containers";
+@import "bootstrap/scss/grid";
+// @import "bootstrap/scss/tables";
+@import "bootstrap/scss/forms";
+@import "bootstrap/scss/buttons";
+@import "bootstrap/scss/transitions";
+// @import "bootstrap/scss/dropdown";
+// @import "bootstrap/scss/button-group";
+@import "bootstrap/scss/nav";
+@import "bootstrap/scss/navbar";
+// @import "bootstrap/scss/card";
+// @import "bootstrap/scss/accordion";
+// @import "bootstrap/scss/breadcrumb";
+// @import "bootstrap/scss/pagination";
+// @import "bootstrap/scss/badge";
+@import "bootstrap/scss/alert";
+// @import "bootstrap/scss/progress";
+@import "bootstrap/scss/list-group";
+@import "bootstrap/scss/close";
+// @import "bootstrap/scss/toasts";
+@import "bootstrap/scss/modal";
+@import "bootstrap/scss/tooltip";
+// @import "bootstrap/scss/popover";
+// @import "bootstrap/scss/carousel";
+@import "bootstrap/scss/spinners";
+// @import "bootstrap/scss/offcanvas";
+// @import "bootstrap/scss/placeholders";
+
+// Helpers
+@import "bootstrap/scss/helpers";
+
+// Utilities
+@import "bootstrap/scss/utilities/api";
+
+
+// .list-group-flush > .list-group-item {
+//     border-radius: $border-radius;
+//     text-shadow: 0 0 1px black;
+// }
+
+a {
+    text-decoration-color: rgba($body-color, 0.25);
+    text-underline-offset: 2px;
+
+    &:hover, &.active {
+        text-decoration-color: $body-color;
+    }
+}
+
+.page-summary-bar {
+    display: flex;
+    align-items: center;
+    margin: 0.25rem 0 1.5rem;
+
+    h1 {
+        margin: 0;
+    }
+}
+
+.alert {
+    background: none !important;
+    border-top-style: none;
+    border-bottom-style: none;
+    border-right-style: none;
+    border-left-width: 2px;
+    font-style: italic;
+    padding: 0 10px;
+    margin: 20px 0;
+}

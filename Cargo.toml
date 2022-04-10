@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "warpgate",
+    "warpgate-admin",
+    "warpgate-common",
+    "warpgate-db-migrations",
+    "warpgate-db-entities",
+    "warpgate-protocol-ssh",
+]
+default-members = ["warpgate"]
+
+[profile.release]
+lto = true
+panic = "abort"
+strip = "debuginfo"

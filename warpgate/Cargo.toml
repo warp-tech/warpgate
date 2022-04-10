@@ -1,0 +1,35 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate"
+version = "0.1.0"
+
+[dependencies]
+anyhow = {version = "1.0", features = ["backtrace"]}
+async-trait = "0.1"
+bytes = "1.1"
+clap = {version = "3.1", features = ["derive"]}
+config = "0.12"
+console = "0.1"
+console-subscriber = {version = "0.1", optional = true}
+dhat = {version = "0.3", optional = true}
+dialoguer = "0.10"
+futures = "0.3"
+notify = "^5.0.0-beta.1"
+openssl = {version = "0.10", features = ["vendored"]}# Embed OpenSSL
+rcgen = {version = "0.9", features = ["zeroize"]}
+serde_yaml = "0.8.23"
+time = "0.3"
+tokio = {version = "1.17", features = ["tracing", "signal"]}
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
+warpgate-admin = {version = "*", path = "../warpgate-admin"}
+warpgate-common = {version = "*", path = "../warpgate-common"}
+warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
+
+[target.'cfg(target_os = "linux")'.dependencies]
+sd-notify = "0.4"
+
+[features]
+dhat-ad-hoc = ["dhat"]
+dhat-heap = ["dhat"]

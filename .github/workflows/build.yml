@@ -1,0 +1,67 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install just
+        run: |
+          cargo install just
+
+
+      - name: Install admin UI deps
+        run: |
+          just yarn
+
+      - name: Build admin UI
+        run: |
+          just yarn openapi-client
+          just yarn build
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target x86_64-unknown-linux-gnu
+
+      - name: Rename
+        run: |
+          mkdir dist
+          mv target/x86_64-unknown-linux-gnu/release/warpgate dist/warpgate-${{github.ref_name}}-x86_64-linux
+
+      - uses: actions/upload-artifact@master
+        name: Upload artifacts
+        with:
+          name: warpgate-${{github.ref_name}}-x86_64-linux
+          path: dist/warpgate-${{github.ref_name}}-x86_64-linux
+
+      # - name: 🔎 Test
+      #   uses: actions-rs/cargo@v1
+      #   with:
+      #     command: test
+
+      - name: Upload
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          draft: true
+          append_body: true
+          generate_release_notes: true
+          files: dist/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_REPOSITORY: my_gh_org/my_gh_repo
