@@ -1,12 +1,13 @@
 use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
+use isatty::stdin_isatty;
 use std::io::stdin;
 use warpgate_common::hash::hash_password;
 
 pub(crate) async fn command() -> Result<()> {
     let mut input = String::new();
 
-    if console::user_attended() {
+    if stdin_isatty() {
         input = dialoguer::Password::with_theme(&ColorfulTheme::default())
             .with_prompt("Password to be hashed")
             .interact()?;
