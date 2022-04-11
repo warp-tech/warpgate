@@ -5,7 +5,7 @@
 
 [[ -e /data/web-admin.certificate.pem ]] || openssl req -x509 -nodes -days 7300 -newkey rsa:4096 -keyout /data/web-admin.key.pem -out /data/web-admin.certificate.pem -subj "/C=PE/ST=Lima/L=Lima/O=Acme Inc. /OU=IT Department/CN=acme.com"
 
-password_hash=$(/expect.sh "${ADMIN_PASS}" | tail -1 | sed 's/\r$//')
+password_hash=$(echo -n "${ADMIN_PASS}" | warpgate hash | cat)
 
 cat << EOF > /etc/warpgate.yaml
 ---

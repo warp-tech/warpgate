@@ -9,9 +9,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_17.x | bash - \
     && npm install -g yarn \
     && cargo install just
 
-RUN git clone https://github.com/Eugeny/warpgate /opt/warpgate \
-    && cd /opt/warpgate \
+COPY . /opt/warpgate
+
+RUN cd /opt/warpgate \
     && just yarn \
+    && just openapi \
     && just yarn build \
     && cargo build
 
@@ -19,13 +21,12 @@ FROM debian:bullseye
 LABEL maintainer=heywoodlh
 
 COPY --from=build /opt/warpgate/target/debug/warpgate /usr/local/bin/warpgate
-COPY run.sh /run.sh
-COPY expect.sh /expect.sh
+COPY docker/run.sh /run.sh
 
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update \
-    && apt-get install -y expect openssl \
+    && apt-get install -y openssl \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 2222
