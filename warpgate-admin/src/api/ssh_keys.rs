@@ -44,7 +44,7 @@ impl Api {
                 .into_iter()
                 .map(|k| SSHKey {
                     kind: k.name().to_owned(),
-                    public_key_base64: k.public_key_base64(),
+                    public_key_base64: k.public_key_base64().replace("\n", "").replace("\r", ""),
                 })
                 .collect();
             Ok(GetSSHOwnKeysResponse::Ok(Json(keys)))
