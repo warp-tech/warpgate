@@ -28,6 +28,7 @@ In particular, we're working on:
 
 ## Contributing / building from source
 
+* You'll need nightly Rust (will be installed automatically), NodeJS and Yarn
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
 * Install the admin UI deps: `just yarn`
