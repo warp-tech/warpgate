@@ -20,7 +20,7 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 
 ## Project Status
 
-The project is currently in **alpha** stage and is gathering community feedback. See the [official roadmap](https://github.com/users/warp-tech/projects/1/views/2) for the upcoming features.
+The project is currently in **alpha** stage and is gathering community feedback. See the [official roadmap](https://github.com/users/Eugeny/projects/1/views/2) for the upcoming features.
 
 In particular, we're working on:
 
