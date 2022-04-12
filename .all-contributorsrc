@@ -1,0 +1,24 @@
+{
+  "projectName": "warpgate",
+  "projectOwner": "Eugeny",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": true,
+  "commitConvention": "none",
+  "contributors": [
+    {
+      "login": "Eugeny",
+      "name": "Eugeny",
+      "avatar_url": "https://avatars.githubusercontent.com/u/161476?v=4",
+      "profile": "https://github.com/Eugeny",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7
+}
