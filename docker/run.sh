@@ -7,7 +7,8 @@
 
 password_hash=$(echo -n "${ADMIN_PASS}" | warpgate hash | cat)
 
-cat << EOF > /etc/warpgate.yaml
+
+[[ -f '/data/warpgate.yaml'  ]] || cat << EOF > /data/warpgate.yaml
 ---
 targets:
   - name: web-admin
@@ -39,4 +40,6 @@ ssh:
 retention: 7days
 EOF
 
-warpgate -c /etc/warpgate.yaml $@
+[[ -L /etc/warpgate.yaml  ]] || ln -s /data/warpgate.yaml /etc/warpgate.yaml
+
+warpgate $@

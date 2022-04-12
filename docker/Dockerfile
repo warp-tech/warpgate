@@ -15,12 +15,12 @@ RUN cd /opt/warpgate \
     && just yarn \
     && just openapi \
     && just yarn build \
-    && cargo build
+    && cargo build --release
 
 FROM debian:bullseye
 LABEL maintainer=heywoodlh
 
-COPY --from=build /opt/warpgate/target/debug/warpgate /usr/local/bin/warpgate
+COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 COPY docker/run.sh /run.sh
 
 ENV DEBIAN_FRONTEND noninteractive
