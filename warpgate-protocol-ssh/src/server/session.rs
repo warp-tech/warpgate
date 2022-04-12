@@ -55,6 +55,7 @@ pub struct ServerSession {
     all_channels: Vec<Uuid>,
     channel_recorders: HashMap<Uuid, TerminalRecorder>,
     channel_map: BiMap<ServerChannelId, Uuid>,
+    channel_pty_size_map: HashMap<Uuid, PtyRequest>,
     rc_tx: UnboundedSender<RCCommand>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -118,6 +119,7 @@ impl ServerSession {
             all_channels: vec![],
             channel_recorders: HashMap::new(),
             channel_map: BiMap::new(),
+            channel_pty_size_map: HashMap::new(),
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -596,6 +598,8 @@ impl ServerSession {
         request: PtyRequest,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
+        self.channel_pty_size_map
+            .insert(channel_id, request.clone());
         if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
             if let Err(error) = recorder
                 .write_pty_resize(request.col_width, request.row_height)
@@ -625,6 +629,8 @@ impl ServerSession {
         request: PtyRequest,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
+        self.channel_pty_size_map
+            .insert(channel_id, request.clone());
         if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
             if let Err(error) = recorder
                 .write_pty_resize(request.col_width, request.row_height)
@@ -729,13 +735,25 @@ impl ServerSession {
             ChannelOperation::RequestShell,
         ))?;
 
-        match self
-            .services
-            .recordings
-            .lock()
-            .await
-            .start(&self.id, format!("shell-channel-{}", server_channel_id.0))
-            .await
+        match async {
+            let mut recorder = self
+                .services
+                .recordings
+                .lock()
+                .await
+                .start::<TerminalRecorder>(
+                    &self.id,
+                    format!("shell-channel-{}", server_channel_id.0),
+                )
+                .await?;
+            if let Some(request) = self.channel_pty_size_map.get(&channel_id) {
+                recorder
+                    .write_pty_resize(request.col_width, request.row_height)
+                    .await?;
+            }
+            Ok::<_, anyhow::Error>(recorder)
+        }
+        .await
         {
             Ok(recorder) => {
                 self.channel_recorders.insert(channel_id, recorder);
