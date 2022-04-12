@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: eugeny/warpgate
+  IMAGE_NAME: warp-tech/warpgate
 
 jobs:
   build:
