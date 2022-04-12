@@ -1,7 +1,6 @@
 # Warpgate
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+
+<a href="https://github.com/Eugeny/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/eugeny/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/Eugeny/warpgate/workflows/build/master"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp;
 
 Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH client.
 
