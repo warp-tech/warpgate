@@ -10,9 +10,11 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 
 <img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
 
-## Getting started
+## Getting started & downloads
 
-See the [Getting started](https://github.com/Eugeny/warpgate/wiki/Getting-started) wiki page.
+* See the [Getting started](https://github.com/Eugeny/warpgate/wiki/Getting-started) wiki page.
+* [Release / beta binaries](https://github.com/Eugeny/warpgate/releases)
+* [Nightly builds](https://nightly.link/Eugeny/warpgate/workflows/build/main)
 
 ## Project Status
 
@@ -28,6 +30,7 @@ In particular, we're working on:
 
 ## Contributing / building from source
 
+* You'll need nightly Rust (will be installed automatically), NodeJS and Yarn
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
 * Install the admin UI deps: `just yarn`
