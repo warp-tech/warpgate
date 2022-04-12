@@ -27,6 +27,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "apiening",
+      "name": "Andreas Piening",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2064875?v=4",
+      "profile": "https://github.com/apiening",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7
