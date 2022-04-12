@@ -1,6 +1,6 @@
 # Warpgate
 
-<a href="https://github.com/Eugeny/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/eugeny/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/Eugeny/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp;
+<a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp;
 
 Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH client.
 
@@ -14,13 +14,13 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 
 ## Getting started & downloads
 
-* See the [Getting started](https://github.com/Eugeny/warpgate/wiki/Getting-started) wiki page.
-* [Release / beta binaries](https://github.com/Eugeny/warpgate/releases)
-* [Nightly builds](https://nightly.link/Eugeny/warpgate/workflows/build/main)
+* See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page.
+* [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
+* [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
 
 ## Project Status
 
-The project is currently in **alpha** stage and is gathering community feedback. See the [official roadmap](https://github.com/users/Eugeny/projects/1/views/2) for the upcoming features.
+The project is currently in **alpha** stage and is gathering community feedback. See the [official roadmap](https://github.com/users/warp-tech/projects/1/views/2) for the upcoming features.
 
 In particular, we're working on:
 
