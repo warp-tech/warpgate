@@ -30,6 +30,16 @@ In particular, we're working on:
 * Requesting admin approval for sessions
 * and much more.
 
+## How it works
+
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH connections and provide an (optional) web admin UI.
+
+It receives SSH connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
+
+You manage the target and user lists and assign them to each other through a config file (default: `/etc/warpgate.yaml`), and the session history is stored in an SQLite database (default: in `/var/lib/warpgate`).
+
+You can use the web interface to view the live session list, review session recordings and more.
+
 ## Contributing / building from source
 
 * You'll need nightly Rust (will be installed automatically), NodeJS and Yarn
