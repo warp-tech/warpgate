@@ -6,7 +6,7 @@ use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing::*;
-use warpgate_common::hash::hash_password;
+use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::{
     Role, SSHConfig, Secret, Services, Target, TargetWebAdminOptions, User, UserAuthCredential,

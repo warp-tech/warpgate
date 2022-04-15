@@ -9,7 +9,7 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_db_entities::Ticket;
 
 pub struct Api;

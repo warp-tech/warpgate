@@ -5,19 +5,22 @@ name = "warpgate"
 version = "0.1.0"
 
 [dependencies]
+ansi_term = "0.12"
 anyhow = {version = "1.0", features = ["backtrace"]}
 async-trait = "0.1"
 bytes = "1.1"
 clap = {version = "3.1", features = ["derive"]}
-config = "0.12"
-console = "0.1"
+config = {version = "0.12", features = ["yaml"], default_features = false}
+console = {version = "0.1", default_features = false}
 console-subscriber = {version = "0.1", optional = true}
+data-encoding = "2.3"
 dhat = {version = "0.3", optional = true}
 dialoguer = "0.10"
 futures = "0.3"
 isatty = "0.1"
 notify = "^5.0.0-beta.1"
 openssl = {version = "0.10", features = ["vendored"]}# Embed OpenSSL
+qrcode = "0.12"
 rcgen = {version = "0.9", features = ["zeroize"]}
 serde_yaml = "0.8.23"
 time = "0.3"

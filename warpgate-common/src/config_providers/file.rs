@@ -1,5 +1,6 @@
 use super::ConfigProvider;
-use crate::hash::verify_password_hash;
+use crate::helpers::hash::verify_password_hash;
+use crate::helpers::otp::verify_totp;
 use crate::{
     AuthCredential, AuthResult, Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig,
 };
@@ -36,6 +37,7 @@ fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
     match c {
         UserAuthCredential::Password { .. } => k == "password",
         UserAuthCredential::PublicKey { .. } => k == "publickey",
+        UserAuthCredential::TOTP { .. } => k == "otp",
     }
 }
 
@@ -92,48 +94,59 @@ impl ConfigProvider for FileConfigProvider {
         let mut valid_credentials = vec![];
 
         for client_credential in credentials {
-            if let AuthCredential::PublicKey {
-                kind,
-                public_key_bytes,
-            } = client_credential
-            {
-                let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
-                base64_bytes.pop();
-                base64_bytes.pop();
+            match client_credential {
+                AuthCredential::PublicKey {
+                    kind,
+                    public_key_bytes,
+                } => {
+                    let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
+                    base64_bytes.pop();
+                    base64_bytes.pop();
 
-                let client_key = format!("{} {}", kind, base64_bytes);
-                debug!(username=%user.username, "Client key: {}", client_key);
+                    let client_key = format!("{} {}", kind, base64_bytes);
+                    debug!(username=%user.username, "Client key: {}", client_key);
 
-                for credential in user.credentials.iter() {
-                    if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
-                        if &client_key == user_key.expose_secret() {
-                            valid_credentials.push(credential);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        for client_credential in credentials {
-            if let AuthCredential::Password(client_password) = client_credential {
-                for credential in user.credentials.iter() {
-                    if let UserAuthCredential::Password {
-                        hash: ref user_password_hash,
-                    } = credential
-                    {
-                        match verify_password_hash(
-                            client_password.expose_secret(),
-                            user_password_hash.expose_secret(),
-                        ) {
-                            Ok(true) => {
+                    for credential in user.credentials.iter() {
+                        if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
+                            if &client_key == user_key.expose_secret() {
                                 valid_credentials.push(credential);
                                 break;
                             }
-                            Ok(false) => continue,
-                            Err(e) => {
-                                error!(username=%user.username, "Error verifying password hash: {}", e);
-                                continue;
+                        }
+                    }
+                }
+                AuthCredential::Password(client_password) => {
+                    for credential in user.credentials.iter() {
+                        if let UserAuthCredential::Password {
+                            hash: ref user_password_hash,
+                        } = credential
+                        {
+                            match verify_password_hash(
+                                client_password.expose_secret(),
+                                user_password_hash.expose_secret(),
+                            ) {
+                                Ok(true) => {
+                                    valid_credentials.push(credential);
+                                    break;
+                                }
+                                Ok(false) => continue,
+                                Err(e) => {
+                                    error!(username=%user.username, "Error verifying password hash: {}", e);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                AuthCredential::OTP(client_otp) => {
+                    for credential in user.credentials.iter() {
+                        if let UserAuthCredential::TOTP {
+                            key: ref user_otp_key,
+                        } = credential
+                        {
+                            if verify_totp(client_otp.expose_secret(), user_otp_key) {
+                                valid_credentials.push(credential);
+                                break;
                             }
                         }
                     }
@@ -141,31 +154,38 @@ impl ConfigProvider for FileConfigProvider {
             }
         }
 
-        if !valid_credentials.is_empty() {
-            match user.require {
-                Some(ref required_kinds) => {
-                    for kind in required_kinds {
-                        if !valid_credentials
-                            .iter()
-                            .any(|x| credential_is_type(x, kind))
-                        {
-                            return Ok(AuthResult::Rejected);
-                        }
+        if valid_credentials.is_empty() {
+            warn!(username=%user.username, "Client credentials did not match");
+        }
+
+        match user.require {
+            Some(ref required_kinds) => {
+                let mut remaining_required_kinds = HashSet::new();
+                remaining_required_kinds.extend(required_kinds);
+                for kind in required_kinds {
+                    if valid_credentials
+                        .iter()
+                        .any(|x| credential_is_type(x, kind))
+                    {
+                        remaining_required_kinds.remove(kind);
                     }
+                }
+                if remaining_required_kinds.is_empty() {
                     return Ok(AuthResult::Accepted {
                         username: user.username.clone(),
                     });
-                }
-                None => {
-                    return Ok(AuthResult::Accepted {
-                        username: user.username.clone(),
-                    })
+                } else if remaining_required_kinds.contains(&"otp".to_string()) {
+                    return Ok(AuthResult::OTPNeeded);
+                } else {
+                    return Ok(AuthResult::Rejected);
                 }
             }
+            None => {
+                return Ok(AuthResult::Accepted {
+                    username: user.username.clone(),
+                })
+            }
         }
-
-        warn!(username=%user.username, "Client credentials did not match");
-        Ok(AuthResult::Rejected)
     }
 
     async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {

@@ -141,6 +141,28 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
+    fn auth_keyboard_interactive(
+        self,
+        user: &str,
+        _submethods: &str,
+        response: Option<russh::server::Response>,
+    ) -> Self::FutureAuth {
+        let user = user.to_string();
+        let response = response
+            .and_then(|mut r| r.next())
+            .and_then(|b| String::from_utf8(b.to_vec()).ok());
+        async move {
+            let result = self
+                .session
+                .lock()
+                .await
+                ._auth_keyboard_interactive(Secret::new(user), response.map(Secret::new))
+                .await;
+            Ok((self, result))
+        }
+        .boxed()
+    }
+
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data).freeze();
         async move {
@@ -341,15 +363,6 @@ impl russh::server::Handler for ServerHandler {
     // -----
 
     // fn auth_none(self, user: &str) -> Self::FutureAuth {
-    //     self.finished_auth(Auth::Reject)
-    // }
-
-    // fn auth_keyboard_interactive(
-    //     self,
-    //     user: &str,
-    //     submethods: &str,
-    //     response: Option<russh::server::Response>,
-    // ) -> Self::FutureAuth {
     //     self.finished_auth(Auth::Reject)
     // }
 
