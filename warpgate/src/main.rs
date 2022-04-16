@@ -37,6 +37,8 @@ enum Commands {
     Check,
     /// Test the connection to a target host
     TestTarget { target_name: String },
+    /// Generate a new 2FA (TOTP) enrollment key
+    GenerateOtp,
 }
 
 async fn _main() -> Result<()> {
@@ -51,6 +53,7 @@ async fn _main() -> Result<()> {
         }
         Commands::Setup => crate::commands::setup::command(&cli).await,
         Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
+        Commands::GenerateOtp => crate::commands::otp::command().await,
     }
 }
 

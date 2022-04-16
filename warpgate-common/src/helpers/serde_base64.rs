@@ -1,18 +1,16 @@
-use bytes::Bytes;
 use data_encoding::BASE64;
 use serde::{Deserialize, Serializer};
 
-pub fn serialize<S>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(&BASE64.encode(bytes))
+pub fn serialize<S: Serializer, B: AsRef<[u8]>>(
+    bytes: B,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&BASE64.encode(bytes.as_ref()))
 }
 
-pub fn deserialize<'de, D>(deserializer: D) -> Result<Bytes, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
+pub fn deserialize<'de, D: serde::Deserializer<'de>, B: From<Vec<u8>>>(
+    deserializer: D,
+) -> Result<B, D::Error> {
     let s = String::deserialize(deserializer)?;
     Ok(BASE64
         .decode(s.as_bytes())

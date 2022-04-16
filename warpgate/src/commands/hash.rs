@@ -2,7 +2,7 @@ use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use isatty::stdin_isatty;
 use std::io::stdin;
-use warpgate_common::hash::hash_password;
+use warpgate_common::helpers::hash::hash_password;
 
 pub(crate) async fn command() -> Result<()> {
     let mut input = String::new();

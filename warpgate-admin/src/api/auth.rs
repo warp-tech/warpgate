@@ -63,6 +63,7 @@ impl Api {
                 Ok(LoginResponse::Failure)
             }
             AuthResult::Rejected => Ok(LoginResponse::Failure),
+            AuthResult::OTPNeeded => Ok(LoginResponse::Failure), // TODO
         }
     }
 

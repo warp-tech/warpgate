@@ -14,6 +14,7 @@ use russh::server::Session;
 use russh::{CryptoVec, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
+use std::borrow::Cow;
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -850,6 +851,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
+            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(session=?self, ?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -870,6 +872,34 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
+            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
+            Err(error) => {
+                error!(session=?self, ?error, "Failed to verify credentials");
+                russh::server::Auth::Reject
+            }
+        }
+    }
+
+    pub async fn _auth_keyboard_interactive(
+        &mut self,
+        ssh_username: Secret<String>,
+        response: Option<Secret<String>>,
+    ) -> russh::server::Auth {
+        let selector: AuthSelector = ssh_username.expose_secret().into();
+        info!(session=?self, "Keyboard-interactive auth as {:?}", selector);
+
+        if let Some(otp) = response {
+            self.credentials.push(AuthCredential::OTP(otp));
+        }
+
+        match self.try_auth(&selector).await {
+            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
+            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Partial {
+                name: Cow::Borrowed("OTP"),
+                instructions: Cow::Borrowed(""),
+                prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
+            },
             Err(error) => {
                 error!(session=?self, ?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -913,6 +943,7 @@ impl ServerSession {
                         Ok(AuthResult::Accepted { username })
                     }
                     AuthResult::Rejected => Ok(AuthResult::Rejected),
+                    AuthResult::OTPNeeded => Ok(AuthResult::OTPNeeded),
                 }
             }
             AuthSelector::Ticket { secret } => {

@@ -6,7 +6,6 @@ pub mod consts;
 mod data;
 pub mod db;
 pub mod eventhub;
-pub mod hash;
 pub mod helpers;
 mod protocols;
 pub mod recordings;
