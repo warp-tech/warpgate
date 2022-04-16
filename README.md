@@ -33,6 +33,9 @@ In particular, we're working on:
 ## How it works
 
 Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH connections and provide an (optional) web admin UI.
+Executing `warpgate setup` helps to define on which ports `warpgate` listens.
+See [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started)
+to see `warpgate setup in action.
 
 It receives SSH connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
 
