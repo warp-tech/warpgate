@@ -3860,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -3892,7 +3892,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
