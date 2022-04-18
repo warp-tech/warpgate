@@ -89,7 +89,7 @@ pub async fn api_get_recording_cast(
 
         let mut response = vec![]; //String::new();
 
-        let mut last_size = (0, 0);
+        let mut last_size = (80, 25);
         let file = File::open(&path).await.map_err(InternalServerError)?;
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
@@ -107,8 +107,18 @@ pub async fn api_get_recording_cast(
                         .map_err(InternalServerError)?,
                     );
                 }
-                TerminalRecordingItem::PtyResize { cols, rows, .. } => {
+                TerminalRecordingItem::PtyResize { time, cols, rows } => {
                     last_size = (cols, rows);
+                    response.push(
+                        serde_json::to_string(&Cast::Header {
+                            time,
+                            version: 2,
+                            width: cols,
+                            height: rows,
+                            title: recording.name.clone(),
+                        })
+                        .map_err(InternalServerError)?,
+                    );
                 }
             }
         }
@@ -116,6 +126,7 @@ pub async fn api_get_recording_cast(
         response.insert(
             0,
             serde_json::to_string(&Cast::Header {
+                time: 0.0,
                 version: 2,
                 width: last_size.0,
                 height: last_size.1,
@@ -170,6 +181,7 @@ pub async fn api_get_recording_tcpdump(
 #[serde(untagged)]
 enum Cast {
     Header {
+        time: f32,
         version: u32,
         width: u32,
         height: u32,

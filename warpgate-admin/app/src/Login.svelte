@@ -41,7 +41,7 @@ async function login () {
 
 <div class="mt-5 row">
     <div class="col-12 col-md-3"></div>
-    <div class="col-12 col-md-6">
+    <form class="col-12 col-md-6">
         <div class="page-summary-bar">
             <h1>Welcome</h1>
         </div>
@@ -52,6 +52,7 @@ async function login () {
                 bind:value={username}
                 on:keypress={onInputKey}
                 class="form-control"
+                autocomplete="username"
                 autofocus />
         </FormGroup>
 
@@ -60,6 +61,7 @@ async function login () {
                 bind:value={password}
                 on:keypress={onInputKey}
                 type="password"
+                autocomplete="current-password"
                 class="form-control" />
         </FormGroup>
 
@@ -75,6 +77,6 @@ async function login () {
             <Alert color="danger">{error}</Alert>
         {/if}
 
-    </div>
+    </form>
     <div class="col-12 col-md-3"></div>
 </div>

@@ -1,18 +1,18 @@
 <script lang="ts">
 import { api, Recording, RecordingKind } from 'lib/api'
 import { Alert, Spinner } from 'sveltestrap'
-import * as AsciinemaPlayer from 'asciinema-player'
+import TerminalRecordingPlayer from 'player/TerminalRecordingPlayer.svelte'
 
 export let params = { id: '' }
 
 let error: Error|null = null
 let recording: Recording|null = null
-let playerContainer: HTMLDivElement
+let terminalRecordingURL: string|null = null
 
 async function load () {
     recording = await api.getRecording(params)
     if (recording.kind === 'Terminal') {
-        AsciinemaPlayer.create(`/api/recordings/${params.id}/cast`, playerContainer)
+        terminalRecordingURL = `/api/recordings/${params.id}/cast`
     }
 }
 
@@ -42,8 +42,6 @@ load().catch(e => {
 {#if recording?.kind === 'Traffic'}
     <a href={getTCPDumpURL()}>Download tcpdump file</a>
 {/if}
-<div bind:this={playerContainer}></div>
-
-<style lang="scss">
-    @import "asciinema-player/dist/bundle/asciinema-player.css";
-</style>
+{#if recording?.kind === 'Terminal' && terminalRecordingURL}
+    <TerminalRecordingPlayer url={terminalRecordingURL} />
+{/if}
