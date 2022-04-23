@@ -15,7 +15,8 @@ function onInputKey (event: KeyboardEvent) {
     }
 }
 
-async function login () {
+async function login (event?) {
+    event?.preventDefault()
     error = null
     incorrectCredentials = false
     try {
@@ -39,7 +40,7 @@ async function login () {
 }
 </script>
 
-<div class="mt-5 row">
+<form class="mt-5 row" autocomplete="on">
     <div class="col-12 col-md-3"></div>
     <div class="col-12 col-md-6">
         <div class="page-summary-bar">
@@ -51,6 +52,8 @@ async function login () {
             <input
                 bind:value={username}
                 on:keypress={onInputKey}
+                name="username"
+                autocomplete="username"
                 class="form-control"
                 autofocus />
         </FormGroup>
@@ -59,12 +62,15 @@ async function login () {
             <input
                 bind:value={password}
                 on:keypress={onInputKey}
+                name="password"
+                autocomplete="current-password"
                 type="password"
                 class="form-control" />
         </FormGroup>
 
         <Button
             outline
+            type="submit"
             on:click={login}
         >Login</Button>
 
@@ -77,4 +83,4 @@ async function login () {
 
     </div>
     <div class="col-12 col-md-3"></div>
-</div>
+</form>
