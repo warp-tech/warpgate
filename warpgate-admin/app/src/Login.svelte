@@ -55,7 +55,6 @@ async function login (event?) {
                 name="username"
                 autocomplete="username"
                 class="form-control"
-                autocomplete="username"
                 autofocus />
         </FormGroup>
 
@@ -64,7 +63,6 @@ async function login (event?) {
                 bind:value={password}
                 on:keypress={onInputKey}
                 name="password"
-                autocomplete="current-password"
                 type="password"
                 autocomplete="current-password"
                 class="form-control" />
