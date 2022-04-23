@@ -1,20 +1,23 @@
 use crate::helpers::{authorized, ApiResult};
 use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
-use poem::handler;
 use poem::session::Session;
+use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
+use poem::{handler, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait};
-use serde::Serialize;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
+use tracing::*;
 use uuid::Uuid;
-use warpgate_common::recordings::{SessionRecordings, TerminalRecordingItem};
+use warpgate_common::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 
 pub struct Api;
@@ -96,36 +99,16 @@ pub async fn api_get_recording_cast(
         while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
             let entry: TerminalRecordingItem =
                 serde_json::from_str(&line[..]).map_err(InternalServerError)?;
-            match entry {
-                TerminalRecordingItem::Data { time, data } => {
-                    response.push(
-                        serde_json::to_string(&Cast::Output(
-                            time,
-                            "o".to_string(),
-                            String::from_utf8_lossy(&data[..]).to_string(),
-                        ))
-                        .map_err(InternalServerError)?,
-                    );
-                }
-                TerminalRecordingItem::PtyResize { time, cols, rows } => {
-                    last_size = (cols, rows);
-                    response.push(
-                        serde_json::to_string(&Cast::Header {
-                            time,
-                            version: 2,
-                            width: cols,
-                            height: rows,
-                            title: recording.name.clone(),
-                        })
-                        .map_err(InternalServerError)?,
-                    );
-                }
+            let asciicast: AsciiCast = entry.into();
+            response.push(serde_json::to_string(&asciicast).map_err(InternalServerError)?);
+            if let AsciiCast::Header { width, height, .. } = asciicast {
+                last_size = (width, height);
             }
         }
 
         response.insert(
             0,
-            serde_json::to_string(&Cast::Header {
+            serde_json::to_string(&AsciiCast::Header {
                 time: 0.0,
                 version: 2,
                 width: last_size.0,
@@ -177,27 +160,49 @@ pub async fn api_get_recording_tcpdump(
     .await
 }
 
-#[derive(Serialize)]
-#[serde(untagged)]
-enum Cast {
-    Header {
-        time: f32,
-        version: u32,
-        width: u32,
-        height: u32,
-        title: String,
-    },
-    Output(f32, String, String),
+#[handler]
+pub async fn api_get_recording_stream(
+    ws: WebSocket,
+    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    id: poem::web::Path<Uuid>,
+) -> impl IntoResponse {
+    let recordings = recordings.lock().await;
+    let receiver = recordings.subscribe_live(&id).await;
+
+    ws.on_upgrade(|socket| async move {
+        let (mut sink, _) = socket.split();
+
+        sink.send(Message::Text(serde_json::to_string(&json!({
+            "start": true,
+            "live": receiver.is_some(),
+        }))?))
+        .await?;
+
+        if let Some(mut receiver) = receiver {
+            tokio::spawn(async move {
+                if let Err(error) = async {
+                    loop {
+                        let Ok(data) = receiver.recv().await else {
+                            break;
+                        };
+                        let content: TerminalRecordingItem = serde_json::from_slice(&data)?;
+                        let cast: AsciiCast = content.into();
+                        let msg = serde_json::to_string(&json!({ "data": cast }))?;
+                        sink.send(Message::Text(msg)).await?;
+                    }
+                    sink.send(Message::Text(serde_json::to_string(&json!({
+                        "end": true,
+                    }))?))
+                    .await?;
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await
+                {
+                    error!(%error, "Livestream error:");
+                }
+            });
+        }
+
+        Ok::<(), anyhow::Error>(())
+    })
 }
-
-// #[handler]
-// pub async fn api_get_recording_stream(
-//     ws: WebSocket,
-//     db: Data<&Arc<Mutex<DatabaseConnection>>>,
-//     state: Data<&Arc<Mutex<State>>>,
-//     id: poem::web::Path<Uuid>,
-// ) -> impl IntoResponse {
-//     ws.on_upgrade(|socket| async move {
-
-//     })
-// }

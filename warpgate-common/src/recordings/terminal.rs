@@ -7,6 +7,19 @@ use warpgate_db_entities::Recording::RecordingKind;
 use super::writer::RecordingWriter;
 use super::Recorder;
 
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum AsciiCast {
+    Header {
+        time: f32,
+        version: u32,
+        width: u32,
+        height: u32,
+        title: String,
+    },
+    Output(f32, String, String),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum TerminalRecordingItem {
@@ -22,6 +35,25 @@ pub enum TerminalRecordingItem {
     },
 }
 
+impl From<TerminalRecordingItem> for AsciiCast {
+    fn from(item: TerminalRecordingItem) -> Self {
+        match item {
+            TerminalRecordingItem::Data { time, data } => AsciiCast::Output(
+                time,
+                "o".to_string(),
+                String::from_utf8_lossy(&data[..]).to_string(),
+            ),
+            TerminalRecordingItem::PtyResize { time, cols, rows } => AsciiCast::Header {
+                time,
+                version: 2,
+                width: cols,
+                height: rows,
+                title: "".to_string(),
+            },
+        }
+    }
+}
+
 pub struct TerminalRecorder {
     writer: RecordingWriter,
     started_at: Instant,
@@ -33,9 +65,9 @@ impl TerminalRecorder {
     }
 
     async fn write_item(&mut self, item: &TerminalRecordingItem) -> Result<()> {
-        let serialized_item = serde_json::to_vec(&item)?;
+        let mut serialized_item = serde_json::to_vec(&item)?;
+        serialized_item.push(b'\n');
         self.writer.write(&serialized_item).await?;
-        self.writer.write(b"\n").await?;
         Ok(())
     }
 

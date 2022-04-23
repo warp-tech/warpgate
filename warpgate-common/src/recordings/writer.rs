@@ -3,18 +3,22 @@ use crate::helpers::fs::secure_file;
 use super::{Error, Result};
 use bytes::{Bytes, BytesMut};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
+use uuid::Uuid;
 use warpgate_db_entities::Recording;
 
 #[derive(Clone)]
 pub struct RecordingWriter {
     sender: mpsc::Sender<Bytes>,
+    live_sender: broadcast::Sender<Bytes>,
+    drop_signal: mpsc::Sender<()>,
 }
 
 impl RecordingWriter {
@@ -22,11 +26,30 @@ impl RecordingWriter {
         path: PathBuf,
         model: Recording::Model,
         db: Arc<Mutex<DatabaseConnection>>,
+        live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
     ) -> Result<Self> {
         let file = File::create(&path).await?;
         secure_file(&path)?;
         let mut writer = BufWriter::new(file);
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
+        let (drop_signal, mut drop_receiver) = mpsc::channel(1);
+
+        let live_sender = broadcast::channel(128).0;
+        {
+            let mut live = live.lock().await;
+            live.insert(model.id, live_sender.clone());
+        }
+
+        tokio::spawn({
+            let live = live.clone();
+            let id = model.id;
+            async move {
+                let _ = drop_receiver.recv().await;
+                let mut live = live.lock().await;
+                live.remove(&id);
+            }
+        });
+
         tokio::spawn(async move {
             if let Err(error) = async {
                 let mut last_flush = Instant::now();
@@ -73,14 +96,26 @@ impl RecordingWriter {
             }
         });
 
-        Ok(RecordingWriter { sender })
+        Ok(RecordingWriter {
+            sender,
+            live_sender,
+            drop_signal,
+        })
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {
+        let data = BytesMut::from(data).freeze();
         self.sender
-            .send(BytesMut::from(data).freeze())
+            .send(data.clone())
             .await
             .map_err(|_| Error::Closed)?;
+        let _ = self.live_sender.send(data);
         Ok(())
+    }
+}
+
+impl Drop for RecordingWriter {
+    fn drop(&mut self) {
+        let _ = self.drop_signal.send(());
     }
 }

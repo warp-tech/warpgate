@@ -1,7 +1,9 @@
+use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Recording::{self, RecordingKind};
@@ -40,6 +42,7 @@ pub struct SessionRecordings {
     db: Arc<Mutex<DatabaseConnection>>,
     path: PathBuf,
     config: RecordingsConfig,
+    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
 }
 
 impl SessionRecordings {
@@ -54,10 +57,11 @@ impl SessionRecordings {
             db,
             config: config.store.recordings.clone(),
             path,
+            live: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub async fn start<T>(&self, id: &SessionId, name: String) -> Result<T>
+    pub async fn start<T>(&mut self, id: &SessionId, name: String) -> Result<T>
     where
         T: Recorder,
     {
@@ -84,8 +88,13 @@ impl SessionRecordings {
             values.insert(&*db).await.map_err(Error::Database)?
         };
 
-        let writer = RecordingWriter::new(path, model, self.db.clone()).await?;
+        let writer = RecordingWriter::new(path, model, self.db.clone(), self.live.clone()).await?;
         Ok(T::new(writer))
+    }
+
+    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
+        let live = self.live.lock().await;
+        live.get(id).map(|sender| sender.subscribe())
     }
 
     pub fn path_for(&self, session_id: &SessionId, name: &dyn AsRef<std::path::Path>) -> PathBuf {
