@@ -42,7 +42,7 @@ async function login (event?) {
 
 <form class="mt-5 row" autocomplete="on">
     <div class="col-12 col-md-3"></div>
-    <div class="col-12 col-md-6">
+    <form class="col-12 col-md-6">
         <div class="page-summary-bar">
             <h1>Welcome</h1>
         </div>
@@ -55,6 +55,7 @@ async function login (event?) {
                 name="username"
                 autocomplete="username"
                 class="form-control"
+                autocomplete="username"
                 autofocus />
         </FormGroup>
 
@@ -65,6 +66,7 @@ async function login (event?) {
                 name="password"
                 autocomplete="current-password"
                 type="password"
+                autocomplete="current-password"
                 class="form-control" />
         </FormGroup>
 
@@ -81,6 +83,6 @@ async function login (event?) {
             <Alert color="danger">{error}</Alert>
         {/if}
 
-    </div>
+    </form>
     <div class="col-12 col-md-3"></div>
 </form>
