@@ -6,9 +6,11 @@
     import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from 'sveltestrap'
     import formatDuration from 'format-duration'
+    import type { Recording } from 'lib/api'
 
-    export let url: string
+    export let recording: Recording
 
+    let url: string
     let containerElement: HTMLDivElement
     let rootElement: HTMLDivElement
     let timestamp = 0
@@ -18,6 +20,11 @@
     let events: (SizeEvent | DataEvent | SnapshotEvent)[] = []
     let playing = false
     let loading = true
+    let sessionIsLive: boolean|null = null
+    let socket: WebSocket|null = null
+    let isStreaming = false
+
+    $: isStreaming = timestamp === duration && playing
 
     const COLOR_NAMES = [
         'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
@@ -51,6 +58,23 @@
         theme[COLOR_NAMES[i]] = colors[i]
     }
 
+    interface AsciiCastHeader {
+        time: number
+        version: number
+        width: number
+        height: number
+    }
+    type AsciiCastData = [number, 'o', string]
+    type AsciiCastItem = AsciiCastHeader | AsciiCastData
+
+    function isAsciiCastHeader(data: AsciiCastItem): data is AsciiCastHeader {
+        return 'version' in data
+    }
+
+    function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
+        return data[1] === 'o'
+    }
+
     interface SizeEvent { time: number, cols: number, rows: number }
     interface DataEvent { time: number, data: string }
     interface SnapshotEvent { time: number, snapshot: string }
@@ -58,7 +82,15 @@
     const term = new Terminal()
     const serializeAddon = new SerializeAddon()
 
+    onDestroy(() => socket?.close())
+
     onMount(async () => {
+        if (recording.kind !== 'Terminal') {
+            throw new Error('Invalid recording type')
+        }
+
+        url = `/api/recordings/${recording.id}/cast`
+
         term.loadAddon(serializeAddon)
         term.open(containerElement)
 
@@ -75,25 +107,55 @@
         }
 
         await seek(duration)
-        await seek(0)
+
+        socket = new WebSocket(`wss://${location.host}/api/recordings/${recording.id}/stream`)
+        socket.addEventListener('message', function (event) {
+            let message = JSON.parse(event.data)
+            if ('data' in message) {
+                let item: AsciiCastItem = message.data
+                addData(item)
+            } if ('start' in message) {
+                sessionIsLive = message.live
+                if (!sessionIsLive) {
+                    seek(0)
+                } else {
+                    playing = true
+                }
+            } if ('end' in message) {
+                sessionIsLive = false
+            } else {
+                console.log('Message from server ', message)
+            }
+        })
+        socket.addEventListener('close', () => console.info('Live stream closed'))
+
         loading = false
     })
 
-    function addData (data) {
-        if (data.version) {
-            duration = Math.max(duration, data.time)
+    function addData (data: AsciiCastItem) {
+        if (isAsciiCastHeader(data)) {
             events.push({
                 time: data.time,
                 cols: data.width,
                 rows: data.height,
             })
+            if (isStreaming) {
+                resize(data.width, data.height)
+                timestamp = data.time
+            }
+            duration = Math.max(duration, data.time)
         }
-        if (data instanceof Array) {
-            duration = Math.max(duration, data[0])
-            events.push({
+        if (isAsciiCastData(data)) {
+            let dataEvent = {
                 time: data[0],
                 data: data[2],
-            })
+            }
+            events.push(dataEvent)
+            if (isStreaming) {
+                term.write(dataEvent.data)
+                timestamp = dataEvent.time
+            }
+            duration = Math.max(duration, dataEvent.time)
         }
     }
 
@@ -129,7 +191,11 @@
 
         let index = nearestSnapshot ? events.indexOf(nearestSnapshot) : 0
         if (time >= timestamp) {
-            index = Math.max(index, events.findIndex(e => e.time > timestamp))
+            const nextEventIndex = events.findIndex(e => e.time > timestamp)
+            if (nextEventIndex === -1) {
+                return
+            }
+            index = Math.max(index, nextEventIndex)
         }
         let lastSize = { cols: term.cols, rows: term.rows }
 
@@ -205,7 +271,7 @@
             return
         }
         if (playing) {
-            await seek(timestamp + 0.1)
+            await seek(Math.min(duration, timestamp + 0.1))
         }
         setTimeout(step, 100)
     }
@@ -237,17 +303,26 @@
     {/if}
 
     <div
-    class="container"
-    class:invisible={loading}
-    on:click={togglePlaying}
-    bind:this={containerElement}
+        class="container"
+        class:invisible={loading}
+        on:click={togglePlaying}
+        bind:this={containerElement}
     ></div>
 
     <div class="toolbar" class:invisible={loading}>
         <button class="btn btn-link" on:click={togglePlaying}>
             <Fa icon={playing ? faPause : faPlay} fw />
         </button>
-        <pre class="timestamp">{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
+        <pre
+            class="timestamp"
+        >{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
+        {#if sessionIsLive === true}
+            <button
+                class="btn live-btn"
+                class:active={isStreaming}
+                on:click={() => seek(duration)}
+            >LIVE</button>
+        {/if}
         <input
             class="w-100"
             type="range"
@@ -346,8 +421,22 @@
         flex: none;
         overflow: visible;
         color: #eeeeee;
-        font-size: 0.75rem;
         margin: 0;
+        font-size: 0.75rem;
         align-self: center;
+    }
+
+    .live-btn {
+        font-size: 0.75rem;
+        align-self: center;
+        color: red;
+        flex: none;
+
+        &.active {
+            background: red;
+            color: white;
+            padding: 0.1rem 0.25rem;
+            margin: 0 0.5rem;
+        }
     }
 </style>

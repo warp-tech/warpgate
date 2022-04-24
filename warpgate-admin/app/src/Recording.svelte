@@ -2,18 +2,16 @@
 import { api, Recording, RecordingKind } from 'lib/api'
 import { Alert, Spinner } from 'sveltestrap'
 import TerminalRecordingPlayer from 'player/TerminalRecordingPlayer.svelte'
+import { onDestroy } from 'svelte';
 
 export let params = { id: '' }
 
 let error: Error|null = null
 let recording: Recording|null = null
-let terminalRecordingURL: string|null = null
 
 async function load () {
     recording = await api.getRecording(params)
-    if (recording.kind === 'Terminal') {
-        terminalRecordingURL = `/api/recordings/${params.id}/cast`
-    }
+
 }
 
 function getTCPDumpURL () {
@@ -42,6 +40,6 @@ load().catch(e => {
 {#if recording?.kind === 'Traffic'}
     <a href={getTCPDumpURL()}>Download tcpdump file</a>
 {/if}
-{#if recording?.kind === 'Terminal' && terminalRecordingURL}
-    <TerminalRecordingPlayer url={terminalRecordingURL} />
+{#if recording?.kind === 'Terminal'}
+    <TerminalRecordingPlayer recording={recording} />
 {/if}

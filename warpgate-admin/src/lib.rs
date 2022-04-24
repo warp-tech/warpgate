@@ -68,6 +68,10 @@ impl AdminServer {
                 crate::api::recordings_detail::api_get_recording_cast,
             )
             .at(
+                "/api/recordings/:id/stream",
+                crate::api::recordings_detail::api_get_recording_stream,
+            )
+            .at(
                 "/api/recordings/:id/tcpdump",
                 crate::api::recordings_detail::api_get_recording_tcpdump,
             )
