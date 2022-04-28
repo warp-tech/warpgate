@@ -2081,7 +2081,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71643f290d126e18ac2598876d01e1d57aed164afc78fdb6e2a0c6589a1f6662"
 dependencies = [
  "aliasable",
- "ouroboros_macro",
+ "ouroboros_macro 0.14.2",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "ouroboros"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f31a3b678685b150cba82b702dcdc5e155893f63610cf388d30cd988d4ca2bf"
+dependencies = [
+ "aliasable",
+ "ouroboros_macro 0.15.0",
  "stable_deref_trait",
 ]
 
@@ -2090,6 +2101,19 @@ name = "ouroboros_macro"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed9a247206016d424fe8497bc611e510887af5c261fbbf977877c4bb55ca4d82"
+dependencies = [
+ "Inflector",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "ouroboros_macro"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "084fd65d5dd8b3772edccb5ffd1e4b7eba43897ecd0f9401e330e8c542959408"
 dependencies = [
  "Inflector",
  "proc-macro-error",
@@ -2888,10 +2912,10 @@ dependencies = [
  "futures",
  "futures-util",
  "once_cell",
- "ouroboros",
+ "ouroboros 0.14.2",
  "rust_decimal",
- "sea-orm-macros",
- "sea-query",
+ "sea-orm-macros 0.6.0",
+ "sea-query 0.21.0",
  "sea-strum",
  "serde",
  "serde_json",
@@ -2902,10 +2926,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "sea-orm"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27dbb8a742003f8dbf2ba290d128134d4275a6b55fd02f4d728683b6b55ea9bf"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "once_cell",
+ "ouroboros 0.15.0",
+ "sea-orm-macros 0.7.0",
+ "sea-query 0.23.0",
+ "sea-strum",
+ "serde",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "sea-orm-macros"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c199fa8630b1e195d7aef24ce8944af8f4ced67c4eccffd8926453b59f2565a1"
+dependencies = [
+ "bae",
+ "heck 0.3.3",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sea-orm-macros"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953bf5fb9f6ec985c139c4a98550b600c2f7c97bea74e2acc4025438469cb5a2"
 dependencies = [
  "bae",
  "heck 0.3.3",
@@ -2928,6 +2985,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sea-query"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "727090e8d1e61edd07305d237664315226748ad559e16daa6293fa26c4e7a3c3"
+dependencies = [
+ "sea-query-derive",
+]
+
+[[package]]
+name = "sea-query"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf24fc03259e206d8cd4c957ce7446fe54ab00ba5ada4cdb028aa3513e26231"
+dependencies = [
+ "sea-query-derive",
+]
+
+[[package]]
 name = "sea-query-derive"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2942,17 +3017,17 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.5.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfd47c9936ada6b8649b6602b7873ca4dd5edd0c2d8051a8ac3d9aba22b9e406"
+checksum = "9d492f4550a428d2be29e4df8e43b2e9e46717424c9603fafa3365ae6079bd73"
 dependencies = [
  "async-std",
  "async-trait",
  "clap 2.34.0",
  "dotenv",
  "log",
- "sea-orm",
- "sea-query",
+ "sea-orm 0.7.1",
+ "sea-query 0.22.0",
  "sea-schema-derive",
  "tracing",
  "tracing-subscriber",
@@ -3981,7 +4056,7 @@ dependencies = [
  "poem-openapi",
  "russh-keys",
  "rust-embed",
- "sea-orm",
+ "sea-orm 0.6.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -4011,7 +4086,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
- "sea-orm",
+ "sea-orm 0.6.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -4030,7 +4105,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "poem-openapi",
- "sea-orm",
+ "sea-orm 0.6.0",
  "serde",
  "uuid",
 ]
@@ -4040,7 +4115,7 @@ name = "warpgate-db-migrations"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "sea-orm",
+ "sea-orm 0.6.0",
  "sea-schema",
  "uuid",
 ]
@@ -4058,7 +4133,7 @@ dependencies = [
  "futures",
  "russh",
  "russh-keys",
- "sea-orm",
+ "sea-orm 0.6.0",
  "thiserror",
  "time 0.3.9",
  "tokio",

@@ -10,5 +10,5 @@ version = "0.1.0"
 [dependencies]
 chrono = "0.4"
 sea-orm = {version = "^0.6", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
-sea-schema = {version = "0.5", default-features = false, features = ["migration", "debug-print"]}
+sea-schema = {version = "0.7", default-features = false, features = ["migration", "debug-print"]}
 uuid = {version = "0.8", features = ["v4", "serde"]}
