@@ -5,5 +5,13 @@ version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
+    labels: ["type/deps"]
+    open-pull-requests-limit: 25
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "npm"
+    directory: "/warpgate-admin/app"
+    labels: ["type/deps"]
+    open-pull-requests-limit: 25
     schedule:
       interval: "weekly"
