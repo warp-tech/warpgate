@@ -38,7 +38,7 @@
     "svelte": "^3.44.0",
     "svelte-check": "^2.2.7",
     "svelte-fa": "^2.4.0",
-    "svelte-preprocess": "^4.9.8",
+    "svelte-preprocess": "^4.10.6",
     "svelte-spa-router": "^3.2.0",
     "sveltestrap": "^5.8.5",
     "thenby": "^1.3.4",
