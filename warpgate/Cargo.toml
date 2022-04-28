@@ -24,7 +24,7 @@ qrcode = "0.12"
 rcgen = {version = "0.9", features = ["zeroize"]}
 serde_yaml = "0.8.23"
 time = "0.3"
-tokio = {version = "1.17", features = ["tracing", "signal"]}
+tokio = {version = "1.18", features = ["tracing", "signal"]}
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
 warpgate-admin = {version = "*", path = "../warpgate-admin"}

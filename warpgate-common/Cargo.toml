@@ -23,7 +23,7 @@ sea-orm = {version = "^0.6", features = ["sqlx-sqlite", "runtime-tokio-native-tl
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"
-tokio = {version = "1.17", features = ["tracing"]}
+tokio = {version = "1.18", features = ["tracing"]}
 totp-rs = "1.0"
 tracing = "0.1"
 url = "2.2"
