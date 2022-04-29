@@ -23,7 +23,7 @@
     "@sveltejs/vite-plugin-svelte": "^1.0.0-next.30",
     "@tsconfig/svelte": "^3.0.0",
     "@typescript-eslint/eslint-plugin": "^5.12.0",
-    "@typescript-eslint/parser": "^5.12.0",
+    "@typescript-eslint/parser": "^5.21.0",
     "bootstrap": "^5.1.3",
     "eslint": "^8.14.0",
     "eslint-config-standard": "^16.0.3",
