@@ -2422,10 +2422,10 @@ vite-plugin-checker@^0.4.6:
     vscode-languageserver-textdocument "^1.0.1"
     vscode-uri "^3.0.2"
 
-vite-tsconfig-paths@^3.4.0:
-  version "3.4.0"
-  resolved "https://registry.yarnpkg.com/vite-tsconfig-paths/-/vite-tsconfig-paths-3.4.0.tgz#bcb6033198e530c3fa5ab14bdb1fe1d0d1d8ec0c"
-  integrity sha512-os+oAdJxkZvNLmisVQ76eDdCWC3aH4bKTy3EXI5oJi//zQ0G+qJfUeFR6Need4iyzL/Xus9R7AECF/YfGS0ZEw==
+vite-tsconfig-paths@^3.4.1:
+  version "3.4.1"
+  resolved "https://registry.yarnpkg.com/vite-tsconfig-paths/-/vite-tsconfig-paths-3.4.1.tgz#6901b71d4cb7b764f76312e491f8f0622b9bfe56"
+  integrity sha512-SgK3/pnTuJ3i+gMSAWLR6VCPSw26bnxawrmXGvCDjJgk8MAQgmbCrFrAzfwbwZBXSqSuvWEuX04Wt73qJKx8fQ==
   dependencies:
     debug "^4.1.1"
     globrex "^0.1.2"
