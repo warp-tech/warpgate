@@ -2407,10 +2407,10 @@ v8-compile-cache@^2.0.3:
   resolved "https://registry.yarnpkg.com/v8-compile-cache/-/v8-compile-cache-2.3.0.tgz#2de19618c66dc247dcfb6f99338035d8245a2cee"
   integrity sha512-l8lCEmLcLYZh4nbunNZvQCJc5pv7+RCwa8q/LdUx8u7lsWvPDKmpodJAJNwkAhJC//dFY48KuIEmjtd4RViDrA==
 
-vite-plugin-checker@^0.4.2:
-  version "0.4.2"
-  resolved "https://registry.yarnpkg.com/vite-plugin-checker/-/vite-plugin-checker-0.4.2.tgz#7912cadd8581656d2642a54145311a03779247cc"
-  integrity sha512-qMre3nYXAv11fZTQt+zQjVvNMweye36vZLnUqCCC7BJXYjHYeBml3zox4N6UiBufKoiF3XX0w/kwTvXHQLvflQ==
+vite-plugin-checker@^0.4.6:
+  version "0.4.6"
+  resolved "https://registry.yarnpkg.com/vite-plugin-checker/-/vite-plugin-checker-0.4.6.tgz#c954a3c9be4a7751b9f6b3f18cea7120732b8448"
+  integrity sha512-oFel33hlsc8aUspfq0ThQRpWsfrG772fmZ5qPHKUhmew6ieejd2viITlwXHIRBY6hE3U0kirXoTWwft3DdbK+g==
   dependencies:
     "@babel/code-frame" "^7.12.13"
     ansi-escapes "^4.3.0"
