@@ -40,7 +40,7 @@
     "svelte-fa": "^2.4.0",
     "svelte-preprocess": "^4.9.8",
     "svelte-spa-router": "^3.2.0",
-    "sveltestrap": "^5.8.5",
+    "sveltestrap": "^5.9.0",
     "thenby": "^1.3.4",
     "tslib": "^2.3.1",
     "typescript": "^4.5.4",
