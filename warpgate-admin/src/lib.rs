@@ -2,8 +2,8 @@
 mod api;
 mod helpers;
 use anyhow::{Context, Result};
-use poem::endpoint::{EmbeddedFilesEndpoint, EmbeddedFileEndpoint};
-use poem::listener::{Listener, RustlsConfig, TcpListener};
+use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
+use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::{AddData, SetHeader};
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
@@ -106,9 +106,9 @@ impl AdminServer {
         };
 
         info!(?address, "Listening");
-        Server::new(
-            TcpListener::bind(address).rustls(RustlsConfig::new().cert(certificate).key(key)),
-        )
+        Server::new(TcpListener::bind(address).rustls(
+            RustlsConfig::new().fallback(RustlsCertificate::new().cert(certificate).key(key)),
+        ))
         .run(app)
         .await
         .context("Failed to start admin server")
