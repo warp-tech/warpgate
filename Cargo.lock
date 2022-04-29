@@ -2125,6 +2125,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-hash"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e029e94abc8fb0065241c308f1ac6bc8d20f450e8f7c5f0b25cd9b8d526ba294"
+dependencies = [
+ "base64ct",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3901,7 +3912,7 @@ dependencies = [
  "humantime-serde",
  "lazy_static",
  "packet",
- "password-hash 0.3.2",
+ "password-hash 0.4.1",
  "poem-openapi",
  "rand",
  "rand_chacha",
