@@ -8,6 +8,7 @@ version = "0.1.1"
 ansi_term = "0.12"
 anyhow = {version = "1.0", features = ["backtrace"]}
 async-trait = "0.1"
+atty = "0.2"
 bytes = "1.1"
 clap = {version = "3.1", features = ["derive"]}
 config = {version = "0.13", features = ["yaml"], default_features = false}
@@ -17,7 +18,6 @@ data-encoding = "2.3"
 dhat = {version = "0.3", optional = true}
 dialoguer = "0.10"
 futures = "0.3"
-isatty = "0.1"
 notify = "^5.0.0-beta.1"
 openssl = {version = "0.10", features = ["vendored"]}# Embed OpenSSL
 qrcode = "0.12"
