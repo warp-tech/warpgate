@@ -1,9 +1,8 @@
 #![feature(decl_macro, proc_macro_hygiene, let_else)]
 mod api;
-mod embed;
 mod helpers;
-use crate::embed::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use anyhow::{Context, Result};
+use poem::endpoint::{EmbeddedFilesEndpoint, EmbeddedFileEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::{AddData, SetHeader};
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
