@@ -16,7 +16,7 @@
     "openapi": "yarn run openapi-schema && yarn run openapi-client"
   },
   "devDependencies": {
-    "@fontsource/work-sans": "^4.5.7",
+    "@fontsource/work-sans": "^4.5.10",
     "@fortawesome/free-regular-svg-icons": "^6.1.1",
     "@fortawesome/free-solid-svg-icons": "^6.1.1",
     "@openapitools/openapi-generator-cli": "^2.5.1",
