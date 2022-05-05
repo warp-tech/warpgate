@@ -7,6 +7,7 @@ mod data;
 pub mod db;
 pub mod eventhub;
 pub mod helpers;
+pub mod logging;
 mod protocols;
 pub mod recordings;
 mod services;
