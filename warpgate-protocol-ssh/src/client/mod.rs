@@ -333,7 +333,7 @@ impl RemoteClient {
             ssh_options: ssh_options.clone(),
             event_tx,
             services: self.services.clone(),
-            session_id: self.id.clone(),
+            session_id: self.id,
         };
 
         let fut_connect = russh::client::connect(config, address, handler);
@@ -433,13 +433,7 @@ impl RemoteClient {
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            let channel = SessionChannel::new(
-                channel,
-                channel_id,
-                rx,
-                self.tx.clone(),
-                self.id.clone(),
-            );
+            let channel = SessionChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
@@ -468,13 +462,8 @@ impl RemoteClient {
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            let channel = DirectTCPIPChannel::new(
-                channel,
-                channel_id,
-                rx,
-                self.tx.clone(),
-                self.id.clone(),
-            );
+            let channel =
+                DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))

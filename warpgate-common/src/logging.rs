@@ -1,20 +1,19 @@
 use once_cell::sync::OnceCell;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
-use uuid::Uuid;
 use std::fmt::{Debug, Write};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::*;
 use tracing::field::Visit;
+use tracing::*;
 use tracing_core::Field;
 use tracing_subscriber::layer::Context;
+use uuid::Uuid;
 use warpgate_db_entities::LogEntry;
 
 static LOG_SENDER: OnceCell<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
     OnceCell::new();
 
-pub struct DatabaseLogger {
-}
+pub struct DatabaseLogger {}
 
 impl DatabaseLogger {
     pub fn new() -> Self {

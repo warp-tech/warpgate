@@ -90,10 +90,7 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
         let id = server_handle.id();
-        let mut rc_handles = RemoteClient::create(
-            id,
-            services.clone(),
-        );
+        let mut rc_handles = RemoteClient::create(id, services.clone());
 
         let (hub, event_sender) = EventHub::setup();
         let mut event_sub = hub.subscribe(|_| true).await;
