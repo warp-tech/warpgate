@@ -13,7 +13,7 @@ futures = "0.3"
 hex = "0.4"
 mime_guess = {version = "2.0", default_features = false}
 poem = {version = "^1.3.24", features = ["cookie", "session", "anyhow", "rustls", "websocket", "embed"]}
-poem-openapi = {version = "^1.3.24", features = ["swagger-ui", "chrono", "uuid", "static-files"]}
+poem-openapi = {version = "^1.3.30", features = ["swagger-ui", "chrono", "uuid", "static-files"]}
 russh-keys = {version = "0.22.0-beta.1", features = ["openssl"]}
 rust-embed = "6.3"
 sea-orm = {version = "^0.7", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
