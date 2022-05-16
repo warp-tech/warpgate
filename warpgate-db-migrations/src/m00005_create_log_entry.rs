@@ -44,6 +44,16 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .table(log_entry::Entity)
+                    .name("log_entry__timestamp_session_id")
+                    .col(log_entry::Column::Timestamp)
+                    .col(log_entry::Column::SessionId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .table(log_entry::Entity)
                     .name("log_entry__session_id")
                     .col(log_entry::Column::SessionId)
                     .to_owned(),
@@ -61,12 +71,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .drop_index(Index::drop().name("log_entry__session_id").to_owned())
-            .await?;
-        manager
-            .drop_index(Index::drop().name("log_entry__username").to_owned())
-            .await?;
         manager
             .drop_table(Table::drop().table(log_entry::Entity).to_owned())
             .await

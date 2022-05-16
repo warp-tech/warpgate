@@ -4,6 +4,7 @@ use russh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::SessionId;
 
 use crate::{ChannelOperation, RCEvent};
 
@@ -12,7 +13,7 @@ pub struct DirectTCPIPChannel {
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
-    session_tag: String,
+    session_id: SessionId,
 }
 
 impl DirectTCPIPChannel {
@@ -21,14 +22,14 @@ impl DirectTCPIPChannel {
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
-        session_tag: String,
+        session_id: SessionId,
     ) -> Self {
         DirectTCPIPChannel {
             client_channel,
             channel_id,
             ops_rx,
             events_tx,
-            session_tag,
+            session_id,
         }
     }
 
@@ -46,7 +47,7 @@ impl DirectTCPIPChannel {
                         Some(ChannelOperation::Close) => break,
                         None => break,
                         Some(operation) => {
-                            warn!(client_channel=%self.channel_id, ?operation, session=%self.session_tag, "unexpected client_channel operation");
+                            warn!(client_channel=%self.channel_id, ?operation, session=%self.session_id, "unexpected client_channel operation");
                         }
                     }
                 }
@@ -73,7 +74,7 @@ impl DirectTCPIPChannel {
                             break
                         },
                         Some(operation) => {
-                            warn!(client_channel=%self.channel_id, ?operation, session=%self.session_tag, "unexpected client_channel operation");
+                            warn!(client_channel=%self.channel_id, ?operation, session=%self.session_id, "unexpected client_channel operation");
                         }
                     }
                 }
@@ -85,6 +86,6 @@ impl DirectTCPIPChannel {
 
 impl Drop for DirectTCPIPChannel {
     fn drop(&mut self) {
-        info!(client_channel=%self.channel_id, session=%self.session_tag, "Closed");
+        info!(client_channel=%self.channel_id, session=%self.session_id, "Closed");
     }
 }

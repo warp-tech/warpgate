@@ -48,7 +48,7 @@ impl ProtocolServer for SSHProtocolServer {
         };
 
         let mut handles =
-            RemoteClient::create(Uuid::new_v4(), "test".to_owned(), self.services.clone());
+            RemoteClient::create(Uuid::new_v4(), self.services.clone());
 
         let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
 

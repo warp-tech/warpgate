@@ -15,6 +15,9 @@ clippy *ARGS:
 yarn *ARGS:
     cd warpgate-admin/app/ && yarn {{ARGS}}
 
+migrate *ARGS:
+    cargo run -p warpgate-db-migrations -- {{ARGS}}
+
 svelte-check:
     cd warpgate-admin/app/ && yarn run check
 
