@@ -1,2 +1,2 @@
 [target.x86_64-unknown-linux-gnu]
-image = "pagmo2/manylinux1_x86_64_with_deps"
+image = "pypa/manylinux2010_x86_64"
