@@ -1,2 +1,2 @@
 [target.x86_64-unknown-linux-gnu]
-image = "quay.io/pypa/manylinux2014_x86_64"
+image = "centos:7"
