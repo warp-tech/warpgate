@@ -40,7 +40,7 @@ jobs:
           command: build
           toolchain: nightly
           use-cross: true
-          args: --release --target x86_64-unknown-linux-gnu
+          args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
 
       - name: Rename
         run: |
