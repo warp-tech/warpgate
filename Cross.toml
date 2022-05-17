@@ -1,3 +1,2 @@
 [target.x86_64-unknown-linux-gnu]
-image = "dockcross/manylinux2014-x64"
-
+image = "pagmo2/manylinux1_x86_64_with_deps"
