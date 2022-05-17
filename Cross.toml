@@ -1,0 +1,3 @@
+[target.x86_64-unknown-linux-gnu]
+image = "dockcross/manylinux2014-x64"
+
