@@ -9,7 +9,7 @@
     "watch": "vite build -w --mode development --minify false",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "lint": "eslint src",
+    "lint": "eslint src && svelte-check",
     "postinstall": "yarn run openapi-client",
     "openapi-schema": "curl http://localhost:8888/api/openapi.json > openapi-schema.json",
     "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && npm run build",
