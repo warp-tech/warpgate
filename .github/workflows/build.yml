@@ -5,11 +5,16 @@ on: [push, pull_request]
 jobs:
   Build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v2
 
       - uses: rlespinasse/github-slug-action@4.2.3
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nighly
+          target: x86_64-unknown-linux-gnu
+          override: true
 
       - name: Cache
         uses: actions/cache@v2
@@ -23,7 +28,6 @@ jobs:
       - name: Install just
         run: |
           cargo install just
-
 
       - name: Install admin UI deps
         run: |
