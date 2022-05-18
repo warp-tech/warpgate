@@ -41,10 +41,8 @@ jobs:
           just yarn build
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
+        run: |
+          cargo build --release
 
       - name: Rename
         run: |
