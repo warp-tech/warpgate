@@ -5,12 +5,14 @@ on: [push, pull_request]
 jobs:
   Build:
     runs-on: ubuntu-latest
+    container: eugenepankov/warpgate-build-env
     steps:
       - uses: actions/checkout@v2
 
       - uses: rlespinasse/github-slug-action@4.2.3
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
@@ -42,9 +44,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          toolchain: nightly
-          use-cross: true
-          args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
+          args: --release
 
       - name: Rename
         run: |
