@@ -11,6 +11,10 @@ jobs:
 
       - uses: rlespinasse/github-slug-action@4.2.3
 
+      - name: Install Rust
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+
       - name: Cache
         uses: actions/cache@v2
         with:
