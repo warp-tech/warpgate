@@ -27,6 +27,6 @@ tokio = {version = "1.18", features = ["tracing"]}
 totp-rs = "1.4"
 tracing = "0.1"
 url = "2.2"
-uuid = {version = "0.8", features = ["v4", "serde"]}
+uuid = {version = "1.0", features = ["v4", "serde"]}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-db-migrations = {version = "*", path = "../warpgate-db-migrations"}

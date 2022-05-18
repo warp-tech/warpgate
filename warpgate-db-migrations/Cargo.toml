@@ -11,4 +11,4 @@ version = "0.1.0"
 chrono = "0.4"
 sea-orm = {version = "^0.7", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
 sea-schema = {version = "0.7", default-features = false, features = ["migration", "debug-print"]}
-uuid = {version = "0.8", features = ["v4", "serde"]}
+uuid = {version = "1.0", features = ["v4", "serde"]}
