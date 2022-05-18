@@ -5,15 +5,16 @@ on: [push, pull_request]
 jobs:
   Build:
     runs-on: ubuntu-latest
-    container: eugenepankov/warpgate-build-env
     steps:
       - uses: actions/checkout@v2
 
       - uses: rlespinasse/github-slug-action@4.2.3
 
-      - name: Install Rust
-        run: |
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: x86_64-unknown-linux-gnu
+          override: true
 
       - name: Cache
         uses: actions/cache@v2
@@ -26,20 +27,24 @@ jobs:
 
       - name: Install just
         run: |
-          ~/.cargo/bin/cargo install just
+          cargo install just
 
       - name: Install admin UI deps
         run: |
-          ~/.cargo/bin/just yarn
+          just yarn
 
       - name: Build admin UI
         run: |
-          ~/.cargo/bin/just yarn openapi-client
-          ~/.cargo/bin/just yarn build
+          just yarn openapi-client
+          just yarn build
 
       - name: Build
-        run: |
-          ~/.cargo/bin/cargo build --release
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          toolchain: nightly
+          use-cross: true
+          args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
 
       - name: Rename
         run: |
