@@ -5,11 +5,16 @@ on: [push, pull_request]
 jobs:
   Build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v2
 
       - uses: rlespinasse/github-slug-action@4.2.3
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: x86_64-unknown-linux-gnu
+          override: true
 
       - name: Cache
         uses: actions/cache@v2
@@ -24,7 +29,6 @@ jobs:
         run: |
           cargo install just
 
-
       - name: Install admin UI deps
         run: |
           just yarn
@@ -38,8 +42,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
+          toolchain: nightly
           use-cross: true
-          args: --release --target x86_64-unknown-linux-gnu
+          args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
 
       - name: Rename
         run: |
