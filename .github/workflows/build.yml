@@ -12,11 +12,8 @@ jobs:
       - uses: rlespinasse/github-slug-action@4.2.3
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          target: x86_64-unknown-linux-gnu
-          override: true
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
 
       - name: Cache
         uses: actions/cache@v2
@@ -29,20 +26,20 @@ jobs:
 
       - name: Install just
         run: |
-          cargo install just
+          ~/.cargo/bin/cargo install just
 
       - name: Install admin UI deps
         run: |
-          just yarn
+          ~/.cargo/bin/just yarn
 
       - name: Build admin UI
         run: |
-          just yarn openapi-client
-          just yarn build
+          ~/.cargo/bin/just yarn openapi-client
+          ~/.cargo/bin/just yarn build
 
       - name: Build
         run: |
-          cargo build --release
+          ~/.cargo/bin/cargo build --release
 
       - name: Rename
         run: |
