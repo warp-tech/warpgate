@@ -150,14 +150,17 @@ impl RemoteClient {
             abort_rx,
         };
 
-        tokio::spawn({
-            async move {
-                while let Some(e) = command_rx.recv().await {
-                    inner_event_tx.send(InnerEvent::RCCommand(e))?
+        tokio::spawn(
+            {
+                async move {
+                    while let Some(e) = command_rx.recv().await {
+                        inner_event_tx.send(InnerEvent::RCCommand(e))?
+                    }
+                    Ok::<(), anyhow::Error>(())
                 }
-                Ok::<(), anyhow::Error>(())
             }
-        }.instrument(Span::current()));
+            .instrument(Span::current()),
+        );
 
         this.start();
 
@@ -322,7 +325,7 @@ impl RemoteClient {
             }
         };
 
-        info!(?address, username=&ssh_options.username[..], "Connecting");
+        info!(?address, username = &ssh_options.username[..], "Connecting");
         let config = russh::client::Config {
             ..Default::default()
         };

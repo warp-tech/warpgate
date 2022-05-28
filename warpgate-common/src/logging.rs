@@ -139,7 +139,6 @@ impl RecordVisitor {
             .session_id
             .as_ref()
             .or(other.session_id.as_ref())
-            .clone()
             .cloned();
         if !self.buffer.is_empty() {
             self.buffer.push(' ');

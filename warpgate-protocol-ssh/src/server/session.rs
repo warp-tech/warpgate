@@ -172,9 +172,7 @@ impl ServerSession {
             async move {
                 loop {
                     match event_sub.recv().await {
-                        Some(Event::Client(RCEvent::Done)) => {
-                            break
-                        }
+                        Some(Event::Client(RCEvent::Done)) => break,
                         Some(Event::Client(e)) => {
                             debug!(event=?e, "Event");
                             let Some(this) = this.upgrade() else {
@@ -847,7 +845,11 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = (&ssh_username).into();
 
-        info!("Public key auth as {:?} with key FP {}", selector, key.fingerprint());
+        info!(
+            "Public key auth as {:?} with key FP {}",
+            selector,
+            key.fingerprint()
+        );
 
         self.credentials.push(AuthCredential::PublicKey {
             kind: key.name().to_string(),
@@ -974,7 +976,7 @@ impl ServerSession {
     }
 
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
-        info!(username=username, "Authenticated");
+        info!(username = username, "Authenticated");
 
         let _ = self.server_handle.set_username(username.to_string()).await;
         self.username = Some(username.to_string());

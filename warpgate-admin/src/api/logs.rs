@@ -54,7 +54,7 @@ impl Api {
                     .order_by_asc(LogEntry::Column::Timestamp);
             }
             if let Some(ref session_id) = body.session_id {
-                q = q.filter(LogEntry::Column::SessionId.eq(session_id.clone()));
+                q = q.filter(LogEntry::Column::SessionId.eq(*session_id));
             }
             if let Some(ref username) = body.username {
                 q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
