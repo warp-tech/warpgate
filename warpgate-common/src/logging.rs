@@ -95,13 +95,19 @@ impl RecordVisitor {
 }
 
 impl Visit for RecordVisitor {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "username" {
+            self.username = Some(value.to_string());
+        } else {
+            let _ = write!(&mut self.buffer, " {}={}", field.name(), value);
+        }
+    }
+
     fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         if field.name() == "message" {
             let _ = write!(&mut self.buffer, "{:?}", value);
         } else if field.name() == "session" {
             self.session_id = Some(format!("{:?}", value));
-        } else if field.name() == "username" {
-            self.username = Some(format!("{:?}", value));
         } else {
             let _ = write!(&mut self.buffer, " {}={:?}", field.name(), value);
         }

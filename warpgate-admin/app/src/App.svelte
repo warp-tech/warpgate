@@ -54,6 +54,9 @@ const routes = {
     '/ssh': wrap({
         asyncComponent: () => import('./SSH.svelte')
     }),
+    '/log': wrap({
+        asyncComponent: () => import('./Log.svelte')
+    }),
 }
 </script>
 
@@ -67,6 +70,7 @@ const routes = {
             <a use:link use:active href="/targets">Targets</a>
             <a use:link use:active href="/tickets">Tickets</a>
             <a use:link use:active href="/ssh">SSH</a>
+            <a use:link use:active href="/log">Log</a>
         {/if}
         {#if $authenticatedUsername}
         <div class="username">

@@ -2270,6 +2270,11 @@ svelte-hmr@^0.14.9:
   resolved "https://registry.yarnpkg.com/svelte-hmr/-/svelte-hmr-0.14.9.tgz#35f277efc789e1a6230185717347cddb2f8e9833"
   integrity sha512-bKE9+4qb4sAnA+TKHiYurUl970rjA0XmlP9TEP7K/ncyWz3m81kA4HOgmlZK/7irGK7gzZlaPDI3cmf8fp/+tg==
 
+svelte-intersection-observer@^0.10.0:
+  version "0.10.0"
+  resolved "https://registry.yarnpkg.com/svelte-intersection-observer/-/svelte-intersection-observer-0.10.0.tgz#6f9ff6c235ee80b761c169406e389ff15d1e8f3a"
+  integrity sha512-GdOTMSrRpoBciMe+NbocsHOBvqKJ5OiL5H8Jz4mBoDGHba9VOI4oGeXAmMOmh8mi5gq95+0b0DVI+6alcQ7TCA==
+
 svelte-preprocess@^4.0.0, svelte-preprocess@^4.10.6:
   version "4.10.6"
   resolved "https://registry.yarnpkg.com/svelte-preprocess/-/svelte-preprocess-4.10.6.tgz#5f9a53e7ed3b85fc7e0841120c725b76ac5a1ba8"

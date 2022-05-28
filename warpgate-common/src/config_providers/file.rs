@@ -104,7 +104,7 @@ impl ConfigProvider for FileConfigProvider {
                     base64_bytes.pop();
 
                     let client_key = format!("{} {}", kind, base64_bytes);
-                    debug!(username=%user.username, "Client key: {}", client_key);
+                    debug!(username=&user.username[..], "Client key: {}", client_key);
 
                     for credential in user.credentials.iter() {
                         if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
@@ -131,7 +131,7 @@ impl ConfigProvider for FileConfigProvider {
                                 }
                                 Ok(false) => continue,
                                 Err(e) => {
-                                    error!(username=%user.username, "Error verifying password hash: {}", e);
+                                    error!(username=&user.username[..], "Error verifying password hash: {}", e);
                                     continue;
                                 }
                             }
@@ -155,7 +155,7 @@ impl ConfigProvider for FileConfigProvider {
         }
 
         if valid_credentials.is_empty() {
-            warn!(username=%user.username, "Client credentials did not match");
+            warn!(username=&user.username[..], "Client credentials did not match");
         }
 
         match user.require {

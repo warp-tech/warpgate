@@ -322,7 +322,7 @@ impl RemoteClient {
             }
         };
 
-        info!(?address, username=?ssh_options.username, session=%self.id, "Connecting");
+        info!(?address, username=&ssh_options.username[..], session=%self.id, "Connecting");
         let config = russh::client::Config {
             ..Default::default()
         };
@@ -378,7 +378,7 @@ impl RemoteClient {
                                 .authenticate_password(ssh_options.username.clone(), password.expose_secret())
                                 .await?;
                             if auth_result {
-                                debug!(session=%self.id, username=%ssh_options.username, "Authenticated with password");
+                                debug!(session=%self.id, username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
                         SSHTargetAuth::PublicKey => {
@@ -389,7 +389,7 @@ impl RemoteClient {
                                     .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
                                     .await?;
                                 if auth_result {
-                                    debug!(session=%self.id, username=%ssh_options.username, key=%key_str, "Authenticated with key");
+                                    debug!(session=%self.id, username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 }
                             }

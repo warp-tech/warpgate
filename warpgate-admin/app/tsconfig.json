@@ -15,6 +15,7 @@
         * Note that setting allowJs false does not prevent the use
         * of JS in `.svelte` files.
         */
+        "types": [],
         "allowJs": true,
         "checkJs": true,
         "paths": {
@@ -28,6 +29,9 @@
         "src/**/*.ts",
         "src/**/*.js",
         "src/**/*.svelte"
+    ],
+    "exclude": [
+        "node_modules/@types/node/**",
     ],
     "references": [
         {

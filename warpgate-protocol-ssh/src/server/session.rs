@@ -964,7 +964,7 @@ impl ServerSession {
     }
 
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
-        info!(session=%self.id, username=%username, "Authenticated");
+        info!(session=%self.id, username=username, "Authenticated");
 
         let _ = self.server_handle.set_username(username.to_string()).await;
 
