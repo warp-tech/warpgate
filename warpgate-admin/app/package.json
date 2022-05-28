@@ -34,7 +34,7 @@
     "eslint-plugin-svelte3": "^4.0.0",
     "format-duration": "^2.0.0",
     "moment": "^2.29.3",
-    "sass": "^1.51.0",
+    "sass": "^1.52.1",
     "svelte": "^3.48.0",
     "svelte-check": "^2.7.1",
     "svelte-fa": "^2.4.0",
