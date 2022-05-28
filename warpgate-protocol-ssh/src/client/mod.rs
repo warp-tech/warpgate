@@ -157,7 +157,7 @@ impl RemoteClient {
                 }
                 Ok::<(), anyhow::Error>(())
             }
-        });
+        }.instrument(Span::current()));
 
         this.start();
 
@@ -229,7 +229,7 @@ impl RemoteClient {
                         }
                     },
                     None => {
-                        debug!(channel=%channel_id, session=%self.id, "operation for unknown channel")
+                        debug!(channel=%channel_id, "operation for unknown channel")
                     }
                 }
             }
@@ -260,7 +260,7 @@ impl RemoteClient {
                                                 // }
                                             }
                                             Err(e) => {
-                                                debug!(session=%self.id, "Connect error: {}", e);
+                                                debug!("Connect error: {}", e);
                                                 let _ = self.tx.send(RCEvent::ConnectionError(e));
                                                 self.set_disconnected();
                                                 break
@@ -276,20 +276,20 @@ impl RemoteClient {
                                     }
                                 }
                                 InnerEvent::ClientHandlerEvent(client_event) => {
-                                    debug!(session=%self.id, "Client handler event: {:?}", client_event);
+                                    debug!("Client handler event: {:?}", client_event);
                                     match client_event {
                                         ClientHandlerEvent::Disconnect => {
                                             self._on_disconnect().await?;
                                         }
                                         event => {
-                                            error!(session=%self.id, ?event, "Unhandled client handler event");
+                                            error!(?event, "Unhandled client handler event");
                                         },
                                     }
                                 }
                             }
                         }
                         Some(_) = self.abort_rx.recv() => {
-                            debug!(session=%self.id, "Abort requested");
+                            debug!("Abort requested");
                             self.disconnect().await?;
                             break
                         }
@@ -299,12 +299,12 @@ impl RemoteClient {
             }
             .await
             .map_err(|error| {
-                error!(?error, session=%self.id, "error in command loop");
+                error!(?error, "error in command loop");
                 anyhow::anyhow!("Error in command loop: {error}")
             })?;
-            debug!(session=%self.id, "No more commmands");
+            debug!("No more commmands");
             Ok::<(), anyhow::Error>(())
-        });
+        }.instrument(Span::current()));
     }
 
     async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
@@ -322,7 +322,7 @@ impl RemoteClient {
             }
         };
 
-        info!(?address, username=&ssh_options.username[..], session=%self.id, "Connecting");
+        info!(?address, username=&ssh_options.username[..], "Connecting");
         let config = russh::client::Config {
             ..Default::default()
         };
@@ -353,7 +353,7 @@ impl RemoteClient {
                     }
                 }
                 Some(_) = self.abort_rx.recv() => {
-                    info!(session=%self.id, "Abort requested");
+                    info!("Abort requested");
                     self.set_disconnected();
                     return Err(ConnectionError::Aborted)
                 }
@@ -364,7 +364,7 @@ impl RemoteClient {
                             ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
                             ClientHandlerError::Internal => ConnectionError::Internal,
                         };
-                        error!(error=?connection_error, session=%self.id, "Connection error");
+                        error!(error=?connection_error, "Connection error");
                         return Err(connection_error);
                     }
 
@@ -378,7 +378,7 @@ impl RemoteClient {
                                 .authenticate_password(ssh_options.username.clone(), password.expose_secret())
                                 .await?;
                             if auth_result {
-                                debug!(session=%self.id, username=&ssh_options.username[..], "Authenticated with password");
+                                debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
                         SSHTargetAuth::PublicKey => {
@@ -389,7 +389,7 @@ impl RemoteClient {
                                     .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
                                     .await?;
                                 if auth_result {
-                                    debug!(session=%self.id, username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
+                                    debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 }
                             }
@@ -397,7 +397,7 @@ impl RemoteClient {
                     }
 
                     if !auth_result {
-                        error!(session=%self.id, "Auth rejected");
+                        error!("Auth rejected");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
                             .await;
@@ -406,7 +406,7 @@ impl RemoteClient {
 
                     self.session = Some(Arc::new(Mutex::new(session)));
 
-                    info!(?address, session=%self.id, "Connected");
+                    info!(?address, "Connected");
 
                     tokio::spawn({
                         let inner_event_tx = self.inner_event_tx.clone();
@@ -417,7 +417,7 @@ impl RemoteClient {
                             }
                             Ok::<(), anyhow::Error>(())
                         }
-                    });
+                    }.instrument(Span::current()));
 
                     return Ok(())
                 }
@@ -496,7 +496,7 @@ impl Drop for RemoteClient {
         for task in self.child_tasks.drain(..) {
             let _ = task.abort();
         }
-        info!(session=%self.id, "Closed connection");
-        debug!(session=%self.id, "Dropped");
+        info!("Closed connection");
+        debug!("Dropped");
     }
 }

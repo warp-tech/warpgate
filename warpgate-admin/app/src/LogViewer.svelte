@@ -3,6 +3,7 @@ import { api, LogEntry } from 'lib/api'
 import { Alert, FormGroup } from 'sveltestrap'
 import { firstBy } from 'thenby';
 import IntersectionObserver from 'svelte-intersection-observer'
+import { link } from 'svelte-spa-router'
 import { onDestroy, onMount } from 'svelte'
 
 export let filters: {
@@ -11,6 +12,7 @@ export let filters: {
 
 let error: Error|undefined
 let items: LogEntry[]|undefined
+let visibleItems: LogEntry[]|undefined
 let loading = true
 let endReached = false
 let loadOlderButton: HTMLButtonElement|undefined
@@ -18,7 +20,7 @@ let reloadInterval: number|undefined
 let lastUpdate = new Date()
 let isLive = true
 let searchQuery = ''
-const PAGE_SIZE = 10
+const PAGE_SIZE = 1000
 
 function addItems (newItems: LogEntry[]) {
     lastUpdate = new Date()
@@ -51,27 +53,29 @@ async function loadNewer () {
             },
         })
         addItems(newItems)
+        visibleItems = items
     } finally {
         loading = false
     }
 }
 
-async function loadOlder (replace = false) {
+async function loadOlder (search = false) {
     loading = true
     try {
         const newItems = await api.getLogs({
             getLogsRequest: {
                 ...filters ?? {},
-                before: items?.at(-1)?.timestamp,
+                before: search ? undefined : items?.at(-1)?.timestamp,
                 limit: PAGE_SIZE,
                 search: searchQuery,
             },
         })
-        if (replace) {
-            items = undefined
+        if (search) {
             endReached = false
+            items = []
         }
         addItems(newItems)
+        visibleItems = items
         if (!newItems.length) {
             endReached = true
         }
@@ -119,74 +123,97 @@ onDestroy(() => {
     bind:value={searchQuery}
     on:keyup={() => search()} />
 
-{#if items }
-    <table class="w-100">
-        <tr>
-            <th>Time</th>
-            <th>User</th>
-            <th class="d-flex">
-                <div class="me-auto">Message</div>
-                {#if isLive}
-                    <span class="badge bg-danger">Live</span>
-                {:else}
-                    <small><em>Last update: {stringifyDate(lastUpdate)}</em></small>
-                {/if}
-            </th>
-        </tr>
-        {#each items as item}
+{#if visibleItems}
+    <div class="table-wrapper">
+        <table class="w-100">
             <tr>
-                <td class="timestamp pe-4">
-                    {stringifyDate(item.timestamp)}
-                </td>
-                <td class="username pe-4">
-                    {#if item.username}
-                        {item.username}
+                <th>Time</th>
+                {#if !filters?.sessionId}
+                    <th>User</th>
+                    <th>Session</th>
+                {/if}
+                <th class="d-flex">
+                    <div class="me-auto">Message</div>
+                    {#if isLive}
+                        <span class="badge bg-danger">Live</span>
+                    {:else}
+                        <small><em>Last update: {stringifyDate(lastUpdate)}</em></small>
                     {/if}
-                </td>
-                <td class="text">
-                    {item.text}
-                </td>
+                </th>
             </tr>
-            {/each}
-            {#if !endReached}
-                {#if !loading}
-                    <tr>
-                        <td colspan="3">
-                            <IntersectionObserver element={loadOlderButton} on:observe={event => {
-                                if (!loading && event.detail.isIntersecting) {
-                                    loadOlder()
-                                }
-                            }}>
-                                <button
-                                    bind:this={loadOlderButton}
-                                    class="btn btn-light"
-                                    on:click={() => loadOlder()}
-                                    disabled={loading}
-                                >
-                                    Load older
-                                </button>
-                            </IntersectionObserver>
+            {#each visibleItems as item}
+                <tr>
+                    <td class="timestamp pe-4">
+                        {stringifyDate(item.timestamp)}
+                    </td>
+                    {#if !filters?.sessionId}
+                        <td class="username pe-4">
+                            {#if item.username}
+                                {item.username}
+                            {/if}
                         </td>
+                        <td class="session pe-4">
+                            {#if item.sessionId}
+                                <a href="/sessions/{item.sessionId}" use:link>
+                                    {item.sessionId}
+                                </a>
+                            {/if}
+                        </td>
+                    {/if}
+                    <td class="text">
+                        {item.text}
+                    </td>
+                </tr>
+                {/each}
+                {#if !endReached}
+                    {#if !loading}
+                        <tr>
+                            <td colspan="3">
+                                <IntersectionObserver element={loadOlderButton} on:observe={event => {
+                                    if (!loading && event.detail.isIntersecting) {
+                                        loadOlder()
+                                    }
+                                }}>
+                                    <button
+                                        bind:this={loadOlderButton}
+                                        class="btn btn-light"
+                                        on:click={() => loadOlder()}
+                                        disabled={loading}
+                                    >
+                                        Load older
+                                    </button>
+                                </IntersectionObserver>
+                            </td>
+                        </tr>
+                    {/if}
+                {:else}
+                    <tr>
+                        <td></td>
+                        {#if !filters?.sessionId}
+                            <td></td>
+                            <td></td>
+                        {/if}
+                        <td class="text">End of the log</td>
                     </tr>
                 {/if}
-            {:else}
-                <tr>
-                    <td></td>
-                    <td></td>
-                    <td class="text">End of the log</td>
-                </tr>
-            {/if}
-    </table>
+        </table>
+    </div>
 {/if}
 
 
 <style lang="scss">
     @import "./vars";
 
+    .table-wrapper {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
     tr {
         td {
             font-family: $font-family-monospace;
             font-size: 0.75rem;
+            white-space: nowrap;
         }
 
         .timestamp {
