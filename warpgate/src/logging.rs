@@ -5,7 +5,7 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
-use warpgate_common::logging::DatabaseLogger;
+use warpgate_common::logging::make_database_logger_layer;
 
 pub fn init_logging() {
     if std::env::var("RUST_LOG").is_err() {
@@ -56,7 +56,7 @@ pub fn init_logging() {
                     }))
             }
         }))
-        .with(DatabaseLogger::new());
+        .with(make_database_logger_layer());
 
     registry.init();
 }

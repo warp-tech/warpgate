@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::DerefMut;
-
 use tracing::field::Visit;
 use tracing_core::Field;
 

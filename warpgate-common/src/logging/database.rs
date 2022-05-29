@@ -1,0 +1,76 @@
+use super::layer::ValuesLogLayer;
+use super::values::SerializedRecordValues;
+use once_cell::sync::OnceCell;
+use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use tracing_subscriber::Layer;
+use tracing_subscriber::registry::LookupSpan;
+use std::fmt::Write;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::*;
+use uuid::Uuid;
+use warpgate_db_entities::LogEntry;
+
+static LOG_SENDER: OnceCell<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
+    OnceCell::new();
+
+pub fn make_database_logger_layer<S>() -> impl Layer<S> where S: Subscriber + for<'a> LookupSpan<'a> {
+    let _ = LOG_SENDER.set(tokio::sync::broadcast::channel(1024).0);
+    ValuesLogLayer::new(|values| {
+        if let Some(sender) = LOG_SENDER.get() {
+            if let Some(entry) = values_to_log_entry_data(values) {
+                let _ = sender.send(entry);
+            }
+        }
+    })
+}
+
+pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
+    tokio::spawn(async move {
+        let mut receiver = LOG_SENDER.get().unwrap().subscribe();
+        loop {
+            match receiver.recv().await {
+                Err(_) => break,
+                Ok(log_entry) => {
+                    let database = database.lock().await;
+                    if let Err(error) = log_entry.insert(&*database).await {
+                        error!(?error, "Failed to store log entry");
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEntry::ActiveModel> {
+    let session_id = (*values).remove("session");
+    let username = (*values).remove("session_username");
+    let message = (*values).remove("message");
+
+    let mut text = String::new();
+    if let Some(ref message) = message {
+        text.push_str(&message);
+        text.push(' ');
+    }
+
+    for (key, value) in values.into_values().into_iter() {
+        _ = write!(text, "{}={} ", key, value);
+    }
+
+    text.pop();
+
+    use sea_orm::ActiveValue::Set;
+    let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok());
+    let Some(session_id) = session_id else {
+            return None
+        };
+
+    Some(LogEntry::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        text: Set(text),
+        session_id: Set(session_id),
+        username: Set(username),
+        timestamp: Set(chrono::Utc::now()),
+        ..Default::default()
+    })
+}
