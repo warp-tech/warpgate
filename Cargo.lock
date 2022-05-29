@@ -4091,6 +4091,7 @@ dependencies = [
  "poem-openapi",
  "sea-orm",
  "serde",
+ "serde_json",
  "uuid",
 ]
 

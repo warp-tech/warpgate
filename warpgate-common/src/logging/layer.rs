@@ -1,4 +1,4 @@
-use tracing::{Subscriber, Level, Event};
+use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
@@ -55,7 +55,7 @@ where
         let mut values = SerializedRecordValues::new();
 
         let current = ctx.current_span();
-        let parent_id = event.parent().or(current.id());
+        let parent_id = event.parent().or_else(|| current.id());
         if let Some(parent_id) = parent_id {
             if let Some(span) = ctx.span(parent_id) {
                 for span in span.scope().from_root() {

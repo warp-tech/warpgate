@@ -27,4 +27,4 @@ openapi-all:
 openapi:
     cd warpgate-admin/app/ && yarn openapi-client
 
-cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt
+cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check

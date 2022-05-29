@@ -134,6 +134,8 @@ rules:
 overrides:
   - files: '*.svelte'
     processor: svelte3/svelte3
+    rules:
+        '@typescript-eslint/init-declarations': off
 
 ignorePatterns:
 - svelte.config.js
