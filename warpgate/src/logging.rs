@@ -5,8 +5,8 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
-use warpgate_common::WarpgateConfig;
 use warpgate_common::logging::{make_database_logger_layer, make_socket_logger_layer};
+use warpgate_common::WarpgateConfig;
 
 pub async fn init_logging(config: Option<&WarpgateConfig>) {
     if std::env::var("RUST_LOG").is_err() {

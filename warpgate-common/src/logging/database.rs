@@ -1,8 +1,8 @@
 use super::layer::ValuesLogLayer;
 use super::values::SerializedRecordValues;
 use once_cell::sync::OnceCell;
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use sea_orm::query::JsonValue;
+use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
@@ -59,7 +59,11 @@ fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEnt
     Some(LogEntry::ActiveModel {
         id: Set(Uuid::new_v4()),
         text: Set(message),
-        values: Set(values.into_values().into_iter().map(|(k, v)| (k, JsonValue::from(v))).collect()),
+        values: Set(values
+            .into_values()
+            .into_iter()
+            .map(|(k, v)| (k, JsonValue::from(v)))
+            .collect()),
         session_id: Set(session_id),
         username: Set(username),
         timestamp: Set(chrono::Utc::now()),

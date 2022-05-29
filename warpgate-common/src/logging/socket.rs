@@ -31,7 +31,7 @@ where
         if !got_socket || values.contains_key(&SKIP_KEY) {
             return;
         }
-        values.insert(&"timestamp", Local::now().to_rfc3339());
+        values.insert("timestamp", Local::now().to_rfc3339());
         let _ = tx.try_send(values);
     });
 
