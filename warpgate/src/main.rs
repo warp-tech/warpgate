@@ -2,6 +2,7 @@
 mod commands;
 mod config;
 mod logging;
+use crate::config::load_config;
 use anyhow::Result;
 use clap::StructOpt;
 use logging::init_logging;
@@ -44,6 +45,8 @@ enum Commands {
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
 
+    init_logging(load_config(&cli.config, false).ok().as_ref()).await;
+
     match &cli.command {
         Commands::Run => crate::commands::run::command(&cli).await,
         Commands::Hash => crate::commands::hash::command().await,
@@ -61,8 +64,6 @@ async fn _main() -> Result<()> {
 async fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
-
-    init_logging();
 
     if let Err(error) = _main().await {
         error!(?error, "Fatal error");

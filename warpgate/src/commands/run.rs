@@ -55,7 +55,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         let services = services.clone();
         async move {
             loop {
-                let retention = { services.config.lock().await.store.retention };
+                let retention = { services.config.lock().await.store.log.retention };
                 let interval = retention / 10;
                 match cleanup_db(&mut *services.db.lock().await, &retention).await {
                     Err(error) => error!(?error, "Failed to cleanup the database"),

@@ -5,9 +5,10 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
-use warpgate_common::logging::make_database_logger_layer;
+use warpgate_common::WarpgateConfig;
+use warpgate_common::logging::{make_database_logger_layer, make_socket_logger_layer};
 
-pub fn init_logging() {
+pub async fn init_logging(config: Option<&WarpgateConfig>) {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "warpgate=info")
     }
@@ -24,6 +25,11 @@ pub fn init_logging() {
     let console_layer = console_subscriber::spawn();
     #[cfg(all(debug_assertions, feature = "console-subscriber"))]
     let registry = registry.with(console_layer);
+
+    let socket_layer = match config {
+        Some(config) => Some(make_socket_logger_layer(config).await),
+        None => None,
+    };
 
     let registry = registry
         .with((!console::user_attended()).then({
@@ -56,7 +62,8 @@ pub fn init_logging() {
                     }))
             }
         }))
-        .with(make_database_logger_layer());
+        .with(make_database_logger_layer())
+        .with(socket_layer);
 
     registry.init();
 }

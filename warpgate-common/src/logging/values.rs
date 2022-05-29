@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::DerefMut;
+use serde::Serialize;
 use tracing::field::Visit;
 use tracing_core::Field;
 
 pub type SerializedRecordValuesInner = HashMap<&'static str, String>;
+
+#[derive(Serialize)]
 pub struct SerializedRecordValues(SerializedRecordValuesInner);
 
 impl SerializedRecordValues {
