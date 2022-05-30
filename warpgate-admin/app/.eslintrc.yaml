@@ -147,6 +147,8 @@ overrides:
         '@typescript-eslint/init-declarations': off
         # False positives for {#if}
         '@typescript-eslint/no-unnecessary-condition': off
+        # False positives for FontAwesome
+        import/no-named-as-default: off
 
 ignorePatterns:
 - svelte.config.js

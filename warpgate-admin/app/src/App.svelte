@@ -2,7 +2,7 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { api } from 'lib/api'
 import { authenticatedUsername } from 'lib/store'
-import { Fa } from 'svelte-fa'
+import Fa from 'svelte-fa'
 
 import logo from '../public/assets/logo.svg'
 

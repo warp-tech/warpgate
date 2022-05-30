@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, SessionSnapshot, Recording } from 'lib/api'
 import { timeAgo } from 'lib/time'
-import moment, { duration } from 'moment'
+import moment from 'moment'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
 import { Alert, Button, Spinner } from 'sveltestrap'
@@ -64,10 +64,10 @@ onDestroy(() => clearInterval(interval))
                         {getTargetDescription()}
                     </strong>
                     <span class="text-muted">
-                        {duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                        {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
                     </span>
                 {:else}
-                    {duration(moment().diff(session.started)).humanize()}
+                    {moment.duration(moment().diff(session.started)).humanize()}
                 {/if}
             </div>
         </div>

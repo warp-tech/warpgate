@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Fa } from 'svelte-fa'
+    import Fa from 'svelte-fa'
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
     import { Spinner, Button } from 'sveltestrap'
     import { onDestroy } from 'svelte'
@@ -7,7 +7,7 @@
     import { api, SessionSnapshot } from 'lib/api'
     import { derived, writable } from 'svelte/store'
     import { firstBy } from 'thenby'
-    import moment, { duration } from 'moment'
+    import moment from 'moment'
     import RelativeDate from 'RelativeDate.svelte'
 
     const sessions = writable<SessionSnapshot[]|null>(null)
@@ -73,7 +73,7 @@
 
                         <div class="meta">
                             {#if session.ended }
-                                {duration(moment(session.ended).diff(session.started)).humanize()}
+                                {moment.duration(moment(session.ended).diff(session.started)).humanize()}
                             {/if}
                         </div>
 

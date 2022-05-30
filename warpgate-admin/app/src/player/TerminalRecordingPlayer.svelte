@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Fa } from 'svelte-fa'
+    import Fa from 'svelte-fa'
     import { onDestroy, onMount } from 'svelte'
     import { Terminal } from 'xterm'
     import { SerializeAddon } from 'xterm-addon-serialize'
