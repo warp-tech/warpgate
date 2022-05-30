@@ -149,6 +149,7 @@ overrides:
         '@typescript-eslint/no-unnecessary-condition': off
         # False positives for FontAwesome
         import/no-named-as-default: off
+        import/no-named-as-default-member: off
 
 ignorePatterns:
 - svelte.config.js

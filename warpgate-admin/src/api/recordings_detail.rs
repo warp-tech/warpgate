@@ -92,7 +92,7 @@ pub async fn api_get_recording_cast(
 
         let mut response = vec![]; //String::new();
 
-        let mut last_size = (80, 25);
+        let mut last_size = (0, 0);
         let file = File::open(&path).await.map_err(InternalServerError)?;
         let reader = BufReader::new(file);
         let mut lines = reader.lines();

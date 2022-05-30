@@ -21,10 +21,25 @@ pub enum AsciiCast {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub enum TerminalRecordingStreamId {
+    Input,
+    Output,
+    Error,
+}
+
+impl Default for TerminalRecordingStreamId {
+    fn default() -> Self {
+        TerminalRecordingStreamId::Output
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum TerminalRecordingItem {
     Data {
         time: f32,
+        #[serde(default)]
+        stream: TerminalRecordingStreamId,
         #[serde(with = "crate::helpers::serde_base64")]
         data: Bytes,
     },
@@ -38,9 +53,13 @@ pub enum TerminalRecordingItem {
 impl From<TerminalRecordingItem> for AsciiCast {
     fn from(item: TerminalRecordingItem) -> Self {
         match item {
-            TerminalRecordingItem::Data { time, data } => AsciiCast::Output(
+            TerminalRecordingItem::Data { time, stream, data } => AsciiCast::Output(
                 time,
-                "o".to_string(),
+                match stream {
+                    TerminalRecordingStreamId::Input => "i".to_string(),
+                    TerminalRecordingStreamId::Output => "o".to_string(),
+                    TerminalRecordingStreamId::Error => "e".to_string(),
+                },
                 String::from_utf8_lossy(&data[..]).to_string(),
             ),
             TerminalRecordingItem::PtyResize { time, cols, rows } => AsciiCast::Header {
@@ -71,9 +90,10 @@ impl TerminalRecorder {
         Ok(())
     }
 
-    pub async fn write(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn write(&mut self, stream: TerminalRecordingStreamId, data: &[u8]) -> Result<()> {
         self.write_item(&TerminalRecordingItem::Data {
             time: self.get_time(),
+            stream,
             data: BytesMut::from(data).freeze(),
         })
         .await

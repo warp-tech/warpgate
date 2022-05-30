@@ -23,6 +23,7 @@
     let sessionIsLive: boolean|null = null
     let socket: WebSocket|null = null
     let isStreaming = false
+    let ptyMode = false
 
     $: isStreaming = timestamp === duration && playing
 
@@ -73,7 +74,7 @@
     }
 
     function isAsciiCastData (data: AsciiCastItem): data is AsciiCastData {
-        return data[1] === 'o'
+        return data[1] === 'o' || data[1] === 'e'
     }
 
     interface SizeEvent { time: number, cols: number, rows: number }
@@ -96,7 +97,7 @@
         term.open(containerElement)
 
         term.options.theme = theme
-        term.options.scrollback = 0
+        term.options.scrollback = 100
 
         fitSize()
         resizeObserver = new ResizeObserver(fitSize)
@@ -133,8 +134,18 @@
         loading = false
     })
 
+    async function writeToTerminal (data: string) {
+        if (!ptyMode) {
+            data = data.replace(/\n/g, '\r\n')
+        }
+        await new Promise<void>(r => term.write(data, r))
+    }
+
     function addData (data: AsciiCastItem) {
         if (isAsciiCastHeader(data)) {
+            if (data.width) {
+                ptyMode = true
+            }
             events.push({
                 time: data.time,
                 cols: data.width,
@@ -153,7 +164,7 @@
             }
             events.push(dataEvent)
             if (isStreaming) {
-                term.write(dataEvent.data)
+                writeToTerminal(dataEvent.data)
                 timestamp = dataEvent.time
             }
             duration = Math.max(duration, dataEvent.time)
@@ -212,9 +223,7 @@
         let output = ''
 
         async function flush () {
-            await new Promise<void>(r => {
-                term.write(output, r)
-            })
+            await writeToTerminal(output)
             output = ''
         }
 
@@ -258,7 +267,9 @@
         if (term.cols === cols && term.rows === rows) {
             return
         }
-        term.resize(cols, rows)
+        if (cols && rows) {
+            term.resize(cols, rows)
+        }
         fitSize()
     }
 

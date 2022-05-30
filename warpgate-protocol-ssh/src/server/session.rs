@@ -27,7 +27,8 @@ use uuid::Uuid;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
-    ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
+    ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
+    TrafficRecorder,
 };
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
@@ -373,7 +374,10 @@ impl ServerSession {
             }
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder.write(&data).await {
+                    if let Err(error) = recorder
+                        .write(TerminalRecordingStreamId::Output, &data)
+                        .await
+                    {
                         error!(%channel, ?error, "Failed to record terminal data");
                         self.channel_recorders.remove(&channel);
                     }
@@ -462,7 +466,10 @@ impl ServerSession {
             RCEvent::Done => {}
             RCEvent::ExtendedData { channel, data, ext } => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder.write(&data).await {
+                    if let Err(error) = recorder
+                        .write(TerminalRecordingStreamId::Error, &data)
+                        .await
+                    {
                         error!(%channel, ?error, "Failed to record session data");
                         self.channel_recorders.remove(&channel);
                     }
@@ -670,9 +677,42 @@ impl ServerSession {
                     channel_id,
                     ChannelOperation::RequestExec(command.to_string()),
                 ));
+
+                self.start_terminal_recording(
+                    channel_id,
+                    format!("exec-channel-{}", server_channel_id.0),
+                )
+                .await;
             }
         }
         Ok(())
+    }
+
+    async fn start_terminal_recording(&mut self, channel_id: Uuid, name: String) {
+        match async {
+            let mut recorder = self
+                .services
+                .recordings
+                .lock()
+                .await
+                .start::<TerminalRecorder>(&self.id, name)
+                .await?;
+            if let Some(request) = self.channel_pty_size_map.get(&channel_id) {
+                recorder
+                    .write_pty_resize(request.col_width, request.row_height)
+                    .await?;
+            }
+            Ok::<_, anyhow::Error>(recorder)
+        }
+        .await
+        {
+            Ok(recorder) => {
+                self.channel_recorders.insert(channel_id, recorder);
+            }
+            Err(error) => {
+                error!(channel=%channel_id, ?error, "Failed to start recording");
+            }
+        }
     }
 
     pub async fn _channel_x11_request(
@@ -740,33 +780,8 @@ impl ServerSession {
             ChannelOperation::RequestShell,
         ))?;
 
-        match async {
-            let mut recorder = self
-                .services
-                .recordings
-                .lock()
-                .await
-                .start::<TerminalRecorder>(
-                    &self.id,
-                    format!("shell-channel-{}", server_channel_id.0),
-                )
-                .await?;
-            if let Some(request) = self.channel_pty_size_map.get(&channel_id) {
-                recorder
-                    .write_pty_resize(request.col_width, request.row_height)
-                    .await?;
-            }
-            Ok::<_, anyhow::Error>(recorder)
-        }
-        .await
-        {
-            Ok(recorder) => {
-                self.channel_recorders.insert(channel_id, recorder);
-            }
-            Err(error) => {
-                error!(channel=%channel_id, ?error, "Failed to start recording");
-            }
-        }
+        self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
+            .await;
 
         info!(%channel_id, "Opening shell");
         let _ = self
@@ -800,6 +815,16 @@ impl ServerSession {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return Ok(());
+        }
+
+        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
+            if let Err(error) = recorder
+                .write(TerminalRecordingStreamId::Input, &data)
+                .await
+            {
+                error!(channel=%channel_id, ?error, "Failed to record terminal data");
+                self.channel_recorders.remove(&channel_id);
+            }
         }
 
         if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id) {
