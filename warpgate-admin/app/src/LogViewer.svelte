@@ -159,8 +159,15 @@ onDestroy(() => {
                             {/if}
                         </td>
                     {/if}
-                    <td class="text">
-                        {item.text}
+                    <td class="content">
+                        <span class="text">
+                            {item.text}
+                        </span>
+
+                        {#each Object.entries(item.values ?? {}) as pair}
+                            <span class="key">{pair[0]}:</span>
+                            <span class="value">{pair[1]}</span>
+                        {/each}
                     </td>
                 </tr>
                 {/each}
@@ -219,8 +226,28 @@ onDestroy(() => {
             opacity: .75;
         }
 
-        :not(:last-child) {
-            padding-right: 15px;
+        td:not(:last-child) {
+            padding-right: 1em;
+        }
+
+        .content {
+            display: flex;
+
+            .text {
+                font-weight: bold;
+                margin-right: 0.6em;
+            }
+
+            .key {
+                margin-left: 0.5em;
+                margin-right: 0.3em;
+                opacity: .5;
+                font-style: italic;
+            }
+
+            .value {
+                font-style: italic;
+            }
         }
     }
 

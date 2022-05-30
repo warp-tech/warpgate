@@ -489,6 +489,7 @@
         "required": [
           "id",
           "text",
+          "values",
           "timestamp",
           "session_id"
         ],
@@ -500,6 +501,7 @@
           "text": {
             "type": "string"
           },
+          "values": {},
           "timestamp": {
             "type": "string",
             "format": "date-time"
