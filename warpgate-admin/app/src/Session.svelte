@@ -2,10 +2,11 @@
 import { api, SessionSnapshot, Recording } from 'lib/api'
 import { timeAgo } from 'lib/time'
 import moment from 'moment'
-import RelativeDate from 'RelativeDate.svelte';
 import { onDestroy } from 'svelte';
 import { link } from 'svelte-spa-router'
 import { Alert, Button, FormGroup, Spinner } from 'sveltestrap'
+import LogViewer from 'LogViewer.svelte'
+import RelativeDate from 'RelativeDate.svelte'
 
 export let params = { id: '' }
 
@@ -51,9 +52,20 @@ onDestroy(() => clearInterval(interval))
     <div class="page-summary-bar">
         <div>
             <h1>Session</h1>
-            <div class="text-muted">
+            <div>
                 {#if session.ended}
-                    {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                    <strong class="me-2">
+                        {#if session.username}
+                            {session.username}
+                        {:else}
+                            Logging in
+                        {/if}
+                        ⇆
+                        {getTargetDescription()}
+                    </strong>
+                    <span class="text-muted">
+                        {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                    </span>
                 {:else}
                     {moment.duration(moment().diff(session.started)).humanize()}
                 {/if}
@@ -66,25 +78,8 @@ onDestroy(() => clearInterval(interval))
         {/if}
     </div>
 
-    <div class="row mb-4">
-        <div class="col-12 col-md-6">
-            <FormGroup floating label="User">
-                {#if session.username}
-                    <input type="text" class="form-control" readonly value={session.username} />
-                {:else}
-                    <input type="text" class="form-control" readonly value="Not logged in" />
-                {/if}
-            </FormGroup>
-        </div>
-        <div class="col-12 col-md-6">
-            <FormGroup floating label="Target">
-                <input type="text" class="form-control" readonly value={getTargetDescription()} />
-            </FormGroup>
-        </div>
-    </div>
-
     {#if recordings?.length }
-        <h3>Recordings</h3>
+        <h3 class="mt-4">Recordings</h3>
         <div class="list-group list-group-flush">
             {#each recordings as recording}
                 <a
@@ -103,6 +98,12 @@ onDestroy(() => clearInterval(interval))
             {/each}
         </div>
     {/if}
+
+    <h3 class="mt-4">Log</h3>
+    <LogViewer filters={{
+        sessionId: session.id,
+    }} />
+
 {/if}
 
 <style lang="scss">

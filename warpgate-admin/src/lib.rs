@@ -44,6 +44,7 @@ impl AdminServer {
                 crate::api::info::Api,
                 crate::api::auth::Api,
                 crate::api::ssh_keys::Api,
+                crate::api::logs::Api,
             ),
             "Warpgate",
             env!("CARGO_PKG_VERSION"),

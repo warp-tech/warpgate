@@ -120,7 +120,6 @@ pub struct RemoteClient {
     inner_event_tx: UnboundedSender<InnerEvent>,
     child_tasks: Vec<JoinHandle<Result<()>>>,
     services: Services,
-    session_tag: String,
 }
 
 pub struct RemoteClientHandles {
@@ -130,7 +129,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId, session_tag: String, services: Services) -> RemoteClientHandles {
+    pub fn create(id: SessionId, services: Services) -> RemoteClientHandles {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, mut command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = unbounded_channel();
@@ -147,19 +146,21 @@ impl RemoteClient {
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
             child_tasks: vec![],
-            session_tag,
             services,
             abort_rx,
         };
 
-        tokio::spawn({
-            async move {
-                while let Some(e) = command_rx.recv().await {
-                    inner_event_tx.send(InnerEvent::RCCommand(e))?
+        tokio::spawn(
+            {
+                async move {
+                    while let Some(e) = command_rx.recv().await {
+                        inner_event_tx.send(InnerEvent::RCCommand(e))?
+                    }
+                    Ok::<(), anyhow::Error>(())
                 }
-                Ok::<(), anyhow::Error>(())
             }
-        });
+            .instrument(Span::current()),
+        );
 
         this.start();
 
@@ -231,7 +232,7 @@ impl RemoteClient {
                         }
                     },
                     None => {
-                        debug!(channel=%channel_id, session=%self.session_tag, "operation for unknown channel")
+                        debug!(channel=%channel_id, "operation for unknown channel")
                     }
                 }
             }
@@ -262,7 +263,7 @@ impl RemoteClient {
                                                 // }
                                             }
                                             Err(e) => {
-                                                debug!(session=%self.session_tag, "Connect error: {}", e);
+                                                debug!("Connect error: {}", e);
                                                 let _ = self.tx.send(RCEvent::ConnectionError(e));
                                                 self.set_disconnected();
                                                 break
@@ -278,20 +279,20 @@ impl RemoteClient {
                                     }
                                 }
                                 InnerEvent::ClientHandlerEvent(client_event) => {
-                                    debug!(session=%self.session_tag, "Client handler event: {:?}", client_event);
+                                    debug!("Client handler event: {:?}", client_event);
                                     match client_event {
                                         ClientHandlerEvent::Disconnect => {
                                             self._on_disconnect().await?;
                                         }
                                         event => {
-                                            error!(session=%self.session_tag, ?event, "Unhandled client handler event");
+                                            error!(?event, "Unhandled client handler event");
                                         },
                                     }
                                 }
                             }
                         }
                         Some(_) = self.abort_rx.recv() => {
-                            debug!(session=%self.session_tag, "Abort requested");
+                            debug!("Abort requested");
                             self.disconnect().await?;
                             break
                         }
@@ -301,12 +302,12 @@ impl RemoteClient {
             }
             .await
             .map_err(|error| {
-                error!(?error, session=%self.session_tag, "error in command loop");
+                error!(?error, "error in command loop");
                 anyhow::anyhow!("Error in command loop: {error}")
             })?;
-            debug!(session=%self.session_tag, "No more commmands");
+            debug!("No more commmands");
             Ok::<(), anyhow::Error>(())
-        });
+        }.instrument(Span::current()));
     }
 
     async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
@@ -324,7 +325,7 @@ impl RemoteClient {
             }
         };
 
-        info!(?address, username=?ssh_options.username, session=%self.session_tag, "Connecting");
+        info!(?address, username = &ssh_options.username[..], "Connecting");
         let config = russh::client::Config {
             ..Default::default()
         };
@@ -335,7 +336,7 @@ impl RemoteClient {
             ssh_options: ssh_options.clone(),
             event_tx,
             services: self.services.clone(),
-            session_tag: self.session_tag.clone(),
+            session_id: self.id,
         };
 
         let fut_connect = russh::client::connect(config, address, handler);
@@ -355,7 +356,7 @@ impl RemoteClient {
                     }
                 }
                 Some(_) = self.abort_rx.recv() => {
-                    info!(session=%self.session_tag, "Abort requested");
+                    info!("Abort requested");
                     self.set_disconnected();
                     return Err(ConnectionError::Aborted)
                 }
@@ -366,7 +367,7 @@ impl RemoteClient {
                             ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
                             ClientHandlerError::Internal => ConnectionError::Internal,
                         };
-                        error!(error=?connection_error, session=%self.session_tag, "Connection error");
+                        error!(error=?connection_error, "Connection error");
                         return Err(connection_error);
                     }
 
@@ -377,10 +378,10 @@ impl RemoteClient {
                     match ssh_options.auth {
                         SSHTargetAuth::Password { password } => {
                             auth_result = session
-                                .authenticate_password(ssh_options.username, password.expose_secret())
+                                .authenticate_password(ssh_options.username.clone(), password.expose_secret())
                                 .await?;
                             if auth_result {
-                                debug!(session=%self.session_tag, "Authenticated with password");
+                                debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
                         SSHTargetAuth::PublicKey => {
@@ -391,7 +392,7 @@ impl RemoteClient {
                                     .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
                                     .await?;
                                 if auth_result {
-                                    debug!(session=%self.session_tag, key=%key_str, "Authenticated with key");
+                                    debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 }
                             }
@@ -399,7 +400,7 @@ impl RemoteClient {
                     }
 
                     if !auth_result {
-                        error!(session=%self.session_tag, "Auth rejected");
+                        error!("Auth rejected");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
                             .await;
@@ -408,7 +409,7 @@ impl RemoteClient {
 
                     self.session = Some(Arc::new(Mutex::new(session)));
 
-                    info!(?address, session=%self.session_tag, "Connected");
+                    info!(?address, "Connected");
 
                     tokio::spawn({
                         let inner_event_tx = self.inner_event_tx.clone();
@@ -419,7 +420,7 @@ impl RemoteClient {
                             }
                             Ok::<(), anyhow::Error>(())
                         }
-                    });
+                    }.instrument(Span::current()));
 
                     return Ok(())
                 }
@@ -435,13 +436,7 @@ impl RemoteClient {
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            let channel = SessionChannel::new(
-                channel,
-                channel_id,
-                rx,
-                self.tx.clone(),
-                self.session_tag.clone(),
-            );
+            let channel = SessionChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
@@ -470,13 +465,8 @@ impl RemoteClient {
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);
 
-            let channel = DirectTCPIPChannel::new(
-                channel,
-                channel_id,
-                rx,
-                self.tx.clone(),
-                self.session_tag.clone(),
-            );
+            let channel =
+                DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
@@ -509,7 +499,7 @@ impl Drop for RemoteClient {
         for task in self.child_tasks.drain(..) {
             let _ = task.abort();
         }
-        info!(session=%self.session_tag, "Closed connection");
-        debug!(session=%self.session_tag, "Dropped");
+        info!("Closed connection");
+        debug!("Dropped");
     }
 }

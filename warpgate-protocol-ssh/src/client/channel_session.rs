@@ -4,6 +4,7 @@ use russh::client::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::SessionId;
 
 use crate::{ChannelOperation, RCEvent};
 
@@ -12,7 +13,7 @@ pub struct SessionChannel {
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
-    session_tag: String,
+    session_id: SessionId,
 }
 
 impl SessionChannel {
@@ -21,14 +22,14 @@ impl SessionChannel {
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
-        session_tag: String,
+        session_id: SessionId,
     ) -> Self {
         SessionChannel {
             client_channel,
             channel_id,
             ops_rx,
             events_tx,
-            session_tag,
+            session_id,
         }
     }
 
@@ -149,6 +150,6 @@ impl SessionChannel {
 
 impl Drop for SessionChannel {
     fn drop(&mut self) {
-        info!(channel=%self.channel_id, session=%self.session_tag, "Closed");
+        info!(channel=%self.channel_id, session=%self.session_id, "Closed");
     }
 }

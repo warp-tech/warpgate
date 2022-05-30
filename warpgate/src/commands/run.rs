@@ -4,6 +4,7 @@ use futures::StreamExt;
 use std::net::ToSocketAddrs;
 use tracing::*;
 use warpgate_common::db::cleanup_db;
+use warpgate_common::logging::install_database_logger;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_ssh::SSHProtocolServer;
 
@@ -16,6 +17,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let config = load_config(&cli.config, true)?;
     let services = Services::new(config.clone()).await?;
+
+    install_database_logger(services.db.clone());
 
     let mut other_futures = futures::stream::FuturesUnordered::new();
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
@@ -52,7 +55,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         let services = services.clone();
         async move {
             loop {
-                let retention = { services.config.lock().await.store.retention };
+                let retention = { services.config.lock().await.store.log.retention };
                 let interval = retention / 10;
                 match cleanup_db(&mut *services.db.lock().await, &retention).await {
                     Err(error) => error!(?error, "Failed to cleanup the database"),

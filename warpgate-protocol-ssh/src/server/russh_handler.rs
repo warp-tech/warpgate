@@ -42,11 +42,14 @@ impl russh::server::Handler for ServerHandler {
 
     fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_open_session(ServerChannelId(channel), &mut session)
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_open_session(ServerChannelId(channel), &mut session)
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -60,11 +63,14 @@ impl russh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let name = name.to_string();
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_subsystem_request(ServerChannelId(channel), name)
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_subsystem_request(ServerChannelId(channel), name)
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -84,21 +90,24 @@ impl russh::server::Handler for ServerHandler {
         let term = term.to_string();
         let modes = modes.to_vec();
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_pty_request(
-                    ServerChannelId(channel),
-                    PtyRequest {
-                        term,
-                        col_width,
-                        row_height,
-                        pix_width,
-                        pix_height,
-                        modes,
-                    },
-                )
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_pty_request(
+                        ServerChannelId(channel),
+                        PtyRequest {
+                            term,
+                            col_width,
+                            row_height,
+                            pix_width,
+                            pix_height,
+                            modes,
+                        },
+                    )
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -106,11 +115,14 @@ impl russh::server::Handler for ServerHandler {
 
     fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_shell_request(ServerChannelId(channel))
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_shell_request(ServerChannelId(channel))
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -120,7 +132,14 @@ impl russh::server::Handler for ServerHandler {
         let user = user.to_string();
         let key = key.clone();
         async move {
-            let result = self.session.lock().await._auth_publickey(user, &key).await;
+            let result = {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._auth_publickey(user, &key)
+                    .instrument(span)
+                    .await
+            };
             Ok((self, result))
         }
         .boxed()
@@ -130,12 +149,14 @@ impl russh::server::Handler for ServerHandler {
         let user = user.to_string();
         let password = password.to_string();
         async move {
-            let result = self
-                .session
-                .lock()
-                .await
-                ._auth_password(Secret::new(user), Secret::new(password))
-                .await;
+            let result = {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._auth_password(Secret::new(user), Secret::new(password))
+                    .instrument(span)
+                    .await
+            };
             Ok((self, result))
         }
         .boxed()
@@ -152,12 +173,14 @@ impl russh::server::Handler for ServerHandler {
             .and_then(|mut r| r.next())
             .and_then(|b| String::from_utf8(b.to_vec()).ok());
         async move {
-            let result = self
-                .session
-                .lock()
-                .await
-                ._auth_keyboard_interactive(Secret::new(user), response.map(Secret::new))
-                .await;
+            let result = {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._auth_keyboard_interactive(Secret::new(user), response.map(Secret::new))
+                    .instrument(span)
+                    .await
+            };
             Ok((self, result))
         }
         .boxed()
@@ -166,11 +189,14 @@ impl russh::server::Handler for ServerHandler {
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data).freeze();
         async move {
-            self.session
-                .lock()
-                .await
-                ._data(ServerChannelId(channel), data)
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._data(ServerChannelId(channel), data)
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -185,11 +211,14 @@ impl russh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
-            self.session
-                .lock()
-                .await
-                ._extended_data(ServerChannelId(channel), code, data)
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._extended_data(ServerChannelId(channel), code, data)
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -197,11 +226,14 @@ impl russh::server::Handler for ServerHandler {
 
     fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_close(ServerChannelId(channel))
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_close(ServerChannelId(channel))
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -217,21 +249,24 @@ impl russh::server::Handler for ServerHandler {
         session: Session,
     ) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._window_change_request(
-                    ServerChannelId(channel),
-                    PtyRequest {
-                        term: "".to_string(),
-                        col_width,
-                        row_height,
-                        pix_width,
-                        pix_height,
-                        modes: vec![],
-                    },
-                )
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._window_change_request(
+                        ServerChannelId(channel),
+                        PtyRequest {
+                            term: "".to_string(),
+                            col_width,
+                            row_height,
+                            pix_width,
+                            pix_height,
+                            modes: vec![],
+                        },
+                    )
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -239,11 +274,14 @@ impl russh::server::Handler for ServerHandler {
 
     fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_eof(ServerChannelId(channel))
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_eof(ServerChannelId(channel))
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -256,11 +294,14 @@ impl russh::server::Handler for ServerHandler {
         session: Session,
     ) -> Self::FutureUnit {
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_signal(ServerChannelId(channel), signal_name)
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_signal(ServerChannelId(channel), signal_name)
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -269,11 +310,14 @@ impl russh::server::Handler for ServerHandler {
     fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_exec_request(ServerChannelId(channel), data.freeze())
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_exec_request(ServerChannelId(channel), data.freeze())
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -289,11 +333,14 @@ impl russh::server::Handler for ServerHandler {
         let variable_name = variable_name.to_string();
         let variable_value = variable_value.to_string();
         async move {
-            self.session.lock().await._channel_env_request(
-                ServerChannelId(channel),
-                variable_name,
-                variable_value,
-            )?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_env_request(ServerChannelId(channel), variable_name, variable_value)
+                    .instrument(span)
+                    .await?
+            };
             Ok((self, session))
         }
         .boxed()
@@ -311,20 +358,23 @@ impl russh::server::Handler for ServerHandler {
         let host_to_connect = host_to_connect.to_string();
         let originator_address = originator_address.to_string();
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_open_direct_tcpip(
-                    ServerChannelId(channel),
-                    DirectTCPIPParams {
-                        host_to_connect,
-                        port_to_connect,
-                        originator_address,
-                        originator_port,
-                    },
-                    &mut session,
-                )
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_open_direct_tcpip(
+                        ServerChannelId(channel),
+                        DirectTCPIPParams {
+                            host_to_connect,
+                            port_to_connect,
+                            originator_address,
+                            originator_port,
+                        },
+                        &mut session,
+                    )
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()
@@ -342,19 +392,22 @@ impl russh::server::Handler for ServerHandler {
         let x11_auth_protocol = x11_auth_protocol.to_string();
         let x11_auth_cookie = x11_auth_cookie.to_string();
         async move {
-            self.session
-                .lock()
-                .await
-                ._channel_x11_request(
-                    ServerChannelId(channel),
-                    X11Request {
-                        single_conection,
-                        x11_auth_protocol,
-                        x11_auth_cookie,
-                        x11_screen_number,
-                    },
-                )
-                .await?;
+            {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_x11_request(
+                        ServerChannelId(channel),
+                        X11Request {
+                            single_conection,
+                            x11_auth_protocol,
+                            x11_auth_cookie,
+                            x11_screen_number,
+                        },
+                    )
+                    .instrument(span)
+                    .await?;
+            }
             Ok((self, session))
         }
         .boxed()

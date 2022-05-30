@@ -1,16 +1,14 @@
-use std::pin::Pin;
-
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
 use crate::ConnectionError;
 use futures::FutureExt;
 use russh::client::Session;
-
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
+use std::pin::Pin;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{Services, TargetSSHOptions};
+use warpgate_common::{Services, SessionId, TargetSSHOptions};
 
 #[derive(Debug)]
 pub enum ClientHandlerEvent {
@@ -24,7 +22,7 @@ pub struct ClientHandler {
     pub ssh_options: TargetSSHOptions,
     pub event_tx: UnboundedSender<ClientHandlerEvent>,
     pub services: Services,
-    pub session_tag: String,
+    pub session_id: SessionId,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,7 +76,7 @@ impl russh::client::Handler for ClientHandler {
                     key_type,
                     key_base64,
                 }) => {
-                    warn!(session=%self.session_tag, "Host key is invalid!");
+                    warn!(session=%self.session_id, "Host key is invalid!");
                     return Err(ClientHandlerError::ConnectionError(
                         ConnectionError::HostKeyMismatch {
                             received_key_type: server_public_key.name().to_owned(),
@@ -89,7 +87,7 @@ impl russh::client::Handler for ClientHandler {
                     ));
                 }
                 Ok(KnownHostValidationResult::Unknown) => {
-                    warn!(session=%self.session_tag, "Host key is unknown");
+                    warn!(session=%self.session_id, "Host key is unknown");
 
                     let (tx, rx) = oneshot::channel();
                     self.event_tx
@@ -108,7 +106,7 @@ impl russh::client::Handler for ClientHandler {
                             )
                             .await
                         {
-                            error!(?error, session=%self.session_tag, "Failed to save host key");
+                            error!(?error, session=%self.session_id, "Failed to save host key");
                         }
                         Ok((self, true))
                     } else {
@@ -116,7 +114,7 @@ impl russh::client::Handler for ClientHandler {
                     }
                 }
                 Err(error) => {
-                    error!(?error, session=%self.session_tag, "Failed to verify the host key");
+                    error!(?error, session=%self.session_id, "Failed to verify the host key");
                     Err(ClientHandlerError::Internal)
                 }
             }
@@ -128,6 +126,6 @@ impl russh::client::Handler for ClientHandler {
 impl Drop for ClientHandler {
     fn drop(&mut self) {
         let _ = self.event_tx.send(ClientHandlerEvent::Disconnect);
-        debug!(session=%self.session_tag, "Dropped");
+        debug!(session=%self.session_id, "Dropped");
     }
 }

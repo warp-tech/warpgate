@@ -190,6 +190,24 @@ impl Default for RecordingsConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LogConfig {
+    #[serde(default = "_default_retention", with = "humantime_serde")]
+    pub retention: Duration,
+
+    #[serde(default)]
+    pub send_to: Option<String>,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            retention: _default_retention(),
+            send_to: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
     pub users: Vec<User>,
@@ -207,8 +225,8 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub ssh: SSHConfig,
 
-    #[serde(default = "_default_retention", with = "humantime_serde")]
-    pub retention: Duration,
+    #[serde(default)]
+    pub log: LogConfig,
 }
 
 impl Default for WarpgateConfigStore {
@@ -221,7 +239,7 @@ impl Default for WarpgateConfigStore {
             web_admin: WebAdminConfig::default(),
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
-            retention: _default_retention(),
+            log: LogConfig::default(),
         }
     }
 }

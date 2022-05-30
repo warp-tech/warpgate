@@ -11,7 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint src && svelte-check",
     "postinstall": "yarn run openapi-client",
-    "openapi-schema": "curl http://localhost:8888/api/openapi.json > openapi-schema.json",
+    "openapi-schema": "curl -k https://localhost:8888/api/openapi.json > openapi-schema.json",
     "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && npm run build",
     "openapi": "yarn run openapi-schema && yarn run openapi-client"
   },
@@ -38,6 +38,7 @@
     "svelte": "^3.48.0",
     "svelte-check": "^2.7.1",
     "svelte-fa": "^2.4.0",
+    "svelte-intersection-observer": "^0.10.0",
     "svelte-preprocess": "^4.10.6",
     "svelte-spa-router": "^3.2.0",
     "sveltestrap": "^5.9.0",

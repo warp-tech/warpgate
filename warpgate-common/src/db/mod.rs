@@ -1,13 +1,13 @@
+use crate::helpers::fs::secure_file;
+use crate::WarpgateConfig;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
 };
 use std::time::Duration;
+use warpgate_db_entities::LogEntry;
 use warpgate_db_migrations::{Migrator, MigratorTrait};
-
-use crate::helpers::fs::secure_file;
-use crate::WarpgateConfig;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
@@ -79,6 +79,11 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<()> {
 pub async fn cleanup_db(db: &mut DatabaseConnection, retention: &Duration) -> Result<()> {
     use warpgate_db_entities::{Recording, Session};
     let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
+
+    LogEntry::Entity::delete_many()
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(cutoff))
+        .exec(db)
+        .await?;
 
     Recording::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())

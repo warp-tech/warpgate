@@ -4061,6 +4061,7 @@ dependencies = [
  "data-encoding",
  "humantime-serde",
  "lazy_static",
+ "once_cell",
  "packet",
  "password-hash 0.4.1",
  "poem-openapi",
@@ -4074,6 +4075,8 @@ dependencies = [
  "tokio",
  "totp-rs",
  "tracing",
+ "tracing-core",
+ "tracing-subscriber",
  "url",
  "uuid",
  "warpgate-db-entities",
@@ -4088,6 +4091,7 @@ dependencies = [
  "poem-openapi",
  "sea-orm",
  "serde",
+ "serde_json",
  "uuid",
 ]
 

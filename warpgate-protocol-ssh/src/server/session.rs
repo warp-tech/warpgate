@@ -51,6 +51,7 @@ enum Event {
 
 pub struct ServerSession {
     pub id: SessionId,
+    username: Option<String>,
     session_handle: Option<russh::server::Handle>,
     pty_channels: Vec<Uuid>,
     all_channels: Vec<Uuid>,
@@ -90,11 +91,11 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
         let id = server_handle.id();
-        let mut rc_handles = RemoteClient::create(
-            id,
-            session_debug_tag(&id, &remote_address),
-            services.clone(),
-        );
+
+        let _span = info_span!("SSH", session=%id);
+        let _enter = _span.enter();
+
+        let mut rc_handles = RemoteClient::create(id, services.clone());
 
         let (hub, event_sender) = EventHub::setup();
         let mut event_sub = hub.subscribe(|_| true).await;
@@ -115,6 +116,7 @@ impl ServerSession {
 
         let this = Self {
             id: server_handle.id(),
+            username: None,
             session_handle: None,
             pty_channels: vec![],
             all_channels: vec![],
@@ -138,9 +140,6 @@ impl ServerSession {
             })),
         };
 
-        info!(session=?this, "New connection");
-
-        let session_debug_tag = format!("{:?}", this);
         let this = Arc::new(Mutex::new(this));
 
         let name = format!("SSH {} session control", id);
@@ -173,28 +172,26 @@ impl ServerSession {
             async move {
                 loop {
                     match event_sub.recv().await {
-                        Some(Event::Client(RCEvent::Done)) => {
-                            break
-                        }
+                        Some(Event::Client(RCEvent::Done)) => break,
                         Some(Event::Client(e)) => {
-                            debug!(session=%session_debug_tag, event=?e, "Event");
+                            debug!(event=?e, "Event");
                             let Some(this) = this.upgrade() else {
                                 break;
                             };
                             let this = &mut this.lock().await;
                             if let Err(err) = this.handle_remote_event(e).await {
-                                error!(session=%session_debug_tag, "Event handler error: {:?}", err);
+                                error!("Event handler error: {:?}", err);
                                 break;
                             }
                         }
                         Some(Event::Command(command)) => {
-                            debug!(session=%session_debug_tag, ?command, "Session control");
+                            debug!(?command, "Session control");
                             let Some(this) = this.upgrade() else {
                                 break;
                             };
                             let this = &mut this.lock().await;
                             if let Err(err) = this.handle_session_control(command).await {
-                                error!(session=%session_debug_tag, "Event handler error: {:?}", err);
+                                error!("Event handler error: {:?}", err);
                                 break;
                             }
                         }
@@ -209,11 +206,18 @@ impl ServerSession {
                         None => break,
                     }
                 }
-                debug!(session=%session_debug_tag, "No more events");
+                debug!("No more events");
             }
         });
 
         Ok(this)
+    }
+
+    pub fn make_logging_span(&self) -> tracing::Span {
+        match self.username {
+            Some(ref username) => info_span!("SSH", session=%self.id, session_username=%username),
+            None => info_span!("SSH", session=%self.id),
+        }
     }
 
     fn map_channel(&self, ch: &ServerChannelId) -> Result<Uuid> {
@@ -231,7 +235,7 @@ impl ServerSession {
     }
 
     pub async fn emit_service_message(&mut self, msg: &str) -> Result<()> {
-        debug!(session=?self, "Service message: {}", msg);
+        debug!("Service message: {}", msg);
 
         self.emit_pty_output(
             format!(
@@ -288,7 +292,7 @@ impl ServerSession {
         match command {
             SessionHandleCommand::Close => {
                 let _ = self.emit_service_message("Session closed by admin").await;
-                info!(session=?self, "Session closed by admin");
+                info!("Session closed by admin");
                 let _ = self.request_disconnect().await;
                 self.disconnect_server().await;
             }
@@ -370,14 +374,14 @@ impl ServerSession {
             RCEvent::Output(channel, data) => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
                     if let Err(error) = recorder.write(&data).await {
-                        error!(session=?self, %channel, ?error, "Failed to record terminal data");
+                        error!(%channel, ?error, "Failed to record terminal data");
                         self.channel_recorders.remove(&channel);
                     }
                 }
 
                 if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel) {
                     if let Err(error) = recorder.write_rx(&data).await {
-                        error!(session=?self, %channel, ?error, "Failed to record traffic data");
+                        error!(%channel, ?error, "Failed to record traffic data");
                         self.traffic_connection_recorders.remove(&channel);
                     }
                 }
@@ -459,7 +463,7 @@ impl ServerSession {
             RCEvent::ExtendedData { channel, data, ext } => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
                     if let Err(error) = recorder.write(&data).await {
-                        error!(session=?self, %channel, ?error, "Failed to record session data");
+                        error!(%channel, ?error, "Failed to record session data");
                         self.channel_recorders.remove(&channel);
                     }
                 }
@@ -549,7 +553,7 @@ impl ServerSession {
         let channel = Uuid::new_v4();
         self.channel_map.insert(server_channel_id, channel);
 
-        info!(session=?self, %channel, "Opening session channel");
+        info!(%channel, "Opening session channel");
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
         self.rc_tx
@@ -566,7 +570,7 @@ impl ServerSession {
         let uuid = Uuid::new_v4();
         self.channel_map.insert(channel, uuid);
 
-        info!(session=?self, %channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
+        info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
 
         let recorder = self
             .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
@@ -579,7 +583,7 @@ impl ServerSession {
                 src_port: params.originator_port as u16,
             });
             if let Err(error) = recorder.write_connection_setup().await {
-                error!(session=?self, %channel, ?error, "Failed to record connection setup");
+                error!(%channel, ?error, "Failed to record connection setup");
             }
             self.traffic_connection_recorders.insert(uuid, recorder);
         }
@@ -606,7 +610,7 @@ impl ServerSession {
                 .write_pty_resize(request.col_width, request.row_height)
                 .await
             {
-                error!(session=?self, %channel_id, ?error, "Failed to record terminal data");
+                error!(%channel_id, ?error, "Failed to record terminal data");
                 self.channel_recorders.remove(&channel_id);
             }
         }
@@ -637,7 +641,7 @@ impl ServerSession {
                 .write_pty_resize(request.col_width, request.row_height)
                 .await
             {
-                error!(session=?self, %channel_id, ?error, "Failed to record terminal data");
+                error!(%channel_id, ?error, "Failed to record terminal data");
                 self.channel_recorders.remove(&channel_id);
             }
         }
@@ -656,11 +660,11 @@ impl ServerSession {
         let channel_id = self.map_channel(&server_channel_id)?;
         match std::str::from_utf8(&data) {
             Err(e) => {
-                error!(session=?self, channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
+                error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
                 anyhow::bail!(e)
             }
             Ok::<&str, _>(command) => {
-                debug!(session=?self, channel=%channel_id, %command, "Requested exec");
+                debug!(channel=%channel_id, %command, "Requested exec");
                 let _ = self.maybe_connect_remote().await;
                 self.send_command(RCCommand::Channel(
                     channel_id,
@@ -677,7 +681,7 @@ impl ServerSession {
         request: X11Request,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%channel_id, "Requested X11");
+        debug!(channel=%channel_id, "Requested X11");
         let _ = self.maybe_connect_remote().await;
         self.send_command(RCCommand::Channel(
             channel_id,
@@ -686,14 +690,14 @@ impl ServerSession {
         Ok(())
     }
 
-    pub fn _channel_env_request(
+    pub async fn _channel_env_request(
         &mut self,
         server_channel_id: ServerChannelId,
         name: String,
         value: String,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%channel_id, %name, %value, "Environment");
+        debug!(channel=%channel_id, %name, %value, "Environment");
         self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestEnv(name, value),
@@ -719,7 +723,7 @@ impl ServerSession {
                     e.insert(recorder);
                 }
                 Err(error) => {
-                    error!(session=?self, %host, %port, ?error, "Failed to start recording");
+                    error!(%host, %port, ?error, "Failed to start recording");
                 }
             }
         }
@@ -760,11 +764,11 @@ impl ServerSession {
                 self.channel_recorders.insert(channel_id, recorder);
             }
             Err(error) => {
-                error!(session=?self, channel=%channel_id, ?error, "Failed to start recording");
+                error!(channel=%channel_id, ?error, "Failed to start recording");
             }
         }
 
-        info!(session=?self, %channel_id, "Opening shell");
+        info!(%channel_id, "Opening shell");
         let _ = self
             .session_handle
             .as_mut()
@@ -781,7 +785,7 @@ impl ServerSession {
         name: String,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        info!(session=?self, channel=%channel_id, "Requesting subsystem {}", &name);
+        info!(channel=%channel_id, "Requesting subsystem {}", &name);
         self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestSubsystem(name),
@@ -791,16 +795,16 @@ impl ServerSession {
 
     pub async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%server_channel_id.0, ?data, "Data");
+        debug!(channel=%server_channel_id.0, ?data, "Data");
         if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
-            info!(session=?self, channel=%channel_id, "User requested connection abort (Ctrl-C)");
+            info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return Ok(());
         }
 
         if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id) {
             if let Err(error) = recorder.write_tx(&data).await {
-                error!(session=?self, channel=%channel_id, ?error, "Failed to record traffic data");
+                error!(channel=%channel_id, ?error, "Failed to record traffic data");
                 self.traffic_connection_recorders.remove(&channel_id);
             }
         }
@@ -823,7 +827,7 @@ impl ServerSession {
         data: BytesMut,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%server_channel_id.0, ?data, "Data");
+        debug!(channel=%server_channel_id.0, ?data, "Data");
         self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::ExtendedData {
@@ -841,7 +845,11 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = (&ssh_username).into();
 
-        info!(session=?self, "Public key auth as {:?} with key FP {}", selector, key.fingerprint());
+        info!(
+            "Public key auth as {:?} with key FP {}",
+            selector,
+            key.fingerprint()
+        );
 
         self.credentials.push(AuthCredential::PublicKey {
             kind: key.name().to_string(),
@@ -853,7 +861,7 @@ impl ServerSession {
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
             Err(error) => {
-                error!(session=?self, ?error, "Failed to verify credentials");
+                error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
             }
         }
@@ -865,7 +873,7 @@ impl ServerSession {
         password: Secret<String>,
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
-        info!(session=?self, "Password key auth as {:?}", selector);
+        info!("Password key auth as {:?}", selector);
 
         self.credentials.push(AuthCredential::Password(password));
 
@@ -874,7 +882,7 @@ impl ServerSession {
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
             Err(error) => {
-                error!(session=?self, ?error, "Failed to verify credentials");
+                error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
             }
         }
@@ -886,7 +894,7 @@ impl ServerSession {
         response: Option<Secret<String>>,
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
-        info!(session=?self, "Keyboard-interactive auth as {:?}", selector);
+        info!("Keyboard-interactive auth as {:?}", selector);
 
         if let Some(otp) = response {
             self.credentials.push(AuthCredential::OTP(otp));
@@ -901,7 +909,7 @@ impl ServerSession {
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
             Err(error) => {
-                error!(session=?self, ?error, "Failed to verify credentials");
+                error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
             }
         }
@@ -949,7 +957,7 @@ impl ServerSession {
             AuthSelector::Ticket { secret } => {
                 match authorize_ticket(&self.services.db, secret).await? {
                     Some(ticket) => {
-                        info!(session=?self, "Authorized for {} with a ticket", ticket.target);
+                        info!("Authorized for {} with a ticket", ticket.target);
                         self.services
                             .config_provider
                             .lock()
@@ -968,9 +976,10 @@ impl ServerSession {
     }
 
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
-        info!(session=?self, "Authenticated");
+        info!(username = username, "Authenticated");
 
         let _ = self.server_handle.set_username(username.to_string()).await;
+        self.username = Some(username.to_string());
 
         let target = {
             self.services
@@ -987,7 +996,7 @@ impl ServerSession {
 
         let Some((target, ssh_options)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
-            info!(session=?self, "Selected target not found");
+            info!("Selected target not found");
             return;
         };
 
@@ -997,25 +1006,25 @@ impl ServerSession {
 
     pub async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%channel_id, "Closing channel");
+        debug!(channel=%channel_id, "Closing channel");
         self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Close));
         Ok(())
     }
 
     pub async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%channel_id, "EOF");
+        debug!(channel=%channel_id, "EOF");
         self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
         Ok(())
     }
 
     // pub async fn _tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(session=?self, %address, %port, "Remote port forwarding requested");
+    //     info!(%address, %port, "Remote port forwarding requested");
     //     self.send_command(RCCommand::ForwardTCPIP(address, port));
     // }
 
     // pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(session=?self, %address, %port, "Remote port forwarding cancelled");
+    //     info!(%address, %port, "Remote port forwarding cancelled");
     //     self.send_command(RCCommand::CancelTCPIPForward(address, port));
     // }
 
@@ -1025,7 +1034,7 @@ impl ServerSession {
         signal: Sig,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
-        debug!(session=?self, channel=%channel_id, ?signal, "Signal");
+        debug!(channel=%channel_id, ?signal, "Signal");
         self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::Signal(signal),
@@ -1038,12 +1047,12 @@ impl ServerSession {
     }
 
     pub async fn _disconnect(&mut self) {
-        debug!(session=?self, "Client disconnect requested");
+        debug!("Client disconnect requested");
         self.request_disconnect().await;
     }
 
     async fn request_disconnect(&mut self) {
-        debug!(session=?self, "Disconnecting");
+        debug!("Disconnecting");
         let _ = self.rc_abort_tx.send(());
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
             self.send_command(RCCommand::Disconnect);
@@ -1073,7 +1082,7 @@ impl ServerSession {
 
 impl Drop for ServerSession {
     fn drop(&mut self) {
-        info!(session=?self, "Closed connection");
+        info!("Closed connection");
         debug!("Dropped");
     }
 }

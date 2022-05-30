@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "servers": [
     {
@@ -394,6 +394,36 @@
         },
         "operationId": "get_ssh_own_keys"
       }
+    },
+    "/logs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetLogsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_logs"
+      }
     }
   },
   "components": {
@@ -413,6 +443,33 @@
           }
         }
       },
+      "GetLogsRequest": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "after": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
       "Info": {
         "type": "object",
         "required": [
@@ -421,6 +478,35 @@
         "properties": {
           "version": {
             "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "LogEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "timestamp",
+          "session_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"

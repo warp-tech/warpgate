@@ -47,8 +47,7 @@ impl ProtocolServer for SSHProtocolServer {
             return Err(TargetTestError::Misconfigured("Not an SSH target".to_owned()));
         };
 
-        let mut handles =
-            RemoteClient::create(Uuid::new_v4(), "test".to_owned(), self.services.clone());
+        let mut handles = RemoteClient::create(Uuid::new_v4(), self.services.clone());
 
         let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
 
