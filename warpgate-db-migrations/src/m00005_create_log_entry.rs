@@ -1,6 +1,5 @@
-use sea_schema::migration::sea_orm::Schema;
-use sea_schema::migration::sea_query::*;
-use sea_schema::migration::*;
+use sea_orm::Schema;
+use sea_orm_migration::prelude::*;
 
 pub mod log_entry {
     use chrono::{DateTime, Utc};

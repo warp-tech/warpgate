@@ -7,7 +7,7 @@ use sea_orm::{
 };
 use std::time::Duration;
 use warpgate_db_entities::LogEntry;
-use warpgate_db_migrations::{Migrator, MigratorTrait};
+use warpgate_db_migrations::migrate_database;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
@@ -46,8 +46,7 @@ pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection
 
     let connection = Database::connect(opt).await?;
 
-    Migrator::up(&connection, None).await?;
-
+    migrate_database(&connection).await?;
     Ok(connection)
 }
 
