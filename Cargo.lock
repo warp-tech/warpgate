@@ -593,9 +593,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.17"
+version = "3.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47582c09be7c8b32c0ab3a6181825ababb713fde6fff20fc573a3870dd45c6a0"
+checksum = "d2dbdf4bdacb33466e854ce889eee8dfd5729abf7ccd7664d0a2d60cd384440b"
 dependencies = [
  "atty",
  "bitflags",
@@ -610,9 +610,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.1.7"
+version = "3.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3aab4734e083b809aaf5794e14e756d1c798d2c69c7f7de7a09a2f5214993c1"
+checksum = "25320346e922cffe59c0bbc5410c8d8784509efb321488971081313cb1e1a33c"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -2234,9 +2234,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.29"
+version = "1.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd0b347fdf249d24edbd6797e606ec3989ce0ba2bf36e359e591b8ca84e45212"
+checksum = "e4a37cf8dba4d40f07bc6274613dea21f38a91535e91ea1061f29533cf6522f8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2279,9 +2279,9 @@ dependencies = [
 
 [[package]]
 name = "poem-derive"
-version = "1.3.29"
+version = "1.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29d12019a61bef6c425db05c35b37bb98256cb7eaa0f5ba1a8864c1fd79e28fc"
+checksum = "fed74e1ef749dc0f36addc543c66ae48beef59902c26222d82a1c7a7c1a2fb36"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2291,9 +2291,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi"
-version = "1.3.29"
+version = "1.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c902f53280a1a1776abcb167476339c0433d3d4bcc61dfb9c17d8781bce7256"
+checksum = "dadc0eabc9a09e57b81d82f3b5f8e044ac4e4f183218a584c910da4ff43c0600"
 dependencies = [
  "base64",
  "bytes",
@@ -2315,9 +2315,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi-derive"
-version = "1.3.29"
+version = "1.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a39662d8fbe262fb04b11581744fd633f57813806e7d5848bef9b92cdbd01a5d"
+checksum = "170880a61eb484836ce184a00d982d6e9d296cffeb285bf253bfa3a81a81ae1d"
 dependencies = [
  "Inflector",
  "darling",
@@ -3999,7 +3999,7 @@ dependencies = [
  "async-trait",
  "atty",
  "bytes",
- "clap 3.1.17",
+ "clap 3.1.18",
  "config",
  "console",
  "console-subscriber",
