@@ -5,8 +5,9 @@
 Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH client.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts within the network.
-* Warpgate will record every session for you to replay and review later through a built-in admin web UI.
+* Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
+* 2FA support
 * Single-file statically linked binary with no dependencies.
 * Written in 100% safe Rust.
 
@@ -40,7 +41,6 @@ In particular, we're working on:
 
 * Support for exposing HTTP(S) endpoints through the bastion,
 * Support for tunneling database connections,
-* Live session view and control,
 * Requesting admin approval for sessions
 * and much more.
 
