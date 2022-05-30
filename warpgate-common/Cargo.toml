@@ -30,6 +30,6 @@ tracing = "0.1"
 tracing-core = "0.1"
 tracing-subscriber = "0.3"
 url = "2.2"
-uuid = {version = "0.8", features = ["v4", "serde"]}
+uuid = {version = "1.1", features = ["v4", "serde"]}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-db-migrations = {version = "*", path = "../warpgate-db-migrations"}
