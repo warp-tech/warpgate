@@ -33,7 +33,7 @@ async function create () {
             createTicketRequest: {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
-            }
+            },
         })
     } catch (err) {
         error = err
@@ -59,11 +59,11 @@ async function create () {
         <h3>Connection instructions</h3>
 
         <FormGroup floating label="SSH username">
-            <input type="text" class="form-control" readonly value={"ticket-" + result.secret} />
+            <input type="text" class="form-control" readonly value={'ticket-' + result.secret} />
         </FormGroup>
 
         <FormGroup floating label="Example command">
-            <input type="text" class="form-control" readonly value={"ssh ticket-" + result.secret + "@warpgate-host -p warpgate-port"} />
+            <input type="text" class="form-control" readonly value={'ssh ticket-' + result.secret + '@warpgate-host -p warpgate-port'} />
         </FormGroup>
     {/if}
 

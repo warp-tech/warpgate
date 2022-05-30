@@ -1,10 +1,10 @@
 <script lang="ts">
 import { api, SessionSnapshot, Recording } from 'lib/api'
 import { timeAgo } from 'lib/time'
-import moment from 'moment'
-import { onDestroy } from 'svelte';
+import moment, { duration } from 'moment'
+import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
-import { Alert, Button, FormGroup, Spinner } from 'sveltestrap'
+import { Alert, Button, Spinner } from 'sveltestrap'
 import LogViewer from 'LogViewer.svelte'
 import RelativeDate from 'RelativeDate.svelte'
 
@@ -64,10 +64,10 @@ onDestroy(() => clearInterval(interval))
                         {getTargetDescription()}
                     </strong>
                     <span class="text-muted">
-                        {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                        {duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
                     </span>
                 {:else}
-                    {moment.duration(moment().diff(session.started)).humanize()}
+                    {duration(moment().diff(session.started)).humanize()}
                 {/if}
             </div>
         </div>

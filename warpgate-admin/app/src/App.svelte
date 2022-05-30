@@ -2,7 +2,7 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { api } from 'lib/api'
 import { authenticatedUsername } from 'lib/store'
-import Fa from 'svelte-fa'
+import { Fa } from 'svelte-fa'
 
 import logo from '../public/assets/logo.svg'
 
@@ -31,31 +31,31 @@ init()
 
 const routes = {
     '/': wrap({
-        asyncComponent: () => import('./Home.svelte')
+        asyncComponent: () => import('./Home.svelte'),
     }),
     '/login': wrap({
-        asyncComponent: () => import('./Login.svelte')
+        asyncComponent: () => import('./Login.svelte'),
     }),
     '/sessions/:id': wrap({
-        asyncComponent: () => import('./Session.svelte')
+        asyncComponent: () => import('./Session.svelte'),
     }),
     '/recordings/:id': wrap({
-        asyncComponent: () => import('./Recording.svelte')
+        asyncComponent: () => import('./Recording.svelte'),
     }),
     '/tickets': wrap({
-        asyncComponent: () => import('./Tickets.svelte')
+        asyncComponent: () => import('./Tickets.svelte'),
     }),
     '/tickets/create': wrap({
-        asyncComponent: () => import('./CreateTicket.svelte')
+        asyncComponent: () => import('./CreateTicket.svelte'),
     }),
     '/targets': wrap({
-        asyncComponent: () => import('./Targets.svelte')
+        asyncComponent: () => import('./Targets.svelte'),
     }),
     '/ssh': wrap({
-        asyncComponent: () => import('./SSH.svelte')
+        asyncComponent: () => import('./SSH.svelte'),
     }),
     '/log': wrap({
-        asyncComponent: () => import('./Log.svelte')
+        asyncComponent: () => import('./Log.svelte'),
     }),
 }
 </script>

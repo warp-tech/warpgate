@@ -18,6 +18,9 @@ yarn *ARGS:
 migrate *ARGS:
     cargo run -p warpgate-db-migrations -- {{ARGS}}
 
+lint:
+    cd warpgate-admin/app/ && yarn run lint
+
 svelte-check:
     cd warpgate-admin/app/ && yarn run check
 
@@ -27,4 +30,4 @@ openapi-all:
 openapi:
     cd warpgate-admin/app/ && yarn openapi-client
 
-cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check
+cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint

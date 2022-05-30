@@ -1,8 +1,7 @@
 <script lang="ts">
-import { api, Recording, RecordingKind } from 'lib/api'
+import { api, Recording } from 'lib/api'
 import { Alert, Spinner } from 'sveltestrap'
 import TerminalRecordingPlayer from 'player/TerminalRecordingPlayer.svelte'
-import { onDestroy } from 'svelte';
 
 export let params = { id: '' }
 
@@ -11,7 +10,6 @@ let recording: Recording|null = null
 
 async function load () {
     recording = await api.getRecording(params)
-
 }
 
 function getTCPDumpURL () {

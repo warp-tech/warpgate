@@ -12,5 +12,12 @@ export default defineConfig({
     ],
     build: {
         sourcemap: true,
+        commonjsOptions: {
+            include: [
+                'api-client/dist/*.js',
+                '**/*.js',
+            ],
+            transformMixedEsModules: true,
+        },
     },
 })

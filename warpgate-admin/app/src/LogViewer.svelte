@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, LogEntry } from 'lib/api'
-import { Alert, FormGroup } from 'sveltestrap'
-import { firstBy } from 'thenby';
+import { Alert } from 'sveltestrap'
+import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
 import { onDestroy, onMount } from 'svelte'
@@ -59,18 +59,18 @@ async function loadNewer () {
     }
 }
 
-async function loadOlder (search = false) {
+async function loadOlder (searchMode = false) {
     loading = true
     try {
         const newItems = await api.getLogs({
             getLogsRequest: {
                 ...filters ?? {},
-                before: search ? undefined : items?.at(-1)?.timestamp,
+                before: searchMode ? undefined : items?.at(-1)?.timestamp,
                 limit: PAGE_SIZE,
                 search: searchQuery,
             },
         })
-        if (search) {
+        if (searchMode) {
             endReached = false
             items = []
         }
@@ -108,7 +108,6 @@ onMount(() => {
 onDestroy(() => {
     clearInterval(reloadInterval)
 })
-
 
 </script>
 

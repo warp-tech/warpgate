@@ -1,5 +1,5 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
+    import { Fa } from 'svelte-fa'
     import { onDestroy, onMount } from 'svelte'
     import { Terminal } from 'xterm'
     import { SerializeAddon } from 'xterm-addon-serialize'
@@ -16,7 +16,7 @@
     let timestamp = 0
     let seekInputValue = 0
     let duration = 0
-    let resizeObserver: ResizeObserver
+    let resizeObserver: ResizeObserver|undefined
     let events: (SizeEvent | DataEvent | SnapshotEvent)[] = []
     let playing = false
     let loading = true
@@ -64,14 +64,15 @@
         width: number
         height: number
     }
+    // eslint-disable-next-line @typescript-eslint/no-type-alias
     type AsciiCastData = [number, 'o', string]
     type AsciiCastItem = AsciiCastHeader | AsciiCastData
 
-    function isAsciiCastHeader(data: AsciiCastItem): data is AsciiCastHeader {
+    function isAsciiCastHeader (data: AsciiCastItem): data is AsciiCastHeader {
         return 'version' in data
     }
 
-    function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
+    function isAsciiCastData (data: AsciiCastItem): data is AsciiCastData {
         return data[1] === 'o'
     }
 
@@ -163,7 +164,7 @@
     function fitSize () {
         metricsCanvas ??= document.createElement('canvas')
         const context = metricsCanvas.getContext('2d')!
-        context.font = '10px ' + term.options.fontFamily ?? 'monospace'
+        context.font = `10px ${term.options.fontFamily ?? 'monospace'}`
         const metrics = context.measureText('abcdef')
 
         const fontWidth = containerElement.clientWidth / term.cols
@@ -172,12 +173,12 @@
 
     let seekPromise = Promise.resolve()
 
-    async function seek (time) {
+    async function seek (time: number) {
         seekPromise = seekPromise.then(() => _seekInternal(time))
         await seekPromise
     }
 
-    async function _seekInternal (time) {
+    async function _seekInternal (time: number) {
         let nearestSnapshot: SnapshotEvent|null = null
 
         for (const event of events) {
@@ -253,7 +254,7 @@
         seekInputValue = 100 * time / duration
     }
 
-    function resize (cols, rows) {
+    function resize (cols: number, rows: number) {
         if (term.cols === cols && term.rows === rows) {
             return
         }

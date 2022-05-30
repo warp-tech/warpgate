@@ -12,7 +12,7 @@
     "lint": "eslint src && svelte-check",
     "postinstall": "yarn run openapi-client",
     "openapi-schema": "curl -k https://localhost:8888/api/openapi.json > openapi-schema.json",
-    "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && npm run build",
+    "openapi-client": "openapi-generator-cli generate -g typescript-fetch -i openapi-schema.json -o api-client -p npmName=warpgate-api-client -p useSingleRequestParameter=true && cd api-client && npm i && yarn tsc --target esnext --module esnext && rm -rf src",
     "openapi": "yarn run openapi-schema && yarn run openapi-client"
   },
   "devDependencies": {

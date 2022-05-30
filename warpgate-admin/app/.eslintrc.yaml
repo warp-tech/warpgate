@@ -53,6 +53,7 @@ rules:
   '@typescript-eslint/no-use-before-define':
     - error
     - classes: false
+      functions: false
   no-duplicate-imports: error
   array-bracket-spacing:
     - error
@@ -130,12 +131,22 @@ rules:
     - allowAliases: in-unions-and-intersections
       allowLiterals: always
       allowCallbacks: always
+  '@typescript-eslint/comma-dangle':
+  - error
+  - arrays: always-multiline
+    objects: always-multiline
+    imports: always-multiline
+    exports: always-multiline
+    functions: only-multiline
 
 overrides:
   - files: '*.svelte'
     processor: svelte3/svelte3
     rules:
+        # To allow prop definitions
         '@typescript-eslint/init-declarations': off
+        # False positives for {#if}
+        '@typescript-eslint/no-unnecessary-condition': off
 
 ignorePatterns:
 - svelte.config.js

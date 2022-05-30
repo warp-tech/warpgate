@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
-use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::MigrationTrait;
 
 mod m00001_create_ticket;
 mod m00002_create_session;
@@ -24,5 +24,5 @@ impl MigratorTrait for Migrator {
 }
 
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
-    Migrator::up(&connection, None).await
+    Migrator::up(connection, None).await
 }

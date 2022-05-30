@@ -4128,6 +4128,7 @@ dependencies = [
 name = "warpgate-db-migrations"
 version = "0.1.0"
 dependencies = [
+ "async-std",
  "chrono",
  "sea-orm",
  "sea-orm-migration",

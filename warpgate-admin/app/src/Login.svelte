@@ -9,13 +9,7 @@ let username = ''
 let password = ''
 let incorrectCredentials = false
 
-function onInputKey (event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-        login()
-    }
-}
-
-async function login (event?) {
+async function login (event?: MouseEvent) {
     event?.preventDefault()
     error = null
     incorrectCredentials = false
@@ -26,17 +20,23 @@ async function login (event?) {
                 password,
             },
         })
-    } catch (error) {
-        if (error.status === 401) {
+    } catch (err) {
+        if (err.status === 401) {
             incorrectCredentials = true
         } else {
-            error = error
+            error = err
         }
         return
     }
     const info = await api.getInfo()
     authenticatedUsername.set(info.username!)
     replace('/')
+}
+
+function onInputKey (event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+        login()
+    }
 }
 </script>
 

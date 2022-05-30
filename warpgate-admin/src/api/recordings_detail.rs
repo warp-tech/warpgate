@@ -181,10 +181,7 @@ pub async fn api_get_recording_stream(
         if let Some(mut receiver) = receiver {
             tokio::spawn(async move {
                 if let Err(error) = async {
-                    loop {
-                        let Ok(data) = receiver.recv().await else {
-                            break;
-                        };
+                    while let Ok(data) = receiver.recv().await {
                         let content: TerminalRecordingItem = serde_json::from_slice(&data)?;
                         let cast: AsciiCast = content.into();
                         let msg = serde_json::to_string(&json!({ "data": cast }))?;

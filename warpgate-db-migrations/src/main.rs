@@ -1,4 +1,4 @@
-use sea_schema::migration::*;
+use sea_orm_migration::prelude::*;
 use warpgate_db_migrations::Migrator;
 
 #[async_std::main]

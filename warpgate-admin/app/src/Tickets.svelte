@@ -2,7 +2,7 @@
 import { api, Ticket } from 'lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert } from 'sveltestrap'
-import RelativeDate from 'RelativeDate.svelte';
+import RelativeDate from 'RelativeDate.svelte'
 
 let error: Error|undefined
 let tickets: Ticket[]|undefined

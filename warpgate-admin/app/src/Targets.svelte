@@ -1,6 +1,6 @@
 <script lang="ts">
 import { api, Target, UserSnapshot } from 'lib/api'
-import { getSSHUsername } from 'lib/ssh';
+import { getSSHUsername } from 'lib/ssh'
 import { Alert, FormGroup, Modal, ModalBody, ModalHeader } from 'sveltestrap'
 
 let error: Error|undefined
@@ -86,7 +86,7 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
             </FormGroup>
 
             <FormGroup floating label="Example command">
-                <input type="text" class="form-control" readonly value={"ssh " + sshUsername + "@warpgate-host -p warpgate-port"} />
+                <input type="text" class="form-control" readonly value={'ssh ' + sshUsername + '@warpgate-host -p warpgate-port'} />
             </FormGroup>
         {/if}
     </ModalBody>

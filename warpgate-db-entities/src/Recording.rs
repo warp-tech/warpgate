@@ -27,16 +27,6 @@ pub struct Model {
     pub kind: RecordingKind,
 }
 
-// #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-// pub enum Relation {
-//     #[sea_orm(
-//         belongs_to = "super::Session::Entity",
-//         from = "Column::SessionId",
-//         to = "super::Session::Column::Id"
-//     )]
-//     Session,
-// }
-
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
     Session,

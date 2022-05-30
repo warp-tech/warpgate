@@ -1,8 +1,8 @@
-import { DefaultApi, Configuration } from '../../api-client/src'
+import { DefaultApi, Configuration } from '../../api-client/dist'
 
 const configuration = new Configuration({
-    basePath: '/api'
+    basePath: '/api',
 })
 
 export const api = new DefaultApi(configuration)
-export * from '../../api-client/src/models'
+export * from '../../api-client'
