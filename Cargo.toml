@@ -5,6 +5,7 @@ members = [
     "warpgate-common",
     "warpgate-db-migrations",
     "warpgate-db-entities",
+    "warpgate-protocol-http",
     "warpgate-protocol-ssh",
 ]
 default-members = ["warpgate"]

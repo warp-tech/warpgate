@@ -90,6 +90,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             name: "web-admin".to_owned(),
             allow_roles: vec!["warpgate:admin".to_owned()],
             ssh: None,
+            http: None,
             web_admin: Some(TargetWebAdminOptions {}),
         });
     }

@@ -53,22 +53,22 @@ onDestroy(() => clearInterval(interval))
         <div>
             <h1>Session</h1>
             <div>
-                {#if session.ended}
-                    <strong class="me-2">
-                        {#if session.username}
-                            {session.username}
-                        {:else}
-                            Logging in
-                        {/if}
-                        ⇆
-                        {getTargetDescription()}
-                    </strong>
-                    <span class="text-muted">
+                <strong class="me-2">
+                    {#if session.username}
+                        {session.username}
+                    {:else}
+                        Logging in
+                    {/if}
+                    ⇆
+                    {getTargetDescription()}
+                </strong>
+                <span class="text-muted">
+                    {#if session.ended}
                         {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
-                    </span>
-                {:else}
-                    {moment.duration(moment().diff(session.started)).humanize()}
-                {/if}
+                    {:else}
+                        {moment.duration(moment().diff(session.started)).humanize()}
+                    {/if}
+                </span>
             </div>
         </div>
         {#if !session.ended}

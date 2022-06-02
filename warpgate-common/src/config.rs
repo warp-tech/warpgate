@@ -22,12 +22,20 @@ fn _default_username() -> String {
     "root".to_owned()
 }
 
+fn _default_empty_string() -> String {
+    "".to_owned()
+}
+
 fn _default_recordings_path() -> String {
     "./data/recordings".to_owned()
 }
 
 fn _default_database_url() -> Secret<String> {
     Secret::new("sqlite:data/db".to_owned())
+}
+
+fn _default_http_listen() -> String {
+    "0.0.0.0:7777".to_owned()
 }
 
 fn _default_web_admin_listen() -> String {
@@ -69,6 +77,12 @@ impl Default for SSHTargetAuth {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetHTTPOptions {
+    #[serde(default = "_default_empty_string")]
+    pub url: String,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
@@ -79,6 +93,8 @@ pub struct Target {
     pub allow_roles: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<TargetSSHOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<TargetHTTPOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_admin: Option<TargetWebAdminOptions>,
 }
@@ -141,6 +157,32 @@ impl Default for SSHConfig {
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             client_key: _default_ssh_client_key(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct HTTPConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_http_listen")]
+    pub listen: String,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for HTTPConfig {
+    fn default() -> Self {
+        HTTPConfig {
+            enable: true,
+            listen: _default_http_listen(),
+            certificate: "".to_owned(),
+            key: "".to_owned(),
         }
     }
 }
@@ -216,14 +258,17 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub recordings: RecordingsConfig,
 
-    #[serde(default)]
-    pub web_admin: WebAdminConfig,
-
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
     #[serde(default)]
     pub ssh: SSHConfig,
+
+    #[serde(default)]
+    pub http: HTTPConfig,
+
+    #[serde(default)]
+    pub web_admin: WebAdminConfig,
 
     #[serde(default)]
     pub log: LogConfig,
@@ -236,9 +281,10 @@ impl Default for WarpgateConfigStore {
             users: vec![],
             roles: vec![],
             recordings: RecordingsConfig::default(),
-            web_admin: WebAdminConfig::default(),
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
+            http: HTTPConfig::default(),
+            web_admin: WebAdminConfig::default(),
             log: LogConfig::default(),
         }
     }

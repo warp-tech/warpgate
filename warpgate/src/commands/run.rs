@@ -6,6 +6,7 @@ use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
 use warpgate_common::{ProtocolServer, Services};
+use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[cfg(target_os = "linux")]
@@ -34,6 +35,20 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
         ),
     );
+
+    if config.store.http.enable {
+        protocol_futures.push(
+            HTTPProtocolServer::new(&services).await?.run(
+                config
+                    .store
+                    .http
+                    .listen
+                    .to_socket_addrs()?
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
+            ),
+        );
+    }
 
     if config.store.web_admin.enable {
         let admin = warpgate_admin::AdminServer::new(&services);
@@ -69,7 +84,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
-        info!("Accepting SSH connections on {}", config.store.ssh.listen);
+        info!("Accepting SSH connections on  {}", config.store.ssh.listen);
+        if config.store.http.enable {
+            info!("Accepting HTTP connections on {}", config.store.http.listen);
+        }
         if config.store.web_admin.enable {
             info!(
                 "Access admin UI on https://{}",
