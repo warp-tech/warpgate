@@ -906,6 +906,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
 
 [[package]]
+name = "delegate"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35c47a31748d9cfa641f6cccb3608385fafe261ba36054f3d40d5a3ca11eb1af"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3733,8 +3744,12 @@ checksum = "06cda1232a49558c46f8a504d5b93101d42c0bf7f911f12a105ba48168f821ae"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
+ "webpki",
 ]
 
 [[package]]
@@ -3963,10 +3978,12 @@ dependencies = [
  "httparse",
  "log",
  "rand",
+ "rustls",
  "sha-1",
  "thiserror",
  "url",
  "utf-8",
+ "webpki",
 ]
 
 [[package]]
@@ -4252,10 +4269,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "data-encoding",
+ "delegate",
+ "futures",
  "http",
+ "lazy_static",
  "poem",
  "reqwest",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "warpgate-common",
  "warpgate-db-entities",
