@@ -12,7 +12,7 @@ use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::{handler, Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
-use warpgate_common::{Target, TargetHTTPOptions};
+use warpgate_common::{Target, TargetHTTPOptions, try_block};
 
 trait SomeResponse {
     fn status(&self) -> http::StatusCode;
@@ -191,13 +191,15 @@ fn rewrite_response(resp: &mut Response, target: &Target) -> Result<()> {
 
     if let http::header::Entry::Occupied(mut entry) = headers.entry(http::header::SET_COOKIE) {
         for value in entry.iter_mut() {
-            if let Result::<()>::Err(error) = try {
+            try_block!({
                 let mut cookie = Cookie::parse(value.to_str()?)?;
                 cookie.set_expires(cookie::Expiration::Session);
                 *value = cookie.to_string().parse()?;
-            } {
+            } catch (error: anyhow::Error) {
                 warn!(?error, header=?value, "Failed to parse response cookie")
-            }
+            })
+            // {
+            // }
         }
     }
 
