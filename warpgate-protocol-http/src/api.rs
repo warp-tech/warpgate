@@ -257,7 +257,7 @@ async fn proxy_request(req: &Request, body: Body) -> poem::Result<Response> {
     copy_client_response(&client_response, &mut response);
     response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
 
-    rewrite_response(&mut response, &target);
+    rewrite_response(&mut response, &target)?;
     Ok(response)
 }
 
