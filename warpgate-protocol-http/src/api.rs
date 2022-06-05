@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
-
+use anyhow::Result;
+use cookie::Cookie;
 use delegate::delegate;
 use futures::{SinkExt, StreamExt};
 use http::header::HeaderName;
@@ -103,7 +104,7 @@ lazy_static::lazy_static! {
     static ref DEMO_TARGET: Target = Target {
         allow_roles: vec![],
         http: Some(TargetHTTPOptions {
-            url: "http://192.168.78.233/".to_string(),
+            url: "https://ci.elements.tv/".to_string(),
         }),
         name: String::from("Target"),
         ssh: None,
@@ -112,13 +113,13 @@ lazy_static::lazy_static! {
 
     static ref DONT_FORWARD_HEADERS: HashSet<HeaderName> = {
         let mut s = HashSet::new();
-        s.insert("sec-websocket-extensions".parse().unwrap());
-        s.insert("sec-websocket-accept".parse().unwrap());
-        s.insert("sec-websocket-key".parse().unwrap());
-        s.insert("sec-websocket-version".parse().unwrap());
-        s.insert("upgrade".parse().unwrap());
-        s.insert("connection".parse().unwrap());
-        s.insert("strict-transport-security".parse().unwrap());
+        s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
+        s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
+        s.insert(http::header::SEC_WEBSOCKET_KEY);
+        s.insert(http::header::SEC_WEBSOCKET_VERSION);
+        s.insert(http::header::UPGRADE);
+        s.insert(http::header::CONNECTION);
+        s.insert(http::header::STRICT_TRANSPORT_SECURITY);
         s
     };
 }
@@ -167,6 +168,40 @@ fn copy_client_response<R: SomeResponse>(
     server_response.headers_mut().extend(headers.into_iter());
 
     server_response.set_status(client_response.status());
+}
+
+fn rewrite_response(resp: &mut Response, target: &Target) -> Result<()> {
+    let target_uri = Uri::try_from(target.http.clone().unwrap().url).unwrap();
+    let headers = resp.headers_mut();
+
+    if let Some(value) = headers.get_mut(http::header::LOCATION) {
+        let redirect_uri = Uri::try_from(value.as_bytes()).unwrap();
+        if redirect_uri.authority() == target_uri.authority() {
+            let old_value = value.clone();
+            *value = Uri::builder()
+                .path_and_query(redirect_uri.path_and_query().unwrap().clone())
+                .build()
+                .unwrap()
+                .to_string()
+                .parse()
+                .unwrap();
+            debug!("Rewrote a redirect from {:?} to {:?}", old_value, value);
+        }
+    }
+
+    if let http::header::Entry::Occupied(mut entry) = headers.entry(http::header::SET_COOKIE) {
+        for value in entry.iter_mut() {
+            if let Result::<()>::Err(error) = try {
+                let mut cookie = Cookie::parse(value.to_str()?)?;
+                cookie.set_expires(cookie::Expiration::Session);
+                *value = cookie.to_string().parse()?;
+            } {
+                warn!(?error, header=?value, "Failed to parse response cookie")
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
@@ -220,6 +255,7 @@ async fn proxy_request(req: &Request, body: Body) -> poem::Result<Response> {
     copy_client_response(&client_response, &mut response);
     response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
 
+    rewrite_response(&mut response, &target);
     Ok(response)
 }
 
@@ -235,11 +271,11 @@ async fn proxy_ws(req: &Request, ws: WebSocket) -> poem::Result<impl IntoRespons
 async fn proxy_ws_inner(req: &Request, ws: WebSocket, uri: Uri) -> poem::Result<impl IntoResponse> {
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .header("Sec-WebSocket-Version", "13")
+        .header(http::header::CONNECTION, "Upgrade")
+        .header(http::header::UPGRADE, "websocket")
+        .header(http::header::SEC_WEBSOCKET_VERSION, "13")
         .header(
-            "Sec-WebSocket-Key",
+            http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         );
     client_request = copy_server_request(&req, client_request);

@@ -19,3 +19,4 @@ warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 lazy_static = "1.4"
 futures = "0.3"
 delegate = "0.6"
+cookie = "0.16"

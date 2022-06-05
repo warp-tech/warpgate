@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait, let_else)]
+#![feature(type_alias_impl_trait, let_else, try_blocks)]
 mod api;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
