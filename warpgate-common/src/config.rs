@@ -1,4 +1,4 @@
-use poem_openapi::Object;
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -91,12 +91,18 @@ pub struct Target {
     pub name: String,
     #[serde(default = "_default_empty_string_vec")]
     pub allow_roles: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh: Option<TargetSSHOptions>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http: Option<TargetHTTPOptions>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub web_admin: Option<TargetWebAdminOptions>,
+    #[serde(flatten)]
+    pub options: TargetOptions,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Union)]
+pub enum TargetOptions {
+    #[serde(rename = "ssh")]
+    Ssh(TargetSSHOptions),
+    #[serde(rename = "http")]
+    Http(TargetHTTPOptions),
+    #[serde(rename = "web_admin")]
+    WebAdmin(TargetWebAdminOptions),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]

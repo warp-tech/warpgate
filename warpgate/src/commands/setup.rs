@@ -9,8 +9,8 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    Role, SSHConfig, Secret, Services, Target, TargetWebAdminOptions, User, UserAuthCredential,
-    WarpgateConfigStore, WebAdminConfig,
+    Role, SSHConfig, Secret, Services, Target, TargetOptions, TargetWebAdminOptions, User,
+    UserAuthCredential, WarpgateConfigStore, WebAdminConfig,
 };
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
@@ -89,9 +89,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         store.targets.push(Target {
             name: "web-admin".to_owned(),
             allow_roles: vec!["warpgate:admin".to_owned()],
-            ssh: None,
-            http: None,
-            web_admin: Some(TargetWebAdminOptions {}),
+            options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),
         });
     }
 

@@ -12,12 +12,19 @@ export default defineConfig({
     ],
     build: {
         sourcemap: true,
+        manifest: true,
         commonjsOptions: {
             include: [
                 'api-client/dist/*.js',
                 '**/*.js',
             ],
             transformMixedEsModules: true,
+        },
+        rollupOptions: {
+            input: {
+                admin: 'index.html',
+                embed: 'src/main.embed.ts',
+            },
         },
     },
 })

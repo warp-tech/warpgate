@@ -4192,7 +4192,6 @@ dependencies = [
  "poem",
  "poem-openapi",
  "russh-keys",
- "rust-embed",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4203,6 +4202,7 @@ dependencies = [
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
+ "warpgate-web",
 ]
 
 [[package]]
@@ -4276,11 +4276,13 @@ dependencies = [
  "lazy_static",
  "poem",
  "reqwest",
+ "serde",
  "tokio",
  "tokio-tungstenite",
  "tracing",
  "warpgate-common",
  "warpgate-db-entities",
+ "warpgate-web",
 ]
 
 [[package]]
@@ -4304,6 +4306,16 @@ dependencies = [
  "uuid",
  "warpgate-common",
  "warpgate-db-entities",
+]
+
+[[package]]
+name = "warpgate-web"
+version = "0.1.0"
+dependencies = [
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

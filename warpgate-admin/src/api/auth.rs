@@ -5,7 +5,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{AuthCredential, AuthResult, ConfigProvider, Secret};
+use warpgate_common::{AuthCredential, AuthResult, ConfigProvider, Secret, TargetOptions};
 
 pub struct Api;
 
@@ -51,7 +51,7 @@ impl Api {
             AuthResult::Accepted { username } => {
                 let targets = config_provider.list_targets().await?;
                 for target in targets {
-                    if target.web_admin.is_some()
+                    if matches!(target.options, TargetOptions::WebAdmin(_))
                         && config_provider
                             .authorize_target(&username, &target.name)
                             .await?

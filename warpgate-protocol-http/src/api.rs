@@ -1,6 +1,3 @@
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::str::FromStr;
 use anyhow::Result;
 use cookie::Cookie;
 use delegate::delegate;
@@ -8,11 +5,17 @@ use futures::{SinkExt, StreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::Uri;
+use poem::session::Session;
 use poem::web::websocket::{CloseCode, Message, WebSocket};
+use poem::web::{Data, Html};
 use poem::{handler, Body, IntoResponse, Request, Response};
+use serde::Deserialize;
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::str::FromStr;
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
-use warpgate_common::{Target, TargetHTTPOptions, try_block};
+use warpgate_common::{try_block, Services, Target, TargetHTTPOptions, TargetOptions};
 
 trait SomeResponse {
     fn status(&self) -> http::StatusCode;
@@ -57,58 +60,70 @@ impl SomeRequestBuilder for http::request::Builder {
     }
 }
 
+static TARGET_SESSION_KEY: &str = "target";
+
+#[derive(Deserialize)]
+struct QueryParams {
+    warpgate_target: Option<String>,
+}
+
 #[handler]
 pub async fn test_endpoint(
     req: &Request,
     ws: Option<WebSocket>,
+    session: &Session,
     body: Body,
+    services: Data<&Services>,
 ) -> poem::Result<Response> {
+    let params: QueryParams = req.params()?;
+
+    if let Some(target_name) = params.warpgate_target {
+        session.set(TARGET_SESSION_KEY, target_name);
+    }
+
+    let Some(target_name) = session.get::<String>(TARGET_SESSION_KEY) else {
+        return Ok(target_select_view().into_response());
+    };
+
+    let target = {
+        services
+            .config
+            .lock()
+            .await
+            .store
+            .targets
+            .iter()
+            .filter_map(|t| match t.options {
+                TargetOptions::Http(ref options) => Some((t, options)),
+                _ => None,
+            })
+            .find(|(t, _)| t.name == target_name)
+            .map(|(t, opt)| (t.clone(), opt.clone()))
+    };
+
+    let Some((target, options)) = target else {
+        return Ok(target_select_view().into_response());
+    };
+
     Ok(match ws {
-        Some(ws) => proxy_ws(req, ws).await?.into_response(),
-        None => proxy_normal(req, body).await?.into_response(),
+        Some(ws) => proxy_ws(req, ws, options).await?.into_response(),
+        None => proxy_normal(req, body, target, options)
+            .await?
+            .into_response(),
     })
 }
 
-pub async fn proxy_normal(req: &Request, body: Body) -> poem::Result<Response> {
-    let mut res = String::new();
-    let mut has_auth = false;
-    for h in req.headers().iter() {
-        if h.0 == "Authorization" {
-            // println!("Found {:?} {:?}", h.0, h.1);
-            // let v = BASE64
-            // .decode(h.1.as_bytes())
-            // .map_err(poem::error::BadRequest)?;
-            // println!("v: {:?}", v);
-            if h.1 == "Basic dGVzdDpwdw==" {
-                has_auth = true;
-            }
-        }
-        res.push_str(&format!("{}: {:?}\n", h.0, h.1));
-    }
-    res.push('\n');
-    res.push_str(&req.original_uri().to_string());
-
-    proxy_request(req, body).await
-    // let mut r = res.into_response();
-    // if !has_auth {
-    //     r.headers_mut().insert(
-    //         "WWW-Authenticate",
-    //         HeaderValue::try_from("Basic realm=\"Test\"".to_string()).unwrap(),
-    //     );
-    //     r.set_status(StatusCode::UNAUTHORIZED);
-    // }
-    // Ok(r)
+pub fn target_select_view() -> impl IntoResponse {
+    Html("No target selected")
 }
 
 lazy_static::lazy_static! {
     static ref DEMO_TARGET: Target = Target {
         allow_roles: vec![],
-        http: Some(TargetHTTPOptions {
+        options: TargetOptions::Http(TargetHTTPOptions {
             url: "https://ci.elements.tv/".to_string(),
         }),
         name: String::from("Target"),
-        ssh: None,
-        web_admin: None,
     };
 
     static ref DONT_FORWARD_HEADERS: HashSet<HeaderName> = {
@@ -124,8 +139,8 @@ lazy_static::lazy_static! {
     };
 }
 
-fn construct_uri(req: &Request, target: &Target, websocket: bool) -> Uri {
-    let target_uri = Uri::try_from(target.http.clone().unwrap().url).unwrap();
+fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Uri {
+    let target_uri = Uri::try_from(options.url.clone()).unwrap();
     let source_uri = req.uri().clone();
 
     let authority = target_uri.authority().unwrap().to_string();
@@ -171,7 +186,9 @@ fn copy_client_response<R: SomeResponse>(
 }
 
 fn rewrite_response(resp: &mut Response, target: &Target) -> Result<()> {
-    let target_uri = Uri::try_from(target.http.clone().unwrap().url).unwrap();
+    let TargetOptions::Http(ref options) = target.options else {panic!();};
+
+    let target_uri = Uri::try_from(options.url.clone()).unwrap();
     let headers = resp.headers_mut();
 
     if let Some(value) = headers.get_mut(http::header::LOCATION) {
@@ -224,10 +241,13 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
-async fn proxy_request(req: &Request, body: Body) -> poem::Result<Response> {
-    let target = DEMO_TARGET.clone();
-
-    let uri = construct_uri(req, &target, false).to_string();
+pub async fn proxy_normal(
+    req: &Request,
+    body: Body,
+    target: Target,
+    options: TargetHTTPOptions,
+) -> poem::Result<Response> {
+    let uri = construct_uri(req, &options, false).to_string();
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -255,15 +275,22 @@ async fn proxy_request(req: &Request, body: Body) -> poem::Result<Response> {
     );
 
     copy_client_response(&client_response, &mut response);
-    response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
+    copy_client_body(client_response, &mut response);
 
     rewrite_response(&mut response, &target)?;
     Ok(response)
 }
 
-async fn proxy_ws(req: &Request, ws: WebSocket) -> poem::Result<impl IntoResponse> {
-    let target = DEMO_TARGET.clone();
-    let uri = construct_uri(req, &target, true);
+fn copy_client_body(client_response: reqwest::Response, response: &mut Response) {
+    response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
+}
+
+async fn proxy_ws(
+    req: &Request,
+    ws: WebSocket,
+    options: TargetHTTPOptions,
+) -> poem::Result<impl IntoResponse> {
+    let uri = construct_uri(req, &options, true);
     proxy_ws_inner(req, ws, uri.clone()).await.map_err(|error| {
         tracing::error!(?uri, ?error, "WebSocket proxy failed");
         error

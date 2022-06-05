@@ -1,7 +1,7 @@
 #[macro_export]
-#[allow(unreachable_code)]
 macro_rules! try_block {
     ($try:block catch ($err:ident : $errtype:ty) $catch:block) => {{
+        #[allow(unreachable_code)]
         let result: anyhow::Result<_, $errtype> = (|| Ok::<_, $errtype>($try))();
         match result {
             Ok(_) => (),

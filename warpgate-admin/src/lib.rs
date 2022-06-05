@@ -8,14 +8,10 @@ use poem::middleware::{AddData, SetHeader};
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
-use rust_embed::RustEmbed;
+use warpgate_web::Assets;
 use std::net::SocketAddr;
 use tracing::*;
 use warpgate_common::Services;
-
-#[derive(RustEmbed)]
-#[folder = "../warpgate-admin/app/dist"]
-pub struct Assets;
 
 pub struct AdminServer {
     services: Services,

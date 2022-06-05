@@ -10,7 +10,7 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "npm"
-    directory: "/warpgate-admin/app"
+    directory: "/web"
     labels: ["type/deps"]
     open-pull-requests-limit: 25
     schedule:

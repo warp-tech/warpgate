@@ -32,7 +32,7 @@ use warpgate_common::recordings::{
 };
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
-    TargetSSHOptions, WarpgateServerHandle,
+    TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
 #[derive(Clone)]
@@ -1014,9 +1014,12 @@ impl ServerSession {
                 .store
                 .targets
                 .iter()
-                .find(|x| x.name == target_name)
-                .filter(|x| x.ssh.is_some())
-                .map(|x| (x.clone(), x.ssh.clone().unwrap()))
+                .filter_map(|t| match t.options {
+                    TargetOptions::Ssh(ref options) => Some((t, options)),
+                    _ => None,
+                })
+                .find(|(t, _)| t.name == target_name)
+                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, ssh_options)) = target else {

@@ -2,8 +2,11 @@
 mod api;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use poem::endpoint::{EmbeddedFilesEndpoint, EmbeddedFileEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
-use poem::{Route, Server};
+use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::{EndpointExt, Route, Server};
+use warpgate_web::Assets;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tracing::*;
@@ -25,7 +28,18 @@ impl HTTPProtocolServer {
 #[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
-        let app = Route::new().nest_no_strip("/", api::test_endpoint);
+        let app = Route::new()
+            .nest_no_strip("/@warpgate/assets", EmbeddedFilesEndpoint::<Assets>::new())
+            .at(
+                "/@warpgate",
+                EmbeddedFileEndpoint::<Assets>::new("index.html"),
+            )
+            .nest_no_strip("/", api::test_endpoint)
+            .with(ServerSession::new(
+                CookieConfig::default().secure(false),
+                MemoryStorage::default(),
+            ))
+            .data(self.services.clone());
 
         let (certificate, key) = {
             let config = self.services.config.lock().await;
@@ -56,7 +70,7 @@ impl ProtocolServer for HTTPProtocolServer {
         .context("Failed to start admin server")
     }
 
-    async fn test_target(self, target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {
         Ok(())
     }
 }
