@@ -2,15 +2,15 @@
 mod api;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use poem::endpoint::{EmbeddedFilesEndpoint, EmbeddedFileEndpoint};
+use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
-use warpgate_web::Assets;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tracing::*;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
+use warpgate_web::Assets;
 
 #[derive(Clone)]
 pub struct HTTPProtocolServer {
@@ -29,10 +29,11 @@ impl HTTPProtocolServer {
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
         let app = Route::new()
-            .nest_no_strip("/@warpgate/assets", EmbeddedFilesEndpoint::<Assets>::new())
-            .at(
+            .nest(
                 "/@warpgate",
-                EmbeddedFileEndpoint::<Assets>::new("index.html"),
+                Route::new()
+                    .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
+                    .at("/", EmbeddedFileEndpoint::<Assets>::new("index.html")),
             )
             .nest_no_strip("/", api::test_endpoint)
             .with(ServerSession::new(

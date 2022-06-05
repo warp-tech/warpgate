@@ -10,6 +10,7 @@ use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::web::{Data, Html};
 use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
+use warpgate_web::lookup_built_file;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -128,6 +129,7 @@ lazy_static::lazy_static! {
 
     static ref DONT_FORWARD_HEADERS: HashSet<HeaderName> = {
         let mut s = HashSet::new();
+        s.insert(http::header::ACCEPT_ENCODING);
         s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
         s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
         s.insert(http::header::SEC_WEBSOCKET_KEY);
@@ -275,14 +277,38 @@ pub async fn proxy_normal(
     );
 
     copy_client_response(&client_response, &mut response);
-    copy_client_body(client_response, &mut response);
+    copy_client_body(client_response, &mut response).await?;
 
     rewrite_response(&mut response, &target)?;
     Ok(response)
 }
 
-fn copy_client_body(client_response: reqwest::Response, response: &mut Response) {
+async fn copy_client_body(client_response: reqwest::Response, response: &mut Response) -> Result<()> {
+    if response.content_type().map(|c| c.starts_with("text/html")) == Some(true) && response.status() == 200 {
+        copy_client_body_and_embed(client_response, response).await?;
+        return Ok(())
+    }
+
     response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
+    Ok(())
+}
+
+async fn copy_client_body_and_embed(client_response: reqwest::Response, response: &mut Response) -> Result<()> {
+    let content = client_response.text().await?;
+
+    let script_name = lookup_built_file("src/main.embed.ts")?;
+
+    let inject = format!(r#"<script type="module" src="/@warpgate/{}"></script>"#, script_name);
+    let before = "</head>";
+    let content = content.replacen(before, &format!("{}{}", inject, before), 1);
+
+    response.headers_mut().remove(http::header::CONTENT_LENGTH);
+    response.headers_mut().remove(http::header::CONTENT_ENCODING);
+    response.headers_mut().remove(http::header::CONTENT_TYPE);
+    response.headers_mut().remove(http::header::TRANSFER_ENCODING);
+    response.headers_mut().insert(http::header::CONTENT_TYPE, "text/html; charset=utf-8".parse()?);
+    response.set_body(content);
+    Ok(())
 }
 
 async fn proxy_ws(
