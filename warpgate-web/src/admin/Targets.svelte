@@ -1,6 +1,6 @@
 <script lang="ts">
-import { api, Target, UserSnapshot } from 'lib/api'
-import { getSSHUsername } from 'lib/ssh'
+import { api, Target, UserSnapshot } from 'admin/lib/api'
+import { getSSHUsername } from 'admin/lib/ssh'
 import { Alert, FormGroup, Modal, ModalBody, ModalHeader } from 'sveltestrap'
 
 let error: Error|undefined

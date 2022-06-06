@@ -6,7 +6,7 @@
     import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from 'sveltestrap'
     import formatDuration from 'format-duration'
-    import type { Recording } from 'lib/api'
+    import type { Recording } from 'admin/lib/api'
 
     export let recording: Recording
 
@@ -349,7 +349,7 @@
 </div>
 
 <style lang="scss">
-    @import "../../node_modules/xterm/css/xterm.css";
+    @import "../../../node_modules/xterm/css/xterm.css";
 
     .root {
         border-radius: 5px;

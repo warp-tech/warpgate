@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, UserSnapshot, Target, TicketAndSecret } from 'lib/api'
+import { api, UserSnapshot, Target, TicketAndSecret } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert, Button, FormGroup } from 'sveltestrap'
 import { firstBy } from 'thenby'

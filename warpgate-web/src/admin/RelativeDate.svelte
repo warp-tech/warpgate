@@ -1,5 +1,5 @@
 <script lang="ts">
-import { timeAgo } from 'lib/time'
+import { timeAgo } from 'admin/lib/time'
 export let date: any
 </script>
 

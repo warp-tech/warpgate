@@ -1,10 +1,10 @@
 <script lang="ts">
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import { api } from 'lib/api'
-import { authenticatedUsername } from 'lib/store'
+import { api } from 'admin/lib/api'
+import { authenticatedUsername } from 'admin/lib/store'
 import Fa from 'svelte-fa'
 
-import logo from '../public/assets/logo.svg'
+import logo from '../../public/assets/logo.svg'
 
 import Router, { link, push } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
@@ -90,7 +90,7 @@ const routes = {
 </div>
 
 <style lang="scss">
-    @import "./vars";
+    @import "../vars";
 
     .app {
         min-height: 100vh;

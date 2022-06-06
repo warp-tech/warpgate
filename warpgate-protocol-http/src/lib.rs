@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
+use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
 use warpgate_admin::AdminServer;
@@ -39,9 +40,10 @@ impl ProtocolServer for HTTPProtocolServer {
                 "/@warpgate",
                 Route::new()
                     .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
-                    .at("/", EmbeddedFileEndpoint::<Assets>::new("index.html")),
+                    .at("/", EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")),
             )
             .nest_no_strip("/", api::catchall_endpoint)
+            .with(SetHeader::new().overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"))
             .with(ServerSession::new(
                 CookieConfig::default().secure(false).name("warpgate-http-session"),
                 MemoryStorage::default(),

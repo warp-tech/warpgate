@@ -1,6 +1,5 @@
 <script lang="ts">
-import { api } from 'lib/api'
-import { authenticatedUsername } from 'lib/store'
+import logo from '../../public/assets/logo.svg'
 import { replace } from 'svelte-spa-router'
 
 import { Alert, Button, FormGroup } from 'sveltestrap'
@@ -14,12 +13,12 @@ async function login (event?: MouseEvent) {
     error = null
     incorrectCredentials = false
     try {
-        await api.login({
-            loginRequest: {
-                username,
-                password,
-            },
-        })
+        // await api.login({
+        //     loginRequest: {
+        //         username,
+        //         password,
+        //     },
+        // })
     } catch (err) {
         if (err.status === 401) {
             incorrectCredentials = true
@@ -28,8 +27,8 @@ async function login (event?: MouseEvent) {
         }
         return
     }
-    const info = await api.getInfo()
-    authenticatedUsername.set(info.username!)
+    // const info = await api.getInfo()
+    // authenticatedUsername.set(info.username!)
     replace('/')
 }
 
@@ -43,6 +42,8 @@ function onInputKey (event: KeyboardEvent) {
 <form class="mt-5 row" autocomplete="on">
     <div class="col-12 col-md-3"></div>
     <form class="col-12 col-md-6">
+        <img class="logo" src={logo} alt="Warpgate" />
+
         <div class="page-summary-bar">
             <h1>Welcome</h1>
         </div>
@@ -84,3 +85,10 @@ function onInputKey (event: KeyboardEvent) {
     </form>
     <div class="col-12 col-md-3"></div>
 </form>
+
+<style lang="scss">
+    .logo {
+        width: 6rem;
+        margin: 0 -0.5rem 1rem;
+    }
+</style>

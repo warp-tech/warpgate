@@ -1,7 +1,7 @@
 <script lang="ts">
-import { api, Recording } from 'lib/api'
+import { api, Recording } from 'admin/lib/api'
 import { Alert, Spinner } from 'sveltestrap'
-import TerminalRecordingPlayer from 'player/TerminalRecordingPlayer.svelte'
+import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
 
 export let params = { id: '' }
 

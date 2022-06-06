@@ -1,12 +1,12 @@
 <script lang="ts">
-import { api, SessionSnapshot, Recording } from 'lib/api'
-import { timeAgo } from 'lib/time'
+import { api, SessionSnapshot, Recording } from 'admin/lib/api'
+import { timeAgo } from 'admin/lib/time'
 import moment from 'moment'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
 import { Alert, Button, Spinner } from 'sveltestrap'
-import LogViewer from 'LogViewer.svelte'
-import RelativeDate from 'RelativeDate.svelte'
+import LogViewer from './LogViewer.svelte'
+import RelativeDate from './RelativeDate.svelte'
 
 export let params = { id: '' }
 

@@ -4147,7 +4147,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.1.1"
+version = "0.2.2"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4180,7 +4180,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.1.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, LogEntry } from 'lib/api'
+import { api, LogEntry } from 'admin/lib/api'
 import { Alert } from 'sveltestrap'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
@@ -208,7 +208,7 @@ onDestroy(() => {
 
 
 <style lang="scss">
-    @import "./vars";
+    @import "../vars";
 
     .table-wrapper {
         max-width: 100%;

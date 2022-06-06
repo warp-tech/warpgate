@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::http::StatusCode;
 use poem::listener::{Acceptor, Listener, TcpListener};
-use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{Endpoint, EndpointExt, IntoEndpoint, Route, Server};
 use poem_openapi::OpenApiService;
@@ -61,7 +60,7 @@ fn admin_app(services: &Services, secret: AdminServerSecret) -> impl IntoEndpoin
         .nest("/api", api_service)
         .nest("/api/openapi.json", spec)
         .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
-        .at("/", EmbeddedFileEndpoint::<Assets>::new("index.html"))
+        .at("/", EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"))
         .at(
             "/api/recordings/:id/cast",
             crate::api::recordings_detail::api_get_recording_cast,
@@ -78,7 +77,6 @@ fn admin_app(services: &Services, secret: AdminServerSecret) -> impl IntoEndpoin
             CookieConfig::default().secure(false),
             MemoryStorage::default(),
         ))
-        .with(SetHeader::new().overriding("Strict-Transport-Security", "max-age=31536000"))
         .data(db)
         .data(config_provider)
         .data(state)

@@ -4,11 +4,11 @@
     import { Spinner, Button } from 'sveltestrap'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
-    import { api, SessionSnapshot } from 'lib/api'
+    import { api, SessionSnapshot } from 'admin/lib/api'
     import { derived, writable } from 'svelte/store'
     import { firstBy } from 'thenby'
     import moment from 'moment'
-    import RelativeDate from 'RelativeDate.svelte'
+    import RelativeDate from './RelativeDate.svelte'
 
     const sessions = writable<SessionSnapshot[]|null>(null)
 
