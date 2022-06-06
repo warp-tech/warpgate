@@ -5,18 +5,33 @@
 Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH client.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts within the network.
-* Warpgate will record every session for you to replay and review later through a built-in admin web UI.
+* Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
+* 2FA support
 * Single-file statically linked binary with no dependencies.
 * Written in 100% safe Rust.
-
-<img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
 
 ## Getting started & downloads
 
 * See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page.
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
+
+<center>
+      <img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
+</center>
+
+<table>
+  <tr>
+  <td>
+    <img width="1016" alt="image" src="https://user-images.githubusercontent.com/161476/171013863-f087ab75-1b29-4489-b08d-0eacf62fd98c.png">
+
+  </td>
+  <td>
+    <img width="1016" alt="image" src="https://user-images.githubusercontent.com/161476/171013410-f2b7374c-073e-4a66-b9c6-fe0a6b2b0dd0.png">
+  </td>
+  </tr>
+</table>
 
 ## Project Status
 
@@ -26,7 +41,6 @@ In particular, we're working on:
 
 * Support for exposing HTTP(S) endpoints through the bastion,
 * Support for tunneling database connections,
-* Live session view and control,
 * Requesting admin approval for sessions
 * and much more.
 
