@@ -21,7 +21,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     install_database_logger(services.db.clone());
 
-    let mut other_futures = futures::stream::FuturesUnordered::new();
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
     protocol_futures.push(
@@ -50,22 +49,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         );
     }
 
-    if config.store.web_admin.enable {
-        let admin = warpgate_admin::AdminServer::new(&services);
-        let admin_future = admin.run(
-            config
-                .store
-                .web_admin
-                .listen
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Failed to resolve the listen address for the admin server")
-                })?,
-        );
-        other_futures.push(admin_future);
-    }
-
     tokio::spawn({
         let services = services.clone();
         async move {
@@ -84,15 +67,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
-        info!("Accepting SSH connections on  {}", config.store.ssh.listen);
+        info!("Accepting SSH connections on {}", config.store.ssh.listen);
         if config.store.http.enable {
-            info!("Accepting HTTP connections on {}", config.store.http.listen);
-        }
-        if config.store.web_admin.enable {
-            info!(
-                "Access admin UI on https://{}",
-                config.store.web_admin.listen
-            );
+            info!("Accepting HTTP connections on https://{}", config.store.http.listen);
         }
         info!("--------------------------------------------");
     }
@@ -130,16 +107,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 match result {
                     Some(Err(error)) => {
                         error!(?error, "SSH server error");
-                        std::process::exit(1);
-                    },
-                    None => break,
-                    _ => (),
-                }
-            }
-            result = other_futures.next(), if !other_futures.is_empty() => {
-                match result {
-                    Some(Err(error)) => {
-                        error!(?error, "Error");
                         std::process::exit(1);
                     },
                     None => break,

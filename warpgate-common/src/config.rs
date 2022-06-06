@@ -1,5 +1,6 @@
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -35,10 +36,6 @@ fn _default_database_url() -> Secret<String> {
 }
 
 fn _default_http_listen() -> String {
-    "0.0.0.0:7777".to_owned()
-}
-
-fn _default_web_admin_listen() -> String {
     "0.0.0.0:8888".to_owned()
 }
 
@@ -81,6 +78,9 @@ impl Default for SSHTargetAuth {
 pub struct TargetHTTPOptions {
     #[serde(default = "_default_empty_string")]
     pub url: String,
+
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
@@ -194,32 +194,6 @@ impl Default for HTTPConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct WebAdminConfig {
-    #[serde(default = "_default_false")]
-    pub enable: bool,
-
-    #[serde(default = "_default_web_admin_listen")]
-    pub listen: String,
-
-    #[serde(default)]
-    pub certificate: String,
-
-    #[serde(default)]
-    pub key: String,
-}
-
-impl Default for WebAdminConfig {
-    fn default() -> Self {
-        WebAdminConfig {
-            enable: true,
-            listen: _default_web_admin_listen(),
-            certificate: "".to_owned(),
-            key: "".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -274,9 +248,6 @@ pub struct WarpgateConfigStore {
     pub http: HTTPConfig,
 
     #[serde(default)]
-    pub web_admin: WebAdminConfig,
-
-    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -290,7 +261,6 @@ impl Default for WarpgateConfigStore {
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
             http: HTTPConfig::default(),
-            web_admin: WebAdminConfig::default(),
             log: LogConfig::default(),
         }
     }

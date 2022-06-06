@@ -4280,6 +4280,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "warpgate-admin",
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-web",

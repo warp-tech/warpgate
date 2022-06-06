@@ -13,7 +13,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         .context("Failed to parse SSH listen address")?;
     config
         .store
-        .web_admin
+        .http
         .listen
         .to_socket_addrs()
         .context("Failed to parse admin server listen address")?;

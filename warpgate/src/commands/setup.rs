@@ -10,7 +10,7 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
     Role, SSHConfig, Secret, Services, Target, TargetOptions, TargetWebAdminOptions, User,
-    UserAuthCredential, WarpgateConfigStore, WebAdminConfig,
+    UserAuthCredential, WarpgateConfigStore, HTTPConfig,
 };
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
@@ -80,12 +80,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    store.web_admin.listen = dialoguer::Input::with_theme(&theme)
-        .default(WebAdminConfig::default().listen)
-        .with_prompt("Endpoint to expose admin web interface on")
+    store.http.listen = dialoguer::Input::with_theme(&theme)
+        .default(HTTPConfig::default().listen)
+        .with_prompt("Endpoint to listen for HTTP connections on")
         .interact_text()?;
 
-    if store.web_admin.enable {
+    if store.http.enable {
         store.targets.push(Target {
             name: "web-admin".to_owned(),
             allow_roles: vec!["warpgate:admin".to_owned()],
@@ -93,13 +93,13 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         });
     }
 
-    store.web_admin.certificate = PathBuf::from(&data_path)
-        .join("web-admin.certificate.pem")
+    store.http.certificate = PathBuf::from(&data_path)
+        .join("tls.certificate.pem")
         .to_string_lossy()
         .to_string();
 
-    store.web_admin.key = PathBuf::from(&data_path)
-        .join("web-admin.key.pem")
+    store.http.key = PathBuf::from(&data_path)
+        .join("tls.key.pem")
         .to_string_lossy()
         .to_string();
 
@@ -159,8 +159,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
         let certificate_path = config
             .paths_relative_to
-            .join(&config.store.web_admin.certificate);
-        let key_path = config.paths_relative_to.join(&config.store.web_admin.key);
+            .join(&config.store.http.certificate);
+        let key_path = config.paths_relative_to.join(&config.store.http.key);
         std::fs::write(&certificate_path, cert.serialize_pem()?)?;
         std::fs::write(&key_path, cert.serialize_private_key_pem())?;
         secure_file(&certificate_path)?;
