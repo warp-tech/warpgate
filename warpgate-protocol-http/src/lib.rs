@@ -8,49 +8,56 @@ use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::{EndpointExt, Route, Server};
-use warpgate_admin::AdminServer;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tracing::*;
+use warpgate_admin::admin_api_app;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
 
 pub struct HTTPProtocolServer {
     services: Services,
-    admin_server: AdminServer,
 }
 
 impl HTTPProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         Ok(HTTPProtocolServer {
             services: services.clone(),
-            admin_server: AdminServer::new(services).await?,
         })
     }
 }
 
-#[derive(Clone)]
-pub struct AdminServerAddress(pub SocketAddr);
-
 #[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
+        let admin_api_app = admin_api_app(&self.services);
         let app = Route::new()
             .nest(
                 "/@warpgate",
                 Route::new()
+                    .nest_no_strip("/api", admin_api_app)
                     .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
-                    .at("/", EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")),
+                    .at(
+                        "/admin",
+                        EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"),
+                    )
+                    .at(
+                        "",
+                        EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html"),
+                    ),
             )
             .nest_no_strip("/", api::catchall_endpoint)
-            .with(SetHeader::new().overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"))
+            .with(
+                SetHeader::new()
+                    .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
+            )
             .with(ServerSession::new(
-                CookieConfig::default().secure(false).name("warpgate-http-session"),
+                CookieConfig::default()
+                    .secure(false)
+                    .name("warpgate-http-session"),
                 MemoryStorage::default(),
             ))
-            .data(self.services.clone())
-            .data(AdminServerAddress(self.admin_server.local_addr().clone()))
-            .data(self.admin_server.secret().clone());
+            .data(self.services.clone());
 
         let (certificate, key) = {
             let config = self.services.config.lock().await;
@@ -73,15 +80,13 @@ impl ProtocolServer for HTTPProtocolServer {
         };
 
         info!(?address, "Listening");
-        let server_future = Server::new(TcpListener::bind(address).rustls(
+        Server::new(TcpListener::bind(address).rustls(
             RustlsConfig::new().fallback(RustlsCertificate::new().cert(certificate).key(key)),
         ))
-        .run(app);
+        .run(app)
+        .await?;
 
-        tokio::select! {
-            _ = server_future => Ok(()),
-            _ = self.admin_server.run() => Ok(()),
-        }
+        Ok(())
     }
 
     async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {

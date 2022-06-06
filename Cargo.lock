@@ -4274,6 +4274,7 @@ dependencies = [
  "futures",
  "http",
  "lazy_static",
+ "percent-encoding",
  "poem",
  "reqwest",
  "serde",
