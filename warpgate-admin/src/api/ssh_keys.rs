@@ -1,5 +1,4 @@
-use crate::helpers::{authorized, ApiResult};
-use poem::session::Session;
+use crate::helpers::{ApiResult, endpoint_auth};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -28,14 +27,13 @@ impl Api {
     #[oai(
         path = "/ssh/own-keys",
         method = "get",
-        operation_id = "get_ssh_own_keys"
+        operation_id = "get_ssh_own_keys",
+        transform = "endpoint_auth",
     )]
     async fn api_ssh_get_own_keys(
         &self,
         config: Data<&Arc<Mutex<WarpgateConfig>>>,
-        session: &Session,
     ) -> ApiResult<GetSSHOwnKeysResponse> {
-        authorized(session, || async move {
             let config = config.lock().await;
             let keys = warpgate_protocol_ssh::load_client_keys(&config)
                 .map_err(poem::error::InternalServerError)?;
@@ -48,7 +46,5 @@ impl Api {
                 })
                 .collect();
             Ok(GetSSHOwnKeysResponse::Ok(Json(keys)))
-        })
-        .await
     }
 }

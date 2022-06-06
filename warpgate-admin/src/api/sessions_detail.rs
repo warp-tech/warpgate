@@ -1,4 +1,4 @@
-use crate::helpers::{authorized, ApiResult};
+use crate::helpers::{endpoint_auth, ApiResult};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -37,75 +37,70 @@ enum CloseSessionResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(path = "/sessions/:id", method = "get", operation_id = "get_session")]
+    #[oai(
+        path = "/sessions/:id",
+        method = "get",
+        operation_id = "get_session",
+        transform = "endpoint_auth"
+    )]
     async fn api_get_session(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        session: &poem::session::Session,
     ) -> ApiResult<GetSessionResponse> {
-        authorized(session, || async move {
-            let db = db.lock().await;
+        let db = db.lock().await;
 
-            let session = Session::Entity::find_by_id(id.0)
-                .one(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
+        let session = Session::Entity::find_by_id(id.0)
+            .one(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
 
-            match session {
-                Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
-                None => Ok(GetSessionResponse::NotFound),
-            }
-        })
-        .await
+        match session {
+            Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
+            None => Ok(GetSessionResponse::NotFound),
+        }
     }
 
     #[oai(
         path = "/sessions/:id/recordings",
         method = "get",
-        operation_id = "get_session_recordings"
+        operation_id = "get_session_recordings",
+        transform = "endpoint_auth"
     )]
     async fn api_get_session_recordings(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        session: &poem::session::Session,
     ) -> ApiResult<GetSessionRecordingsResponse> {
-        authorized(session, || async move {
-            let db = db.lock().await;
-            let recordings: Vec<Recording::Model> = Recording::Entity::find()
-                .order_by_desc(Recording::Column::Started)
-                .filter(Recording::Column::SessionId.eq(id.0))
-                .all(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
-            Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
-        })
-        .await
+        let db = db.lock().await;
+        let recordings: Vec<Recording::Model> = Recording::Entity::find()
+            .order_by_desc(Recording::Column::Started)
+            .filter(Recording::Column::SessionId.eq(id.0))
+            .all(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+        Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
     }
 
     #[oai(
         path = "/sessions/:id/close",
         method = "post",
-        operation_id = "close_session"
+        operation_id = "close_session",
+        transform = "endpoint_auth"
     )]
     async fn api_close_session(
         &self,
         state: Data<&Arc<Mutex<State>>>,
         id: Path<Uuid>,
-        session: &poem::session::Session,
     ) -> ApiResult<CloseSessionResponse> {
-        authorized(session, || async move {
-            let state = state.lock().await;
+        let state = state.lock().await;
 
-            if let Some(s) = state.sessions.get(&id) {
-                let mut session = s.lock().await;
-                session.handle.close();
-                Ok(CloseSessionResponse::Ok)
-            } else {
-                Ok(CloseSessionResponse::NotFound)
-            }
-        })
-        .await
+        if let Some(s) = state.sessions.get(&id) {
+            let mut session = s.lock().await;
+            session.handle.close();
+            Ok(CloseSessionResponse::Ok)
+        } else {
+            Ok(CloseSessionResponse::NotFound)
+        }
     }
 }

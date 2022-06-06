@@ -13,7 +13,7 @@ async function load () {
 }
 
 function getTCPDumpURL () {
-    return `/api/recordings/${recording?.id}/tcpdump`
+    return `/@warpgate/api/recordings/${recording?.id}/tcpdump`
 }
 
 load().catch(e => {

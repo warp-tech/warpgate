@@ -1,4 +1,4 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{ApiResult, SessionExt};
 use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
@@ -56,7 +56,7 @@ impl Api {
                             .authorize_target(&username, &target.name)
                             .await?
                     {
-                        session.set("username", username);
+                        session.set_username(username);
                         return Ok(LoginResponse::Success);
                     }
                 }

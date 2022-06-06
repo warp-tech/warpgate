@@ -1,5 +1,4 @@
-use crate::helpers::{authorized, ApiResult};
-use poem::session::Session;
+use crate::helpers::{ApiResult, endpoint_auth};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -23,34 +22,31 @@ impl Api {
     #[oai(
         path = "/ssh/known-hosts/:id",
         method = "delete",
-        operation_id = "delete_ssh_known_host"
+        operation_id = "delete_ssh_known_host",
+        transform = "endpoint_auth"
     )]
     async fn api_ssh_delete_known_host(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        session: &Session,
     ) -> ApiResult<DeleteSSHKnownHostResponse> {
-        authorized(session, || async move {
-            use warpgate_db_entities::KnownHost;
-            let db = db.lock().await;
+        use warpgate_db_entities::KnownHost;
+        let db = db.lock().await;
 
-            let known_host = KnownHost::Entity::find_by_id(id.0)
-                .one(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
+        let known_host = KnownHost::Entity::find_by_id(id.0)
+            .one(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
 
-            match known_host {
-                Some(known_host) => {
-                    known_host
-                        .delete(&*db)
-                        .await
-                        .map_err(poem::error::InternalServerError)?;
-                    Ok(DeleteSSHKnownHostResponse::Deleted)
-                }
-                None => Ok(DeleteSSHKnownHostResponse::NotFound),
+        match known_host {
+            Some(known_host) => {
+                known_host
+                    .delete(&*db)
+                    .await
+                    .map_err(poem::error::InternalServerError)?;
+                Ok(DeleteSSHKnownHostResponse::Deleted)
             }
-        })
-        .await
+            None => Ok(DeleteSSHKnownHostResponse::NotFound),
+        }
     }
 }

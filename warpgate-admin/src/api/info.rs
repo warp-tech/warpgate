@@ -1,4 +1,4 @@
-use crate::helpers::ApiResult;
+use crate::helpers::{ApiResult, SessionExt};
 use poem::session::Session;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -24,7 +24,7 @@ impl Api {
     async fn api_get_info(&self, session: &Session) -> ApiResult<InstanceInfoResponse> {
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            username: session.get::<String>("username"),
+            username: session.get_username(),
         })))
     }
 }

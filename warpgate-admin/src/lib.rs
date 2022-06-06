@@ -1,6 +1,7 @@
 #![feature(decl_macro, proc_macro_hygiene, let_else)]
 mod api;
 mod helpers;
+use helpers::endpoint_auth;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
 use warpgate_common::Services;
@@ -41,15 +42,15 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
         .nest("/api/openapi.json", spec)
         .at(
             "/api/recordings/:id/cast",
-            crate::api::recordings_detail::api_get_recording_cast,
+            endpoint_auth(crate::api::recordings_detail::api_get_recording_cast),
         )
         .at(
             "/api/recordings/:id/stream",
-            crate::api::recordings_detail::api_get_recording_stream,
+            endpoint_auth(crate::api::recordings_detail::api_get_recording_stream),
         )
         .at(
             "/api/recordings/:id/tcpdump",
-            crate::api::recordings_detail::api_get_recording_tcpdump,
+            endpoint_auth(crate::api::recordings_detail::api_get_recording_tcpdump),
         )
         .data(db)
         .data(config_provider)

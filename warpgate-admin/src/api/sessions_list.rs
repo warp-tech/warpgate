@@ -1,5 +1,4 @@
-use crate::helpers::{authorized, ApiResult};
-use poem::session::Session;
+use crate::helpers::{ApiResult, endpoint_auth};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -24,50 +23,48 @@ enum CloseAllSessionsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
+    #[oai(
+        path = "/sessions",
+        method = "get",
+        operation_id = "get_sessions",
+        transform = "endpoint_auth"
+    )]
     async fn api_get_all_sessions(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        session: &Session,
     ) -> ApiResult<GetSessionsResponse> {
-        authorized(session, || async move {
-            use warpgate_db_entities::Session;
+        use warpgate_db_entities::Session;
 
-            let db = db.lock().await;
-            let sessions = Session::Entity::find()
-                .order_by_desc(Session::Column::Started)
-                .all(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
-            let sessions = sessions
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<SessionSnapshot>>();
-            Ok(GetSessionsResponse::Ok(Json(sessions)))
-        })
-        .await
+        let db = db.lock().await;
+        let sessions = Session::Entity::find()
+            .order_by_desc(Session::Column::Started)
+            .all(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+        let sessions = sessions
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<SessionSnapshot>>();
+        Ok(GetSessionsResponse::Ok(Json(sessions)))
     }
 
     #[oai(
         path = "/sessions",
         method = "delete",
-        operation_id = "close_all_sessions"
+        operation_id = "close_all_sessions",
+        transform = "endpoint_auth"
     )]
     async fn api_close_all_sessions(
         &self,
         state: Data<&Arc<Mutex<State>>>,
-        session: &Session,
     ) -> ApiResult<CloseAllSessionsResponse> {
-        authorized(session, || async move {
-            let state = state.lock().await;
+        let state = state.lock().await;
 
-            for s in state.sessions.values() {
-                let mut session = s.lock().await;
-                session.handle.close();
-            }
+        for s in state.sessions.values() {
+            let mut session = s.lock().await;
+            session.handle.close();
+        }
 
-            Ok(CloseAllSessionsResponse::Ok)
-        })
-        .await
+        Ok(CloseAllSessionsResponse::Ok)
     }
 }
