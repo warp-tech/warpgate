@@ -2310,7 +2310,7 @@ dependencies = [
  "serde_urlencoded",
  "thiserror",
  "tokio",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2838,7 +2838,7 @@ dependencies = [
  "time 0.2.27",
  "tracing",
  "url",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2899,7 +2899,7 @@ dependencies = [
  "sea-query-driver",
  "serde_json",
  "time 0.2.27",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3248,7 +3248,7 @@ dependencies = [
  "time 0.2.27",
  "tokio-stream",
  "url",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3959,6 +3959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uuid"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6d5d669b51467dcf7b2f1a796ce0f955f05f01cafda6c19d6e95f730df29238"
+dependencies = [
+ "getrandom",
+ "serde",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4072,7 +4082,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uuid",
+ "uuid 1.1.1",
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
@@ -4107,7 +4117,7 @@ dependencies = [
  "tracing-core",
  "tracing-subscriber",
  "url",
- "uuid",
+ "uuid 1.1.1",
  "warpgate-db-entities",
  "warpgate-db-migrations",
 ]
@@ -4121,7 +4131,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "uuid",
+ "uuid 1.1.1",
 ]
 
 [[package]]
@@ -4132,7 +4142,7 @@ dependencies = [
  "chrono",
  "sea-orm",
  "sea-orm-migration",
- "uuid",
+ "uuid 1.1.1",
 ]
 
 [[package]]
@@ -4153,7 +4163,7 @@ dependencies = [
  "time 0.3.9",
  "tokio",
  "tracing",
- "uuid",
+ "uuid 1.1.1",
  "warpgate-common",
  "warpgate-db-entities",
 ]

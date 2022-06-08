@@ -19,6 +19,6 @@ thiserror = "1.0"
 time = "0.3"
 tokio = {version = "1.19", features = ["tracing", "signal"]}
 tracing = "0.1"
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.1", features = ["v4"]}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
