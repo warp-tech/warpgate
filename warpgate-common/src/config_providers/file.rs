@@ -186,11 +186,13 @@ impl ConfigProvider for FileConfigProvider {
                     return Ok(AuthResult::Rejected);
                 }
             }
-            None => {
-                return Ok(AuthResult::Accepted {
+            None => Ok(if !valid_credentials.is_empty() {
+                AuthResult::Accepted {
                     username: user.username.clone(),
-                })
-            }
+                }
+            } else {
+                AuthResult::Rejected
+            }),
         }
     }
 
