@@ -1,4 +1,4 @@
-use crate::helpers::{endpoint_auth, ApiResult};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -47,7 +47,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<GetSessionResponse> {
+    ) -> poem::Result<GetSessionResponse> {
         let db = db.lock().await;
 
         let session = Session::Entity::find_by_id(id.0)
@@ -71,7 +71,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<GetSessionRecordingsResponse> {
+    ) -> poem::Result<GetSessionRecordingsResponse> {
         let db = db.lock().await;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
             .order_by_desc(Recording::Column::Started)
@@ -92,7 +92,7 @@ impl Api {
         &self,
         state: Data<&Arc<Mutex<State>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<CloseSessionResponse> {
+    ) -> poem::Result<CloseSessionResponse> {
         let state = state.lock().await;
 
         if let Some(s) = state.sessions.get(&id) {

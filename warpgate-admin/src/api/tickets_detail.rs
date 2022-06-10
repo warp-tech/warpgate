@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -30,7 +30,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<DeleteTicketResponse> {
+    ) -> poem::Result<DeleteTicketResponse> {
         use warpgate_db_entities::Ticket;
         let db = db.lock().await;
 

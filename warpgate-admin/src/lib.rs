@@ -56,5 +56,5 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
         .data(config_provider)
         .data(state)
         .data(recordings)
-        .data(config.clone())
+        .data(config)
 }

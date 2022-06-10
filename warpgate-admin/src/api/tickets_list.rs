@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use anyhow::Context;
 use poem::web::Data;
 use poem_openapi::payload::Json;
@@ -51,7 +51,7 @@ impl Api {
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    ) -> ApiResult<GetTicketsResponse> {
+    ) -> poem::Result<GetTicketsResponse> {
         use warpgate_db_entities::Ticket;
 
         let db = db.lock().await;
@@ -76,7 +76,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateTicketRequest>,
-    ) -> ApiResult<CreateTicketResponse> {
+    ) -> poem::Result<CreateTicketResponse> {
         use warpgate_db_entities::Ticket;
 
         if body.username.is_empty() {

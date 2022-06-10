@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -16,15 +16,18 @@ enum GetUsersResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(path = "/users", method = "get", operation_id = "get_users",
-    transform = "endpoint_auth"
-)]
+    #[oai(
+        path = "/users",
+        method = "get",
+        operation_id = "get_users",
+        transform = "endpoint_auth"
+    )]
     async fn api_get_all_users(
         &self,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,
-    ) -> ApiResult<GetUsersResponse> {
-            let mut users = config_provider.lock().await.list_users().await?;
-            users.sort_by(|a, b| a.username.cmp(&b.username));
-            Ok(GetUsersResponse::Ok(Json(users)))
+    ) -> poem::Result<GetUsersResponse> {
+        let mut users = config_provider.lock().await.list_users().await?;
+        users.sort_by(|a, b| a.username.cmp(&b.username));
+        Ok(GetUsersResponse::Ok(Json(users)))
     }
 }

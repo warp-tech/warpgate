@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -26,7 +26,7 @@ impl Api {
     async fn api_ssh_get_all_known_hosts(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    ) -> ApiResult<GetSSHKnownHostsResponse> {
+    ) -> poem::Result<GetSSHKnownHostsResponse> {
         use warpgate_db_entities::KnownHost;
 
         let db = db.lock().await;

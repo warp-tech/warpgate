@@ -1,4 +1,4 @@
-use crate::helpers::{endpoint_auth, ApiResult};
+use crate::helpers::endpoint_auth;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
@@ -41,7 +41,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<GetRecordingResponse> {
+    ) -> poem::Result<GetRecordingResponse> {
         let db = db.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
@@ -61,7 +61,7 @@ pub async fn api_get_recording_cast(
     db: Data<&Arc<Mutex<DatabaseConnection>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
-) -> ApiResult<String> {
+) -> poem::Result<String> {
     let db = db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
@@ -120,7 +120,7 @@ pub async fn api_get_recording_tcpdump(
     db: Data<&Arc<Mutex<DatabaseConnection>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
-) -> ApiResult<Bytes> {
+) -> poem::Result<Bytes> {
     let db = db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)

@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -32,7 +32,7 @@ impl Api {
     async fn api_get_all_sessions(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    ) -> ApiResult<GetSessionsResponse> {
+    ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
 
         let db = db.lock().await;
@@ -57,7 +57,7 @@ impl Api {
     async fn api_close_all_sessions(
         &self,
         state: Data<&Arc<Mutex<State>>>,
-    ) -> ApiResult<CloseAllSessionsResponse> {
+    ) -> poem::Result<CloseAllSessionsResponse> {
         let state = state.lock().await;
 
         for s in state.sessions.values() {

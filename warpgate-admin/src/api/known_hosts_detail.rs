@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -29,7 +29,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> ApiResult<DeleteSSHKnownHostResponse> {
+    ) -> poem::Result<DeleteSSHKnownHostResponse> {
         use warpgate_db_entities::KnownHost;
         let db = db.lock().await;
 

@@ -1,11 +1,11 @@
-use crate::helpers::{ApiResult, SessionExt};
+use crate::helpers::SessionExt;
 use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warpgate_common::{AuthCredential, AuthResult, ConfigProvider, Secret, TargetOptions};
+use warpgate_common::{AuthCredential, AuthResult, ConfigProvider, Secret};
 
 pub struct Api;
 
@@ -38,7 +38,7 @@ impl Api {
         session: &Session,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,
         body: Json<LoginRequest>,
-    ) -> ApiResult<LoginResponse> {
+    ) -> poem::Result<LoginResponse> {
         let mut config_provider = config_provider.lock().await;
         let result = config_provider
             .authorize(
@@ -49,18 +49,8 @@ impl Api {
             .map_err(|e| e.context("Failed to authorize user"))?;
         match result {
             AuthResult::Accepted { username } => {
-                let targets = config_provider.list_targets().await?;
-                for target in targets {
-                    if matches!(target.options, TargetOptions::WebAdmin(_))
-                        && config_provider
-                            .authorize_target(&username, &target.name)
-                            .await?
-                    {
-                        session.set_username(username);
-                        return Ok(LoginResponse::Success);
-                    }
-                }
-                Ok(LoginResponse::Failure)
+                session.set_username(username);
+                Ok(LoginResponse::Success)
             }
             AuthResult::Rejected => Ok(LoginResponse::Failure),
             AuthResult::OTPNeeded => Ok(LoginResponse::Failure), // TODO
@@ -68,7 +58,7 @@ impl Api {
     }
 
     #[oai(path = "/auth/logout", method = "post", operation_id = "logout")]
-    async fn api_auth_logout(&self, session: &Session) -> ApiResult<LogoutResponse> {
+    async fn api_auth_logout(&self, session: &Session) -> poem::Result<LogoutResponse> {
         session.clear();
         Ok(LogoutResponse::Success)
     }

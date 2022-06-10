@@ -1,4 +1,4 @@
-use crate::helpers::{ApiResult, endpoint_auth};
+use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -25,7 +25,7 @@ impl Api {
     async fn api_get_all_targets(
         &self,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,
-    ) -> ApiResult<GetTargetsResponse> {
+    ) -> poem::Result<GetTargetsResponse> {
         let mut targets = config_provider.lock().await.list_targets().await?;
         targets.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(GetTargetsResponse::Ok(Json(targets)))

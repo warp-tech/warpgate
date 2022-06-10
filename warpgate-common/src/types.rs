@@ -14,9 +14,7 @@ pub struct Secret<T>(T);
 
 impl Secret<String> {
     pub fn random() -> Self {
-        Secret::new(
-            HEXLOWER.encode(&Bytes::from_iter(get_crypto_rng().gen::<[u8; 32]>())),
-        )
+        Secret::new(HEXLOWER.encode(&Bytes::from_iter(get_crypto_rng().gen::<[u8; 32]>())))
     }
 }
 

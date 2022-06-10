@@ -1,4 +1,4 @@
-use crate::helpers::{endpoint_auth, ApiResult};
+use crate::helpers::endpoint_auth;
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
@@ -39,7 +39,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-    ) -> ApiResult<GetLogsResponse> {
+    ) -> poem::Result<GetLogsResponse> {
         use warpgate_db_entities::LogEntry;
 
         let db = db.lock().await;
