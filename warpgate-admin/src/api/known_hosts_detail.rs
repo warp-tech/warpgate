@@ -21,7 +21,7 @@ impl Api {
     #[oai(
         path = "/ssh/known-hosts/:id",
         method = "delete",
-        operation_id = "delete_ssh_known_host",
+        operation_id = "delete_ssh_known_host"
     )]
     async fn api_ssh_delete_known_host(
         &self,

@@ -28,11 +28,7 @@ struct GetLogsRequest {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/logs",
-        method = "post",
-        operation_id = "get_logs",
-    )]
+    #[oai(path = "/logs", method = "post", operation_id = "get_logs")]
     async fn api_get_all_logs(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,

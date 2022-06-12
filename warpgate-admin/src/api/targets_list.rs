@@ -15,11 +15,7 @@ enum GetTargetsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/targets",
-        method = "get",
-        operation_id = "get_targets",
-    )]
+    #[oai(path = "/targets", method = "get", operation_id = "get_targets")]
     async fn api_get_all_targets(
         &self,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,

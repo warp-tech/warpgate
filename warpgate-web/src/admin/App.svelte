@@ -6,7 +6,7 @@ import Fa from 'svelte-fa'
 
 import logo from '../../public/assets/logo.svg'
 
-import Router, { link, push } from 'svelte-spa-router'
+import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
 
@@ -16,9 +16,6 @@ async function init () {
     const info = await api.getInfo()
     version = info.version
     authenticatedUsername.set(info.username ?? null)
-    if (!info.username) {
-        push('/login')
-    }
 }
 
 async function logout () {
@@ -32,9 +29,6 @@ init()
 const routes = {
     '/': wrap({
         asyncComponent: () => import('./Home.svelte'),
-    }),
-    '/login': wrap({
-        asyncComponent: () => import('./Login.svelte'),
     }),
     '/sessions/:id': wrap({
         asyncComponent: () => import('./Session.svelte'),

@@ -1,6 +1,6 @@
 <script lang="ts">
 import { api, Target, TargetKind } from 'gateway/lib/api'
-import { createEventDispatcher } from 'svelte';
+import { createEventDispatcher } from 'svelte'
 import { get } from 'svelte/store'
 import { FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
 import { authenticatedUsername } from './lib/store'

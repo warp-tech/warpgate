@@ -41,11 +41,7 @@ enum CreateTicketResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/tickets",
-        method = "get",
-        operation_id = "get_tickets",
-    )]
+    #[oai(path = "/tickets", method = "get", operation_id = "get_tickets")]
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -64,11 +60,7 @@ impl Api {
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
 
-    #[oai(
-        path = "/tickets",
-        method = "post",
-        operation_id = "create_ticket",
-    )]
+    #[oai(path = "/tickets", method = "post", operation_id = "create_ticket")]
     async fn api_create_ticket(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,

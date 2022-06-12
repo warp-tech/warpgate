@@ -154,3 +154,4 @@ overrides:
 ignorePatterns:
 - svelte.config.js
 - vite.config.ts
+- src/*/lib/api-client/**

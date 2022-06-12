@@ -36,11 +36,7 @@ enum CloseSessionResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/sessions/:id",
-        method = "get",
-        operation_id = "get_session",
-    )]
+    #[oai(path = "/sessions/:id", method = "get", operation_id = "get_session")]
     async fn api_get_session(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -62,7 +58,7 @@ impl Api {
     #[oai(
         path = "/sessions/:id/recordings",
         method = "get",
-        operation_id = "get_session_recordings",
+        operation_id = "get_session_recordings"
     )]
     async fn api_get_session_recordings(
         &self,
@@ -82,7 +78,7 @@ impl Api {
     #[oai(
         path = "/sessions/:id/close",
         method = "post",
-        operation_id = "close_session",
+        operation_id = "close_session"
     )]
     async fn api_close_session(
         &self,

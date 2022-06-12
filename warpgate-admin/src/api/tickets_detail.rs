@@ -22,7 +22,7 @@ impl Api {
     #[oai(
         path = "/tickets/:id",
         method = "delete",
-        operation_id = "delete_ticket",
+        operation_id = "delete_ticket"
     )]
     async fn api_delete_ticket(
         &self,

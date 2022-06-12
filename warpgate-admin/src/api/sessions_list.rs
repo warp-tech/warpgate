@@ -22,11 +22,7 @@ enum CloseAllSessionsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/sessions",
-        method = "get",
-        operation_id = "get_sessions",
-    )]
+    #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
     async fn api_get_all_sessions(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -49,7 +45,7 @@ impl Api {
     #[oai(
         path = "/sessions",
         method = "delete",
-        operation_id = "close_all_sessions",
+        operation_id = "close_all_sessions"
     )]
     async fn api_close_all_sessions(
         &self,

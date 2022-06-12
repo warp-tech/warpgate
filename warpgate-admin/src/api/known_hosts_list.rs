@@ -19,7 +19,7 @@ impl Api {
     #[oai(
         path = "/ssh/known-hosts",
         method = "get",
-        operation_id = "get_ssh_known_hosts",
+        operation_id = "get_ssh_known_hosts"
     )]
     async fn api_ssh_get_all_known_hosts(
         &self,

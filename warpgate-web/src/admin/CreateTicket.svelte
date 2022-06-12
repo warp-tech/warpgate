@@ -55,7 +55,7 @@ async function create () {
         The secret is only shown once - you won't be able to see it again.
     </Alert>
 
-    {#if selectedTarget?.ssh}
+    {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
         <h3>Connection instructions</h3>
 
         <FormGroup floating label="SSH username">

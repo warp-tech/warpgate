@@ -15,11 +15,7 @@ enum GetUsersResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/users",
-        method = "get",
-        operation_id = "get_users",
-    )]
+    #[oai(path = "/users", method = "get", operation_id = "get_users")]
     async fn api_get_all_users(
         &self,
         config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,

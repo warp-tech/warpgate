@@ -26,7 +26,7 @@ impl Api {
     #[oai(
         path = "/ssh/own-keys",
         method = "get",
-        operation_id = "get_ssh_own_keys",
+        operation_id = "get_ssh_own_keys"
     )]
     async fn api_ssh_get_own_keys(
         &self,

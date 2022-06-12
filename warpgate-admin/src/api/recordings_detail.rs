@@ -33,7 +33,7 @@ impl Api {
     #[oai(
         path = "/recordings/:id",
         method = "get",
-        operation_id = "get_recording",
+        operation_id = "get_recording"
     )]
     async fn api_get_recording(
         &self,

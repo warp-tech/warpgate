@@ -25,7 +25,7 @@ async function close () {
 
 function getTargetDescription () {
     if (session?.target) {
-        return `${session.target.name} (${session.target.ssh?.host}:${session.target.ssh?.port})`
+        return `${session.target.name} (${session.target.options.host}:${session.target.options?.port})`
     } else {
         return 'Not selected yet'
     }

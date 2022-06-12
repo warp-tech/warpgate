@@ -96,7 +96,7 @@ pub struct Target {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
-#[oai(discriminator_name="kind")]
+#[oai(discriminator_name = "kind")]
 pub enum TargetOptions {
     #[serde(rename = "ssh")]
     Ssh(TargetSSHOptions),

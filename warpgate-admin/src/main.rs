@@ -3,11 +3,8 @@ mod api;
 use poem_openapi::OpenApiService;
 
 pub fn main() {
-    let api_service = OpenApiService::new(
-        api::get(),
-        "Warpgate Web Admin",
-        env!("CARGO_PKG_VERSION"),
-    )
-    .server("/@warpgate/admin/api");
+    let api_service =
+        OpenApiService::new(api::get(), "Warpgate Web Admin", env!("CARGO_PKG_VERSION"))
+            .server("/@warpgate/admin/api");
     println!("{}", api_service.spec());
 }
