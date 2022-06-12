@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -20,7 +19,6 @@ impl Api {
         path = "/targets",
         method = "get",
         operation_id = "get_targets",
-        transform = "endpoint_auth"
     )]
     async fn api_get_all_targets(
         &self,

@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
@@ -35,7 +34,6 @@ impl Api {
         path = "/recordings/:id",
         method = "get",
         operation_id = "get_recording",
-        transform = "endpoint_auth"
     )]
     async fn api_get_recording(
         &self,

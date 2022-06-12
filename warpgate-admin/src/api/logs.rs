@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
@@ -33,7 +32,6 @@ impl Api {
         path = "/logs",
         method = "post",
         operation_id = "get_logs",
-        transform = "endpoint_auth"
     )]
     async fn api_get_all_logs(
         &self,

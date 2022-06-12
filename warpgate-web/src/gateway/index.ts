@@ -1,4 +1,10 @@
 import '@fontsource/work-sans'
 import '../theme.scss'
+import App from './App.svelte'
 
-import('./login')
+const app = {}
+new App({
+    target: document.getElementById('app')!,
+})
+
+export default app

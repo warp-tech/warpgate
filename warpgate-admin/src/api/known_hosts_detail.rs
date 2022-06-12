@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -23,7 +22,6 @@ impl Api {
         path = "/ssh/known-hosts/:id",
         method = "delete",
         operation_id = "delete_ssh_known_host",
-        transform = "endpoint_auth"
     )]
     async fn api_ssh_delete_known_host(
         &self,

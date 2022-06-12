@@ -1,4 +1,4 @@
-use crate::helpers::SessionExt;
+use crate::common::SessionExt;
 use poem::session::Session;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -10,6 +10,7 @@ pub struct Api;
 pub struct Info {
     version: String,
     username: Option<String>,
+    selected_target: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -25,6 +26,7 @@ impl Api {
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
             username: session.get_username(),
+            selected_target: session.get_target_name(),
         })))
     }
 }

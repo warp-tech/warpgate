@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -28,7 +27,6 @@ impl Api {
         path = "/ssh/own-keys",
         method = "get",
         operation_id = "get_ssh_own_keys",
-        transform = "endpoint_auth"
     )]
     async fn api_ssh_get_own_keys(
         &self,

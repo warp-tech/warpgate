@@ -1,13 +1,11 @@
+use crate::common::{gateway_redirect, SessionExt, SessionUsername};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
-use poem::web::{Data, Redirect};
+use poem::web::Data;
 use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use warpgate_common::{Services, TargetOptions};
-
-static TARGET_SESSION_KEY: &str = "target";
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -20,16 +18,17 @@ pub async fn catchall_endpoint(
     ws: Option<WebSocket>,
     session: &Session,
     body: Body,
+    username: Data<&SessionUsername>,
     services: Data<&Services>,
 ) -> poem::Result<Response> {
     let params: QueryParams = req.params()?;
 
     if let Some(target_name) = params.warpgate_target {
-        session.set(TARGET_SESSION_KEY, target_name);
+        session.set_target_name(target_name);
     }
 
-    let Some(target_name) = session.get::<String>(TARGET_SESSION_KEY) else {
-        return Ok(target_select_redirect(req).into_response());
+    let Some(target_name) = session.get_target_name() else {
+        return Ok(gateway_redirect(req).into_response());
     };
 
     let target = {
@@ -48,9 +47,13 @@ pub async fn catchall_endpoint(
             .map(|(t, o)| (t.clone(), o.clone()))
     };
 
-    let Some((_, options)) = target else {
-        return Ok(target_select_redirect(req).into_response());
+    let Some((target, options)) = target else {
+        return Ok(gateway_redirect(req).into_response());
     };
+
+    if !services.config_provider.lock().await.authorize_target(&username.0.0, &target.name).await? {
+        return Ok(gateway_redirect(req).into_response());
+    }
 
     Ok(match ws {
         Some(ws) => proxy_websocket_request(req, ws, &options)
@@ -60,19 +63,4 @@ pub async fn catchall_endpoint(
             .await?
             .into_response(),
     })
-}
-
-pub fn target_select_redirect(req: &Request) -> Response {
-    let path = req
-        .uri()
-        .path_and_query()
-        .map(|p| p.to_string())
-        .unwrap_or("".into());
-
-    let path = format!(
-        "/@warpgate?next={}",
-        utf8_percent_encode(&path, NON_ALPHANUMERIC)
-    );
-
-    Redirect::temporary(path).into_response()
 }

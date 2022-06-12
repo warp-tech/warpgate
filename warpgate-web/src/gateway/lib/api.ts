@@ -1,7 +1,7 @@
 import { DefaultApi, Configuration } from './api-client/dist'
 
 const configuration = new Configuration({
-    basePath: '/@warpgate/admin/api',
+    basePath: '/@warpgate/api',
 })
 
 export const api = new DefaultApi(configuration)

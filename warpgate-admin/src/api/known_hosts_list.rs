@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -21,7 +20,6 @@ impl Api {
         path = "/ssh/known-hosts",
         method = "get",
         operation_id = "get_ssh_known_hosts",
-        transform = "endpoint_auth"
     )]
     async fn api_ssh_get_all_known_hosts(
         &self,

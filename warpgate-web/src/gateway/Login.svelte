@@ -1,8 +1,10 @@
 <script lang="ts">
 import logo from '../../public/assets/logo.svg'
 import { replace } from 'svelte-spa-router'
-
 import { Alert, Button, FormGroup } from 'sveltestrap'
+import { api } from 'gateway/lib/api'
+import { authenticatedUsername } from 'gateway/lib/store'
+
 let error: Error|null = null
 let username = ''
 let password = ''
@@ -13,12 +15,12 @@ async function login (event?: MouseEvent) {
     error = null
     incorrectCredentials = false
     try {
-        // await api.login({
-        //     loginRequest: {
-        //         username,
-        //         password,
-        //     },
-        // })
+        await api.login({
+            loginRequest: {
+                username,
+                password,
+            },
+        })
     } catch (err) {
         if (err.status === 401) {
             incorrectCredentials = true
@@ -27,9 +29,15 @@ async function login (event?: MouseEvent) {
         }
         return
     }
-    // const info = await api.getInfo()
-    // authenticatedUsername.set(info.username!)
-    replace('/')
+    const info = await api.getInfo()
+
+    let next = new URLSearchParams(location.search).get('next')
+    if (next) {
+        location.href = next
+    } else {
+        authenticatedUsername.set(info.username!)
+        replace('/')
+    }
 }
 
 function onInputKey (event: KeyboardEvent) {

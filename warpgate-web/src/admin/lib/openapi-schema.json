@@ -1,12 +1,12 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Warpgate",
-    "version": "0.1.1"
+    "title": "Warpgate Web Admin",
+    "version": "0.2.2"
   },
   "servers": [
     {
-      "url": "/api"
+      "url": "/@warpgate/admin/api"
     }
   ],
   "tags": [],
@@ -325,56 +325,6 @@
         "operationId": "delete_ssh_known_host"
       }
     },
-    "/info": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Info"
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_info"
-      }
-    },
-    "/auth/login": {
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          },
-          "401": {
-            "description": ""
-          }
-        },
-        "operationId": "login"
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "operationId": "logout"
-      }
-    },
     "/ssh/own-keys": {
       "get": {
         "responses": {
@@ -470,20 +420,6 @@
           }
         }
       },
-      "Info": {
-        "type": "object",
-        "required": [
-          "version"
-        ],
-        "properties": {
-          "version": {
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
-          }
-        }
-      },
       "LogEntry": {
         "type": "object",
         "required": [
@@ -511,21 +447,6 @@
             "format": "uuid"
           },
           "username": {
-            "type": "string"
-          }
-        }
-      },
-      "LoginRequest": {
-        "type": "object",
-        "required": [
-          "username",
-          "password"
-        ],
-        "properties": {
-          "username": {
-            "type": "string"
-          },
-          "password": {
             "type": "string"
           }
         }
@@ -650,7 +571,8 @@
         "type": "object",
         "required": [
           "name",
-          "allow_roles"
+          "allow_roles",
+          "options"
         ],
         "properties": {
           "name": {
@@ -662,12 +584,94 @@
               "type": "string"
             }
           },
-          "ssh": {
-            "$ref": "#/components/schemas/TargetSSHOptions"
-          },
-          "web_admin": {
-            "$ref": "#/components/schemas/TargetWebAdminOptions"
+          "options": {
+            "$ref": "#/components/schemas/TargetOptions"
           }
+        }
+      },
+      "TargetHTTPOptions": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TargetOptions": {
+        "type": "object",
+        "anyOf": [
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetSSHOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetSSHOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetSSHOptions"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetHTTPOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetHTTPOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetHTTPOptions"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetWebAdminOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetWebAdminOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetWebAdminOptions"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
         }
       },
       "TargetSSHOptions": {

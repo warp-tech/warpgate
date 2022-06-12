@@ -16,7 +16,8 @@ export default defineConfig({
         manifest: true,
         commonjsOptions: {
             include: [
-                'api-client/dist/*.js',
+                'src/gateway/lib/api-client/dist/*.js',
+                'src/admin/lib/api-client/dist/*.js',
                 '**/*.js',
             ],
             transformMixedEsModules: true,

@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -24,7 +23,6 @@ impl Api {
         path = "/tickets/:id",
         method = "delete",
         operation_id = "delete_ticket",
-        transform = "endpoint_auth"
     )]
     async fn api_delete_ticket(
         &self,

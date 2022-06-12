@@ -1,19 +1,25 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
 mod api;
+mod catchall;
+mod common;
 mod proxy;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use common::page_admin_auth;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
-use poem::{EndpointExt, Route, Server};
+use poem::{EndpointExt, Route, Server, IntoEndpoint};
+use poem_openapi::OpenApiService;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
+
+use crate::common::{page_auth, endpoint_auth, endpoint_admin_auth};
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -30,23 +36,40 @@ impl HTTPProtocolServer {
 #[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
-        let admin_api_app = admin_api_app(&self.services);
+        let admin_api_app = admin_api_app(&self.services).into_endpoint();
+        let api_service = OpenApiService::new(
+            crate::api::get(),
+            "Warpgate HTTP proxy",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .server("/@warpgate/api");
+        let ui = api_service.swagger_ui();
+        let spec = api_service.spec_endpoint();
+
         let app = Route::new()
             .nest(
                 "/@warpgate",
                 Route::new()
-                    .nest_no_strip("/api", admin_api_app)
+                    .nest("/api/swagger", ui)
+                    .nest("/api", api_service)
+                    .nest("/api/openapi.json", spec)
                     .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
+                    .nest(
+                        "/admin/api",
+                        endpoint_auth(endpoint_admin_auth(admin_api_app)),
+                    )
                     .at(
                         "/admin",
-                        EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"),
+                        page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
+                            "src/admin/index.html",
+                        ))),
                     )
                     .at(
                         "",
                         EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html"),
                     ),
             )
-            .nest_no_strip("/", api::catchall_endpoint)
+            .nest_no_strip("/", page_auth(catchall::catchall_endpoint))
             .with(
                 SetHeader::new()
                     .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),

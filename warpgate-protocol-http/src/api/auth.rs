@@ -1,11 +1,9 @@
-use crate::helpers::SessionExt;
+use crate::common::SessionExt;
 use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use warpgate_common::{AuthCredential, AuthResult, ConfigProvider, Secret};
+use warpgate_common::{AuthCredential, AuthResult, Secret, Services};
 
 pub struct Api;
 
@@ -36,10 +34,10 @@ impl Api {
     async fn api_auth_login(
         &self,
         session: &Session,
-        config_provider: Data<&Arc<Mutex<dyn ConfigProvider + Send>>>,
+        services: Data<&Services>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let mut config_provider = config_provider.lock().await;
+        let mut config_provider = services.config_provider.lock().await;
         let result = config_provider
             .authorize(
                 &body.username,

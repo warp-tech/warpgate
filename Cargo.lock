@@ -4276,6 +4276,7 @@ dependencies = [
  "lazy_static",
  "percent-encoding",
  "poem",
+ "poem-openapi",
  "reqwest",
  "serde",
  "tokio",

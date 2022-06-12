@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use anyhow::Context;
 use poem::web::Data;
 use poem_openapi::payload::Json;
@@ -46,7 +45,6 @@ impl Api {
         path = "/tickets",
         method = "get",
         operation_id = "get_tickets",
-        transform = "endpoint_auth"
     )]
     async fn api_get_all_tickets(
         &self,
@@ -70,7 +68,6 @@ impl Api {
         path = "/tickets",
         method = "post",
         operation_id = "create_ticket",
-        transform = "endpoint_auth"
     )]
     async fn api_create_ticket(
         &self,

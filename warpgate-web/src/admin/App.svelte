@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import { api } from 'admin/lib/api'
+import { api } from 'gateway/lib/api'
 import { authenticatedUsername } from 'admin/lib/store'
 import Fa from 'svelte-fa'
 
@@ -24,7 +24,7 @@ async function init () {
 async function logout () {
     await api.logout()
     authenticatedUsername.set(null)
-    push('/login')
+    location.href = '/@warpgate'
 }
 
 init()

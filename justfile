@@ -25,9 +25,9 @@ svelte-check:
     cd warpgate-web && yarn run check
 
 openapi-all:
-    cd warpgate-web && yarn openapi-schema && yarn openapi-client
+    cd warpgate-web && yarn openapi:schema:admin && yarn openapi:schema:gateway && yarn openapi:client:admin && yarn openapi:client:gateway
 
 openapi:
-    cd warpgate-web && yarn openapi-client
+    cd warpgate-web && yarn openapi:client:admin && yarn openapi:client:gateway
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint

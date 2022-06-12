@@ -1,32 +1,16 @@
 #![feature(decl_macro, proc_macro_hygiene, let_else)]
 mod api;
-mod helpers;
-use helpers::endpoint_auth;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
 use warpgate_common::Services;
 
 pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
     let api_service = OpenApiService::new(
-        (
-            crate::api::sessions_list::Api,
-            crate::api::sessions_detail::Api,
-            crate::api::recordings_detail::Api,
-            crate::api::users_list::Api,
-            crate::api::targets_list::Api,
-            crate::api::tickets_list::Api,
-            crate::api::tickets_detail::Api,
-            crate::api::known_hosts_list::Api,
-            crate::api::known_hosts_detail::Api,
-            crate::api::info::Api,
-            crate::api::auth::Api,
-            crate::api::ssh_keys::Api,
-            crate::api::logs::Api,
-        ),
-        "Warpgate",
+        crate::api::get(),
+        "Warpgate Web Admin",
         env!("CARGO_PKG_VERSION"),
     )
-    .server("/api");
+    .server("/@warpgate/admin/api");
 
     let ui = api_service.swagger_ui();
     let spec = api_service.spec_endpoint();
@@ -37,20 +21,20 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
     let state = services.state.clone();
 
     Route::new()
-        .nest("/api/swagger", ui)
-        .nest("/api", api_service)
-        .nest("/api/openapi.json", spec)
+        .nest("", api_service)
+        .nest("/swagger", ui)
+        .nest("/openapi.json", spec)
         .at(
-            "/api/recordings/:id/cast",
-            endpoint_auth(crate::api::recordings_detail::api_get_recording_cast),
+            "/recordings/:id/cast",
+            crate::api::recordings_detail::api_get_recording_cast,
         )
         .at(
-            "/api/recordings/:id/stream",
-            endpoint_auth(crate::api::recordings_detail::api_get_recording_stream),
+            "/recordings/:id/stream",
+            crate::api::recordings_detail::api_get_recording_stream,
         )
         .at(
-            "/api/recordings/:id/tcpdump",
-            endpoint_auth(crate::api::recordings_detail::api_get_recording_tcpdump),
+            "/recordings/:id/tcpdump",
+            crate::api::recordings_detail::api_get_recording_tcpdump,
         )
         .data(db)
         .data(config_provider)

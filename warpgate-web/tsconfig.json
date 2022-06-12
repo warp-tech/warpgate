@@ -27,11 +27,13 @@
     "include": [
         "src/**/*.d.ts",
         "src/**/*.ts",
+        "src/*.ts",
         "src/**/*.js",
         "src/**/*.svelte"
     ],
     "exclude": [
         "node_modules/@types/node/**",
+        "src/*/lib/api-client",
     ],
     "references": [
         {

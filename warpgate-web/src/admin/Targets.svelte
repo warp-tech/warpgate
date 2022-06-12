@@ -41,10 +41,10 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
                 {target.name}
             </strong>
             <small class="text-muted ms-auto">
-                {#if target.ssh}
+                {#if target.options.kind === 'TargetSSHOptions'}
                     SSH
                 {/if}
-                {#if target.webAdmin}
+                {#if target.options.kind === 'TargetWebAdminOptions'}
                     This web admin interface
                 {/if}
             </small>
@@ -58,16 +58,16 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
             {selectedTarget?.name}
         </div>
         <div class="target-type-label">
-            {#if selectedTarget?.ssh}
+            {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
                 SSH target
             {/if}
-            {#if selectedTarget?.webAdmin}
+            {#if selectedTarget?.options.kind === 'TargetWebAdminOptions'}
                 This web admin interface
             {/if}
         </div>
     </ModalHeader>
     <ModalBody>
-        {#if selectedTarget?.ssh}
+        {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
             <h3>Connection instructions</h3>
             {#if users}
                 <FormGroup floating label="Select a user">

@@ -1,4 +1,3 @@
-use crate::helpers::endpoint_auth;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -41,7 +40,6 @@ impl Api {
         path = "/sessions/:id",
         method = "get",
         operation_id = "get_session",
-        transform = "endpoint_auth"
     )]
     async fn api_get_session(
         &self,
@@ -65,7 +63,6 @@ impl Api {
         path = "/sessions/:id/recordings",
         method = "get",
         operation_id = "get_session_recordings",
-        transform = "endpoint_auth"
     )]
     async fn api_get_session_recordings(
         &self,
@@ -86,7 +83,6 @@ impl Api {
         path = "/sessions/:id/close",
         method = "post",
         operation_id = "close_session",
-        transform = "endpoint_auth"
     )]
     async fn api_close_session(
         &self,
