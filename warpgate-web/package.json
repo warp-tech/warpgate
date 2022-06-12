@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint src && svelte-check",
-    "postinstall": "yarn run openapi-client",
+    "postinstall": "yarn run openapi:client:gateway && yarn run openapi:client:admin",
     "openapi:schema:gateway": "cargo run -p warpgate-protocol-http > src/gateway/lib/openapi-schema.json",
     "openapi:schema:admin": "cargo run -p warpgate-admin > src/admin/lib/openapi-schema.json",
     "openapi:client:gateway": "openapi-generator-cli generate -g typescript-fetch -i src/gateway/lib/openapi-schema.json -o src/gateway/lib/api-client -p npmName=warpgate-gateway-api-client -p useSingleRequestParameter=true && cd src/gateway/lib/api-client && npm i && yarn tsc --target esnext --module esnext && rm -rf src",

@@ -35,7 +35,7 @@ jobs:
 
       - name: Build admin UI
         run: |
-          just yarn openapi-client
+          just openapi
           just yarn build
 
       - name: Build

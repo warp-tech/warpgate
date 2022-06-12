@@ -58,11 +58,11 @@ You can use the web interface to view the live session list, review session reco
 
 ## Contributing / building from source
 
-* You'll need nightly Rust (will be installed automatically), NodeJS and Yarn
+* You'll need Rust, NodeJS and Yarn
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
 * Install the admin UI deps: `just yarn`
-* Build the API SDK: `just openapi-client`
+* Build the API SDK: `just openapi`
 * Build the frontend: `just yarn build`
 * Build Warpgate: `cargo build` (optionally `--release`)
 
