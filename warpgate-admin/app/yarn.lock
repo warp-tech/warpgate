@@ -2252,10 +2252,10 @@ svelte-check@^2.7.2:
     svelte-preprocess "^4.0.0"
     typescript "*"
 
-svelte-fa@^2.4.0:
-  version "2.4.0"
-  resolved "https://registry.yarnpkg.com/svelte-fa/-/svelte-fa-2.4.0.tgz#d94285151a975b92b29efec6ec9e2c11c57780ef"
-  integrity sha512-0bnbMGbsE1LUnlioDcf27tl2O8kjuXlTXMXzIxC7LoIOWmqn0D+zd539HfLiQbdLuOHGTaynwN9V+4ehhEu1Jw==
+svelte-fa@^3.0.1:
+  version "3.0.1"
+  resolved "https://registry.yarnpkg.com/svelte-fa/-/svelte-fa-3.0.1.tgz#a8f64031c25e13bf09670152fb631f274ad127a1"
+  integrity sha512-p0+sp0Zzcjzqi/3cg4TsGG8MO1DE6vgNxUqcELZXMvkMgad/1VFTSKZ9QRkQMWBcIHsu3IEr16HldQFU4bJQ2g==
 
 svelte-hmr@^0.14.12:
   version "0.14.12"
