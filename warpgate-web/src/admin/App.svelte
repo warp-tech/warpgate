@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { api } from 'gateway/lib/api'
-import { authenticatedUsername } from 'admin/lib/store'
+import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
 import Fa from 'svelte-fa'
 
 import logo from '../../public/assets/logo.svg'
@@ -9,18 +9,15 @@ import logo from '../../public/assets/logo.svg'
 import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
-
-let version = ''
+import { Spinner } from 'sveltestrap'
 
 async function init () {
-    const info = await api.getInfo()
-    version = info.version
-    authenticatedUsername.set(info.username ?? null)
+    await reloadServerInfo()
 }
 
 async function logout () {
     await api.logout()
-    authenticatedUsername.set(null)
+    await reloadServerInfo()
     location.href = '/@warpgate'
 }
 
@@ -54,34 +51,38 @@ const routes = {
 }
 </script>
 
-<div class="app container">
-    <header>
-        <a use:link use:active href="/" class="d-flex">
-            <img class="logo" src={logo} alt="Logo" />
-        </a>
-        {#if $authenticatedUsername}
-            <a use:link use:active href="/">Sessions</a>
-            <a use:link use:active href="/targets">Targets</a>
-            <a use:link use:active href="/tickets">Tickets</a>
-            <a use:link use:active href="/ssh">SSH</a>
-            <a use:link use:active href="/log">Log</a>
-        {/if}
-        {#if $authenticatedUsername}
-        <div class="username">
-            <!-- {$authenticatedUsername} -->
-        </div>
-        <button class="btn btn-link" on:click={logout}>
-            <Fa icon={faSignOut} fw />
-        </button>
-        {/if}
-    </header>
-    <main>
-        <Router {routes}/>
-    </main>
-    <footer>
-        {version}
-    </footer>
-</div>
+{#await init()}
+    <Spinner />
+{:then}
+    <div class="app container">
+        <header>
+            <a href="/@warpgate" class="d-flex">
+                <img class="logo" src={logo} alt="Logo" />
+            </a>
+            {#if $serverInfo?.username}
+                <a use:link use:active href="/">Sessions</a>
+                <a use:link use:active href="/targets">Targets</a>
+                <a use:link use:active href="/tickets">Tickets</a>
+                <a use:link use:active href="/ssh">SSH</a>
+                <a use:link use:active href="/log">Log</a>
+            {/if}
+            {#if $serverInfo?.username}
+            <div class="username">
+                {$serverInfo?.username}
+            </div>
+            <button class="btn btn-link" on:click={logout}>
+                <Fa icon={faSignOut} fw />
+            </button>
+            {/if}
+        </header>
+        <main>
+            <Router {routes}/>
+        </main>
+        <footer>
+            {$serverInfo?.version}
+        </footer>
+    </div>
+{/await}
 
 <style lang="scss">
     @import "../vars";
@@ -123,12 +124,5 @@ const routes = {
         .username {
             margin-left: auto;
         }
-    }
-
-    footer {
-        display: flex;
-        padding: 10px 0;
-        margin: 20px 0 10px;
-        border-top: 1px solid rgba($body-color, .75);
     }
 </style>

@@ -240,7 +240,7 @@ async fn copy_client_body_and_embed(
 ) -> Result<()> {
     let content = client_response.text().await?;
 
-    let script_name = lookup_built_file("src/main.embed.ts")?;
+    let script_name = lookup_built_file("src/embed/index.ts")?;
 
     let inject = format!(
         r#"<script type="module" src="/@warpgate/{}"></script>"#,

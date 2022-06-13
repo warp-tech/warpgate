@@ -1,4 +1,4 @@
-import { api } from './gateway/lib/api'
+import { api } from 'gateway/lib/api'
 
 navigator.serviceWorker.getRegistrations().then(registrations => {
     for (const registration of registrations) {

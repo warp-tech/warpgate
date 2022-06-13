@@ -26,7 +26,7 @@ export default defineConfig({
             input: {
                 admin: 'src/admin/index.html',
                 gateway: 'src/gateway/index.html',
-                embed: 'src/main.embed.ts',
+                embed: 'src/embed/index.ts',
             },
         },
     },

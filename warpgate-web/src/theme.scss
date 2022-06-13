@@ -90,3 +90,10 @@ a {
     padding: 0 10px;
     margin: 20px 0;
 }
+
+footer {
+    display: flex;
+    padding: 1rem 0;
+    margin: 2rem 0 1rem;
+    border-top: 1px solid rgba($body-color, .5);
+}

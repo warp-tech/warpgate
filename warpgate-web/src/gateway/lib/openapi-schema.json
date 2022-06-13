@@ -87,7 +87,8 @@
       "Info": {
         "type": "object",
         "required": [
-          "version"
+          "version",
+          "ports"
         ],
         "properties": {
           "version": {
@@ -98,6 +99,9 @@
           },
           "selected_target": {
             "type": "string"
+          },
+          "ports": {
+            "$ref": "#/components/schemas/PortsInfo"
           }
         }
       },
@@ -113,6 +117,18 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "PortsInfo": {
+        "type": "object",
+        "required": [
+          "ssh"
+        ],
+        "properties": {
+          "ssh": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
