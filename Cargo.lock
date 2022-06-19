@@ -593,9 +593,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.18"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2dbdf4bdacb33466e854ce889eee8dfd5729abf7ccd7664d0a2d60cd384440b"
+checksum = "a836566fa5f52f7ddf909a8a2f9029b9f78ca584cd95cf7e87f8073110f4c5c9"
 dependencies = [
  "atty",
  "bitflags",
@@ -610,9 +610,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.1.18"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25320346e922cffe59c0bbc5410c8d8784509efb321488971081313cb1e1a33c"
+checksum = "986fd75d1dfd2c34eb8c9275ae38ad87ea9478c9b79e87f1801f7d866dfb1e37"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -623,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37c35f1112dad5e6e0b1adaff798507497a18fceeb30cceb3bae7d1427b9213"
+checksum = "5538cd660450ebeb4234cfecf8f2284b844ffc4c50531e66d584ad5b91293613"
 dependencies = [
  "os_str_bytes",
 ]
@@ -2040,9 +2040,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.18.0+1.1.1n"
+version = "111.20.0+1.1.1o"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7897a926e1e8d00219127dc020130eca4292e5ca666dd592480d72c3eca2ff6c"
+checksum = "92892c4f87d56e376e469ace79f1128fdaded07646ddf73aa0be4706ff712dec"
 dependencies = [
  "cc",
 ]
@@ -2674,9 +2674,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.34.0-beta.2"
+version = "0.34.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d662ff7b0b00a0b8dc6d66b1cfcdb6e587421cec345805fde78890ca0158de"
+checksum = "8cc30588f58cdf955a0834ac1868c7061f59f97b32cc64edaee6ed7610722e29"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -2707,9 +2707,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0-beta.1"
+version = "0.22.0-beta.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab150b6cf2ee69249e89449873d9b1104f871105ef852f6cd4c03587899aec6b"
+checksum = "8cead36ac2cc5b61c6774a47568117980d3df4ccf1e3dd504614809832c0781b"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
@@ -4147,14 +4147,14 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.2.2"
+version = "0.2.5"
 dependencies = [
  "ansi_term",
  "anyhow",
  "async-trait",
  "atty",
  "bytes",
- "clap 3.1.18",
+ "clap 3.2.1",
  "config",
  "console",
  "console-subscriber",
@@ -4180,7 +4180,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.2.2"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4192,6 +4192,7 @@ dependencies = [
  "poem",
  "poem-openapi",
  "russh-keys",
+ "rust-embed",
  "sea-orm",
  "serde",
  "serde_json",

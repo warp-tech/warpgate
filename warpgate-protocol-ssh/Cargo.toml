@@ -12,8 +12,8 @@ bimap = "0.6"
 bytes = "1.1"
 dialoguer = "0.10"
 futures = "0.3"
-russh = {version = "0.34.0-beta.2", features = ["openssl"]}
-russh-keys = {version = "0.22.0-beta.1", features = ["openssl"]}
+russh = {version = "0.34.0-beta.5", features = ["openssl"]}
+russh-keys = {version = "0.22.0-beta.2", features = ["openssl"]}
 sea-orm = {version = "^0.8", features = ["runtime-tokio-native-tls"], default-features = false}
 thiserror = "1.0"
 time = "0.3"
