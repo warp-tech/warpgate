@@ -13,12 +13,12 @@ use warpgate_db_entities::Ticket;
 
 pub enum AuthResult {
     Accepted { username: String },
-    OTPNeeded,
+    OtpNeeded,
     Rejected,
 }
 
 pub enum AuthCredential {
-    OTP(Secret<String>),
+    Otp(Secret<String>),
     Password(Secret<String>),
     PublicKey {
         kind: String,

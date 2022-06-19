@@ -26,12 +26,6 @@ function onPageResume () {
 }
 
 init()
-
-// const routes = {
-//     '/': wrap({
-//         asyncComponent: () => import('./Home.svelte'),
-//     }),
-// }
 </script>
 
 <svelte:window on:pageshow={onPageResume}/>

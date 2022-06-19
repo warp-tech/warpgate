@@ -28,6 +28,12 @@ impl<T> Secret<T> {
     }
 }
 
+impl<T> From<T> for Secret<T> {
+    fn from(v: T) -> Self {
+        Self::new(v)
+    }
+}
+
 impl<'de, T> Deserialize<'de> for Secret<T>
 where
     T: Deserialize<'de>,

@@ -1,8 +1,12 @@
 use crate::common::SessionExt;
+use crate::session::SessionMiddleware;
+use http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
+use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use warpgate_common::{AuthCredential, AuthResult, Secret, Services};
 
 pub struct Api;
@@ -11,6 +15,18 @@ pub struct Api;
 struct LoginRequest {
     username: String,
     password: String,
+    otp: Option<String>,
+}
+
+#[derive(Enum)]
+enum LoginFailureReason {
+    InvalidCredentials,
+    OtpNeeded,
+}
+
+#[derive(Object)]
+struct LoginFailureResponse {
+    reason: LoginFailureReason,
 }
 
 #[derive(ApiResponse)]
@@ -19,7 +35,7 @@ enum LoginResponse {
     Success,
 
     #[oai(status = 401)]
-    Failure,
+    Failure(Json<LoginFailureResponse>),
 }
 
 #[derive(ApiResponse)]
@@ -35,23 +51,39 @@ impl Api {
         &self,
         session: &Session,
         services: Data<&Services>,
+        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut config_provider = services.config_provider.lock().await;
+        let mut credentials = vec![AuthCredential::Password(Secret::new(body.password.clone()))];
+        if let Some(ref otp) = body.otp {
+            credentials.push(AuthCredential::Otp(otp.clone().into()));
+        }
         let result = config_provider
-            .authorize(
-                &body.username,
-                &[AuthCredential::Password(Secret::new(body.password.clone()))],
-            )
+            .authorize(&body.username, &credentials)
             .await
             .map_err(|e| e.context("Failed to authorize user"))?;
         match result {
             AuthResult::Accepted { username } => {
+                let sm = session_middleware.lock().await;
+                if let Some(mut handle) = sm.handle_for(session) {
+                    handle.set_username(username.clone()).await?;
+                } else {
+                    Err(poem::Error::from_string(
+                        "Failed to get session handle",
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ))?
+                }
                 session.set_username(username);
                 Ok(LoginResponse::Success)
             }
-            AuthResult::Rejected => Ok(LoginResponse::Failure),
-            AuthResult::OTPNeeded => Ok(LoginResponse::Failure), // TODO
+            x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                reason: match x {
+                    AuthResult::Accepted { .. } => unreachable!(),
+                    AuthResult::Rejected => LoginFailureReason::InvalidCredentials,
+                    AuthResult::OtpNeeded => LoginFailureReason::OtpNeeded,
+                },
+            }))),
         }
     }
 

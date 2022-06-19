@@ -1,7 +1,8 @@
 <script lang="ts">
 import { api, UserSnapshot, Target, TicketAndSecret } from 'admin/lib/api'
+import AsyncButton from 'common/AsyncButton.svelte'
 import { link } from 'svelte-spa-router'
-import { Alert, Button, FormGroup } from 'sveltestrap'
+import { Alert, FormGroup } from 'sveltestrap'
 import { firstBy } from 'thenby'
 
 let error: Error|null = null
@@ -101,8 +102,8 @@ async function create () {
     </FormGroup>
     {/if}
 
-    <Button
+    <AsyncButton
         outline
-        on:click={create}
-    >Create ticket</Button>
+        click={create}
+    >Create ticket</AsyncButton>
 {/if}

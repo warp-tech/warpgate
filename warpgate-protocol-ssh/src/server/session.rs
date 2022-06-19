@@ -884,7 +884,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -905,7 +905,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -922,14 +922,14 @@ impl ServerSession {
         info!("Keyboard-interactive auth as {:?}", selector);
 
         if let Some(otp) = response {
-            self.credentials.push(AuthCredential::OTP(otp));
+            self.credentials.push(AuthCredential::Otp(otp.into()));
         }
 
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Partial {
-                name: Cow::Borrowed("OTP"),
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Partial {
+                name: Cow::Borrowed("Two-factor authentication"),
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
@@ -975,8 +975,7 @@ impl ServerSession {
                         self._auth_accept(&username, target_name).await;
                         Ok(AuthResult::Accepted { username })
                     }
-                    AuthResult::Rejected => Ok(AuthResult::Rejected),
-                    AuthResult::OTPNeeded => Ok(AuthResult::OTPNeeded),
+                    x => Ok(x),
                 }
             }
             AuthSelector::Ticket { secret } => {

@@ -1,16 +1,29 @@
 <script lang="ts">
 import { replace } from 'svelte-spa-router'
 import { Alert, Button, FormGroup } from 'sveltestrap'
-import { api } from 'gateway/lib/api'
+import { api, ApiResponse, LoginFailureReason, LoginFailureResponseFromJSON, VoidApiResponse } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
+import AsyncButton from 'common/AsyncButton.svelte';
 
 let error: Error|null = null
 let username = ''
 let password = ''
+let otp = ''
 let incorrectCredentials = false
+let otpInputVisible = false
+let busy = false
 
 async function login (event?: MouseEvent) {
     event?.preventDefault()
+    busy = true
+    try {
+        await _login()
+    } finally {
+        busy = false
+    }
+}
+
+async function _login () {
     error = null
     incorrectCredentials = false
     try {
@@ -18,24 +31,37 @@ async function login (event?: MouseEvent) {
             loginRequest: {
                 username,
                 password,
+                otp: otp || undefined,
             },
         })
+        let next = new URLSearchParams(location.search).get('next')
+        if (next) {
+            location.href = next
+        } else {
+            await reloadServerInfo()
+            replace('/')
+        }
     } catch (err) {
-        if (err.status === 401) {
-            incorrectCredentials = true
+        if (err.status) {
+            const response = err as Response
+            if (response.status === 401) {
+                const failure = LoginFailureResponseFromJSON(await response.json())
+                if (failure.reason === LoginFailureReason.InvalidCredentials) {
+                    incorrectCredentials = true
+                } else if (failure.reason === LoginFailureReason.OtpNeeded) {
+                    presentOTPInput()
+                }
+            } else {
+                error = new Error(await response.text())
+            }
         } else {
             error = err
         }
-        return
     }
+}
 
-    let next = new URLSearchParams(location.search).get('next')
-    if (next) {
-        location.href = next
-    } else {
-        await reloadServerInfo()
-        replace('/')
-    }
+function presentOTPInput () {
+    otpInputVisible = true
 }
 
 function onInputKey (event: KeyboardEvent) {
@@ -50,6 +76,7 @@ function onInputKey (event: KeyboardEvent) {
         <h1>Welcome</h1>
     </div>
 
+    {#if !otpInputVisible}
     <FormGroup floating label="Username">
         <!-- svelte-ignore a11y-autofocus -->
         <input
@@ -57,6 +84,7 @@ function onInputKey (event: KeyboardEvent) {
             on:keypress={onInputKey}
             name="username"
             autocomplete="username"
+            disabled={busy}
             class="form-control"
             autofocus />
     </FormGroup>
@@ -68,14 +96,29 @@ function onInputKey (event: KeyboardEvent) {
             name="password"
             type="password"
             autocomplete="current-password"
+            disabled={busy}
             class="form-control" />
     </FormGroup>
+    {/if}
 
-    <Button
+    {#if otpInputVisible}
+    <FormGroup floating label="One-time password">
+        <input
+            bind:value={otp}
+            on:keypress={onInputKey}
+            name="otp"
+            autofocus
+            disabled={busy}
+            class="form-control" />
+    </FormGroup>
+    {/if}
+
+    <AsyncButton
         outline
         type="submit"
-        on:click={login}
-    >Login</Button>
+        disabled={busy}
+        click={login}
+    >Login</AsyncButton>
 
     {#if incorrectCredentials}
         <Alert color="danger">Incorrect credentials</Alert>

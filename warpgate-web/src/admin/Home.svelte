@@ -1,7 +1,7 @@
 <script lang="ts">
     import Fa from 'svelte-fa'
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
-    import { Spinner, Button } from 'sveltestrap'
+    import { Spinner } from 'sveltestrap'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
@@ -9,6 +9,7 @@
     import { firstBy } from 'thenby'
     import moment from 'moment'
     import RelativeDate from './RelativeDate.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
 
     const sessions = writable<SessionSnapshot[]|null>(null)
 
@@ -46,9 +47,11 @@
     <div class="page-summary-bar">
         {#if $activeSessions }
             <h1>Sessions right now: {$activeSessions}</h1>
-            <Button class="ms-auto" outline on:click={closeAllSesssions}>
-                Close all sessions
-            </Button>
+            <div class="ms-auto">
+                <AsyncButton outline click={closeAllSesssions}>
+                    Close all sessions
+                </AsyncButton>
+            </div>
         {:else}
             <h1>No active sessions</h1>
         {/if}

@@ -4265,7 +4265,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.1.0"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4283,6 +4283,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
  "warpgate-admin",
  "warpgate-common",
  "warpgate-db-entities",

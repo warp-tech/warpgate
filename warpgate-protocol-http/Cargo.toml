@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.1.0"
+version = "0.2.5"
 
 [dependencies]
 anyhow = "1.0"
@@ -25,3 +25,4 @@ warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-web = {version = "*", path = "../warpgate-web"}
 percent-encoding = "2.1"
+uuid = {version = "0.8", features = ["v4"]}

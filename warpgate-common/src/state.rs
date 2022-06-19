@@ -39,7 +39,12 @@ impl State {
             let values = Session::ActiveModel {
                 id: Set(id),
                 started: Set(chrono::Utc::now()),
-                remote_address: Set(session.lock().await.remote_address.to_string()),
+                remote_address: Set(session
+                    .lock()
+                    .await
+                    .remote_address
+                    .map(|x| x.to_string())
+                    .unwrap_or("".to_string())),
                 ..Default::default()
             };
 
@@ -84,14 +89,14 @@ impl State {
 }
 
 pub struct SessionState {
-    pub remote_address: SocketAddr,
+    pub remote_address: Option<SocketAddr>,
     pub username: Option<String>,
     pub target: Option<Target>,
     pub handle: Box<dyn SessionHandle + Send>,
 }
 
 impl SessionState {
-    pub fn new(remote_address: SocketAddr, handle: Box<dyn SessionHandle + Send>) -> Self {
+    pub fn new(remote_address: Option<SocketAddr>, handle: Box<dyn SessionHandle + Send>) -> Self {
         SessionState {
             remote_address,
             username: None,

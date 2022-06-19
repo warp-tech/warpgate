@@ -3,6 +3,8 @@ mod api;
 mod catchall;
 mod common;
 mod proxy;
+mod session;
+mod session_handle;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
@@ -10,16 +12,19 @@ use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
-use poem::{EndpointExt, Route, Server, IntoEndpoint};
+use poem::{EndpointExt, IntoEndpoint, Route, Server};
 use poem_openapi::OpenApiService;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
 
-use crate::common::{page_auth, endpoint_auth, endpoint_admin_auth};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth};
+use crate::session::SessionMiddleware;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -46,6 +51,8 @@ impl ProtocolServer for HTTPProtocolServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
 
+        let session_middleware = Arc::new(Mutex::new(SessionMiddleware::new()));
+
         let app = Route::new()
             .nest(
                 "/@warpgate",
@@ -70,6 +77,16 @@ impl ProtocolServer for HTTPProtocolServer {
                     ),
             )
             .nest_no_strip("/", page_auth(catchall::catchall_endpoint))
+            .before({
+                let sm = session_middleware.clone();
+                move |r| {
+                    let sm = sm.clone();
+                    async move {
+                        let mut sm = sm.lock().await;
+                        sm.process_request(r).await
+                    }
+                }
+            })
             .with(
                 SetHeader::new()
                     .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
@@ -80,7 +97,8 @@ impl ProtocolServer for HTTPProtocolServer {
                     .name("warpgate-http-session"),
                 MemoryStorage::default(),
             ))
-            .data(self.services.clone());
+            .data(self.services.clone())
+            .data(session_middleware);
 
         let (certificate, key) = {
             let config = self.services.config.lock().await;

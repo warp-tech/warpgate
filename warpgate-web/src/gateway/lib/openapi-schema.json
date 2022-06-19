@@ -28,7 +28,14 @@
             "description": ""
           },
           "401": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
           }
         },
         "operationId": "login"
@@ -105,6 +112,24 @@
           }
         }
       },
+      "LoginFailureReason": {
+        "type": "string",
+        "enum": [
+          "InvalidCredentials",
+          "OtpNeeded"
+        ]
+      },
+      "LoginFailureResponse": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/LoginFailureReason"
+          }
+        }
+      },
       "LoginRequest": {
         "type": "object",
         "required": [
@@ -116,6 +141,9 @@
             "type": "string"
           },
           "password": {
+            "type": "string"
+          },
+          "otp": {
             "type": "string"
           }
         }

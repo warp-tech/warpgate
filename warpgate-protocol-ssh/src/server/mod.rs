@@ -37,7 +37,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
         let session_state = Arc::new(Mutex::new(SessionState::new(
-            remote_address,
+            Some(remote_address),
             Box::new(session_handle),
         )));
 

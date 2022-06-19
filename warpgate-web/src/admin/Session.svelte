@@ -1,10 +1,11 @@
 <script lang="ts">
 import { api, SessionSnapshot, Recording } from 'admin/lib/api'
 import { timeAgo } from 'admin/lib/time'
+import AsyncButton from 'common/AsyncButton.svelte'
 import moment from 'moment'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
-import { Alert, Button, Spinner } from 'sveltestrap'
+import { Alert, Spinner } from 'sveltestrap'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
 
@@ -72,9 +73,11 @@ onDestroy(() => clearInterval(interval))
             </div>
         </div>
         {#if !session.ended}
-            <Button class="ms-auto" outline on:click={close}>
-                Close now
-            </Button>
+            <div class="ms-auto">
+                <AsyncButton outline click={close}>
+                    Close now
+                </AsyncButton>
+            </div>
         {/if}
     </div>
 
