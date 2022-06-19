@@ -64,7 +64,7 @@ pub struct ServerSession {
     rc_state: RCState,
     remote_address: SocketAddr,
     services: Services,
-    server_handle: WarpgateServerHandle,
+    server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
     traffic_connection_recorders: HashMap<Uuid, ConnectionRecorder>,
@@ -88,10 +88,10 @@ impl ServerSession {
     pub async fn new(
         remote_address: SocketAddr,
         services: &Services,
-        server_handle: WarpgateServerHandle,
+        server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
-        let id = server_handle.id();
+        let id = server_handle.lock().await.id();
 
         let _span = info_span!("SSH", session=%id);
         let _enter = _span.enter();
@@ -116,7 +116,7 @@ impl ServerSession {
         });
 
         let this = Self {
-            id: server_handle.id(),
+            id,
             username: None,
             session_handle: None,
             pty_channels: vec![],
@@ -1002,7 +1002,7 @@ impl ServerSession {
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
         info!(username = username, "Authenticated");
 
-        let _ = self.server_handle.set_username(username.to_string()).await;
+        let _ = self.server_handle.lock().await.set_username(username.to_string()).await;
         self.username = Some(username.to_string());
 
         let target = {
@@ -1027,7 +1027,7 @@ impl ServerSession {
             return;
         };
 
-        let _ = self.server_handle.set_target(&target).await;
+        let _ = self.server_handle.lock().await.set_target(&target).await;
         self.target = TargetSelection::Found(target, ssh_options);
     }
 

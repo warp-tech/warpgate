@@ -29,7 +29,7 @@ impl State {
     pub async fn register_session(
         &mut self,
         session: &Arc<Mutex<SessionState>>,
-    ) -> Result<WarpgateServerHandle> {
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>> {
         let id = uuid::Uuid::new_v4();
         self.sessions.insert(id, session.clone());
 
@@ -56,12 +56,12 @@ impl State {
         }
 
         match self.this.upgrade() {
-            Some(this) => Ok(WarpgateServerHandle::new(
+            Some(this) => Ok(Arc::new(Mutex::new(WarpgateServerHandle::new(
                 id,
                 self.db.clone(),
                 this,
                 session.clone(),
-            )),
+            )))),
             None => anyhow::bail!("State is being detroyed"),
         }
     }

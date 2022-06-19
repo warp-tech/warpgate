@@ -202,18 +202,18 @@ pub async fn proxy_normal_request(
 
     let client_request = client_request.build().unwrap();
     let client_response = client.execute(client_request).await.unwrap();
+    let status = client_response.status().clone();
 
     let mut response: Response = "".into();
 
-    tracing::info!(
-        "{:?} {:?} - {:?}",
-        client_response.status(),
-        uri,
-        client_response.content_length().unwrap_or(0)
-    );
-
     copy_client_response(&client_response, &mut response);
     copy_client_body(client_response, &mut response).await?;
+
+    if status.is_server_error() || status.is_client_error() {
+        warn!(method=%req.method(), url=%req.original_uri(), %status, "Request failed");
+    } else {
+        info!(method=%req.method(), url=%req.original_uri(), %status, "Request");
+    }
 
     rewrite_response(&mut response, options)?;
     Ok(response)

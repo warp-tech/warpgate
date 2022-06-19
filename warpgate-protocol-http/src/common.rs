@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use http::StatusCode;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
@@ -7,6 +9,7 @@ use warpgate_common::{Services, TargetOptions};
 
 static USERNAME_SESSION_KEY: &str = "username";
 static TARGET_SESSION_KEY: &str = "target_name";
+pub static SESSION_MAX_AGE: Duration = Duration::from_secs(60 * 15);
 
 pub trait SessionExt {
     fn has_selected_target(&self) -> bool;

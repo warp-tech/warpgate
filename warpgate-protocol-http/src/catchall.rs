@@ -5,7 +5,10 @@ use poem::web::websocket::WebSocket;
 use poem::web::Data;
 use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
-use warpgate_common::{Services, TargetOptions};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::*;
+use warpgate_common::{Services, TargetOptions, WarpgateServerHandle};
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -20,6 +23,7 @@ pub async fn catchall_endpoint(
     body: Body,
     username: Data<&SessionUsername>,
     services: Data<&Services>,
+    server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
     let params: QueryParams = req.params()?;
 
@@ -51,15 +55,29 @@ pub async fn catchall_endpoint(
         return Ok(gateway_redirect(req).into_response());
     };
 
-    if !services.config_provider.lock().await.authorize_target(&username.0.0, &target.name).await? {
+    if !services
+        .config_provider
+        .lock()
+        .await
+        .authorize_target(&username.0 .0, &target.name)
+        .await?
+    {
         return Ok(gateway_redirect(req).into_response());
     }
 
+    if let Some(server_handle) = server_handle {
+        server_handle.lock().await.set_target(&target).await?;
+    }
+
+    let span = info_span!("", target=%target.name);
+
     Ok(match ws {
         Some(ws) => proxy_websocket_request(req, ws, &options)
+            .instrument(span)
             .await?
             .into_response(),
         None => proxy_normal_request(req, body, &options)
+            .instrument(span)
             .await?
             .into_response(),
     })

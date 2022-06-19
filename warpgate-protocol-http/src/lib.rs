@@ -5,6 +5,8 @@ mod common;
 mod proxy;
 mod session;
 mod session_handle;
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_MAX_AGE};
+use crate::session::SessionMiddleware;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
@@ -18,14 +20,12 @@ use poem_openapi::OpenApiService;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
-
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth};
-use crate::session::SessionMiddleware;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -97,33 +97,17 @@ impl ProtocolServer for HTTPProtocolServer {
                             (req, handle)
                         };
 
-                        let span = match { handle.session_state().lock().await.username.clone() } {
-                            Some(ref username) => {
-                                info_span!("HTTP", session=%handle.id(), session_username=%username)
-                            }
-                            None => info_span!("HTTP", session=%handle.id()),
-                        };
-
-                        let _span = span.enter();
-                        let method = req.method().clone();
-                        let url = req.original_uri().clone();
-                        let result = ep.data(handle).call(req).await;
-
-                        match result {
-                            Ok(ref response) => {
-                                let status = response.status();
-                                if status.is_server_error() || status.is_client_error() {
-                                    warn!(%method, %url, %status, "Request");
-                                } else {
-                                    info!(%method, %url, %status, "Request");
+                        let span = {
+                            let handle = handle.lock().await;
+                            let ss = handle.session_state().lock().await;
+                            match { ss.username.clone() } {
+                                Some(ref username) => {
+                                    info_span!("HTTP", session=%handle.id(), session_username=%username)
                                 }
+                                None => info_span!("HTTP", session=%handle.id()),
                             }
-                            Err(ref error) => {
-                                info!(%method, %url, %error, "Request failed");
-                            }
-                        }
-
-                        result
+                        };
+                        ep.data(handle).call(req).instrument(span).await
                     }
                 }
             })
@@ -134,11 +118,19 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(ServerSession::new(
                 CookieConfig::default()
                     .secure(false)
+                    .max_age(SESSION_MAX_AGE)
                     .name("warpgate-http-session"),
                 MemoryStorage::default(),
             ))
             .data(self.services.clone())
-            .data(session_middleware);
+            .data(session_middleware.clone());
+
+        tokio::spawn(async move {
+            loop {
+                session_middleware.lock().await.vacuum().await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
 
         let (certificate, key) = {
             let config = self.services.config.lock().await;

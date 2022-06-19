@@ -7,6 +7,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::*;
 use warpgate_common::{AuthCredential, AuthResult, Secret, Services};
 
 pub struct Api;
@@ -69,33 +70,38 @@ impl Api {
 
         match result {
             AuthResult::Accepted { username } => {
-                if let Some(mut handle) = {
+                if let Some(handle) = {
                     let sm = session_middleware.lock().await;
                     sm.handle_for(session)
                 } {
-                    handle.set_username(username.clone()).await?;
+                    handle.lock().await.set_username(username.clone()).await?;
                 } else {
                     Err(poem::Error::from_string(
                         "Failed to get session handle",
                         StatusCode::INTERNAL_SERVER_ERROR,
                     ))?
                 }
+                info!(%username, "Authenticated");
                 session.set_username(username);
                 Ok(LoginResponse::Success)
             }
-            x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                reason: match x {
-                    AuthResult::Accepted { .. } => unreachable!(),
-                    AuthResult::Rejected => LoginFailureReason::InvalidCredentials,
-                    AuthResult::OtpNeeded => LoginFailureReason::OtpNeeded,
-                },
-            }))),
+            x => {
+                error!("Auth rejected");
+                Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    reason: match x {
+                        AuthResult::Accepted { .. } => unreachable!(),
+                        AuthResult::Rejected => LoginFailureReason::InvalidCredentials,
+                        AuthResult::OtpNeeded => LoginFailureReason::OtpNeeded,
+                    },
+                })))
+            }
         }
     }
 
     #[oai(path = "/auth/logout", method = "post", operation_id = "logout")]
     async fn api_auth_logout(&self, session: &Session) -> poem::Result<LogoutResponse> {
         session.clear();
+        info!("Logged out");
         Ok(LogoutResponse::Success)
     }
 }

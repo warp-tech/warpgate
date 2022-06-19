@@ -9,7 +9,6 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
-#[derive(Clone)]
 pub struct WarpgateServerHandle {
     id: SessionId,
     db: Arc<Mutex<DatabaseConnection>>,
@@ -61,7 +60,7 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub async fn set_target(&mut self, target: &Target) -> Result<()> {
+    pub async fn set_target(&self, target: &Target) -> Result<()> {
         use sea_orm::ActiveValue::Set;
         {
             self.session_state.lock().await.target = Some(target.clone());
