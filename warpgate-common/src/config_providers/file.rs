@@ -107,15 +107,16 @@ impl ConfigProvider for FileConfigProvider {
                     let client_key = format!("{} {}", kind, base64_bytes);
                     debug!(username = &user.username[..], "Client key: {}", client_key);
 
-                    user.credentials
-                        .iter()
-                        .find(|credential| match credential {
+                    if let Some(credential) =
+                        user.credentials.iter().find(|credential| match credential {
                             UserAuthCredential::PublicKey { key: ref user_key } => {
                                 &client_key == user_key.expose_secret()
                             }
                             _ => false,
                         })
-                        .map(|credential| valid_credentials.push(credential));
+                    {
+                        valid_credentials.push(credential)
+                    }
                 }
                 AuthCredential::Password(client_password) => {
                     match user.credentials.iter().find(|credential| match credential {

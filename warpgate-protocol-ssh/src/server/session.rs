@@ -922,7 +922,7 @@ impl ServerSession {
         info!("Keyboard-interactive auth as {:?}", selector);
 
         if let Some(otp) = response {
-            self.credentials.push(AuthCredential::Otp(otp.into()));
+            self.credentials.push(AuthCredential::Otp(otp));
         }
 
         match self.try_auth(&selector).await {
@@ -1002,7 +1002,12 @@ impl ServerSession {
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
         info!(username = username, "Authenticated");
 
-        let _ = self.server_handle.lock().await.set_username(username.to_string()).await;
+        let _ = self
+            .server_handle
+            .lock()
+            .await
+            .set_username(username.to_string())
+            .await;
         self.username = Some(username.to_string());
 
         let target = {
