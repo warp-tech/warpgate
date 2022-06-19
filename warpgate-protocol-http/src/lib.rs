@@ -24,8 +24,10 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
+use warpgate_common::{ProtocolServer, Services, Target, TargetTestError, ProtocolName};
 use warpgate_web::Assets;
+
+pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 
 pub struct HTTPProtocolServer {
     services: Services,

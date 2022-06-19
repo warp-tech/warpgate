@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, SessionSnapshot, Recording } from 'admin/lib/api'
+import { api, SessionSnapshot, Recording, TargetSSHOptions, TargetHTTPOptions } from 'admin/lib/api'
 import { timeAgo } from 'admin/lib/time'
 import AsyncButton from 'common/AsyncButton.svelte'
 import moment from 'moment'
@@ -26,7 +26,16 @@ async function close () {
 
 function getTargetDescription () {
     if (session?.target) {
-        return `${session.target.name} (${session.target.options.host}:${session.target.options?.port})`
+        let address = '<unknown>'
+        if (session.target.options.kind === 'TargetSSHOptions') {
+            const options = session.target.options as TargetSSHOptions
+            address = `${options.host}:${options?.port}`
+        }
+        if (session.target.options.kind === 'TargetHTTPOptions') {
+            const options = session.target.options as unknown as TargetHTTPOptions
+            address = options.url
+        }
+        return `${session.target.name} (${address})`
     } else {
         return 'Not selected yet'
     }

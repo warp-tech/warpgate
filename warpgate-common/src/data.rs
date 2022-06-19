@@ -14,6 +14,7 @@ pub struct SessionSnapshot {
     pub started: DateTime<Utc>,
     pub ended: Option<DateTime<Utc>>,
     pub ticket_id: Option<Uuid>,
+    pub protocol: String,
 }
 
 impl From<Session::Model> for SessionSnapshot {
@@ -27,6 +28,7 @@ impl From<Session::Model> for SessionSnapshot {
             started: model.started,
             ended: model.ended,
             ticket_id: model.ticket_id,
+            protocol: model.protocol,
         }
     }
 }

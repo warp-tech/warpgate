@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::helpers::rng::get_crypto_rng;
 
 pub type SessionId = Uuid;
+pub type ProtocolName = &'static str;
 
 #[derive(PartialEq, Clone)]
 pub struct Secret<T>(T);

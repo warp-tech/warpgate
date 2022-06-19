@@ -540,7 +540,8 @@
         "type": "object",
         "required": [
           "id",
-          "started"
+          "started",
+          "protocol"
         ],
         "properties": {
           "id": {
@@ -564,6 +565,9 @@
           "ticket_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "protocol": {
+            "type": "string"
           }
         }
       },

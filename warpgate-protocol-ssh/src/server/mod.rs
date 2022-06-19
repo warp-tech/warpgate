@@ -45,7 +45,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             .state
             .lock()
             .await
-            .register_session(&session_state)
+            .register_session(&crate::PROTOCOL_NAME, &session_state)
             .await?;
 
         let id = server_handle.lock().await.id();

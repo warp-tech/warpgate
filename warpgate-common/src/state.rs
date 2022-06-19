@@ -1,4 +1,4 @@
-use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle};
+use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle, ProtocolName};
 use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
@@ -28,6 +28,7 @@ impl State {
 
     pub async fn register_session(
         &mut self,
+        protocol: &ProtocolName,
         session: &Arc<Mutex<SessionState>>,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>> {
         let id = uuid::Uuid::new_v4();
@@ -45,6 +46,7 @@ impl State {
                     .remote_address
                     .map(|x| x.to_string())
                     .unwrap_or("".to_string())),
+                protocol: Set(protocol.to_string()),
                 ..Default::default()
             };
 

@@ -30,7 +30,6 @@
         return `${user} on ${target}`
     }
 
-
     let activeSessions = derived(sessions, s => s?.filter(x => !x.ended).length ?? 0)
     let sortedSessions = derived(sessions, s => s?.sort(
         firstBy<SessionSnapshot, boolean>(x => !!x.ended, 'asc')
@@ -41,7 +40,7 @@
     onDestroy(() => clearInterval(interval))
 </script>
 
-{#if !sessions}
+{#if !$sessions}
     <Spinner />
 {:else}
     <div class="page-summary-bar">
@@ -70,6 +69,7 @@
                                 <Fa icon={iconActive} fw />
                             {/if}
                         </div>
+                        <div class="protocol text-muted me-2">{session.protocol}</div>
                         <strong>
                             {describeSession(session)}
                         </strong>
@@ -102,6 +102,10 @@
         .main {
             display: flex;
             align-items: center;
+        }
+
+        .protocol {
+            min-width: 3rem;
         }
 
         .meta {
