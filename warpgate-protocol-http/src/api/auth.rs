@@ -54,19 +54,25 @@ impl Api {
         session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let mut config_provider = services.config_provider.lock().await;
         let mut credentials = vec![AuthCredential::Password(Secret::new(body.password.clone()))];
         if let Some(ref otp) = body.otp {
             credentials.push(AuthCredential::Otp(otp.clone().into()));
         }
-        let result = config_provider
-            .authorize(&body.username, &credentials)
-            .await
-            .map_err(|e| e.context("Failed to authorize user"))?;
+
+        let result = {
+            let mut config_provider = services.config_provider.lock().await;
+            config_provider
+                .authorize(&body.username, &credentials)
+                .await
+                .map_err(|e| e.context("Failed to authorize user"))?
+        };
+
         match result {
             AuthResult::Accepted { username } => {
-                let sm = session_middleware.lock().await;
-                if let Some(mut handle) = sm.handle_for(session) {
+                if let Some(mut handle) = {
+                    let sm = session_middleware.lock().await;
+                    sm.handle_for(session)
+                } {
                     handle.set_username(username.clone()).await?;
                 } else {
                     Err(poem::Error::from_string(

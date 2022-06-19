@@ -8,11 +8,12 @@ mod session_handle;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
+use http::StatusCode;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
-use poem::{EndpointExt, IntoEndpoint, Route, Server};
+use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, Route, Server};
 use poem_openapi::OpenApiService;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -77,13 +78,52 @@ impl ProtocolServer for HTTPProtocolServer {
                     ),
             )
             .nest_no_strip("/", page_auth(catchall::catchall_endpoint))
-            .before({
+            .around({
                 let sm = session_middleware.clone();
-                move |r| {
+                move |ep, r| {
                     let sm = sm.clone();
                     async move {
-                        let mut sm = sm.lock().await;
-                        sm.process_request(r).await
+                        let (req, handle) = {
+                            let mut sm = sm.lock().await;
+                            let req = sm.process_request(r).await?;
+                            let Some(handle) =
+                            sm.handle_for(FromRequest::from_request_without_body(&req).await?)
+                            else {
+                                return Err(poem::Error::from_string(
+                                    "Failed to get session handle",
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                ));
+                            };
+                            (req, handle)
+                        };
+
+                        let span = match { handle.session_state().lock().await.username.clone() } {
+                            Some(ref username) => {
+                                info_span!("HTTP", session=%handle.id(), session_username=%username)
+                            }
+                            None => info_span!("HTTP", session=%handle.id()),
+                        };
+
+                        let _span = span.enter();
+                        let method = req.method().clone();
+                        let url = req.original_uri().clone();
+                        let result = ep.data(handle).call(req).await;
+
+                        match result {
+                            Ok(ref response) => {
+                                let status = response.status();
+                                if status.is_server_error() || status.is_client_error() {
+                                    warn!(%method, %url, %status, "Request");
+                                } else {
+                                    info!(%method, %url, %status, "Request");
+                                }
+                            }
+                            Err(ref error) => {
+                                info!(%method, %url, %error, "Request failed");
+                            }
+                        }
+
+                        result
                     }
                 }
             })

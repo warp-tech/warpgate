@@ -36,6 +36,10 @@ impl WarpgateServerHandle {
         self.id
     }
 
+    pub fn session_state(&self) -> &Arc<Mutex<SessionState>> {
+        &self.session_state
+    }
+
     pub async fn set_username(&mut self, username: String) -> Result<()> {
         use sea_orm::ActiveValue::Set;
 
