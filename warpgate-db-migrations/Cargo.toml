@@ -8,7 +8,7 @@ version = "0.1.0"
 [lib]
 
 [dependencies]
-async-std = "^1.11"
+async-std = "^1.12"
 chrono = "0.4"
 sea-orm = {version = "^0.8", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
 sea-orm-migration = {version = "^0.8", default-features = false}
