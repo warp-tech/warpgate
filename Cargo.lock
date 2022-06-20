@@ -2234,9 +2234,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.30"
+version = "1.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a37cf8dba4d40f07bc6274613dea21f38a91535e91ea1061f29533cf6522f8"
+checksum = "61fc6256b0e7050d11d3ac5d8109eb87c7939189ecc80228c92b6cb00f29dd87"
 dependencies = [
  "anyhow",
  "async-trait",
