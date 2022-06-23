@@ -88,7 +88,11 @@ impl russh::server::Handler for ServerHandler {
         session: Session,
     ) -> Self::FutureUnit {
         let term = term.to_string();
-        let modes = modes.to_vec();
+        let modes = modes
+            .into_iter()
+            .take_while(|x| (x.0 as u8) > 0 && (x.0 as u8) < 160)
+            .map(Clone::clone)
+            .collect();
         async move {
             {
                 let mut this_session = self.session.lock().await;
