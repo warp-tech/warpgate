@@ -22,17 +22,18 @@ pub enum LookupError {
     ManifestNotFound,
 }
 
-#[derive(Deserialize)]
-struct ManifestEntry {
+#[derive(Deserialize, Clone)]
+pub struct ManifestEntry {
     pub file: String,
+    pub css: Option<Vec<String>>,
 }
 
-pub fn lookup_built_file(source: &str) -> Result<String, LookupError> {
+pub fn lookup_built_file(source: &str) -> Result<ManifestEntry, LookupError> {
     let file = Assets::get("manifest.json").ok_or(LookupError::ManifestNotFound)?;
 
     let obj: HashMap<String, ManifestEntry> = serde_json::from_slice(&file.data)?;
 
     obj.get(source)
-        .map(|entry| entry.file.clone())
+        .map(Clone::clone)
         .ok_or(LookupError::FileNotFound)
 }

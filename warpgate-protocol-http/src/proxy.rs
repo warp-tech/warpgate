@@ -240,12 +240,19 @@ async fn copy_client_body_and_embed(
 ) -> Result<()> {
     let content = client_response.text().await?;
 
-    let script_name = lookup_built_file("src/embed/index.ts")?;
+    let script_manifest = lookup_built_file("src/embed/index.ts")?;
 
-    let inject = format!(
+    let mut inject = format!(
         r#"<script type="module" src="/@warpgate/{}"></script>"#,
-        script_name
+        script_manifest.file
     );
+    for css_file in script_manifest.css.unwrap_or(vec![]) {
+        inject += &format!(
+            r#"<link rel="stylesheet" href="/@warpgate/{}" />"#,
+            css_file
+        );
+    }
+
     let before = "</head>";
     let content = content.replacen(before, &format!("{}{}", inject, before), 1);
 

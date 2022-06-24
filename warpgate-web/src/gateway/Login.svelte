@@ -1,7 +1,7 @@
 <script lang="ts">
 import { replace } from 'svelte-spa-router'
-import { Alert, Button, FormGroup } from 'sveltestrap'
-import { api, ApiResponse, LoginFailureReason, LoginFailureResponseFromJSON, VoidApiResponse } from 'gateway/lib/api'
+import { Alert, FormGroup } from 'sveltestrap'
+import { api, LoginFailureReason, LoginFailureResponseFromJSON } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte';
 
@@ -13,8 +13,7 @@ let incorrectCredentials = false
 let otpInputVisible = false
 let busy = false
 
-async function login (event?: MouseEvent) {
-    event?.preventDefault()
+async function login () {
     busy = true
     try {
         await _login()

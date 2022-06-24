@@ -2,8 +2,9 @@ import '@fontsource/work-sans'
 import '../theme.scss'
 import App from './App.svelte'
 
-const app = new App({
+new App({
     target: document.getElementById('app')!,
 })
 
-export default app
+// eslint-disable-next-line @typescript-eslint/no-useless-empty-export
+export { }
