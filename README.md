@@ -8,7 +8,7 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
 * 2FA support
-* Single-file statically linked binary with no dependencies.
+* Single binary with no dependencies.
 * Written in 100% safe Rust.
 
 ## Getting started & downloads
