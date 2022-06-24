@@ -3,7 +3,7 @@ import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup } from 'sveltestrap'
 import { api, LoginFailureReason, LoginFailureResponseFromJSON } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
-import AsyncButton from 'common/AsyncButton.svelte';
+import AsyncButton from 'common/AsyncButton.svelte'
 
 let error: Error|null = null
 let username = ''
@@ -102,6 +102,7 @@ function onInputKey (event: KeyboardEvent) {
 
     {#if otpInputVisible}
     <FormGroup floating label="One-time password">
+        <!-- svelte-ignore a11y-autofocus -->
         <input
             bind:value={otp}
             on:keypress={onInputKey}

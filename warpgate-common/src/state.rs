@@ -1,4 +1,4 @@
-use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle, ProtocolName};
+use crate::{ProtocolName, SessionHandle, SessionId, Target, WarpgateServerHandle};
 use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ impl State {
                     .await
                     .remote_address
                     .map(|x| x.to_string())
-                    .unwrap_or("".to_string())),
+                    .unwrap_or_else(|| "".to_string())),
                 protocol: Set(protocol.to_string()),
                 ..Default::default()
             };

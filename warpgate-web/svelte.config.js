@@ -1,6 +1,7 @@
 import sveltePreprocess from 'svelte-preprocess'
 
-export default {
+/** @type {import('@sveltejs/kit').Config} */
+const config = {
     compilerOptions: {
         enableSourcemap: true,
     },
@@ -11,3 +12,5 @@ export default {
         prebundleSvelteLibraries: true,
     },
 }
+
+export default config
