@@ -1,9 +1,9 @@
 use crate::common::SessionExt;
 use crate::session::SessionMiddleware;
 use crate::session_handle::WarpgateServerHandleFromRequest;
-use http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
+use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use std::sync::Arc;
@@ -51,9 +51,10 @@ impl Api {
     #[oai(path = "/auth/login", method = "post", operation_id = "login")]
     async fn api_auth_login(
         &self,
+        req: &Request,
         session: &Session,
         services: Data<&Services>,
-        server_handle: WarpgateServerHandleFromRequest,
+        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut credentials = vec![AuthCredential::Password(Secret::new(body.password.clone()))];
@@ -71,7 +72,16 @@ impl Api {
 
         match result {
             AuthResult::Accepted { username } => {
-                server_handle.lock().await.set_username(username.clone()).await?;
+                let server_handle = session_middleware
+                    .lock()
+                    .await
+                    .create_handle_for(&req)
+                    .await?;
+                server_handle
+                    .lock()
+                    .await
+                    .set_username(username.clone())
+                    .await?;
                 info!(%username, "Authenticated");
                 session.set_username(username);
                 Ok(LoginResponse::Success)
@@ -90,7 +100,12 @@ impl Api {
     }
 
     #[oai(path = "/auth/logout", method = "post", operation_id = "logout")]
-    async fn api_auth_logout(&self, session: &Session) -> poem::Result<LogoutResponse> {
+    async fn api_auth_logout(
+        &self,
+        session: &Session,
+        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
+    ) -> poem::Result<LogoutResponse> {
+        session_middleware.lock().await.remove_session(session);
         session.clear();
         info!("Logged out");
         Ok(LogoutResponse::Success)

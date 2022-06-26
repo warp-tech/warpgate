@@ -56,3 +56,9 @@ impl<'a> FromRequest<'a> for WarpgateServerHandleFromRequest {
             .ok_or_else(|| GetDataError(type_name::<WarpgateServerHandle>()))?)
     }
 }
+
+impl From<Arc<Mutex<WarpgateServerHandle>>> for WarpgateServerHandleFromRequest {
+    fn from(handle: Arc<Mutex<WarpgateServerHandle>>) -> Self {
+        WarpgateServerHandleFromRequest(handle)
+    }
+}
