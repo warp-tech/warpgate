@@ -4280,6 +4280,7 @@ dependencies = [
  "poem-openapi",
  "reqwest",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite",
  "tracing",

@@ -2,19 +2,21 @@
 mod api;
 mod catchall;
 mod common;
+mod logging;
 mod proxy;
 mod session;
 mod session_handle;
 use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_MAX_AGE};
-use crate::session::SessionMiddleware;
+use crate::session::{SessionMiddleware, SharedSessionStorage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
-use http::StatusCode;
+use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, Route, Server};
 use poem_openapi::OpenApiService;
 use std::fmt::Debug;
@@ -24,7 +26,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::{ProtocolServer, Services, Target, TargetTestError, ProtocolName};
+use warpgate_common::{ProtocolName, ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
 
 pub const PROTOCOL_NAME: ProtocolName = "HTTP";
@@ -54,7 +56,9 @@ impl ProtocolServer for HTTPProtocolServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
 
-        let session_middleware = Arc::new(Mutex::new(SessionMiddleware::new()));
+        let session_storage =
+            SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
+        let session_middleware = SessionMiddleware::new();
 
         let app = Route::new()
             .nest(
@@ -77,41 +81,26 @@ impl ProtocolServer for HTTPProtocolServer {
                     .at(
                         "",
                         EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html"),
-                    ),
+                    )
+                    .around(move |ep, req| async move {
+                        let method = req.method().clone();
+                        let url = req.original_uri().clone();
+                        let response = ep.call(req).await?;
+                        log_request_result(&method, &url, &response.status());
+                        Ok(response)
+                    }),
             )
             .nest_no_strip("/", page_auth(catchall::catchall_endpoint))
-            .around({
-                let sm = session_middleware.clone();
-                move |ep, r| {
-                    let sm = sm.clone();
-                    async move {
-                        let (req, handle) = {
-                            let mut sm = sm.lock().await;
-                            let req = sm.process_request(r).await?;
-                            let Some(handle) =
-                            sm.handle_for(FromRequest::from_request_without_body(&req).await?)
-                            else {
-                                return Err(poem::Error::from_string(
-                                    "Failed to get session handle",
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                ));
-                            };
-                            (req, handle)
-                        };
+            .around(move |ep, req| async move {
+                let sm = Data::<&Arc<Mutex<SessionMiddleware>>>::from_request_without_body(&req)
+                    .await?
+                    .clone();
 
-                        let span = {
-                            let handle = handle.lock().await;
-                            let ss = handle.session_state().lock().await;
-                            match { ss.username.clone() } {
-                                Some(ref username) => {
-                                    info_span!("HTTP", session=%handle.id(), session_username=%username)
-                                }
-                                None => info_span!("HTTP", session=%handle.id()),
-                            }
-                        };
-                        ep.data(handle).call(req).instrument(span).await
-                    }
-                }
+                let req = { sm.lock().await.process_request(req).await? };
+
+                let span = span_for_request(&req).await?;
+
+                ep.call(req).instrument(span).await
             })
             .with(
                 SetHeader::new()
@@ -122,10 +111,11 @@ impl ProtocolServer for HTTPProtocolServer {
                     .secure(false)
                     .max_age(SESSION_MAX_AGE)
                     .name("warpgate-http-session"),
-                MemoryStorage::default(),
+                session_storage.clone(),
             ))
             .data(self.services.clone())
-            .data(session_middleware.clone());
+            .data(session_middleware.clone())
+            .data(session_storage);
 
         tokio::spawn(async move {
             loop {

@@ -15,6 +15,8 @@ use tracing::*;
 use warpgate_common::{try_block, TargetHTTPOptions};
 use warpgate_web::lookup_built_file;
 
+use crate::logging::log_request_result;
+
 trait SomeResponse {
     fn status(&self) -> http::StatusCode;
     fn headers(&self) -> &http::HeaderMap;
@@ -209,11 +211,7 @@ pub async fn proxy_normal_request(
     copy_client_response(&client_response, &mut response);
     copy_client_body(client_response, &mut response).await?;
 
-    if status.is_server_error() || status.is_client_error() {
-        warn!(method=%req.method(), url=%req.original_uri(), %status, "Request failed");
-    } else {
-        info!(method=%req.method(), url=%req.original_uri(), %status, "Request");
-    }
+    log_request_result(req.method(), req.original_uri(), &status);
 
     rewrite_response(&mut response, options)?;
     Ok(response)
@@ -278,13 +276,20 @@ pub async fn proxy_websocket_request(
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, &options, true);
-    proxy_ws_inner(req, ws, uri.clone(), options).await.map_err(|error| {
-        tracing::error!(?uri, ?error, "WebSocket proxy failed");
-        error
-    })
+    proxy_ws_inner(req, ws, uri.clone(), options)
+        .await
+        .map_err(|error| {
+            tracing::error!(?uri, ?error, "WebSocket proxy failed");
+            error
+        })
 }
 
-async fn proxy_ws_inner(req: &Request, ws: WebSocket, uri: Uri, options: &TargetHTTPOptions) -> poem::Result<impl IntoResponse> {
+async fn proxy_ws_inner(
+    req: &Request,
+    ws: WebSocket,
+    uri: Uri,
+    options: &TargetHTTPOptions,
+) -> poem::Result<impl IntoResponse> {
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
         .header(http::header::CONNECTION, "Upgrade")

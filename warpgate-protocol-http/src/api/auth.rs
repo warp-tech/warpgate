@@ -1,5 +1,6 @@
 use crate::common::SessionExt;
 use crate::session::SessionMiddleware;
+use crate::session_handle::WarpgateServerHandleFromRequest;
 use http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
@@ -52,7 +53,7 @@ impl Api {
         &self,
         session: &Session,
         services: Data<&Services>,
-        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
+        server_handle: WarpgateServerHandleFromRequest,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut credentials = vec![AuthCredential::Password(Secret::new(body.password.clone()))];
@@ -70,17 +71,7 @@ impl Api {
 
         match result {
             AuthResult::Accepted { username } => {
-                if let Some(handle) = {
-                    let sm = session_middleware.lock().await;
-                    sm.handle_for(session)
-                } {
-                    handle.lock().await.set_username(username.clone()).await?;
-                } else {
-                    Err(poem::Error::from_string(
-                        "Failed to get session handle",
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ))?
-                }
+                server_handle.lock().await.set_username(username.clone()).await?;
                 info!(%username, "Authenticated");
                 session.set_username(username);
                 Ok(LoginResponse::Success)
