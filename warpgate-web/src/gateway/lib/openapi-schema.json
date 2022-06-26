@@ -1,0 +1,188 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Warpgate HTTP proxy",
+    "version": "0.2.5"
+  },
+  "servers": [
+    {
+      "url": "/@warpgate/api"
+    }
+  ],
+  "tags": [],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "login"
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "operationId": "logout"
+      }
+    },
+    "/info": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Info"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_info"
+      }
+    },
+    "/targets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Target"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_targets"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Info": {
+        "type": "object",
+        "required": [
+          "version",
+          "ports"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "selected_target": {
+            "type": "string"
+          },
+          "ports": {
+            "$ref": "#/components/schemas/PortsInfo"
+          }
+        }
+      },
+      "LoginFailureReason": {
+        "type": "string",
+        "enum": [
+          "InvalidCredentials",
+          "OtpNeeded"
+        ]
+      },
+      "LoginFailureResponse": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/LoginFailureReason"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "otp": {
+            "type": "string"
+          }
+        }
+      },
+      "PortsInfo": {
+        "type": "object",
+        "required": [
+          "ssh"
+        ],
+        "properties": {
+          "ssh": {
+            "type": "integer",
+            "format": "uint16"
+          }
+        }
+      },
+      "Target": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          }
+        }
+      },
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "Http",
+          "Ssh",
+          "WebAdmin"
+        ]
+      }
+    }
+  }
+}

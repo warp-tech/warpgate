@@ -89,7 +89,7 @@ impl russh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let term = term.to_string();
         let modes = modes
-            .into_iter()
+            .iter()
             .take_while(|x| (x.0 as u8) > 0 && (x.0 as u8) < 160)
             .map(Clone::clone)
             .collect();

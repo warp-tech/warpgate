@@ -37,7 +37,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
         let session_state = Arc::new(Mutex::new(SessionState::new(
-            remote_address,
+            Some(remote_address),
             Box::new(session_handle),
         )));
 
@@ -45,10 +45,10 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             .state
             .lock()
             .await
-            .register_session(&session_state)
+            .register_session(&crate::PROTOCOL_NAME, &session_state)
             .await?;
 
-        let id = server_handle.id();
+        let id = server_handle.lock().await.id();
 
         let session =
             match ServerSession::new(remote_address, &services, server_handle, session_handle_rx)

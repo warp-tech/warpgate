@@ -6,6 +6,7 @@ use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
 use warpgate_common::{ProtocolServer, Services};
+use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[cfg(target_os = "linux")]
@@ -20,7 +21,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     install_database_logger(services.db.clone());
 
-    let mut other_futures = futures::stream::FuturesUnordered::new();
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
     protocol_futures.push(
@@ -35,20 +35,18 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         ),
     );
 
-    if config.store.web_admin.enable {
-        let admin = warpgate_admin::AdminServer::new(&services);
-        let admin_future = admin.run(
-            config
-                .store
-                .web_admin
-                .listen
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Failed to resolve the listen address for the admin server")
-                })?,
+    if config.store.http.enable {
+        protocol_futures.push(
+            HTTPProtocolServer::new(&services).await?.run(
+                config
+                    .store
+                    .http
+                    .listen
+                    .to_socket_addrs()?
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
+            ),
         );
-        other_futures.push(admin_future);
     }
 
     tokio::spawn({
@@ -70,10 +68,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
         info!("Accepting SSH connections on {}", config.store.ssh.listen);
-        if config.store.web_admin.enable {
+        if config.store.http.enable {
             info!(
-                "Access admin UI on https://{}",
-                config.store.web_admin.listen
+                "Accepting HTTP connections on https://{}",
+                config.store.http.listen
             );
         }
         info!("--------------------------------------------");
@@ -112,16 +110,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 match result {
                     Some(Err(error)) => {
                         error!(?error, "SSH server error");
-                        std::process::exit(1);
-                    },
-                    None => break,
-                    _ => (),
-                }
-            }
-            result = other_futures.next(), if !other_futures.is_empty() => {
-                match result {
-                    Some(Err(error)) => {
-                        error!(?error, "Error");
                         std::process::exit(1);
                     },
                     None => break,

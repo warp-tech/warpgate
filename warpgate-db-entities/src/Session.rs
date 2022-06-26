@@ -13,6 +13,7 @@ pub struct Model {
     pub started: DateTime<Utc>,
     pub ended: Option<DateTime<Utc>>,
     pub ticket_id: Option<Uuid>,
+    pub protocol: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

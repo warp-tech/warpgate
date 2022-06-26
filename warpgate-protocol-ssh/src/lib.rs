@@ -6,7 +6,6 @@ pub mod helpers;
 mod keys;
 mod known_hosts;
 mod server;
-
 use crate::client::{RCCommand, RemoteClient};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,7 +17,11 @@ pub use server::run_server;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use uuid::Uuid;
-use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
+use warpgate_common::{
+    ProtocolName, ProtocolServer, Services, Target, TargetOptions, TargetTestError,
+};
+
+pub static PROTOCOL_NAME: ProtocolName = "SSH";
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -43,7 +46,7 @@ impl ProtocolServer for SSHProtocolServer {
     }
 
     async fn test_target(self, target: Target) -> Result<(), TargetTestError> {
-        let Some(ssh_options) = target.ssh else {
+        let TargetOptions::Ssh(ssh_options) = target.options else {
             return Err(TargetTestError::Misconfigured("Not an SSH target".to_owned()));
         };
 

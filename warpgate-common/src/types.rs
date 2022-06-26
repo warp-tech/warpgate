@@ -1,11 +1,23 @@
+use bytes::Bytes;
+use data_encoding::HEXLOWER;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
 
+use crate::helpers::rng::get_crypto_rng;
+
 pub type SessionId = Uuid;
+pub type ProtocolName = &'static str;
 
 #[derive(PartialEq, Clone)]
 pub struct Secret<T>(T);
+
+impl Secret<String> {
+    pub fn random() -> Self {
+        Secret::new(HEXLOWER.encode(&Bytes::from_iter(get_crypto_rng().gen::<[u8; 32]>())))
+    }
+}
 
 impl<T> Secret<T> {
     pub const fn new(v: T) -> Self {
@@ -14,6 +26,12 @@ impl<T> Secret<T> {
 
     pub fn expose_secret(&self) -> &T {
         &self.0
+    }
+}
+
+impl<T> From<T> for Secret<T> {
+    fn from(v: T) -> Self {
+        Self::new(v)
     }
 }
 

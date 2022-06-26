@@ -13,8 +13,8 @@ use channel_session::SessionChannel;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::{Sig, Preferred};
-use russh_keys::key::{PublicKey, self};
+use russh::{Preferred, Sig};
+use russh_keys::key::{self, PublicKey};
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -328,7 +328,12 @@ impl RemoteClient {
         info!(?address, username = &ssh_options.username[..], "Connecting");
         let config = russh::client::Config {
             preferred: Preferred {
-                key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512, key::SSH_RSA],
+                key: &[
+                    key::ED25519,
+                    key::RSA_SHA2_256,
+                    key::RSA_SHA2_512,
+                    key::SSH_RSA,
+                ],
                 ..<_>::default()
             },
             ..Default::default()
@@ -365,18 +370,18 @@ impl RemoteClient {
                     return Err(ConnectionError::Aborted)
                 }
                 session = &mut fut_connect => {
-                    if let Err(error) = session {
-                        let connection_error = match error {
-                            ClientHandlerError::ConnectionError(e) => e,
-                            ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
-                            ClientHandlerError::Internal => ConnectionError::Internal,
-                        };
-                        error!(error=?connection_error, "Connection error");
-                        return Err(connection_error);
-                    }
-
-                    #[allow(clippy::unwrap_used)]
-                    let mut session = session.unwrap();
+                    let mut session = match session {
+                        Ok(session) => session,
+                        Err(error) => {
+                            let connection_error = match error {
+                                ClientHandlerError::ConnectionError(e) => e,
+                                ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
+                                ClientHandlerError::Internal => ConnectionError::Internal,
+                            };
+                            error!(error=?connection_error, "Connection error");
+                            return Err(connection_error);
+                        }
+                    };
 
                     let mut auth_result = false;
                     match ssh_options.auth {

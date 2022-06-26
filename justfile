@@ -13,21 +13,21 @@ clippy *ARGS:
     for p in {{projects}}; do cargo clippy -p $p {{ARGS}}; done
 
 yarn *ARGS:
-    cd warpgate-admin/app/ && yarn {{ARGS}}
+    cd warpgate-web && yarn {{ARGS}}
 
 migrate *ARGS:
     cargo run -p warpgate-db-migrations -- {{ARGS}}
 
 lint:
-    cd warpgate-admin/app/ && yarn run lint
+    cd warpgate-web && yarn run lint
 
 svelte-check:
-    cd warpgate-admin/app/ && yarn run check
+    cd warpgate-web && yarn run check
 
 openapi-all:
-    cd warpgate-admin/app/ && yarn openapi-schema && yarn openapi-client
+    cd warpgate-web && yarn openapi:schema:admin && yarn openapi:schema:gateway && yarn openapi:client:admin && yarn openapi:client:gateway
 
 openapi:
-    cd warpgate-admin/app/ && yarn openapi-client
+    cd warpgate-web && yarn openapi:client:admin && yarn openapi:client:gateway
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint

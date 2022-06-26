@@ -107,52 +107,47 @@ impl ConfigProvider for FileConfigProvider {
                     let client_key = format!("{} {}", kind, base64_bytes);
                     debug!(username = &user.username[..], "Client key: {}", client_key);
 
-                    for credential in user.credentials.iter() {
-                        if let UserAuthCredential::PublicKey { key: ref user_key } = credential {
-                            if &client_key == user_key.expose_secret() {
-                                valid_credentials.push(credential);
-                                break;
+                    if let Some(credential) =
+                        user.credentials.iter().find(|credential| match credential {
+                            UserAuthCredential::PublicKey { key: ref user_key } => {
+                                &client_key == user_key.expose_secret()
                             }
-                        }
+                            _ => false,
+                        })
+                    {
+                        valid_credentials.push(credential)
                     }
                 }
                 AuthCredential::Password(client_password) => {
-                    for credential in user.credentials.iter() {
-                        if let UserAuthCredential::Password {
+                    match user.credentials.iter().find(|credential| match credential {
+                        UserAuthCredential::Password {
                             hash: ref user_password_hash,
-                        } = credential
-                        {
-                            match verify_password_hash(
-                                client_password.expose_secret(),
-                                user_password_hash.expose_secret(),
-                            ) {
-                                Ok(true) => {
-                                    valid_credentials.push(credential);
-                                    break;
-                                }
-                                Ok(false) => continue,
-                                Err(e) => {
-                                    error!(
-                                        username = &user.username[..],
-                                        "Error verifying password hash: {}", e
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
+                        } => verify_password_hash(
+                            client_password.expose_secret(),
+                            user_password_hash.expose_secret(),
+                        )
+                        .unwrap_or_else(|e| {
+                            error!(
+                                username = &user.username[..],
+                                "Error verifying password hash: {}", e
+                            );
+                            false
+                        }),
+                        _ => false,
+                    }) {
+                        Some(credential) => valid_credentials.push(credential),
+                        None => return Ok(AuthResult::Rejected),
                     }
                 }
-                AuthCredential::OTP(client_otp) => {
-                    for credential in user.credentials.iter() {
-                        if let UserAuthCredential::TOTP {
+                AuthCredential::Otp(client_otp) => {
+                    match user.credentials.iter().find(|credential| match credential {
+                        UserAuthCredential::TOTP {
                             key: ref user_otp_key,
-                        } = credential
-                        {
-                            if verify_totp(client_otp.expose_secret(), user_otp_key) {
-                                valid_credentials.push(credential);
-                                break;
-                            }
-                        }
+                        } => verify_totp(client_otp.expose_secret(), user_otp_key),
+                        _ => false,
+                    }) {
+                        Some(credential) => valid_credentials.push(credential),
+                        None => return Ok(AuthResult::Rejected),
                     }
                 }
             }
@@ -182,7 +177,7 @@ impl ConfigProvider for FileConfigProvider {
                         username: user.username.clone(),
                     });
                 } else if remaining_required_kinds.contains(&"otp".to_string()) {
-                    return Ok(AuthResult::OTPNeeded);
+                    return Ok(AuthResult::OtpNeeded);
                 } else {
                     return Ok(AuthResult::Rejected);
                 }

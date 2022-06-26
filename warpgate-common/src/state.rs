@@ -1,4 +1,4 @@
-use crate::{SessionHandle, SessionId, Target, WarpgateServerHandle};
+use crate::{ProtocolName, SessionHandle, SessionId, Target, WarpgateServerHandle};
 use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
@@ -28,8 +28,9 @@ impl State {
 
     pub async fn register_session(
         &mut self,
+        protocol: &ProtocolName,
         session: &Arc<Mutex<SessionState>>,
-    ) -> Result<WarpgateServerHandle> {
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>> {
         let id = uuid::Uuid::new_v4();
         self.sessions.insert(id, session.clone());
 
@@ -39,7 +40,13 @@ impl State {
             let values = Session::ActiveModel {
                 id: Set(id),
                 started: Set(chrono::Utc::now()),
-                remote_address: Set(session.lock().await.remote_address.to_string()),
+                remote_address: Set(session
+                    .lock()
+                    .await
+                    .remote_address
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "".to_string())),
+                protocol: Set(protocol.to_string()),
                 ..Default::default()
             };
 
@@ -51,12 +58,12 @@ impl State {
         }
 
         match self.this.upgrade() {
-            Some(this) => Ok(WarpgateServerHandle::new(
+            Some(this) => Ok(Arc::new(Mutex::new(WarpgateServerHandle::new(
                 id,
                 self.db.clone(),
                 this,
                 session.clone(),
-            )),
+            )))),
             None => anyhow::bail!("State is being detroyed"),
         }
     }
@@ -84,14 +91,14 @@ impl State {
 }
 
 pub struct SessionState {
-    pub remote_address: SocketAddr,
+    pub remote_address: Option<SocketAddr>,
     pub username: Option<String>,
     pub target: Option<Target>,
     pub handle: Box<dyn SessionHandle + Send>,
 }
 
 impl SessionState {
-    pub fn new(remote_address: SocketAddr, handle: Box<dyn SessionHandle + Send>) -> Self {
+    pub fn new(remote_address: Option<SocketAddr>, handle: Box<dyn SessionHandle + Send>) -> Self {
         SessionState {
             remote_address,
             username: None,

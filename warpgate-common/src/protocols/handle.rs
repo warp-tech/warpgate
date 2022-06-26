@@ -35,6 +35,10 @@ impl WarpgateServerHandle {
         self.id
     }
 
+    pub fn session_state(&self) -> &Arc<Mutex<SessionState>> {
+        &self.session_state
+    }
+
     pub async fn set_username(&mut self, username: String) -> Result<()> {
         use sea_orm::ActiveValue::Set;
 
@@ -56,7 +60,7 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub async fn set_target(&mut self, target: &Target) -> Result<()> {
+    pub async fn set_target(&self, target: &Target) -> Result<()> {
         use sea_orm::ActiveValue::Set;
         {
             self.session_state.lock().await.target = Some(target.clone());

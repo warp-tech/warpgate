@@ -1,5 +1,3 @@
-use crate::helpers::{authorized, ApiResult};
-use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -30,28 +28,24 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        session: &Session,
-    ) -> ApiResult<DeleteTicketResponse> {
-        authorized(session, || async move {
-            use warpgate_db_entities::Ticket;
-            let db = db.lock().await;
+    ) -> poem::Result<DeleteTicketResponse> {
+        use warpgate_db_entities::Ticket;
+        let db = db.lock().await;
 
-            let ticket = Ticket::Entity::find_by_id(id.0)
-                .one(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
+        let ticket = Ticket::Entity::find_by_id(id.0)
+            .one(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
 
-            match ticket {
-                Some(ticket) => {
-                    ticket
-                        .delete(&*db)
-                        .await
-                        .map_err(poem::error::InternalServerError)?;
-                    Ok(DeleteTicketResponse::Deleted)
-                }
-                None => Ok(DeleteTicketResponse::NotFound),
+        match ticket {
+            Some(ticket) => {
+                ticket
+                    .delete(&*db)
+                    .await
+                    .map_err(poem::error::InternalServerError)?;
+                Ok(DeleteTicketResponse::Deleted)
             }
-        })
-        .await
+            None => Ok(DeleteTicketResponse::NotFound),
+        }
     }
 }

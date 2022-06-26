@@ -1,6 +1,4 @@
-use crate::helpers::{authorized, ApiResult};
 use chrono::{DateTime, Utc};
-use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -35,48 +33,44 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-        session: &Session,
-    ) -> ApiResult<GetLogsResponse> {
-        authorized(session, || async move {
-            use warpgate_db_entities::LogEntry;
+    ) -> poem::Result<GetLogsResponse> {
+        use warpgate_db_entities::LogEntry;
 
-            let db = db.lock().await;
-            let mut q = LogEntry::Entity::find()
-                .order_by_desc(LogEntry::Column::Timestamp)
-                .limit(body.limit.unwrap_or(100));
+        let db = db.lock().await;
+        let mut q = LogEntry::Entity::find()
+            .order_by_desc(LogEntry::Column::Timestamp)
+            .limit(body.limit.unwrap_or(100));
 
-            if let Some(before) = body.before {
-                q = q.filter(LogEntry::Column::Timestamp.lt(before));
-            }
-            if let Some(after) = body.after {
-                q = q
-                    .filter(LogEntry::Column::Timestamp.gt(after))
-                    .order_by_asc(LogEntry::Column::Timestamp);
-            }
-            if let Some(ref session_id) = body.session_id {
-                q = q.filter(LogEntry::Column::SessionId.eq(*session_id));
-            }
-            if let Some(ref username) = body.username {
-                q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
-            }
-            if let Some(ref search) = body.search {
-                q = q.filter(
-                    LogEntry::Column::Text
-                        .contains(search)
-                        .or(LogEntry::Column::Username.contains(search)),
-                );
-            }
+        if let Some(before) = body.before {
+            q = q.filter(LogEntry::Column::Timestamp.lt(before));
+        }
+        if let Some(after) = body.after {
+            q = q
+                .filter(LogEntry::Column::Timestamp.gt(after))
+                .order_by_asc(LogEntry::Column::Timestamp);
+        }
+        if let Some(ref session_id) = body.session_id {
+            q = q.filter(LogEntry::Column::SessionId.eq(*session_id));
+        }
+        if let Some(ref username) = body.username {
+            q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
+        }
+        if let Some(ref search) = body.search {
+            q = q.filter(
+                LogEntry::Column::Text
+                    .contains(search)
+                    .or(LogEntry::Column::Username.contains(search)),
+            );
+        }
 
-            let logs = q
-                .all(&*db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
-            let logs = logs
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<LogEntry::Model>>();
-            Ok(GetLogsResponse::Ok(Json(logs)))
-        })
-        .await
+        let logs = q
+            .all(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+        let logs = logs
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<LogEntry::Model>>();
+        Ok(GetLogsResponse::Ok(Json(logs)))
     }
 }

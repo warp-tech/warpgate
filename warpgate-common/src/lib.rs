@@ -12,6 +12,7 @@ mod protocols;
 pub mod recordings;
 mod services;
 mod state;
+mod try_macro;
 mod types;
 
 pub use config::*;
@@ -20,4 +21,5 @@ pub use data::*;
 pub use protocols::*;
 pub use services::*;
 pub use state::{SessionState, State};
+pub use try_macro::*;
 pub use types::*;

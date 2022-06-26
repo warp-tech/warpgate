@@ -1,0 +1,765 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Warpgate Web Admin",
+    "version": "0.2.5"
+  },
+  "servers": [
+    {
+      "url": "/@warpgate/admin/api"
+    }
+  ],
+  "tags": [],
+  "paths": {
+    "/sessions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionSnapshot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_sessions"
+      },
+      "delete": {
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "operationId": "close_all_sessions"
+      }
+    },
+    "/sessions/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_session"
+      }
+    },
+    "/sessions/{id}/recordings": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Recording"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_session_recordings"
+      }
+    },
+    "/sessions/{id}/close": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "close_session"
+      }
+    },
+    "/recordings/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recording"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_recording"
+      }
+    },
+    "/users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserSnapshot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_users"
+      }
+    },
+    "/targets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Target"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_targets"
+      }
+    },
+    "/tickets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ticket"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_tickets"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketAndSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_ticket"
+      }
+    },
+    "/tickets/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_ticket"
+      }
+    },
+    "/ssh/known-hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_ssh_known_hosts"
+      }
+    },
+    "/ssh/known-hosts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_ssh_known_host"
+      }
+    },
+    "/ssh/own-keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_ssh_own_keys"
+      }
+    },
+    "/logs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetLogsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_logs"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateTicketRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "target_name"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          }
+        }
+      },
+      "GetLogsRequest": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "after": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
+      "LogEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "values",
+          "timestamp",
+          "session_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "values": {},
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "Recording": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "started",
+          "session_id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecordingKind"
+          }
+        }
+      },
+      "RecordingKind": {
+        "type": "string",
+        "enum": [
+          "Terminal",
+          "Traffic"
+        ]
+      },
+      "SSHKey": {
+        "type": "object",
+        "required": [
+          "kind",
+          "public_key_base64"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "public_key_base64": {
+            "type": "string"
+          }
+        }
+      },
+      "SSHKnownHost": {
+        "type": "object",
+        "required": [
+          "id",
+          "host",
+          "port",
+          "key_type",
+          "key_base64"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "key_type": {
+            "type": "string"
+          },
+          "key_base64": {
+            "type": "string"
+          }
+        }
+      },
+      "SessionSnapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "started",
+          "protocol"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "protocol": {
+            "type": "string"
+          }
+        }
+      },
+      "Target": {
+        "type": "object",
+        "required": [
+          "name",
+          "allow_roles",
+          "options"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "allow_roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "options": {
+            "$ref": "#/components/schemas/TargetOptions"
+          }
+        }
+      },
+      "TargetHTTPOptions": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TargetOptions": {
+        "type": "object",
+        "anyOf": [
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetSSHOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetSSHOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetSSHOptions"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetHTTPOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetHTTPOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetHTTPOptions"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetWebAdminOptions"
+              },
+              {
+                "type": "object",
+                "title": "TargetWebAdminOptions",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "example": "TargetWebAdminOptions"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "TargetSSHOptions": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "username"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetWebAdminOptions": {
+        "type": "object"
+      },
+      "Ticket": {
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "target",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "uses_left": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TicketAndSecret": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "secret"
+        ],
+        "properties": {
+          "ticket": {
+            "$ref": "#/components/schemas/Ticket"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "UserSnapshot": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

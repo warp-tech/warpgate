@@ -32,7 +32,7 @@ use warpgate_common::recordings::{
 };
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
-    TargetSSHOptions, WarpgateServerHandle,
+    TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
 #[derive(Clone)]
@@ -64,7 +64,7 @@ pub struct ServerSession {
     rc_state: RCState,
     remote_address: SocketAddr,
     services: Services,
-    server_handle: WarpgateServerHandle,
+    server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
     traffic_connection_recorders: HashMap<Uuid, ConnectionRecorder>,
@@ -88,10 +88,10 @@ impl ServerSession {
     pub async fn new(
         remote_address: SocketAddr,
         services: &Services,
-        server_handle: WarpgateServerHandle,
+        server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
     ) -> Result<Arc<Mutex<Self>>> {
-        let id = server_handle.id();
+        let id = server_handle.lock().await.id();
 
         let _span = info_span!("SSH", session=%id);
         let _enter = _span.enter();
@@ -116,7 +116,7 @@ impl ServerSession {
         });
 
         let this = Self {
-            id: server_handle.id(),
+            id,
             username: None,
             session_handle: None,
             pty_channels: vec![],
@@ -884,7 +884,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -905,7 +905,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -922,14 +922,14 @@ impl ServerSession {
         info!("Keyboard-interactive auth as {:?}", selector);
 
         if let Some(otp) = response {
-            self.credentials.push(AuthCredential::OTP(otp));
+            self.credentials.push(AuthCredential::Otp(otp));
         }
 
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OTPNeeded) => russh::server::Auth::Partial {
-                name: Cow::Borrowed("OTP"),
+            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Partial {
+                name: Cow::Borrowed("Two-factor authentication"),
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
@@ -975,8 +975,7 @@ impl ServerSession {
                         self._auth_accept(&username, target_name).await;
                         Ok(AuthResult::Accepted { username })
                     }
-                    AuthResult::Rejected => Ok(AuthResult::Rejected),
-                    AuthResult::OTPNeeded => Ok(AuthResult::OTPNeeded),
+                    x => Ok(x),
                 }
             }
             AuthSelector::Ticket { secret } => {
@@ -1003,7 +1002,12 @@ impl ServerSession {
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
         info!(username = username, "Authenticated");
 
-        let _ = self.server_handle.set_username(username.to_string()).await;
+        let _ = self
+            .server_handle
+            .lock()
+            .await
+            .set_username(username.to_string())
+            .await;
         self.username = Some(username.to_string());
 
         let target = {
@@ -1014,9 +1018,12 @@ impl ServerSession {
                 .store
                 .targets
                 .iter()
-                .find(|x| x.name == target_name)
-                .filter(|x| x.ssh.is_some())
-                .map(|x| (x.clone(), x.ssh.clone().unwrap()))
+                .filter_map(|t| match t.options {
+                    TargetOptions::Ssh(ref options) => Some((t, options)),
+                    _ => None,
+                })
+                .find(|(t, _)| t.name == target_name)
+                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, ssh_options)) = target else {
@@ -1025,7 +1032,7 @@ impl ServerSession {
             return;
         };
 
-        let _ = self.server_handle.set_target(&target).await;
+        let _ = self.server_handle.lock().await.set_target(&target).await;
         self.target = TargetSelection::Found(target, ssh_options);
     }
 

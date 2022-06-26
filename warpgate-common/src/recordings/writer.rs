@@ -1,4 +1,5 @@
 use crate::helpers::fs::secure_file;
+use crate::try_block;
 
 use super::{Error, Result};
 use bytes::{Bytes, BytesMut};
@@ -51,7 +52,7 @@ impl RecordingWriter {
         });
 
         tokio::spawn(async move {
-            if let Err(error) = async {
+            try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
                     if Instant::now() - last_flush > Duration::from_secs(5) {
@@ -69,13 +70,11 @@ impl RecordingWriter {
                     }
                 }
                 Ok::<(), anyhow::Error>(())
-            }
-            .await
-            {
+            } catch (error: anyhow::Error) {
                 error!(%error, ?path, "Failed to write recording");
-            }
+            });
 
-            if let Err(error) = async {
+            try_block!(async {
                 writer.flush().await?;
 
                 use sea_orm::ActiveValue::Set;
@@ -89,11 +88,9 @@ impl RecordingWriter {
                 model.ended = Set(Some(chrono::Utc::now()));
                 model.update(&*db).await?;
                 Ok::<(), anyhow::Error>(())
-            }
-            .await
-            {
+            } catch (error: anyhow::Error) {
                 error!(%error, ?path, "Failed to write recording");
-            }
+            });
         });
 
         Ok(RecordingWriter {

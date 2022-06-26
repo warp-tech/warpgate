@@ -1,5 +1,6 @@
-use poem_openapi::Object;
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,6 +23,10 @@ fn _default_username() -> String {
     "root".to_owned()
 }
 
+fn _default_empty_string() -> String {
+    "".to_owned()
+}
+
 fn _default_recordings_path() -> String {
     "./data/recordings".to_owned()
 }
@@ -30,7 +35,7 @@ fn _default_database_url() -> Secret<String> {
     Secret::new("sqlite:data/db".to_owned())
 }
 
-fn _default_web_admin_listen() -> String {
+fn _default_http_listen() -> String {
     "0.0.0.0:8888".to_owned()
 }
 
@@ -69,6 +74,15 @@ impl Default for SSHTargetAuth {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetHTTPOptions {
+    #[serde(default = "_default_empty_string")]
+    pub url: String,
+
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
@@ -77,10 +91,19 @@ pub struct Target {
     pub name: String,
     #[serde(default = "_default_empty_string_vec")]
     pub allow_roles: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh: Option<TargetSSHOptions>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub web_admin: Option<TargetWebAdminOptions>,
+    #[serde(flatten)]
+    pub options: TargetOptions,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Union)]
+#[oai(discriminator_name = "kind")]
+pub enum TargetOptions {
+    #[serde(rename = "ssh")]
+    Ssh(TargetSSHOptions),
+    #[serde(rename = "http")]
+    Http(TargetHTTPOptions),
+    #[serde(rename = "web_admin")]
+    WebAdmin(TargetWebAdminOptions),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -146,11 +169,11 @@ impl Default for SSHConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct WebAdminConfig {
+pub struct HTTPConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
 
-    #[serde(default = "_default_web_admin_listen")]
+    #[serde(default = "_default_http_listen")]
     pub listen: String,
 
     #[serde(default)]
@@ -160,11 +183,11 @@ pub struct WebAdminConfig {
     pub key: String,
 }
 
-impl Default for WebAdminConfig {
+impl Default for HTTPConfig {
     fn default() -> Self {
-        WebAdminConfig {
+        HTTPConfig {
             enable: true,
-            listen: _default_web_admin_listen(),
+            listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -216,14 +239,14 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub recordings: RecordingsConfig,
 
-    #[serde(default)]
-    pub web_admin: WebAdminConfig,
-
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
     #[serde(default)]
     pub ssh: SSHConfig,
+
+    #[serde(default)]
+    pub http: HTTPConfig,
 
     #[serde(default)]
     pub log: LogConfig,
@@ -236,9 +259,9 @@ impl Default for WarpgateConfigStore {
             users: vec![],
             roles: vec![],
             recordings: RecordingsConfig::default(),
-            web_admin: WebAdminConfig::default(),
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
+            http: HTTPConfig::default(),
             log: LogConfig::default(),
         }
     }
