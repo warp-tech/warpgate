@@ -26,4 +26,4 @@ warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-web = {version = "*", path = "../warpgate-web"}
 percent-encoding = "2.1"
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.1", features = ["v4"]}
