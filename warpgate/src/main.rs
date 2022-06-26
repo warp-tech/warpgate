@@ -4,7 +4,7 @@ mod config;
 mod logging;
 use crate::config::load_config;
 use anyhow::Result;
-use clap::StructOpt;
+use clap::{ArgAction, StructOpt};
 use logging::init_logging;
 use std::path::PathBuf;
 use tracing::*;
@@ -20,7 +20,7 @@ struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
-    #[clap(long, short, default_value = "/etc/warpgate.yaml")]
+    #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set)]
     config: PathBuf,
 }
 
@@ -37,7 +37,10 @@ enum Commands {
     /// Validate config file
     Check,
     /// Test the connection to a target host
-    TestTarget { target_name: String },
+    TestTarget {
+        #[clap(action=ArgAction::Set)]
+        target_name: String,
+    },
     /// Generate a new 2FA (TOTP) enrollment key
     GenerateOtp,
 }
