@@ -1,6 +1,5 @@
 use crate::common::SessionExt;
 use crate::session::SessionMiddleware;
-use crate::session_handle::WarpgateServerHandleFromRequest;
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
