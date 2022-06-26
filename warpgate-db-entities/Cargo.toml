@@ -1,13 +1,15 @@
+cargo-features = ["workspace-inheritance"]
+
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-db-entities"
-version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
 
 [dependencies]
-chrono = {version = "0.4", features = ["serde"]}
-poem-openapi = {version = "^1.3.30", features = ["chrono", "uuid"]}
-sea-orm = {version = "^0.8", features = ["macros", "with-chrono", "with-uuid", "with-json"], default-features = false}
-serde = "1.0"
-serde_json = "1.0"
-uuid = {version = "0.8", features = ["v4", "serde"]}
+chrono.workspace = true
+poem-openapi.workspace = true
+sea-orm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
