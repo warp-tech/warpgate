@@ -25,7 +25,7 @@ serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"
 tokio = {version = "1.19", features = ["tracing"]}
-totp-rs = "1.4"
+totp-rs = {version = "2.0", features = ["otpauth"]}
 tracing = "0.1"
 tracing-core = "0.1"
 tracing-subscriber = "0.3"
