@@ -5,7 +5,7 @@ use sea_orm::sea_query::ForeignKeyAction;
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
 pub enum RecordingKind {
     #[sea_orm(string_value = "terminal")]
@@ -14,7 +14,7 @@ pub enum RecordingKind {
     Traffic,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "recordings")]
 #[oai(rename = "Recording")]
 pub struct Model {

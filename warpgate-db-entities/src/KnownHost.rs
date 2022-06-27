@@ -3,7 +3,7 @@ use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Object, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Object, Serialize)]
 #[sea_orm(table_name = "known_hosts")]
 #[oai(rename = "SSHKnownHost")]
 pub struct Model {

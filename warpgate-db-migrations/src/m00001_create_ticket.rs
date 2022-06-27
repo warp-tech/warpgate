@@ -5,7 +5,7 @@ pub mod ticket {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "tickets")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]

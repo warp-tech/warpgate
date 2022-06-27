@@ -6,7 +6,7 @@ pub mod recording {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 
-    #[derive(Debug, Clone, PartialEq, EnumIter, DeriveActiveEnum)]
+    #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
     #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
     pub enum RecordingKind {
         #[sea_orm(string_value = "terminal")]
@@ -15,7 +15,7 @@ pub mod recording {
         Traffic,
     }
 
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "recordings")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]

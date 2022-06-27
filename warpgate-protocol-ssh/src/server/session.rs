@@ -294,7 +294,7 @@ impl ServerSession {
             SessionHandleCommand::Close => {
                 let _ = self.emit_service_message("Session closed by admin").await;
                 info!("Session closed by admin");
-                let _ = self.request_disconnect().await;
+                self.request_disconnect().await;
                 self.disconnect_server().await;
             }
         }

@@ -94,7 +94,7 @@ pub enum RCCommand {
     Disconnect,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RCState {
     NotInitialized,
     Connecting,
@@ -506,7 +506,7 @@ impl RemoteClient {
 impl Drop for RemoteClient {
     fn drop(&mut self) {
         for task in self.child_tasks.drain(..) {
-            let _ = task.abort();
+            task.abort();
         }
         info!("Closed connection");
         debug!("Dropped");

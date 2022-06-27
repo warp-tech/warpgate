@@ -4,7 +4,7 @@ use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "tickets")]
 #[oai(rename = "Ticket")]
 pub struct Model {

@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use warpgate_common::SessionHandle;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionHandleCommand {
     Close,
 }
