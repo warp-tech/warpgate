@@ -55,9 +55,12 @@ init()
             }}
         >
             <span class="me-auto">{target.name}</span>
-            {#if target.kind === TargetKind.Ssh}
-                <Badge color="success">SSH</Badge>
-            {:else}
+            <small class="protocol text-muted ms-auto">
+                {#if target.kind === TargetKind.Ssh}
+                    SSH
+                {/if}
+            </small>
+            {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
                 <Fa icon={faArrowRight} fw />
             {/if}
         </a>

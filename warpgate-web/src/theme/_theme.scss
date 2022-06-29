@@ -1,36 +1,18 @@
-@import "bootstrap/scss/functions";
-// @import "bootstrap/scss/variables";
-@import "./vars";
-
-// $component-hover-bg: rgba(#fff, .05);
-// $component-active-color: hsl(224deg 100% 78%);
-// $component-active-bg: hsl(224deg 73% 21% / 52%);
-
-// $list-group-bg: transparent;
-// $list-group-color: #bbb;
-// $list-group-hover-bg: $component-hover-bg;
-// $list-group-action-hover-color: #fff;
-
-
-// Configuration
-@import "bootstrap/scss/mixins";
-@import "bootstrap/scss/utilities";
-
 // Layout & components
 @import "bootstrap/scss/root";
 @import "bootstrap/scss/reboot";
 @import "bootstrap/scss/type";
 // @import "bootstrap/scss/images";
 @import "bootstrap/scss/containers";
-@import "bootstrap/scss/grid";
+// @import "bootstrap/scss/grid";
 // @import "bootstrap/scss/tables";
 @import "bootstrap/scss/forms";
 @import "bootstrap/scss/buttons";
 @import "bootstrap/scss/transitions";
 // @import "bootstrap/scss/dropdown";
 // @import "bootstrap/scss/button-group";
-@import "bootstrap/scss/nav";
-@import "bootstrap/scss/navbar";
+// @import "bootstrap/scss/nav";
+// @import "bootstrap/scss/navbar";
 // @import "bootstrap/scss/card";
 // @import "bootstrap/scss/accordion";
 // @import "bootstrap/scss/breadcrumb";
@@ -55,19 +37,11 @@
 // Utilities
 @import "bootstrap/scss/utilities/api";
 
+$font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji" !default;
 
-// .list-group-flush > .list-group-item {
-//     border-radius: $border-radius;
-//     text-shadow: 0 0 1px black;
-// }
 
-a {
-    text-decoration-color: rgba($body-color, 0.25);
-    text-underline-offset: 2px;
-
-    &:hover, &.active {
-        text-decoration-color: $body-color;
-    }
+#app {
+    display: block;
 }
 
 .page-summary-bar {
@@ -81,19 +55,36 @@ a {
 }
 
 .alert {
-    background: none !important;
     border-top-style: none;
     border-bottom-style: none;
     border-right-style: none;
     border-left-width: 2px;
     font-style: italic;
-    padding: 0 10px;
-    margin: 20px 0;
+    background: rgba(0,0,0,.25) !important;
+    padding: 0.7rem 1rem;
+    margin: 1rem 0;
 }
 
 footer {
     display: flex;
-    padding: 1rem 0;
+    align-items: center;
+    padding: .5rem 0;
     margin: 2rem 0 1rem;
     border-top: 1px solid rgba($body-color, .5);
+}
+
+input:-webkit-autofill {
+    -webkit-background-clip: text;
+    -webkit-box-shadow: 0 0 0 50px $input-bg inset;
+    -webkit-text-fill-color: $input-color;
+}
+
+input:-webkit-autofill:focus {
+    -webkit-background-clip: text;
+    -webkit-box-shadow: 0 0 0 50px $input-focus-bg inset;
+    -webkit-text-fill-color: $input-focus-color;
+}
+
+.badge {
+    font-family: $font-family-os;
 }

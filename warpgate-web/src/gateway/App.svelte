@@ -6,6 +6,7 @@ import Fa from 'svelte-fa'
 import { api } from 'gateway/lib/api'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
 import logo from '../../public/assets/logo.svg'
+import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Login from './Login.svelte'
 import TargetList from './TargetList.svelte'
 
@@ -42,21 +43,26 @@ init()
 
             {#if $serverInfo?.username}
                 <div class="ms-auto">{$serverInfo.username}</div>
-                <button class="btn btn-link" on:click={logout}>
+                <button class="btn btn-link" on:click={logout} title="Log out">
                     <Fa icon={faSignOut} fw />
                 </button>
             {/if}
         </div>
 
-        {#if $serverInfo?.username}
-            <TargetList
+        <main>
+            {#if $serverInfo?.username}
+                <TargetList
                 on:navigation={() => redirecting = true} />
-        {:else}
-            <Login />
-        {/if}
+            {:else}
+                <Login />
+            {/if}
+        </main>
 
         <footer class="mt-5">
-            {$serverInfo?.version}
+            <span class="me-auto">
+                v{$serverInfo?.version}
+            </span>
+            <ThemeSwitcher />
         </footer>
     {/if}
 {:catch error}
@@ -71,7 +77,7 @@ init()
     }
 
     .logo {
-        width: 6rem;
+        width: 5rem;
         margin: 0 -0.5rem;
     }
 </style>

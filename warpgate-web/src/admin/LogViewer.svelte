@@ -208,7 +208,7 @@ onDestroy(() => {
 
 
 <style lang="scss">
-    @import "../vars";
+    @import "../theme/vars.light";
 
     .table-wrapper {
         max-width: 100%;

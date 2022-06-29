@@ -1,0 +1,68 @@
+@import "bootstrap/scss/functions";
+
+$body-bg: #1d1d20;
+$body-color: #c1c9e4;
+
+$font-family-sans-serif: "Work Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+$link-color: $body-color;
+$list-group-bg: transparent;
+$alert-border-radius: 0;
+$alert-border-scale: -30%;
+
+
+$blue:    #449fbe;
+$purple:  #5C398F;
+$pink:    #B53D6D;
+$red:     #D35D47;
+$orange:  #fd7e14;
+$yellow:  #D38F47;
+$green:   #87C041;
+$teal:    #20c997;
+$cyan:    #0dcaf0;
+
+$primary: $blue;
+$secondary: #627c84;
+$light: transparent;
+$info: $blue;
+
+$component-active-bg: $primary;
+
+$input-bg: #ffffff08;
+$input-border-color: #ced4da40;
+$input-color: #ccc;
+
+$input-focus-bg: #ffffff08;
+$input-focus-border-color: tint-color($component-active-bg, 25%) ;
+
+$input-disabled-bg: $input-bg;
+
+$input-btn-focus-color-opacity: .25;
+$input-btn-border-width: 2px;
+
+$border-color: rgba(#fff, .125);
+
+$list-group-color: $body-color;
+$list-group-border-color: $border-color;
+$list-group-hover-bg: rgba(#fff, .0625);
+$list-group-action-color: $body-color;
+$list-group-action-hover-color: $body-color;
+$list-group-action-active-color: $body-color;
+$list-group-action-active-bg: rgba(#fff, .125);
+
+$link-hover-color: lighten($link-color, 25%);
+
+$badge-color: $body-bg;
+
+$text-muted: rgba($body-color, .5);
+
+$modal-content-bg: $body-bg;
+
+$btn-close-color: $secondary;
+
+$alert-bg-scale: 100%;
+$alert-border-scale: 50%;
+$alert-color-scale: 0%;
+
+$code-color: #84f1fe;
+
+@import "bootstrap/scss/variables";

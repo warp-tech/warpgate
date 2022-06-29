@@ -145,7 +145,7 @@ async function logout () {
                 border: 0;
                 border-radius: 4px;
 
-                color: #888;
+                color: rgba(0, 0, 0, .5);
 
                 &:not(:first-child) {
                     margin-top: 5px;
