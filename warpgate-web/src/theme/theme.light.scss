@@ -1,0 +1,23 @@
+@import "./vars.light";
+@import "bootstrap/scss/functions";
+@import "bootstrap/scss/maps";
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/utilities";
+@import "theme";
+
+a {
+    text-decoration-color: rgba($body-color, 0.25);
+    text-underline-offset: 2px;
+
+    &:hover, &.active {
+        text-decoration-color: $body-color;
+    }
+}
+
+header {
+    border-bottom: 1px solid rgba($body-color, .75);
+}
+
+.alert {
+    background: none !important;
+}

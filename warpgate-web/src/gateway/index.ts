@@ -1,5 +1,4 @@
-import '@fontsource/work-sans'
-import '../theme.scss'
+import '../theme'
 import App from './App.svelte'
 
 new App({

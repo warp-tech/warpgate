@@ -10,6 +10,7 @@ import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
 import { Spinner } from 'sveltestrap'
+import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 
 async function init () {
     await reloadServerInfo()
@@ -67,10 +68,11 @@ const routes = {
                 <a use:link use:active href="/log">Log</a>
             {/if}
             {#if $serverInfo?.username}
-            <div class="username">
+            <div class="username ms-auto">
                 {$serverInfo?.username}
             </div>
-            <button class="btn btn-link" on:click={logout}>
+            <ThemeSwitcher />
+            <button class="btn btn-link" on:click={logout} title="Log out">
                 <Fa icon={faSignOut} fw />
             </button>
             {/if}
@@ -78,15 +80,17 @@ const routes = {
         <main>
             <Router {routes}/>
         </main>
-        <footer>
-            {$serverInfo?.version}
+
+        <footer class="mt-5">
+            <span class="me-auto">
+                v{$serverInfo?.version}
+            </span>
+            <ThemeSwitcher />
         </footer>
     </div>
 {/await}
 
 <style lang="scss">
-    @import "../vars";
-
     .app {
         min-height: 100vh;
         display: flex;
@@ -111,7 +115,6 @@ const routes = {
         align-items: center;
         padding: 10px 0;
         margin: 10px 0 20px;
-        border-bottom: 1px solid rgba($body-color, .75);
 
         a, .logo {
             font-size: 1.5rem;
@@ -119,10 +122,6 @@ const routes = {
 
         a:not(:first-child) {
             margin-left: 15px;
-        }
-
-        .username {
-            margin-left: auto;
         }
     }
 </style>
