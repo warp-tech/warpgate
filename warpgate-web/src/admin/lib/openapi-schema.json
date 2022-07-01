@@ -13,15 +13,73 @@
   "paths": {
     "/sessions": {
       "get": {
+        "parameters": [
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
+          },
+          {
+            "name": "active_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
+          },
+          {
+            "name": "logged_in_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SessionSnapshot"
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "offset",
+                    "total"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionSnapshot"
+                      }
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "format": "uint64"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "format": "uint64"
+                    }
                   }
                 }
               }

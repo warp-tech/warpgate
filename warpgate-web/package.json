@@ -41,6 +41,7 @@
     "svelte-check": "^2.7.2",
     "svelte-fa": "^3.0.1",
     "svelte-intersection-observer": "^0.10.0",
+    "svelte-observable": "^0.4.0",
     "svelte-preprocess": "^4.10.7",
     "svelte-spa-router": "^3.2.0",
     "sveltestrap": "^5.9.0",

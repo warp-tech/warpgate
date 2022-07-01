@@ -58,6 +58,7 @@ $text-muted: rgba($body-color, .5);
 $modal-content-bg: $body-bg;
 
 $btn-close-color: $secondary;
+$btn-link-disabled-color: rgba(255, 255, 255, .5);
 
 $alert-bg-scale: 100%;
 $alert-border-scale: 50%;
@@ -66,3 +67,4 @@ $alert-color-scale: 0%;
 $code-color: #84f1fe;
 
 @import "bootstrap/scss/variables";
+@import "./vars.common.scss";

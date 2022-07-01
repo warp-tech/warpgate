@@ -21,5 +21,6 @@ $cyan:    #0dcaf0 !default;
 
 
 @import "bootstrap/scss/variables";
+@import "./vars.common.scss";
 
 $text-muted: $gray-500;

@@ -1,20 +1,23 @@
 <script lang="ts">
     import Fa from 'svelte-fa'
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
-    import { Spinner } from 'sveltestrap'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
-    import { derived, writable } from 'svelte/store'
-    import { firstBy } from 'thenby'
     import moment from 'moment'
+    import { timer, Observable, switchMap, from } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
 
-    const sessions = writable<SessionSnapshot[]|null>(null)
+    let activeSessionCount = 0
 
-    async function reloadSessions (): Promise<void> {
-        sessions.set(await api.getSessions())
+    function loadSessions (opt: LoadOptions): Observable<PaginatedResponse<SessionSnapshot>> {
+        return timer(0, 1000).pipe(switchMap(() => from(api.getSessions(opt))))
+    }
+
+    async function _reloadSessions (): Promise<void> {
+        activeSessionCount = (await api.getSessions({ activeOnly: true })).total
     }
 
     async function closeAllSesssions () {
@@ -30,65 +33,52 @@
         return `${user} on ${target}`
     }
 
-    let activeSessions = derived(sessions, s => s?.filter(x => !x.ended).length ?? 0)
-    let sortedSessions = derived(sessions, s => s?.sort(
-        firstBy<SessionSnapshot, boolean>(x => !!x.ended, 'asc')
-            .thenBy(x => x.ended ?? x.started, 'desc')
-    ))
-    reloadSessions()
-    const interval = setInterval(reloadSessions, 1000)
+    _reloadSessions()
+    const interval = setInterval(_reloadSessions, 1000)
     onDestroy(() => clearInterval(interval))
 </script>
 
-{#if !$sessions}
-    <Spinner />
-{:else}
-    <div class="page-summary-bar">
-        {#if $activeSessions }
-            <h1>Sessions right now: {$activeSessions}</h1>
-            <div class="ms-auto">
-                <AsyncButton outline click={closeAllSesssions}>
-                    Close all sessions
-                </AsyncButton>
-            </div>
-        {:else}
-            <h1>No active sessions</h1>
-        {/if}
-    </div>
-
-    {#if $sortedSessions }
-        <div class="list-group list-group-flush">
-            {#each $sortedSessions as session}
-                <a
-                    class="list-group-item list-group-item-action"
-                    href="/sessions/{session.id}"
-                    use:link>
-                    <div class="main">
-                        <div class="icon" class:text-success={!session.ended}>
-                            {#if !session.ended}
-                                <Fa icon={iconActive} fw />
-                            {/if}
-                        </div>
-                        <div class="protocol text-muted me-2">{session.protocol}</div>
-                        <strong>
-                            {describeSession(session)}
-                        </strong>
-
-                        <div class="meta">
-                            {#if session.ended }
-                                {moment.duration(moment(session.ended).diff(session.started)).humanize()}
-                            {/if}
-                        </div>
-
-                        <div class="meta ms-auto">
-                            <RelativeDate date={session.started} />
-                        </div>
-                    </div>
-                </a>
-            {/each}
+<div class="page-summary-bar">
+    {#if activeSessionCount }
+        <h1>Sessions right now: {activeSessionCount}</h1>
+        <div class="ms-auto">
+            <AsyncButton outline click={closeAllSesssions}>
+                Close all sessions
+            </AsyncButton>
         </div>
+    {:else}
+        <h1>No active sessions</h1>
     {/if}
-{/if}
+</div>
+
+<ItemList load={loadSessions} let:item={session} pageSize={10}>
+    <a
+        class="list-group-item list-group-item-action"
+        href="/sessions/{session.id}"
+        use:link>
+        <div class="main">
+            <div class="icon" class:text-success={!session.ended}>
+                {#if !session.ended}
+                    <Fa icon={iconActive} fw />
+                {/if}
+            </div>
+            <div class="protocol text-muted me-2">{session.protocol}</div>
+            <strong>
+                {describeSession(session)}
+            </strong>
+
+            <div class="meta">
+                {#if session.ended }
+                    {moment.duration(moment(session.ended).diff(session.started)).humanize()}
+                {/if}
+            </div>
+
+            <div class="meta ms-auto">
+                <RelativeDate date={session.started} />
+            </div>
+        </div>
+    </a>
+</ItemList>
 
 <style lang="scss">
     .list-group-item {

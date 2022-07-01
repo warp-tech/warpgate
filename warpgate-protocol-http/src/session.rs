@@ -1,4 +1,4 @@
-use crate::common::SESSION_MAX_AGE;
+use crate::common::{SESSION_MAX_AGE, PROTOCOL_NAME};
 use crate::session_handle::{
     HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
 };
@@ -113,7 +113,7 @@ impl SessionMiddleware {
             .state
             .lock()
             .await
-            .register_session(&crate::PROTOCOL_NAME, &session_state)
+            .register_session(&PROTOCOL_NAME, &session_state)
             .await?;
 
         let id = server_handle.lock().await.id();

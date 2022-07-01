@@ -11,6 +11,7 @@ pub mod targets_list;
 pub mod tickets_detail;
 pub mod tickets_list;
 pub mod users_list;
+mod pagination;
 
 pub fn get() -> impl OpenApi {
     (

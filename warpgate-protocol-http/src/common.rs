@@ -1,12 +1,12 @@
-use std::time::Duration;
-
 use http::StatusCode;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
-use warpgate_common::{Services, TargetOptions};
+use std::time::Duration;
+use warpgate_common::{ProtocolName, Services, TargetOptions};
 
+pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static USERNAME_SESSION_KEY: &str = "username";
 static TARGET_SESSION_KEY: &str = "target_name";
 pub static SESSION_MAX_AGE: Duration = Duration::from_secs(60 * 30);
