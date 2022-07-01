@@ -5,15 +5,32 @@
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
     import moment from 'moment'
-    import { timer, Observable, switchMap, from } from 'rxjs'
+    import { timer, Observable, switchMap, from, BehaviorSubject, combineLatest } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
+    import { Input } from 'sveltestrap'
+
+    let showActiveOnly = false
+    let showActiveOnly$ = new BehaviorSubject<boolean>(false)
+    $: showActiveOnly$.next(showActiveOnly)
+
+    let showLoggedInOnly = false
+    let showLoggedInOnly$ = new BehaviorSubject<boolean>(false)
+    $: showLoggedInOnly$.next(showLoggedInOnly)
 
     let activeSessionCount = 0
 
     function loadSessions (opt: LoadOptions): Observable<PaginatedResponse<SessionSnapshot>> {
-        return timer(0, 1000).pipe(switchMap(() => from(api.getSessions(opt))))
+        return combineLatest([
+            timer(0, 5000),
+            showActiveOnly$,
+            showLoggedInOnly$,
+        ]).pipe(switchMap(() => from(api.getSessions({
+            activeOnly: showActiveOnly,
+            loggedInOnly: showLoggedInOnly,
+            ...opt,
+        }))))
     }
 
     async function _reloadSessions (): Promise<void> {
@@ -36,6 +53,7 @@
     _reloadSessions()
     const interval = setInterval(_reloadSessions, 1000)
     onDestroy(() => clearInterval(interval))
+
 </script>
 
 <div class="page-summary-bar">
@@ -50,6 +68,9 @@
         <h1>No active sessions</h1>
     {/if}
 </div>
+
+<Input type="switch" label="Active only" bind:checked={showActiveOnly} />
+<Input type="switch" label="Logged in only" bind:checked={showLoggedInOnly} />
 
 <ItemList load={loadSessions} let:item={session} pageSize={10}>
     <a
