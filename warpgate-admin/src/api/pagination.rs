@@ -1,9 +1,6 @@
 use poem_openapi::types::{ParseFromJSON, ToJSON};
 use poem_openapi::Object;
-use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DeriveColumn, EntityTrait, EnumIter, FromQueryResult,
-    PaginatorTrait, QuerySelect, Select, SelectorTrait,
-};
+use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QuerySelect, Select};
 
 #[derive(Object)]
 #[oai(inline)]

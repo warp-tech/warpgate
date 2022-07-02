@@ -6,7 +6,7 @@ mod logging;
 mod proxy;
 mod session;
 mod session_handle;
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_MAX_AGE};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
 use crate::session::{SessionMiddleware, SharedSessionStorage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -108,7 +108,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(ServerSession::new(
                 CookieConfig::default()
                     .secure(false)
-                    .max_age(SESSION_MAX_AGE)
+                    .max_age(COOKIE_MAX_AGE)
                     .name("warpgate-http-session"),
                 session_storage.clone(),
             ))

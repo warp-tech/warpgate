@@ -53,11 +53,13 @@
     <Spinner />
 {:then items}
     {#if items}
+        <slot name="header" items={items} />
         <div class="list-group list-group-flush mb-3">
             {#each items as item}
-                <slot item={item} />
+                <slot name="item" item={item} />
             {/each}
         </div>
+        <slot name="footer" items={items} />
     {:else}
         <Spinner />
     {/if}

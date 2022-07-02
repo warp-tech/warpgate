@@ -5,7 +5,7 @@
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
     import moment from 'moment'
-    import { timer, Observable, switchMap, from, combineLatest } from 'rxjs'
+    import { timer, Observable, switchMap, from, combineLatest, fromEvent, merge } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
@@ -17,18 +17,28 @@
 
     let activeSessionCount = 0
 
+    let socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/sessions/changes`)
+    let sessionChanges$ = fromEvent(socket, 'message')
+    onDestroy(() => socket.close())
+
     function loadSessions (opt: LoadOptions): Observable<PaginatedResponse<SessionSnapshot>> {
         return combineLatest([
-            timer(0, 5000),
             showActiveOnly$,
             showLoggedInOnly$,
-        ]).pipe(switchMap(([_, activeOnly, loggedInOnly]) =>
-            from(api.getSessions({
+            merge(timer(0, 60000), sessionChanges$),
+        ]).pipe(switchMap(([activeOnly, loggedInOnly]) => {
+            api.getSessions({
+                activeOnly: true,
+                limit: 1,
+            }).then(response => {
+                activeSessionCount = response.total
+            })
+            return from(api.getSessions({
                 activeOnly,
                 loggedInOnly,
                 ...opt,
-            })))
-        )
+            }))
+        }))
     }
 
     async function _reloadSessions (): Promise<void> {
@@ -49,7 +59,7 @@
     }
 
     _reloadSessions()
-    const interval = setInterval(_reloadSessions, 1000)
+    const interval = setInterval(_reloadSessions, 1000000)
     onDestroy(() => clearInterval(interval))
 
 </script>
@@ -67,14 +77,15 @@
     {/if}
 </div>
 
-<div class="d-flex align-items-center mb-1">
-    <div class="ms-auto"></div>
-    <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
-    <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />
-</div>
+<ItemList load={loadSessions}  pageSize={100}>
+    <div slot="header" class="d-flex align-items-center mb-1">
+        <div class="ms-auto"></div>
+        <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
+        <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />
+    </div>
 
-<ItemList load={loadSessions} let:item={session} pageSize={10}>
     <a
+        slot="item" let:item={session}
         class="list-group-item list-group-item-action"
         href="/sessions/{session.id}"
         use:link>

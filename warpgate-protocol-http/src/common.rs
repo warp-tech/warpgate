@@ -10,6 +10,7 @@ pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static USERNAME_SESSION_KEY: &str = "username";
 static TARGET_SESSION_KEY: &str = "target_name";
 pub static SESSION_MAX_AGE: Duration = Duration::from_secs(60 * 30);
+pub static COOKIE_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
 pub trait SessionExt {
     fn has_selected_target(&self) -> bool;

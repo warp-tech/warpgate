@@ -1,4 +1,4 @@
-use crate::common::{SESSION_MAX_AGE, PROTOCOL_NAME};
+use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
 use crate::session_handle::{
     HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
 };
@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use warpgate_common::{Services, SessionId, SessionState, WarpgateServerHandle};
+use tracing::*;
+use warpgate_common::{Services, SessionId, SessionState, WarpgateServerHandle, SessionStateInit};
 
 #[derive(Clone)]
 pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);
@@ -59,7 +60,7 @@ pub struct SessionMiddleware {
 }
 
 static SESSION_ID_SESSION_KEY: &str = "session_id";
-static SESSION_ID_REQUEST_COUNTER: &str = "request_counter";
+static REQUEST_COUNTER_SESSION_KEY: &str = "request_counter";
 
 impl SessionMiddleware {
     pub fn new() -> Arc<Mutex<Self>> {
@@ -75,14 +76,14 @@ impl SessionMiddleware {
     pub async fn process_request(&mut self, req: Request) -> poem::Result<Request> {
         let session: &Session = <_>::from_request_without_body(&req).await?;
 
-        let request_counter = session.get::<u64>(SESSION_ID_REQUEST_COUNTER).unwrap_or(0);
-        session.set(SESSION_ID_REQUEST_COUNTER, request_counter + 1);
+        let request_counter = session.get::<u64>(REQUEST_COUNTER_SESSION_KEY).unwrap_or(0);
+        session.set(REQUEST_COUNTER_SESSION_KEY, request_counter + 1);
 
         if let Some(session_id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
             self.session_timestamps.insert(session_id, Instant::now());
-        } else if request_counter == 5 {
+            // } else if request_counter == 5 {
             // Start logging sessions when they've got 5 requests
-            self.create_handle_for(&req).await?;
+            // self.create_handle_for(&req).await?;
         };
 
         Ok(req)
@@ -104,16 +105,18 @@ impl SessionMiddleware {
             Data::<&SharedSessionStorage>::from_request_without_body(&req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
-        let session_state = Arc::new(Mutex::new(SessionState::new(
-            remote_address.0.as_socket_addr().cloned(),
-            Box::new(session_handle),
-        )));
 
         let server_handle = services
             .state
             .lock()
             .await
-            .register_session(&PROTOCOL_NAME, &session_state)
+            .register_session(
+                &PROTOCOL_NAME,
+                SessionStateInit {
+                    remote_address: remote_address.0.as_socket_addr().cloned(),
+                    handle: Box::new(session_handle),
+                },
+            )
             .await?;
 
         let id = server_handle.lock().await.id();
@@ -133,7 +136,10 @@ impl SessionMiddleware {
                             if let Some(ref poem_session_id) = poem_session_id {
                                 let _ = session_storage.remove_session(&poem_session_id).await;
                             }
-                            this.lock().await.session_handles.remove(&id);
+                            info!(%id, "Removed HTTP session");
+                            let mut that = this.lock().await;
+                            that.session_handles.remove(&id);
+                            that.session_timestamps.remove(&id);
                         }
                     }
                 }

@@ -1,9 +1,13 @@
 use super::pagination::{PaginatedResponse, PaginationParams};
+use futures::{SinkExt, StreamExt};
+use poem::session::Session;
+use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
+use poem::{handler, IntoResponse};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warpgate_common::{SessionSnapshot, State};
@@ -67,6 +71,7 @@ impl Api {
     async fn api_close_all_sessions(
         &self,
         state: Data<&Arc<Mutex<State>>>,
+        session: &Session,
     ) -> poem::Result<CloseAllSessionsResponse> {
         let state = state.lock().await;
 
@@ -75,6 +80,26 @@ impl Api {
             session.handle.close();
         }
 
+        session.purge();
+
         Ok(CloseAllSessionsResponse::Ok)
     }
+}
+
+#[handler]
+pub async fn api_get_sessions_changes_stream(
+    ws: WebSocket,
+    state: Data<&Arc<Mutex<State>>>,
+) -> impl IntoResponse {
+    let mut receiver = state.lock().await.subscribe();
+
+    ws.on_upgrade(|socket| async move {
+        let (mut sink, _) = socket.split();
+
+        while receiver.recv().await.is_ok() {
+            sink.send(Message::Text("".to_string())).await?;
+        }
+
+        Ok::<(), anyhow::Error>(())
+    })
 }

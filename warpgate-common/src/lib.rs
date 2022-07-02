@@ -20,6 +20,6 @@ pub use config_providers::*;
 pub use data::*;
 pub use protocols::*;
 pub use services::*;
-pub use state::{SessionState, State};
+pub use state::{SessionState, SessionStateInit, State};
 pub use try_macro::*;
 pub use types::*;
