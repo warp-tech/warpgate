@@ -5,19 +5,15 @@
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
     import moment from 'moment'
-    import { timer, Observable, switchMap, from, BehaviorSubject, combineLatest } from 'rxjs'
+    import { timer, Observable, switchMap, from, combineLatest } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
     import { Input } from 'sveltestrap'
+    import { autosave } from 'common/autosave'
 
-    let showActiveOnly = false
-    let showActiveOnly$ = new BehaviorSubject<boolean>(false)
-    $: showActiveOnly$.next(showActiveOnly)
-
-    let showLoggedInOnly = false
-    let showLoggedInOnly$ = new BehaviorSubject<boolean>(false)
-    $: showLoggedInOnly$.next(showLoggedInOnly)
+    let [showActiveOnly, showActiveOnly$] = autosave('sessions-list:show-active-only', false)
+    let [showLoggedInOnly, showLoggedInOnly$] = autosave('sessions-list:show-logged-in-only', true)
 
     let activeSessionCount = 0
 
@@ -26,11 +22,13 @@
             timer(0, 5000),
             showActiveOnly$,
             showLoggedInOnly$,
-        ]).pipe(switchMap(() => from(api.getSessions({
-            activeOnly: showActiveOnly,
-            loggedInOnly: showLoggedInOnly,
-            ...opt,
-        }))))
+        ]).pipe(switchMap(([_, activeOnly, loggedInOnly]) =>
+            from(api.getSessions({
+                activeOnly,
+                loggedInOnly,
+                ...opt,
+            })))
+        )
     }
 
     async function _reloadSessions (): Promise<void> {
@@ -69,8 +67,11 @@
     {/if}
 </div>
 
-<Input type="switch" label="Active only" bind:checked={showActiveOnly} />
-<Input type="switch" label="Logged in only" bind:checked={showLoggedInOnly} />
+<div class="d-flex align-items-center mb-1">
+    <div class="ms-auto"></div>
+    <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
+    <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />
+</div>
 
 <ItemList load={loadSessions} let:item={session} pageSize={10}>
     <a
