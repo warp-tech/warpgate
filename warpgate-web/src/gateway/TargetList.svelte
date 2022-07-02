@@ -3,7 +3,7 @@ import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { api, Target, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
-import { Badge, FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
+import { FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
 import { serverInfo } from './lib/store'
 
 const dispatch = createEventDispatcher()

@@ -36,7 +36,10 @@ impl State {
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>> {
         let id = uuid::Uuid::new_v4();
 
-        let state = Arc::new(Mutex::new(SessionState::new(state, self.change_sender.clone())));
+        let state = Arc::new(Mutex::new(SessionState::new(
+            state,
+            self.change_sender.clone(),
+        )));
 
         self.sessions.insert(id, state.clone());
 

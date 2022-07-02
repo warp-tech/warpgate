@@ -23,7 +23,7 @@
 
     export let page = 0
     export let pageSize = 100
-    export let load: (LoadOptions) => Observable<PaginatedResponse<T>>
+    export let load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
 
     const page$ = new Subject<number>()
 

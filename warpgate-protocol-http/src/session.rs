@@ -11,7 +11,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, SessionId, SessionState, WarpgateServerHandle, SessionStateInit};
+use warpgate_common::{Services, SessionId, WarpgateServerHandle, SessionStateInit};
 
 #[derive(Clone)]
 pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);

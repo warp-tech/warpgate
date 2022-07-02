@@ -16,10 +16,10 @@ pub struct PaginationParams {
 }
 
 impl<T: ParseFromJSON + ToJSON + Send + Sync> PaginatedResponse<T> {
-    pub async fn new<'db, E, M, C, P>(
+    pub async fn new<E, M, C, P>(
         query: Select<E>,
         params: PaginationParams,
-        db: &'db C,
+        db: &'_ C,
         postprocess: P,
     ) -> poem::Result<PaginatedResponse<T>>
     where

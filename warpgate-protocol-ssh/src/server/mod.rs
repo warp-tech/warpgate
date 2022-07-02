@@ -13,9 +13,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, SessionState, SessionStateInit};
+use warpgate_common::{Services, SessionStateInit};
 
 pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
     let russh_config = {
