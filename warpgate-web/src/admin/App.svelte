@@ -4,13 +4,12 @@ import { api } from 'gateway/lib/api'
 import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
 import Fa from 'svelte-fa'
 
-import logo from '../../public/assets/logo.svg'
-
 import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
 import { Spinner } from 'sveltestrap'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
+import Logo from 'common/Logo.svelte'
 
 async function init () {
     await reloadServerInfo()
@@ -58,7 +57,9 @@ const routes = {
     <div class="app container">
         <header>
             <a href="/@warpgate" class="d-flex">
-                <img class="logo" src={logo} alt="Logo" />
+                <div class="logo">
+                    <Logo />
+                </div>
             </a>
             {#if $serverInfo?.username}
                 <a use:link use:active href="/">Sessions</a>
@@ -99,6 +100,7 @@ const routes = {
     .logo {
         width: 40px;
         padding-top: 2px;
+        display: flex;
     }
 
     header, footer {

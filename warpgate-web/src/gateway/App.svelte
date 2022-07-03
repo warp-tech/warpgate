@@ -2,13 +2,12 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert, Spinner } from 'sveltestrap'
 import Fa from 'svelte-fa'
-
 import { api } from 'gateway/lib/api'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-import logo from '../../public/assets/logo.svg'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Login from './Login.svelte'
 import TargetList from './TargetList.svelte'
+import Logo from 'common/Logo.svelte'
 
 let redirecting = false
 
@@ -39,7 +38,9 @@ init()
         <Spinner />
     {:else}
         <div class="d-flex align-items-center mt-5 mb-5">
-            <img class="logo" src={logo} alt="Warpgate" />
+            <div class="logo">
+                <Logo />
+            </div>
 
             {#if $serverInfo?.username}
                 <div class="ms-auto">{$serverInfo.username}</div>

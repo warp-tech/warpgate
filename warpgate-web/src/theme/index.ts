@@ -7,11 +7,13 @@ type ThemeName = ThemeFileName|'auto'
 
 const savedTheme = (localStorage.getItem('theme') ?? 'auto') as ThemeName
 export const currentTheme = writable(savedTheme)
+export const currentThemeFile = writable<ThemeFileName>('dark')
 
 const styleElement = document.createElement('style')
 document.head.appendChild(styleElement)
 
 function loadThemeFile (name: ThemeFileName) {
+    currentThemeFile.set(name)
     if (name === 'dark') {
         return import('./theme.dark.scss?inline')
     }
