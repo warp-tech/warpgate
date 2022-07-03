@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import CopyButton from 'common/CopyButton.svelte'
-import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh';
+import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
 import { api, Target, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'

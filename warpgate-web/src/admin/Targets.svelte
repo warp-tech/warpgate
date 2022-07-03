@@ -4,7 +4,7 @@ import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
 import { Alert, FormGroup, Modal, ModalBody, ModalHeader } from 'sveltestrap'
 import { serverInfo } from 'gateway/lib/store'
 import CopyButton from 'common/CopyButton.svelte'
-import { makeTargetURL } from 'common/http';
+import { makeTargetURL } from 'common/http'
 
 let error: Error|undefined
 let targets: Target[]|undefined
