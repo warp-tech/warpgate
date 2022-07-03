@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Button, Tooltip } from 'sveltestrap'
+import { Button } from 'sveltestrap'
 import copyTextToClipboard from 'copy-text-to-clipboard'
 import type { ButtonColor } from 'sveltestrap/src/Button'
 
