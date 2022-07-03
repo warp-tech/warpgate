@@ -27,6 +27,7 @@
     "@typescript-eslint/eslint-plugin": "^5.28.0",
     "@typescript-eslint/parser": "^5.28.0",
     "bootstrap": "^5.2.0-beta1",
+    "copy-text-to-clipboard": "^3.0.1",
     "eslint": "^8.18.0",
     "eslint-config-standard": "^16.0.3",
     "eslint-import-resolver-typescript": "^2.7.1",

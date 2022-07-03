@@ -1,5 +1,6 @@
 <script lang="ts">
 import { api, SSHKey, SSHKnownHost } from 'admin/lib/api'
+import CopyButton from 'common/CopyButton.svelte'
 import { Alert } from 'sveltestrap'
 
 let error: Error|undefined
@@ -35,8 +36,11 @@ async function deleteHost (host: SSHKnownHost) {
     <Alert color="info">Add these keys to the targets' <code>authorized_hosts</code> files</Alert>
     <div class="list-group list-group-flush">
         {#each ownKeys as key}
-            <div class="list-group-item">
+            <div class="list-group-item d-flex">
                 <pre>{key.kind} {key.publicKeyBase64}</pre>
+                <div class="ms-auto">
+                    <CopyButton class="ms-3" link text={key.kind + ' ' + key.publicKeyBase64} />
+                </div>
             </div>
         {/each}
     </div>

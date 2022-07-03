@@ -10,7 +10,7 @@ impl PublicKeyAsOpenSSH for KeyPair {
         let mut buf = String::new();
         buf.push_str(self.name());
         buf.push(' ');
-        buf.push_str(&self.public_key_base64().replace("\r\n", ""));
+        buf.push_str(&self.public_key_base64());
         buf
     }
 }
