@@ -71,7 +71,6 @@ const routes = {
             <div class="username ms-auto">
                 {$serverInfo?.username}
             </div>
-            <ThemeSwitcher />
             <button class="btn btn-link" on:click={logout} title="Log out">
                 <Fa icon={faSignOut} fw />
             </button>

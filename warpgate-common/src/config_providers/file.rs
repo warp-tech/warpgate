@@ -102,7 +102,6 @@ impl ConfigProvider for FileConfigProvider {
                     let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
                     base64_bytes.pop();
                     base64_bytes.pop();
-                    let base64_bytes = base64_bytes.replace("\r\n", "");
 
                     let client_key = format!("{} {}", kind, base64_bytes);
                     debug!(username = &user.username[..], "Client key: {}", client_key);

@@ -3,6 +3,7 @@ use poem_openapi::OpenApi;
 pub mod known_hosts_detail;
 pub mod known_hosts_list;
 pub mod logs;
+mod pagination;
 pub mod recordings_detail;
 pub mod sessions_detail;
 pub mod sessions_list;

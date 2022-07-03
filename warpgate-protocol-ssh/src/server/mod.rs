@@ -13,9 +13,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, SessionState};
+use warpgate_common::{Services, SessionStateInit};
 
 pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
     let russh_config = {
@@ -36,16 +35,18 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
         let russh_config = russh_config.clone();
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
-        let session_state = Arc::new(Mutex::new(SessionState::new(
-            Some(remote_address),
-            Box::new(session_handle),
-        )));
 
         let server_handle = services
             .state
             .lock()
             .await
-            .register_session(&crate::PROTOCOL_NAME, &session_state)
+            .register_session(
+                &crate::PROTOCOL_NAME,
+                SessionStateInit {
+                    remote_address: Some(remote_address),
+                    handle: Box::new(session_handle),
+                },
+            )
             .await?;
 
         let id = server_handle.lock().await.id();

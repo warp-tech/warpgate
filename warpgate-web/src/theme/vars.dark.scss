@@ -30,11 +30,12 @@ $component-active-bg: $primary;
 $input-bg: #ffffff08;
 $input-border-color: #ced4da40;
 $input-color: #ccc;
-
 $input-focus-bg: #ffffff08;
 $input-focus-border-color: tint-color($component-active-bg, 25%) ;
-
 $input-disabled-bg: $input-bg;
+
+$form-check-input-border: 2px solid $input-border-color;
+$form-switch-color: $input-color;
 
 $input-btn-focus-color-opacity: .25;
 $input-btn-border-width: 2px;
@@ -58,6 +59,7 @@ $text-muted: rgba($body-color, .5);
 $modal-content-bg: $body-bg;
 
 $btn-close-color: $secondary;
+$btn-link-disabled-color: rgba(255, 255, 255, .5);
 
 $alert-bg-scale: 100%;
 $alert-border-scale: 50%;
@@ -66,3 +68,4 @@ $alert-color-scale: 0%;
 $code-color: #84f1fe;
 
 @import "bootstrap/scss/variables";
+@import "./vars.common.scss";

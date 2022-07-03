@@ -1,9 +1,10 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+import CopyButton from 'common/CopyButton.svelte'
 import { api, Target, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
-import { Badge, FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
+import { FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
 import { serverInfo } from './lib/store'
 
 const dispatch = createEventDispatcher()
@@ -13,6 +14,7 @@ let selectedTarget: Target|undefined
 let sshUsername: string
 
 $: sshUsername = `${$serverInfo?.username}:${selectedTarget?.name}`
+$: exampleCommand = `ssh ${sshUsername}@warpgate-host -p ${$serverInfo?.ports.ssh}`
 
 async function init () {
     targets = await api.getTargets()
@@ -32,6 +34,7 @@ function loadURL (url: string) {
     dispatch('navigation')
     location.href = url
 }
+
 init()
 
 </script>
@@ -80,12 +83,14 @@ init()
         {#if selectedTarget?.kind === TargetKind.Ssh}
             <h3>Connection instructions</h3>
 
-            <FormGroup floating label="SSH username">
+            <FormGroup floating label="SSH username" class="d-flex align-items-center">
                 <input type="text" class="form-control" readonly value={sshUsername} />
+                <CopyButton text={sshUsername} />
             </FormGroup>
 
-            <FormGroup floating label="Example command">
-                <input type="text" class="form-control" readonly value={`ssh ${sshUsername}@warpgate-host -p ${$serverInfo?.ports.ssh}`} />
+            <FormGroup floating label="Example command" class="d-flex align-items-center">
+                <input type="text" class="form-control" readonly value={exampleCommand} />
+                <CopyButton text={exampleCommand} />
             </FormGroup>
         {/if}
     </ModalBody>

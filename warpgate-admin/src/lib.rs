@@ -36,6 +36,10 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
             "/recordings/:id/tcpdump",
             crate::api::recordings_detail::api_get_recording_tcpdump,
         )
+        .at(
+            "/sessions/changes",
+            crate::api::sessions_list::api_get_sessions_changes_stream,
+        )
         .data(db)
         .data(config_provider)
         .data(state)

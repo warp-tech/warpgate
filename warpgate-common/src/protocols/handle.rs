@@ -43,7 +43,9 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
 
         {
-            self.session_state.lock().await.username = Some(username.clone())
+            let mut state = self.session_state.lock().await;
+            state.username = Some(username.clone());
+            state.emit_change()
         }
 
         let db = self.db.lock().await;
@@ -63,7 +65,9 @@ impl WarpgateServerHandle {
     pub async fn set_target(&self, target: &Target) -> Result<()> {
         use sea_orm::ActiveValue::Set;
         {
-            self.session_state.lock().await.target = Some(target.clone());
+            let mut state = self.session_state.lock().await;
+            state.target = Some(target.clone());
+            state.emit_change()
         }
 
         let db = self.db.lock().await;

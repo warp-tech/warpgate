@@ -6,11 +6,12 @@ mod logging;
 mod proxy;
 mod session;
 mod session_handle;
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_MAX_AGE};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
 use crate::session::{SessionMiddleware, SharedSessionStorage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
+pub use common::PROTOCOL_NAME;
 use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
@@ -26,10 +27,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::{ProtocolName, ProtocolServer, Services, Target, TargetTestError};
+use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
-
-pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -109,7 +108,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(ServerSession::new(
                 CookieConfig::default()
                     .secure(false)
-                    .max_age(SESSION_MAX_AGE)
+                    .max_age(COOKIE_MAX_AGE)
                     .name("warpgate-http-session"),
                 session_storage.clone(),
             ))

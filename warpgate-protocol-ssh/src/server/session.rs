@@ -747,9 +747,10 @@ impl ServerSession {
 
     async fn traffic_recorder_for(
         &mut self,
-        host: &String,
+        host: &str,
         port: u32,
     ) -> Option<&mut TrafficRecorder> {
+        let host = host.to_owned();
         if let Vacant(e) = self.traffic_recorders.entry((host.clone(), port)) {
             match self
                 .services
@@ -767,7 +768,7 @@ impl ServerSession {
                 }
             }
         }
-        self.traffic_recorders.get_mut(&(host.clone(), port))
+        self.traffic_recorders.get_mut(&(host, port))
     }
 
     pub async fn _channel_shell_request(
