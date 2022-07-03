@@ -107,6 +107,9 @@
           "selected_target": {
             "type": "string"
           },
+          "external_host": {
+            "type": "string"
+          },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           }
