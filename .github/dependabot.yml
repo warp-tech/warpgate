@@ -8,10 +8,10 @@ updates:
     labels: ["type/deps"]
     open-pull-requests-limit: 25
     schedule:
-      interval: "weekly"
+      interval: "daily"
   - package-ecosystem: "npm"
     directory: "/web"
     labels: ["type/deps"]
     open-pull-requests-limit: 25
     schedule:
-      interval: "weekly"
+      interval: "daily"
