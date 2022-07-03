@@ -1,6 +1,7 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import CopyButton from 'common/CopyButton.svelte'
+import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh';
 import { api, Target, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
@@ -13,8 +14,8 @@ let targets: Target[]|undefined
 let selectedTarget: Target|undefined
 let sshUsername: string
 
-$: sshUsername = `${$serverInfo?.username}:${selectedTarget?.name}`
-$: exampleCommand = `ssh ${sshUsername}@warpgate-host -p ${$serverInfo?.ports.ssh}`
+$: sshUsername = makeSSHUsername(selectedTarget?.name, $serverInfo?.username)
+$: exampleCommand = makeExampleSSHCommand(selectedTarget?.name, $serverInfo?.username, $serverInfo)
 
 async function init () {
     targets = await api.getTargets()
@@ -22,7 +23,7 @@ async function init () {
 
 function selectTarget (target: Target) {
     if (target.kind === TargetKind.Http) {
-        loadURL(`/?warpgate_target=${target.name}`)
+        loadURL(`/?warpgate-target=${target.name}`)
     } else if (target.kind === TargetKind.WebAdmin) {
         loadURL('/@warpgate/admin')
     } else {
@@ -46,7 +47,7 @@ init()
             class="list-group-item list-group-item-action target-item"
             href={
                 target.kind === TargetKind.Http
-                ? `/?warpgate_target=${target.name}`
+                ? `/?warpgate-target=${target.name}`
                 : '/@warpgate/admin'
             }
             on:click={e => {

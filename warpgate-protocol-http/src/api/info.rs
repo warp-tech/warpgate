@@ -3,6 +3,7 @@ use std::net::ToSocketAddrs;
 use crate::common::SessionExt;
 use poem::session::Session;
 use poem::web::Data;
+use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
@@ -20,6 +21,7 @@ pub struct Info {
     version: String,
     username: Option<String>,
     selected_target: Option<String>,
+    external_host: Option<String>,
     ports: PortsInfo,
 }
 
@@ -34,14 +36,22 @@ impl Api {
     #[oai(path = "/info", method = "get", operation_id = "get_info")]
     async fn api_get_info(
         &self,
+        req: &Request,
         session: &Session,
         services: Data<&Services>,
     ) -> poem::Result<InstanceInfoResponse> {
         let config = services.config.lock().await;
+        let external_host = config
+            .store
+            .external_host
+            .as_deref()
+            .or_else(|| req.header(http::header::HOST))
+            .or_else(|| req.original_uri().host());
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
             username: session.get_username(),
             selected_target: session.get_target_name(),
+            external_host: external_host.map(&str::to_string),
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: config

@@ -1,7 +1,10 @@
 <script lang="ts">
 import { api, Target, UserSnapshot } from 'admin/lib/api'
-import { getSSHUsername } from 'admin/lib/ssh'
+import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
 import { Alert, FormGroup, Modal, ModalBody, ModalHeader } from 'sveltestrap'
+import { serverInfo } from 'gateway/lib/store'
+import CopyButton from 'common/CopyButton.svelte'
+import { makeTargetURL } from 'common/http';
 
 let error: Error|undefined
 let targets: Target[]|undefined
@@ -20,7 +23,9 @@ load().catch(e => {
     error = e
 })
 
-$: sshUsername = getSSHUsername(selectedUser, selectedTarget)
+$: sshUsername = makeSSHUsername(selectedTarget?.name, selectedUser?.username)
+$: exampleCommand = makeExampleSSHCommand(selectedTarget?.name, selectedUser?.username, $serverInfo)
+$: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
 
 </script>
 
@@ -36,7 +41,11 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
 <div class="list-group list-group-flush">
     {#each targets as target}
         <!-- svelte-ignore a11y-missing-attribute -->
-        <a class="list-group-item list-group-item-action" on:click={() => selectedTarget = target}>
+        <a class="list-group-item list-group-item-action" on:click={() => {
+            if (target.options.kind !== 'TargetWebAdminOptions') {
+                selectedTarget = target
+            }
+        }}>
             <strong class="me-auto">
                 {target.name}
             </strong>
@@ -67,8 +76,8 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
         </div>
     </ModalHeader>
     <ModalBody>
+        <h3>Access instructions</h3>
         {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
-            <h3>Connection instructions</h3>
             {#if users}
                 <FormGroup floating label="Select a user">
                     <select bind:value={selectedUser} class="form-control">
@@ -81,12 +90,21 @@ $: sshUsername = getSSHUsername(selectedUser, selectedTarget)
                 </FormGroup>
             {/if}
 
-            <FormGroup floating label="SSH username">
+            <FormGroup floating label="SSH username" class="d-flex align-items-center">
                 <input type="text" class="form-control" readonly value={sshUsername} />
+                <CopyButton text={sshUsername} />
             </FormGroup>
 
-            <FormGroup floating label="Example command">
-                <input type="text" class="form-control" readonly value={'ssh ' + sshUsername + '@warpgate-host -p warpgate-port'} />
+            <FormGroup floating label="Example command" class="d-flex align-items-center">
+                <input type="text" class="form-control" readonly value={exampleCommand} />
+                <CopyButton text={exampleCommand} />
+            </FormGroup>
+        {/if}
+
+        {#if selectedTarget?.options.kind === 'TargetHTTPOptions'}
+            <FormGroup floating label="Access URL" class="d-flex align-items-center">
+                <input type="text" class="form-control" readonly value={targetURL} />
+                <CopyButton text={targetURL} />
             </FormGroup>
         {/if}
     </ModalBody>

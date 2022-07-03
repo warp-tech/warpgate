@@ -19,31 +19,38 @@ const fn _default_port() -> u16 {
     22
 }
 
+#[inline]
 fn _default_username() -> String {
     "root".to_owned()
 }
 
+#[inline]
 fn _default_empty_string() -> String {
     "".to_owned()
 }
 
+#[inline]
 fn _default_recordings_path() -> String {
     "./data/recordings".to_owned()
 }
 
+#[inline]
 fn _default_database_url() -> Secret<String> {
     Secret::new("sqlite:data/db".to_owned())
 }
 
+#[inline]
 fn _default_http_listen() -> String {
     "0.0.0.0:8888".to_owned()
 }
 
+#[inline]
 fn _default_retention() -> Duration {
     Duration::SECOND * 60 * 60 * 24 * 7
 }
 
-fn _default_empty_string_vec() -> Vec<String> {
+#[inline]
+fn _default_empty_vec<T>() -> Vec<T> {
     vec![]
 }
 
@@ -89,7 +96,7 @@ pub struct TargetWebAdminOptions {}
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
     pub name: String,
-    #[serde(default = "_default_empty_string_vec")]
+    #[serde(default = "_default_empty_vec")]
     pub allow_roles: Vec<String>,
     #[serde(flatten)]
     pub options: TargetOptions,
@@ -239,6 +246,9 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub recordings: RecordingsConfig,
 
+    #[serde(default)]
+    pub external_host: Option<String>,
+
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
@@ -259,6 +269,7 @@ impl Default for WarpgateConfigStore {
             users: vec![],
             roles: vec![],
             recordings: RecordingsConfig::default(),
+            external_host: None,
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
             http: HTTPConfig::default(),

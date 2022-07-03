@@ -12,6 +12,7 @@ use warpgate_common::{Services, TargetOptions, WarpgateServerHandle};
 
 #[derive(Deserialize)]
 struct QueryParams {
+    #[serde(rename="warpgate-target")]
     warpgate_target: Option<String>,
 }
 
