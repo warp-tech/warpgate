@@ -2,7 +2,8 @@ use super::ConfigProvider;
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
 use crate::{
-    AuthCredential, AuthResult, Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig,
+    AuthCredential, AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot,
+    WarpgateConfig,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -71,6 +72,7 @@ impl ConfigProvider for FileConfigProvider {
         &mut self,
         username: &str,
         credentials: &[AuthCredential],
+        protocol: ProtocolName,
     ) -> Result<AuthResult> {
         if credentials.is_empty() {
             return Ok(AuthResult::Rejected);
@@ -159,8 +161,16 @@ impl ConfigProvider for FileConfigProvider {
             );
         }
 
-        match user.require {
-            Some(ref required_kinds) => {
+        if let Some(ref policy) = user.require {
+            let required_kinds = match protocol {
+                "SSH" => &policy.ssh,
+                "HTTP" => &policy.http,
+                _ => {
+                    error!(%protocol, "Unkown protocol");
+                    return Ok(AuthResult::Rejected);
+                }
+            };
+            if let Some(required_kinds) = required_kinds {
                 let mut remaining_required_kinds = HashSet::new();
                 remaining_required_kinds.extend(required_kinds);
                 for kind in required_kinds {
@@ -181,14 +191,15 @@ impl ConfigProvider for FileConfigProvider {
                     return Ok(AuthResult::Rejected);
                 }
             }
-            None => Ok(if !valid_credentials.is_empty() {
-                AuthResult::Accepted {
-                    username: user.username.clone(),
-                }
-            } else {
-                AuthResult::Rejected
-            }),
         }
+
+        Ok(if !valid_credentials.is_empty() {
+            AuthResult::Accepted {
+                username: user.username.clone(),
+            }
+        } else {
+            AuthResult::Rejected
+        })
     }
 
     async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {

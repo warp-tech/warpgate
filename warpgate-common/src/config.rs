@@ -128,11 +128,19 @@ pub enum UserAuthCredential {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserRequireCredentialsPolicy {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct User {
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub require: Option<Vec<String>>,
+    pub require: Option<UserRequireCredentialsPolicy>,
     pub roles: Vec<String>,
 }
 

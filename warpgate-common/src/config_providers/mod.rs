@@ -1,5 +1,5 @@
 mod file;
-use crate::{Secret, Target, UserSnapshot};
+use crate::{ProtocolName, Secret, Target, UserSnapshot};
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -36,6 +36,7 @@ pub trait ConfigProvider {
         &mut self,
         username: &str,
         credentials: &[AuthCredential],
+        protocol: ProtocolName,
     ) -> Result<AuthResult>;
 
     async fn authorize_target(&mut self, username: &str, target: &str) -> Result<bool>;

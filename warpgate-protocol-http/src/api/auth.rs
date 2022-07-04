@@ -64,7 +64,7 @@ impl Api {
         let result = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider
-                .authorize(&body.username, &credentials)
+                .authorize(&body.username, &credentials, crate::common::PROTOCOL_NAME)
                 .await
                 .map_err(|e| e.context("Failed to authorize user"))?
         };
