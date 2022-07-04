@@ -952,7 +952,7 @@ impl ServerSession {
                         .config_provider
                         .lock()
                         .await
-                        .authorize(username, &self.credentials)
+                        .authorize(username, &self.credentials, crate::PROTOCOL_NAME)
                         .await?
                 };
 
