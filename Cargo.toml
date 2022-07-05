@@ -16,7 +16,7 @@ members = [
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-version = "version = "0.2.5""
+version = "0.3.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0", features = ["backtrace", "std"] }
