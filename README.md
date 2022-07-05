@@ -1,11 +1,15 @@
-# Warpgate
+<img src="warpgate-web/public/assets/logo.svg" width="100" />
+
+<br/>
 
 <a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp;
 
-Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH client.
+---
 
-* Set it up in your DMZ, add user accounts and easily assign them to specific hosts within the network.
-* Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
+Warpgate is a smart SSH & HTTPS bastion host for Linux that can be used with _any_ SSH client.
+
+* Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
+* Warpgate will record every SSH session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
 * 2FA support
 * Single binary with no dependencies.
@@ -24,11 +28,12 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 <table>
   <tr>
   <td>
-    <img width="1016" alt="image" src="https://user-images.githubusercontent.com/161476/171013863-f087ab75-1b29-4489-b08d-0eacf62fd98c.png">
+    <img width="500" alt="image" src="https://user-images.githubusercontent.com/161476/177408495-80268a91-1a21-43bf-b171-2a563a322f5f.png">
 
   </td>
   <td>
-    <img width="1016" alt="image" src="https://user-images.githubusercontent.com/161476/171013410-f2b7374c-073e-4a66-b9c6-fe0a6b2b0dd0.png">
+    <img width="500" alt="image" src="https://user-images.githubusercontent.com/161476/177410749-cf029df7-223e-4c9c-827a-bb96dbe0a7c8.png">
+
   </td>
   </tr>
 </table>
@@ -39,22 +44,23 @@ The project is currently in **alpha** stage and is gathering community feedback.
 
 In particular, we're working on:
 
-* Support for exposing HTTP(S) endpoints through the bastion,
 * Support for tunneling database connections,
 * Requesting admin approval for sessions
 * and much more.
 
 ## How it works
 
-Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH connections and provide an (optional) web admin UI.
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH and HTTPS connections and provide an (optional) web admin UI.
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) for details.
 
 It receives SSH connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
 
+When connecting through HTTPS, Warpgate presents a selection of available targets, and will then proxy all traffic in a session to the selected target. You can switch between targets at any time.
+
 You manage the target and user lists and assign them to each other through a config file (default: `/etc/warpgate.yaml`), and the session history is stored in an SQLite database (default: in `/var/lib/warpgate`).
 
-You can use the web interface to view the live session list, review session recordings and more.
+You can use the admin web interface to view the live session list, review session recordings, logs and more.
 
 ## Contributing / building from source
 
@@ -62,9 +68,20 @@ You can use the web interface to view the live session list, review session reco
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
 * Install the admin UI deps: `just yarn`
-* Build the API SDK: `just openapi`
 * Build the frontend: `just yarn build`
 * Build Warpgate: `cargo build` (optionally `--release`)
+
+The binary is in `target/{debug|release}`.
+
+### Tech stack
+
+* Rust 🦀
+  * HTTP: `poem-web`
+  * Database: SQLite via `sea-orm` + `sqlx`
+  * SSH: `russh`
+* Typescript
+  * Svelte
+  * Bootstrap
 
 ## Contributors ✨
 
