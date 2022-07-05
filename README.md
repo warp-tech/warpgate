@@ -13,7 +13,7 @@ Warpgate is a smart SSH bastion host for Linux that can be used with _any_ SSH c
 
 ## Getting started & downloads
 
-* See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page.
+* See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page (or [Getting started on Docker](https://github.com/warp-tech/warpgate/wiki/Getting-started-on-Docker)).
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
 

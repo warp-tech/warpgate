@@ -23,6 +23,16 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         std::process::exit(1);
     }
 
+    let is_docker = std::env::var("DOCKER").is_ok();
+
+    if !atty::is(atty::Stream::Stdin) {
+        error!("Please run this command from an interactive terminal.");
+        if is_docker {
+            info!("(have you forgotten `-it`?)");
+        }
+        std::process::exit(1);
+    }
+
     let mut config_dir = cli.config.parent().unwrap_or_else(|| Path::new(&"."));
     if config_dir.as_os_str().is_empty() {
         config_dir = Path::new(&".");
@@ -52,10 +62,14 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    let data_path: String = dialoguer::Input::with_theme(&theme)
-        .default("/var/lib/warpgate".into())
-        .with_prompt("Directory to store app data (up to a few MB) in")
-        .interact_text()?;
+    let data_path: String = if is_docker {
+        "/data".to_owned()
+    } else {
+        dialoguer::Input::with_theme(&theme)
+            .default("/var/lib/warpgate".into())
+            .with_prompt("Directory to store app data (up to a few MB) in")
+            .interact_text()?
+    };
 
     let db_path = PathBuf::from(&data_path).join("db");
     create_dir_all(&db_path)?;
@@ -72,22 +86,23 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     store.database_url = Secret::new(database_url);
 
     // ---
+    if !is_docker {
+        store.ssh.listen = dialoguer::Input::with_theme(&theme)
+            .default(SSHConfig::default().listen)
+            .with_prompt("Endpoint to listen for SSH connections on")
+            .interact_text()?;
 
-    store.ssh.listen = dialoguer::Input::with_theme(&theme)
-        .default(SSHConfig::default().listen)
-        .with_prompt("Endpoint to listen for SSH connections on")
-        .interact_text()?;
+        // ---
 
-    // ---
-
-    store.http.listen = dialoguer::Input::with_theme(&theme)
-        .default(HTTPConfig::default().listen)
-        .with_prompt("Endpoint to listen for HTTP connections on")
-        .interact_text()?;
+        store.http.listen = dialoguer::Input::with_theme(&theme)
+            .default(HTTPConfig::default().listen)
+            .with_prompt("Endpoint to listen for HTTP connections on")
+            .interact_text()?;
+    }
 
     if store.http.enable {
         store.targets.push(Target {
-            name: "web-admin".to_owned(),
+            name: "Web admin".to_owned(),
             allow_roles: vec!["warpgate:admin".to_owned()],
             options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),
         });
@@ -173,11 +188,15 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("  * Password: <your password>");
     info!("");
     info!("You can now start Warpgate with:");
-    info!(
-        "  {} --config {} run",
-        std::env::args().next().unwrap(),
-        cli.config.display()
-    );
+    if is_docker {
+        info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate");
+    } else {
+        info!(
+            "  {} --config {} run",
+            std::env::args().next().unwrap(),
+            cli.config.display()
+        );
+    }
 
     Ok(())
 }

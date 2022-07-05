@@ -21,17 +21,10 @@ FROM debian:bullseye
 LABEL maintainer=heywoodlh
 
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
-COPY docker/run.sh /run.sh
-
-ENV DEBIAN_FRONTEND noninteractive
-
-RUN apt-get update \
-    && apt-get install -y openssl \
-    && rm -rf /var/lib/apt/lists/*
-
-EXPOSE 2222
-EXPOSE 8888
 
 VOLUME /data
 
-ENTRYPOINT ["/run.sh"]
+ENV DOCKER 1
+
+ENTRYPOINT ["warpgate", "--config", "/data/warpgate.yaml"]
+CMD ["run"]
