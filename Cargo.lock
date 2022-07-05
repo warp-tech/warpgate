@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4166,7 +4166,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4194,7 +4194,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4228,7 +4228,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4240,7 +4240,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "async-std",
  "chrono",
@@ -4251,7 +4251,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4279,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4302,7 +4302,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "rust-embed",
  "serde",
