@@ -1,24 +1,26 @@
+cargo-features = ["workspace-inheritance"]
+
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-protocol-ssh"
-version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
 
 [dependencies]
 ansi_term = "0.12"
-anyhow = "1.0"
-async-trait = "0.1"
+anyhow.workspace = true
+async-trait.workspace = true
 bimap = "0.6"
-bytes = "1.1"
-dialoguer = "0.10"
-futures = "0.3"
-russh = {version = "0.34.0-beta.5", features = ["openssl"]}
-russh-keys = {version = "0.22.0-beta.3", features = ["openssl"]}
-sea-orm = {version = "^0.8", features = ["runtime-tokio-native-tls"], default-features = false}
-thiserror = "1.0"
-time = "0.3"
-tokio = {version = "1.19", features = ["tracing", "signal"]}
-tracing = "0.1"
-uuid = {version = "0.8", features = ["v4"]}
-warpgate-common = {version = "*", path = "../warpgate-common"}
-warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
+bytes.workspace = true
+dialoguer.workspace = true
+futures.workspace = true
+russh.workspace = true
+russh-keys.workspace = true
+sea-orm.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
