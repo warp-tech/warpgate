@@ -1,41 +1,36 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
+edition = "2021"
+license = "Apache-2.0"
 name = "warpgate"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
+version = "0.3.0"
 
 [dependencies]
 ansi_term = "0.12"
-anyhow.workspace = true
-async-trait.workspace = true
+anyhow = {version = "1.0", features = ["backtrace"]}
+async-trait = "0.1"
 atty = "0.2"
-bytes.workspace = true
-clap = { version = "3.2", features = ["derive"] }
-config = { version = "0.13", features = ["yaml"], default_features = false }
-console = { version = "0.15", default_features = false }
-console-subscriber = { version = "0.1", optional = true }
-data-encoding.workspace = true
-dhat = { version = "0.3", optional = true }
-dialoguer.workspace = true
-futures.workspace = true
+bytes = "1.1"
+clap = {version = "3.2", features = ["derive"]}
+config = {version = "0.13", features = ["yaml"], default_features = false}
+console = {version = "0.15", default_features = false}
+console-subscriber = {version = "0.1", optional = true}
+data-encoding = "2.3"
+dhat = {version = "0.3", optional = true}
+dialoguer = "0.10"
+futures = "0.3"
 notify = "^5.0.0-beta.1"
-openssl = { version = "0.10", features = ["vendored"] } # Embed OpenSSL
+openssl = {version = "0.10", features = ["vendored"]}# Embed OpenSSL
 qrcode = "0.12"
-rcgen = { version = "0.9", features = ["zeroize"] }
+rcgen = {version = "0.9", features = ["zeroize"]}
 serde_yaml = "0.8.23"
-time.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = [
-    "env-filter",
-    "local-time",
-] }
-warpgate-admin = { version = "*", path = "../warpgate-admin" }
-warpgate-common = { version = "*", path = "../warpgate-common" }
-warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
-warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
+time = "0.3"
+tokio = {version = "1.19", features = ["tracing", "signal", "macros"]}
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
+warpgate-admin = {version = "*", path = "../warpgate-admin"}
+warpgate-common = {version = "*", path = "../warpgate-common"}
+warpgate-protocol-http = {version = "*", path = "../warpgate-protocol-http"}
+warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = "0.4"

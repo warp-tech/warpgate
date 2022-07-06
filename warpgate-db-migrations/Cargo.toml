@@ -1,16 +1,15 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
+edition = "2021"
+license = "Apache-2.0"
 name = "warpgate-db-migrations"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
+publish = false
+version = "0.3.0"
 
 [lib]
 
 [dependencies]
 async-std = "^1.11"
-chrono.workspace = true
-sea-orm.workspace = true
+chrono = "0.4"
+sea-orm = {version = "^0.8", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
 sea-orm-migration = {version = "^0.8", default-features = false}
-uuid.workspace = true
+uuid = {version = "0.8", features = ["v4", "serde"]}

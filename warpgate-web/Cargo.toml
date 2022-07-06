@@ -1,13 +1,11 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
+edition = "2021"
+license = "Apache-2.0"
 name = "warpgate-web"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
+version = "0.3.0"
 
 [dependencies]
-rust-embed.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
+rust-embed = "6.3"
+serde = "1.0"
+serde_json = "1.0"
+thiserror = "1.0"
