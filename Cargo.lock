@@ -2277,9 +2277,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.30"
+version = "1.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a37cf8dba4d40f07bc6274613dea21f38a91535e91ea1061f29533cf6522f8"
+checksum = "d91bcdeed420bd5427f6e0a5dd58d6c4c7b106e688a82874c6468c71b71a06b5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2303,6 +2303,7 @@ dependencies = [
  "priority-queue",
  "rand",
  "regex",
+ "rfc7239",
  "rust-embed",
  "rustls-pemfile",
  "serde",
@@ -2322,9 +2323,9 @@ dependencies = [
 
 [[package]]
 name = "poem-derive"
-version = "1.3.30"
+version = "1.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fed74e1ef749dc0f36addc543c66ae48beef59902c26222d82a1c7a7c1a2fb36"
+checksum = "9c436f8cd7ab49c3af193fdd437e66d4c5376f5dac5383792397446df1f748c1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2656,6 +2657,15 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
+]
+
+[[package]]
+name = "rfc7239"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "087317b3cf7eb481f13bd9025d729324b7cd068d6f470e2d76d049e191f5ba47"
+dependencies = [
+ "uncased",
 ]
 
 [[package]]
@@ -3971,6 +3981,15 @@ name = "typenum"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
+
+[[package]]
+name = "uncased"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09b01702b0fd0b3fadcf98e098780badda8742d4f4a7676615cad90e8ac73622"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "unicase"
