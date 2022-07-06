@@ -1,3 +1,5 @@
+<br/>
+
 <img src="warpgate-web/public/assets/logo.svg" width="100" />
 
 <br/>
