@@ -115,7 +115,7 @@ checksum = "a27e27b63e4a34caee411ade944981136fdfa535522dc9944d6700196cbd899f"
 dependencies = [
  "base64ct",
  "blake2",
- "password-hash 0.4.1",
+ "password-hash 0.4.2",
 ]
 
 [[package]]
@@ -2170,9 +2170,9 @@ dependencies = [
 
 [[package]]
 name = "password-hash"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e029e94abc8fb0065241c308f1ac6bc8d20f450e8f7c5f0b25cd9b8d526ba294"
+checksum = "7676374caaee8a325c9e7a2ae557f216c5563a171d6997b0ef8a65af35147700"
 dependencies = [
  "base64ct",
  "rand_core",
@@ -4206,7 +4206,7 @@ dependencies = [
  "lazy_static",
  "once_cell",
  "packet",
- "password-hash 0.4.1",
+ "password-hash 0.4.2",
  "poem-openapi",
  "rand",
  "rand_chacha",
