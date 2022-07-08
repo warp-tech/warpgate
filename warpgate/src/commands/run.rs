@@ -7,6 +7,7 @@ use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
+use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[cfg(target_os = "linux")]
@@ -41,6 +42,20 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 config
                     .store
                     .http
+                    .listen
+                    .to_socket_addrs()?
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
+            ),
+        );
+    }
+
+    if config.store.mysql.enable {
+        protocol_futures.push(
+            MySQLProtocolServer::new(&services).await?.run(
+                config
+                    .store
+                    .mysql
                     .listen
                     .to_socket_addrs()?
                     .next()

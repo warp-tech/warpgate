@@ -30,6 +30,7 @@ tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-protocol-http = {version = "*", path = "../warpgate-protocol-http"}
+warpgate-protocol-mysql = {version = "*", path = "../warpgate-protocol-mysql"}
 warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}
 
 [target.'cfg(target_os = "linux")'.dependencies]

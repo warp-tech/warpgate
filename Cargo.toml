@@ -6,6 +6,7 @@ members = [
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-protocol-http",
+    "warpgate-protocol-mysql",
     "warpgate-protocol-ssh",
     "warpgate-web",
 ]

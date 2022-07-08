@@ -45,6 +45,11 @@ fn _default_http_listen() -> String {
 }
 
 #[inline]
+fn _default_mysql_listen() -> String {
+    "0.0.0.0:33306".to_owned()
+}
+
+#[inline]
 fn _default_retention() -> Duration {
     Duration::SECOND * 60 * 60 * 24 * 7
 }
@@ -133,6 +138,8 @@ pub struct UserRequireCredentialsPolicy {
     pub http: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mysql: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -210,6 +217,32 @@ impl Default for HTTPConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MySQLConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_mysql_listen")]
+    pub listen: String,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for MySQLConfig {
+    fn default() -> Self {
+        MySQLConfig {
+            enable: true,
+            listen: _default_http_listen(),
+            certificate: "".to_owned(),
+            key: "".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -267,6 +300,9 @@ pub struct WarpgateConfigStore {
     pub http: HTTPConfig,
 
     #[serde(default)]
+    pub mysql: MySQLConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -281,6 +317,7 @@ impl Default for WarpgateConfigStore {
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
             http: HTTPConfig::default(),
+            mysql: MySQLConfig::default(),
             log: LogConfig::default(),
         }
     }
