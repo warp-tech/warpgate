@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::buf::Chain;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use mysql_common::constants::{CapabilityFlags, StatusFlags};
+use mysql_common::constants::StatusFlags;
 use mysql_common::io::ParseBuf;
 use mysql_common::misc::raw::bytes::BareBytes;
 use mysql_common::misc::raw::{Const, RawBytes, RawInt, Skip};
@@ -13,9 +13,12 @@ use mysql_common::proto::codec::PacketCodec;
 use mysql_common::proto::{MyDeserialize, MySerialize};
 use rand::Rng;
 use sha1::Digest;
-use sqlx_core_guts::io::BufStream;
+use sqlx_core_guts::io::{BufMutExt, BufStream};
 use sqlx_core_guts::mysql::io::MySqlBufMutExt;
+use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
+use sqlx_core_guts::mysql::protocol::connect::Handshake;
 use sqlx_core_guts::mysql::protocol::response::{ErrPacket, OkPacket, Status};
+use sqlx_core_guts::mysql::protocol::Capabilities;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -70,9 +73,10 @@ impl Debug for MySQLProtocolServer {
 struct Session {
     stream: BufStream<TcpStream>,
     codec: PacketCodec,
-    capabilities: CapabilityFlags,
+    capabilities: Capabilities,
     inbound_buffer: BytesMut,
     outbound_buffer: BytesMut,
+    challenge: [u8; 20],
 }
 
 pub trait SerializePacket {
@@ -98,9 +102,43 @@ impl SerializePacket for ErrPacket {
     }
 }
 
-impl SerializePacket for HandshakePacket<'_> {
+impl SerializePacket for Handshake {
     fn serialize(&self, buf: &mut Vec<u8>) {
-        MySerialize::serialize(self, buf);
+        buf.put_u8(self.protocol_version);
+        buf.put_str_nul(&self.server_version);
+        buf.put_u32_le(self.connection_id);
+        buf.put_slice(self.auth_plugin_data.first_ref());
+        buf.put_u8(0x00);
+        buf.put_u16_le((self.server_capabilities.bits() & 0x0000_FFFF) as u16);
+        buf.put_u8(self.server_default_collation);
+        buf.put_u16_le(self.status.bits());
+        buf.put_u16_le(((self.server_capabilities.bits() & 0xFFFF_0000) >> 16) as u16);
+
+        if self.server_capabilities.contains(Capabilities::PLUGIN_AUTH) {
+            buf.put_u8((self.auth_plugin_data.last_ref().len() + 8 + 1) as u8);
+        } else {
+            buf.put_u8(0);
+        }
+
+        buf.put_slice(&[0_u8; 10][..]);
+
+        if self
+            .server_capabilities
+            .contains(Capabilities::SECURE_CONNECTION)
+        {
+            buf.put_slice(self.auth_plugin_data.last_ref());
+            buf.put_u8(0);
+        }
+
+        if self.server_capabilities.contains(Capabilities::PLUGIN_AUTH) {
+            if let Some(auth_plugin) = self.auth_plugin {
+                buf.put_str_nul(match auth_plugin {
+                    AuthPlugin::MySqlNativePassword => "mysql_native_password",
+                    AuthPlugin::CachingSha2Password => "caching_sha2_password",
+                    AuthPlugin::Sha256Password => "sha256_password",
+                });
+            }
+        }
     }
 }
 
@@ -114,31 +152,29 @@ impl Session {
     pub fn new(stream: TcpStream) -> Self {
         Self {
             stream: BufStream::new(stream),
-            capabilities: CapabilityFlags::CLIENT_PROTOCOL_41
-                | CapabilityFlags::CLIENT_PLUGIN_AUTH
-                | CapabilityFlags::CLIENT_LONG_PASSWORD
-                | CapabilityFlags::CLIENT_FOUND_ROWS
-                | CapabilityFlags::CLIENT_LONG_FLAG
-                | CapabilityFlags::CLIENT_NO_SCHEMA
-                | CapabilityFlags::CLIENT_IGNORE_SIGPIPE
-                | CapabilityFlags::CLIENT_MULTI_RESULTS
-                | CapabilityFlags::CLIENT_MULTI_STATEMENTS
-                | CapabilityFlags::CLIENT_PS_MULTI_RESULTS
-                | CapabilityFlags::CLIENT_CONNECT_ATTRS
-                | CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
-                | CapabilityFlags::CLIENT_CONNECT_WITH_DB
-                | CapabilityFlags::CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS
-                | CapabilityFlags::CLIENT_SESSION_TRACK
-                | CapabilityFlags::CLIENT_IGNORE_SPACE
-                | CapabilityFlags::CLIENT_INTERACTIVE
-                | CapabilityFlags::CLIENT_TRANSACTIONS
-                | CapabilityFlags::MULTI_FACTOR_AUTHENTICATION
-                | CapabilityFlags::CLIENT_DEPRECATE_EOF
-                | CapabilityFlags::CLIENT_RESERVED
-                | CapabilityFlags::CLIENT_SECURE_CONNECTION,
+            capabilities: Capabilities::PROTOCOL_41
+                | Capabilities::PLUGIN_AUTH
+                | Capabilities::FOUND_ROWS
+                | Capabilities::LONG_FLAG
+                | Capabilities::NO_SCHEMA
+                | Capabilities::MULTI_RESULTS
+                | Capabilities::MULTI_STATEMENTS
+                | Capabilities::PS_MULTI_RESULTS
+                | Capabilities::CONNECT_ATTRS
+                | Capabilities::PLUGIN_AUTH_LENENC_DATA
+                | Capabilities::CONNECT_WITH_DB
+                | Capabilities::CAN_HANDLE_EXPIRED_PASSWORDS
+                | Capabilities::SESSION_TRACK
+                | Capabilities::IGNORE_SPACE
+                | Capabilities::INTERACTIVE
+                | Capabilities::TRANSACTIONS
+                // | Capabilities::MULTI_FACTOR_AUTHENTICATION
+                | Capabilities::DEPRECATE_EOF
+                | Capabilities::SECURE_CONNECTION,
             codec: PacketCodec::default(),
             inbound_buffer: BytesMut::new(),
             outbound_buffer: BytesMut::new(),
+            challenge: get_crypto_rng().gen(),
         }
     }
 
@@ -189,43 +225,14 @@ impl Session {
         // return result.context("Failed to deserialize");
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        let handshake = HandshakePacket::new(
-            10,
-            Cow::Borrowed(&b"10.0.0-Warpgate"[..]),
-            1,
-            b"abcdefgh".to_owned(),
-            None::<&[u8]>,
-            self.capabilities,
-            0,
-            StatusFlags::empty(),
-            Some(&b"mysql_native_password"[..]),
-        );
-        self.push(&handshake)?;
-        self.flush().await?;
-
-        let payload = self.recv().await?;
-        let resp = ParseBuf(&payload)
-            .parse::<HandshakeResponse>(())
-            .context("Failed to parse packet")?;
-        info!(?resp, "got response");
-
-        let challenge = get_crypto_rng().gen::<[u8; 20]>();
-        self.push(&AuthSwitchRequest::new(
-            &b"mysql_native_password"[..],
-            &challenge[..],
-        ))?;
-        // self.push(&RawBytes::<
-        self.flush().await?;
-
-        let client_response = password_hash::Output::new(&self.recv().await?);
+    async fn check_auth_response(&mut self, response: &[u8]) -> Result<bool> {
         let expected_response = password_hash::Output::new(
             &{
                 let true_password = b"123";
                 let password_sha: [u8; 20] = sha1::Sha1::digest(true_password).into();
                 let password_sha_sha: [u8; 20] = sha1::Sha1::digest(password_sha).into();
                 let password_seed_2sha_sha: [u8; 20] =
-                    sha1::Sha1::digest([challenge, password_sha_sha].concat()).into();
+                    sha1::Sha1::digest([self.challenge, password_sha_sha].concat()).into();
 
                 let mut result = password_sha;
                 result
@@ -236,8 +243,10 @@ impl Session {
             }[..],
         );
 
+        let client_response = password_hash::Output::new(response);
         info!(?client_response, "client_response");
         info!(?expected_response, "exp response");
+
         info!("correct {}", client_response == expected_response);
 
         if client_response == expected_response {
@@ -249,11 +258,58 @@ impl Session {
             })?;
         } else {
             self.push(&ErrPacket {
-                error_code: 0,
+                error_code: 1,
                 error_message: "Access denied".to_owned(),
                 sql_state: None,
             })?;
         }
+        self.flush().await?;
+
+        Ok(client_response == expected_response)
+    }
+
+    pub async fn run(mut self) -> Result<()> {
+        let mut challenge_1 = BytesMut::from(&self.challenge[..]);
+        let mut challenge_2 = challenge_1.split_off(8);
+        let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
+
+        let handshake = Handshake {
+            protocol_version: 10,
+            server_version: "Warpgate".to_owned(),
+            connection_id: 1,
+            auth_plugin_data: challenge_chain,
+            server_capabilities: self.capabilities,
+            server_default_collation: 45,
+            status: Status::empty(),
+            auth_plugin: Some(AuthPlugin::MySqlNativePassword),
+        };
+        self.push(&handshake)?;
+        self.flush().await?;
+
+        let payload = self.recv().await?;
+        let resp = ParseBuf(&payload)
+            .parse::<HandshakeResponse>(())
+            .context("Failed to parse packet")?;
+        info!(?resp, "got response");
+
+        if resp.auth_plugin() == Some(&mysql_common::packets::AuthPlugin::MysqlNativePassword) {
+            if self.check_auth_response(resp.scramble_buf()).await? {
+                return Ok(());
+            }
+        }
+
+        let challenge = self.challenge.clone();
+        let req = AuthSwitchRequest::new(
+            &b"mysql_native_password"[..],
+            &challenge[..],
+        );
+        self.push(&req)?;
+
+        // self.push(&RawBytes::<
+        self.flush().await?;
+
+        let response = &self.recv().await?;
+        self.check_auth_response(response).await?;
 
         Ok(())
     }
