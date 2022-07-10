@@ -19,3 +19,7 @@ tracing = "0.1"
 uuid = { version = "0.8", features = ["v4"] }
 bytes = "1.1"
 mysql_common = "0.29"
+rand = "0.8"
+sha1 = "0.10.1"
+password-hash="0.2"
+delegate = "0.6"
