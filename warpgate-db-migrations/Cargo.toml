@@ -10,6 +10,6 @@ version = "0.3.0"
 [dependencies]
 async-std = "^1.11"
 chrono = "0.4"
-sea-orm = {version = "^0.9", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"], default-features = false}
+sea-orm = {version = "^0.9", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros", "with-chrono", "with-uuid", "with-json"], default-features = false}
 sea-orm-migration = {version = "^0.9", default-features = false}
 uuid = {version = "1.0", features = ["v4", "serde"]}
