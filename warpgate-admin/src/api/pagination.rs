@@ -3,7 +3,6 @@ use poem_openapi::Object;
 use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QuerySelect, Select};
 
 #[derive(Object)]
-#[oai(inline)]
 pub struct PaginatedResponse<T: ParseFromJSON + ToJSON + Send + Sync> {
     items: Vec<T>,
     offset: u64,
