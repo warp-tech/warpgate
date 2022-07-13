@@ -2,29 +2,20 @@
 mod common;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use bytes::buf::Chain;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use mysql_common::constants::StatusFlags;
-use mysql_common::io::ParseBuf;
-use mysql_common::misc::raw::bytes::BareBytes;
-use mysql_common::misc::raw::{Const, RawBytes, RawInt, Skip};
-use mysql_common::packets::{AuthSwitchRequest, HandshakePacket, HandshakeResponse};
+use bytes::{Buf, Bytes, BytesMut};
 use mysql_common::proto::codec::PacketCodec;
-use mysql_common::proto::{MyDeserialize, MySerialize};
 use rand::Rng;
 use sha1::Digest;
-use sqlx_core_guts::io::{BufMutExt, BufStream};
-use sqlx_core_guts::mysql::io::MySqlBufMutExt;
+use sqlx_core_guts::io::{BufStream, Decode, Encode};
 use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
-use sqlx_core_guts::mysql::protocol::connect::Handshake;
+use sqlx_core_guts::mysql::protocol::connect::{AuthSwitchRequest, Handshake, HandshakeResponse};
 use sqlx_core_guts::mysql::protocol::response::{ErrPacket, OkPacket, Status};
+use sqlx_core_guts::mysql::protocol::text::Query;
 use sqlx_core_guts::mysql::protocol::Capabilities;
-use std::borrow::Cow;
 use std::fmt::Debug;
-use std::marker::PhantomData;
+
 use std::net::SocketAddr;
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::net::tcp::ReadHalf;
+use tokio::io::{AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::*;
 use warpgate_common::helpers::rng::get_crypto_rng;
@@ -79,74 +70,6 @@ struct Session {
     challenge: [u8; 20],
 }
 
-pub trait SerializePacket {
-    fn serialize(&self, buf: &mut Vec<u8>);
-}
-
-impl SerializePacket for OkPacket {
-    fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.put_u8(0);
-        buf.put_uint_lenenc(self.affected_rows);
-        buf.put_uint_lenenc(self.last_insert_id);
-        buf.put_u16_le(self.status.bits());
-        buf.put_u16_le(self.warnings);
-    }
-}
-
-impl SerializePacket for ErrPacket {
-    fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.put_u8(0xff);
-        buf.put_u16_le(self.error_code);
-        buf.extend_from_slice(self.error_message.as_bytes())
-        //TODO: sql_state
-    }
-}
-
-impl SerializePacket for Handshake {
-    fn serialize(&self, buf: &mut Vec<u8>) {
-        buf.put_u8(self.protocol_version);
-        buf.put_str_nul(&self.server_version);
-        buf.put_u32_le(self.connection_id);
-        buf.put_slice(self.auth_plugin_data.first_ref());
-        buf.put_u8(0x00);
-        buf.put_u16_le((self.server_capabilities.bits() & 0x0000_FFFF) as u16);
-        buf.put_u8(self.server_default_collation);
-        buf.put_u16_le(self.status.bits());
-        buf.put_u16_le(((self.server_capabilities.bits() & 0xFFFF_0000) >> 16) as u16);
-
-        if self.server_capabilities.contains(Capabilities::PLUGIN_AUTH) {
-            buf.put_u8((self.auth_plugin_data.last_ref().len() + 8 + 1) as u8);
-        } else {
-            buf.put_u8(0);
-        }
-
-        buf.put_slice(&[0_u8; 10][..]);
-
-        if self
-            .server_capabilities
-            .contains(Capabilities::SECURE_CONNECTION)
-        {
-            buf.put_slice(self.auth_plugin_data.last_ref());
-            buf.put_u8(0);
-        }
-
-        if self.server_capabilities.contains(Capabilities::PLUGIN_AUTH) {
-            if let Some(auth_plugin) = self.auth_plugin {
-                buf.put_str_nul(match auth_plugin {
-                    AuthPlugin::MySqlNativePassword => "mysql_native_password",
-                    AuthPlugin::CachingSha2Password => "caching_sha2_password",
-                    AuthPlugin::Sha256Password => "sha256_password",
-                });
-            }
-        }
-    }
-}
-
-impl SerializePacket for AuthSwitchRequest<'_> {
-    fn serialize(&self, buf: &mut Vec<u8>) {
-        MySerialize::serialize(self, buf);
-    }
-}
 
 impl Session {
     pub fn new(stream: TcpStream) -> Self {
@@ -178,9 +101,9 @@ impl Session {
         }
     }
 
-    fn push<P: SerializePacket>(&mut self, packet: &P) -> Result<()> {
+    fn push<'a, C, P: Encode<'a, C>>(&mut self, packet: &'a P, context: C) -> Result<()> {
         let mut buf = vec![];
-        packet.serialize(&mut buf);
+        packet.encode_with(&mut buf, context);
         self.codec
             .encode(&mut &*buf, &mut self.outbound_buffer)
             .context("Failed to encode packet")?;
@@ -198,13 +121,8 @@ impl Session {
         Ok(())
     }
 
-    // async fn recv<'a, P>(
-    //     &'a mut self,
-    //     ctx: P::Ctx,
-    // ) -> Result<P> where P: MyDeserialize<'a> {    }
-
-    async fn recv(&mut self) -> Result<Vec<u8>> {
-        let mut payload = vec![];
+    async fn recv(&mut self) -> Result<Bytes> {
+        let mut payload = BytesMut::new();
         loop {
             let read_bytes = self.stream.read_buf(&mut self.inbound_buffer).await?;
             if read_bytes == 0 {
@@ -219,7 +137,7 @@ impl Session {
             }
         }
         trace!(inbound_buffer=?self.inbound_buffer, "after packet");
-        Ok(payload)
+        Ok(payload.freeze())
         // let result = P::deserialize(ctx, &mut pb);
         // drop(pb);
         // return result.context("Failed to deserialize");
@@ -255,13 +173,13 @@ impl Session {
                 last_insert_id: 0,
                 status: Status::empty(),
                 warnings: 0,
-            })?;
+            }, ())?;
         } else {
             self.push(&ErrPacket {
                 error_code: 1,
                 error_message: "Access denied".to_owned(),
                 sql_state: None,
-            })?;
+            }, ())?;
         }
         self.flush().await?;
 
@@ -283,33 +201,57 @@ impl Session {
             status: Status::empty(),
             auth_plugin: Some(AuthPlugin::MySqlNativePassword),
         };
-        self.push(&handshake)?;
+        self.push(&handshake, ())?;
         self.flush().await?;
 
-        let payload = self.recv().await?;
-        let resp = ParseBuf(&payload)
-            .parse::<HandshakeResponse>(())
+        let mut payload = self.recv().await?;
+        let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
             .context("Failed to parse packet")?;
         info!(?resp, "got response");
 
-        if resp.auth_plugin() == Some(&mysql_common::packets::AuthPlugin::MysqlNativePassword) {
-            if self.check_auth_response(resp.scramble_buf()).await? {
-                return Ok(());
-            }
+        if resp.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
+            if let Some(response) = resp.auth_response.as_ref() {
+            if self.check_auth_response(response).await? {
+                return self.run_authorized().await;
+            }}
         }
 
         let challenge = self.challenge.clone();
-        let req = AuthSwitchRequest::new(
-            &b"mysql_native_password"[..],
-            &challenge[..],
-        );
-        self.push(&req)?;
+        let req = AuthSwitchRequest {
+            plugin: AuthPlugin::MySqlNativePassword,
+            data: BytesMut::from(&challenge[..]).freeze(),
+        };
+        self.push(&req, ())?;
 
         // self.push(&RawBytes::<
         self.flush().await?;
 
         let response = &self.recv().await?;
-        self.check_auth_response(response).await?;
+        if self.check_auth_response(response).await? {
+            return self.run_authorized().await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_authorized(mut self) -> Result<()> {
+        loop {
+            self.codec.reset_seq_id();
+            let payload = self.recv().await?;
+            trace!(?payload, "got packet");
+
+            // COM_QUERY
+            if payload.get(0) == Some(&0x03) {
+                let query = Query::decode(payload)?;
+                trace!(?query, "got query");
+                self.push(&ErrPacket {
+                    error_code: 1,
+                    error_message: "Whoops".to_owned(),
+                    sql_state: None,
+                }, ())?;
+                self.flush().await?;
+            }
+        }
 
         Ok(())
     }
