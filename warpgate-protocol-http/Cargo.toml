@@ -14,7 +14,7 @@ futures = "0.3"
 http = "0.2"
 lazy_static = "1.4"
 poem = {version = "^1.3.30", features = ["cookie", "session", "anyhow", "rustls", "websocket", "sse", "embed"]}
-poem-openapi = {version = "^1.3.30", features = ["swagger-ui"]}
+poem-openapi = {version = "^2.0.4", features = ["swagger-ui"]}
 reqwest = {version = "0.11", features = ["rustls-tls-native-roots", "stream"]}
 serde = "1.0"
 serde_json = "1.0"
@@ -26,4 +26,4 @@ warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-web = {version = "*", path = "../warpgate-web"}
 percent-encoding = "2.1"
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.0", features = ["v4"]}

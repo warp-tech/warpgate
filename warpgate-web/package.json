@@ -36,7 +36,7 @@
     "eslint-plugin-promise": "^6.0.0",
     "eslint-plugin-svelte3": "^4.0.0",
     "format-duration": "^2.0.0",
-    "moment": "^2.29.3",
+    "moment": "^2.29.4",
     "sass": "^1.52.3",
     "svelte": "^3.48.0",
     "svelte-check": "^2.7.2",
