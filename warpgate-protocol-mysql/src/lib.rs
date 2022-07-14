@@ -7,6 +7,9 @@ use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
 use common::compute_auth_challenge_response;
 use rand::Rng;
+use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
+use rustls::{Certificate, PrivateKey, ServerConfig};
 use sqlx_core_guts::io::Decode;
 use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
 use sqlx_core_guts::mysql::protocol::connect::{AuthSwitchRequest, Handshake, HandshakeResponse};
@@ -15,6 +18,7 @@ use sqlx_core_guts::mysql::protocol::text::Query;
 use sqlx_core_guts::mysql::protocol::Capabilities;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use stream::MySQLStream;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::*;
@@ -35,21 +39,87 @@ impl MySQLProtocolServer {
     }
 }
 
+struct ResolveServerCert(Arc<CertifiedKey>);
+
+impl ResolvesServerCert for ResolveServerCert {
+    fn resolve(&self, _: ClientHello) -> Option<Arc<CertifiedKey>> {
+        Some(self.0.clone())
+    }
+}
+
 #[async_trait]
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
+        let (certificates, key_bytes) = {
+            let config = self.services.config.lock().await;
+            let certificate_path = config
+                .paths_relative_to
+                .join(&config.store.mysql.certificate);
+            let key_path = config.paths_relative_to.join(&config.store.mysql.key);
+
+            (
+                rustls_pemfile::certs(
+                    &mut std::fs::read(&certificate_path)
+                        .with_context(|| {
+                            format!(
+                                "reading SSL certificate from '{}'",
+                                certificate_path.display()
+                            )
+                        })?
+                        .as_slice(),
+                )
+                .map(|mut certs| {
+                    certs
+                        .drain(..)
+                        .map(Certificate)
+                        .collect::<Vec<Certificate>>()
+                })
+                .context("failed to parse tls certificates")?,
+                std::fs::read(&key_path).with_context(|| {
+                    format!("reading SSL private key from '{}'", key_path.display())
+                })?,
+            )
+        };
+
+        let mut key = rustls_pemfile::pkcs8_private_keys(&mut key_bytes.as_slice())?
+            .drain(..)
+            .next()
+            .map(PrivateKey);
+
+        if key.is_none() {
+            key = rustls_pemfile::rsa_private_keys(&mut key_bytes.as_slice())?
+                .drain(..)
+                .next()
+                .map(PrivateKey);
+        }
+
+        let key = key.context("no private keys in file")?;
+        let key = rustls::sign::any_supported_type(&key)?;
+
+        let cert_key = Arc::new(CertifiedKey {
+            cert: certificates,
+            key,
+            ocsp: None,
+            sct_list: None,
+        });
+
+        let tls_config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_client_cert_verifier(NoClientAuth::new())
+            .with_cert_resolver(Arc::new(ResolveServerCert(cert_key)));
+
         info!(?address, "Listening");
         let listener = TcpListener::bind(address).await?;
         loop {
             let (stream, addr) = listener.accept().await?;
+            let tls_config = tls_config.clone();
             tokio::spawn(async move {
-                match Session::new(stream).run().await {
+                match Session::new(stream, tls_config).run().await {
                     Ok(_) => info!(?addr, "Session finished"),
                     Err(e) => error!(?addr, ?e, "Session failed"),
                 }
             });
         }
-        Ok(())
     }
 
     async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {
@@ -67,10 +137,11 @@ struct Session {
     stream: MySQLStream,
     capabilities: Capabilities,
     challenge: [u8; 20],
+    tls_config: Arc<ServerConfig>,
 }
 
 impl Session {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream, tls_config: ServerConfig) -> Self {
         Self {
             stream: MySQLStream::new(stream),
             capabilities: Capabilities::PROTOCOL_41
@@ -90,8 +161,10 @@ impl Session {
                 | Capabilities::TRANSACTIONS
                 // | Capabilities::MULTI_FACTOR_AUTHENTICATION
                 | Capabilities::DEPRECATE_EOF
-                | Capabilities::SECURE_CONNECTION,
+                | Capabilities::SECURE_CONNECTION
+                | Capabilities::SSL,
             challenge: get_crypto_rng().gen(),
+            tls_config: Arc::new(tls_config),
         }
     }
 
@@ -142,12 +215,24 @@ impl Session {
         self.stream.push(&handshake, ())?;
         self.stream.flush().await?;
 
-        let payload = self.stream.recv().await?;
-        let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
-            .context("Failed to parse packet")?;
+        let resp = loop {
+            let payload = self.stream.recv().await?;
+            let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
+                .context("Failed to parse packet")?;
 
-        trace!(?resp, "Handshake response");
-        info!(capabilities=?self.capabilities, username=%resp.username, "handshake complete");
+            trace!(?resp, "Handshake response");
+            info!(capabilities=?self.capabilities, username=%resp.username, "handshake complete");
+
+            if self.capabilities.contains(Capabilities::SSL) {
+                if self.stream.is_tls() {
+                    break resp
+                }
+                self.stream.upgrade(self.tls_config.clone()).await?;
+                continue
+            } else {
+                break resp
+            }
+        };
 
         if resp.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
             if let Some(response) = resp.auth_response.as_ref() {
@@ -213,8 +298,10 @@ impl Session {
             let payload = self.stream.recv().await?;
             trace!(?payload, "server got packet");
 
+            let com = payload.get(0);
+
             // COM_QUERY
-            if payload.get(0) == Some(&0x03) {
+            if com == Some(&0x03) {
                 let query = Query::decode(payload)?;
                 trace!(?query, "server got query");
 
@@ -227,23 +314,42 @@ impl Session {
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;
-                    if let Some(b) = response.get(0) {
-                        if b == &0xfe {
+                    if let Some(com) = response.get(0) {
+                        if com == &0xfe {
                             eof_ctr += 1;
-                            if eof_ctr == 2 && !self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
-                                // tood check multiple results
+                            if eof_ctr == 2
+                                && !self.capabilities.contains(Capabilities::DEPRECATE_EOF)
+                            {
+                                // todo check multiple results
                                 break;
                             }
                         }
-                        if b == &0 || b == &0xff {
+                        if com == &0 || com == &0xff {
                             break;
                         }
                     }
                 }
-
+            // COM_QUIT
+            } else if com == Some(&0x01) {
+                break;
+            // COM_FIELD_LIST
+            } else if com == Some(&0x04) {
+                client.stream.push(&&payload[..], ())?;
+                client.stream.flush().await?;
+                loop {
+                    let response = client.stream.recv().await?;
+                    trace!(?response, "client got packet");
+                    self.stream.push(&&response[..], ())?;
+                    self.stream.flush().await?;
+                    if let Some(com) = response.get(0) {
+                        if com == &0 || com == &0xff || com == &0xfe {
+                            break;
+                        }
+                    }
+                }
             } else {
                 warn!("Unknown packet type {:?}", payload.get(0));
-                self.send_error(999, "Not implemented").await?;
+                self.send_error(1047, "Not implemented").await?;
             }
         }
 

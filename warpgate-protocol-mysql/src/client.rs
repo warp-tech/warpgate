@@ -33,7 +33,7 @@ impl MySQLClient {
         let handshake = Handshake::decode(payload)?;
 
         options.capabilities &= handshake.server_capabilities;
-        // options.capabilities.remove(Capabilities::CONNECT_ATTRS);
+        options.capabilities |= Capabilities::SSL;
 
         debug!(?handshake, "Received handshake");
         debug!(capabilities=?options.capabilities, "Capabilities");
