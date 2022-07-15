@@ -2,14 +2,16 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use mysql_common::proto::codec::PacketCodec;
 use sqlx_core_guts::io::Encode;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::*;
 
 use crate::tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
-pub struct MySQLStream<TS> where TcpStream: UpgradableStream<TS>,
-TS: AsyncRead + AsyncWrite + Unpin,
+pub struct MySQLStream<TS>
+where
+    TcpStream: UpgradableStream<TS>,
+    TS: AsyncRead + AsyncWrite + Unpin,
 {
     stream: MaybeTlsStream<TcpStream, TS>,
     codec: PacketCodec,
@@ -17,8 +19,11 @@ TS: AsyncRead + AsyncWrite + Unpin,
     outbound_buffer: BytesMut,
 }
 
-impl<TS> MySQLStream<TS> where TcpStream: UpgradableStream<TS>,
-TS: AsyncRead + AsyncWrite + Unpin {
+impl<TS> MySQLStream<TS>
+where
+    TcpStream: UpgradableStream<TS>,
+    TS: AsyncRead + AsyncWrite + Unpin,
+{
     pub fn new(stream: TcpStream) -> Self {
         Self {
             stream: MaybeTlsStream::new(stream),

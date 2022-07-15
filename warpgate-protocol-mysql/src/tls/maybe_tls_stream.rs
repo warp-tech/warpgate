@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use rustls::{ServerConfig, ClientConfig, ServerName};
+use rustls::{ClientConfig, ServerConfig, ServerName};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
@@ -136,7 +136,6 @@ where
         Ok(connector.connect(domain, self).await?)
     }
 }
-
 
 #[async_trait]
 impl<S> UpgradableStream<tokio_rustls::server::TlsStream<S>> for S
