@@ -2,9 +2,10 @@ use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
 pub mod session {
-    use crate::m00001_create_ticket::ticket;
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
+
+    use crate::m00001_create_ticket::ticket;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "sessions")]

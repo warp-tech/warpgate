@@ -1,9 +1,10 @@
+use std::sync::Arc;
+
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh_keys::PublicKeyBase64;
 use serde::Serialize;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use warpgate_common::WarpgateConfig;
 

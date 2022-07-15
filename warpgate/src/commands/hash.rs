@@ -1,6 +1,7 @@
+use std::io::stdin;
+
 use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
-use std::io::stdin;
 use warpgate_common::helpers::hash::hash_password;
 
 pub(crate) async fn command() -> Result<()> {

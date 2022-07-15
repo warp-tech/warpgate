@@ -1,7 +1,8 @@
-use crate::config::load_config;
 use anyhow::Result;
 use tracing::*;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
+
+use crate::config::load_config;
 
 pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {
     let config = load_config(&cli.config, true)?;

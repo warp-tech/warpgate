@@ -1,7 +1,8 @@
-use super::serde_base64;
-use crate::Secret;
 use bytes::Bytes;
 use serde::Serializer;
+
+use super::serde_base64;
+use crate::Secret;
 
 pub fn serialize<S: Serializer>(secret: &Secret<Bytes>, serializer: S) -> Result<S::Ok, S::Error> {
     serde_base64::serialize(secret.expose_secret().as_ref(), serializer)

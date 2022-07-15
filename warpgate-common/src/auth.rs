@@ -1,6 +1,7 @@
+use std::fmt::Debug;
+
 use crate::consts::TICKET_SELECTOR_PREFIX;
 use crate::Secret;
-use std::fmt::Debug;
 
 pub enum AuthSelector {
     User {

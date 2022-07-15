@@ -1,11 +1,10 @@
-use super::service_output::ServiceOutput;
-use super::session_handle::SessionHandleCommand;
-use crate::compat::ContextExt;
-use crate::server::service_output::ERASE_PROGRESS_SPINNER;
-use crate::{
-    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
-    RemoteClient, ServerChannelId, X11Request,
-};
+use std::borrow::Cow;
+use std::collections::hash_map::Entry::Vacant;
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::str::FromStr;
+use std::sync::Arc;
+
 use ansi_term::Colour;
 use anyhow::{Context, Result};
 use bimap::BiMap;
@@ -14,12 +13,6 @@ use russh::server::Session;
 use russh::{CryptoVec, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
-use std::borrow::Cow;
-use std::collections::hash_map::Entry::Vacant;
-use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
-use std::str::FromStr;
-use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
@@ -33,6 +26,15 @@ use warpgate_common::recordings::{
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
     TargetOptions, TargetSSHOptions, WarpgateServerHandle,
+};
+
+use super::service_output::ServiceOutput;
+use super::session_handle::SessionHandleCommand;
+use crate::compat::ContextExt;
+use crate::server::service_output::ERASE_PROGRESS_SPINNER;
+use crate::{
+    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
+    RemoteClient, ServerChannelId, X11Request,
 };
 
 #[derive(Clone)]

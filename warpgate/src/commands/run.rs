@@ -1,7 +1,9 @@
-use crate::config::{load_config, watch_config};
+use std::net::ToSocketAddrs;
+
 use anyhow::Result;
 use futures::StreamExt;
-use std::net::ToSocketAddrs;
+#[cfg(target_os = "linux")]
+use sd_notify::NotifyState;
 use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
@@ -9,8 +11,7 @@ use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
-#[cfg(target_os = "linux")]
-use sd_notify::NotifyState;
+use crate::config::{load_config, watch_config};
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");

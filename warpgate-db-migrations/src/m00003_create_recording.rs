@@ -2,9 +2,10 @@ use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
 pub mod recording {
-    use crate::m00002_create_session::session;
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
+
+    use crate::m00002_create_session::session;
 
     #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
     #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]

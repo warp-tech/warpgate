@@ -6,7 +6,9 @@ pub mod helpers;
 mod keys;
 mod known_hosts;
 mod server;
-use crate::client::{RCCommand, RemoteClient};
+use std::fmt::Debug;
+use std::net::SocketAddr;
+
 use anyhow::Result;
 use async_trait::async_trait;
 pub use client::*;
@@ -14,12 +16,12 @@ pub use common::*;
 pub use keys::*;
 use russh_keys::PublicKeyBase64;
 pub use server::run_server;
-use std::fmt::Debug;
-use std::net::SocketAddr;
 use uuid::Uuid;
 use warpgate_common::{
     ProtocolName, ProtocolServer, Services, Target, TargetOptions, TargetTestError,
 };
+
+use crate::client::{RCCommand, RemoteClient};
 
 pub static PROTOCOL_NAME: ProtocolName = "SSH";
 

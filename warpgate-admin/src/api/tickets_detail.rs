@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 

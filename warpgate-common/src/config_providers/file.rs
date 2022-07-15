@@ -1,3 +1,16 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use data_encoding::BASE64_MIME;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use tokio::sync::Mutex;
+use tracing::*;
+use uuid::Uuid;
+use warpgate_db_entities::Ticket;
+
 use super::ConfigProvider;
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
@@ -5,17 +18,6 @@ use crate::{
     AuthCredential, AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot,
     WarpgateConfig,
 };
-use anyhow::Result;
-use async_trait::async_trait;
-use data_encoding::BASE64_MIME;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
-use std::collections::HashSet;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::*;
-use uuid::Uuid;
-use warpgate_db_entities::Ticket;
 
 pub struct FileConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,

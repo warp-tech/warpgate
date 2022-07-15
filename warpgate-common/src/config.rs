@@ -1,8 +1,9 @@
-use poem_openapi::{Object, Union};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+
+use poem_openapi::{Object, Union};
+use serde::{Deserialize, Serialize};
 
 use crate::helpers::otp::OtpSecretKey;
 use crate::Secret;

@@ -1,7 +1,9 @@
-use crate::config::load_config;
-use anyhow::{Context, Result};
 use std::net::ToSocketAddrs;
+
+use anyhow::{Context, Result};
 use tracing::*;
+
+use crate::config::load_config;
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let config = load_config(&cli.config, true)?;

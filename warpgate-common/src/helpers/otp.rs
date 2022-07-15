@@ -1,10 +1,11 @@
 use std::time::SystemTime;
 
-use super::rng::get_crypto_rng;
-use crate::types::Secret;
 use bytes::Bytes;
 use rand::Rng;
 use totp_rs::{Algorithm, TOTP};
+
+use super::rng::get_crypto_rng;
+use crate::types::Secret;
 
 pub type OtpExposedSecretKey = Bytes;
 pub type OtpSecretKey = Secret<OtpExposedSecretKey>;

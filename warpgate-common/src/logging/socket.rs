@@ -1,11 +1,12 @@
-use super::layer::ValuesLogLayer;
-use crate::WarpgateConfig;
 use bytes::BytesMut;
 use chrono::Local;
 use tokio::net::UnixDatagram;
 use tracing::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
+
+use super::layer::ValuesLogLayer;
+use crate::WarpgateConfig;
 
 static SKIP_KEY: &str = "is_socket_logging_error";
 

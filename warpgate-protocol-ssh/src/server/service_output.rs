@@ -1,7 +1,8 @@
-use ansi_term::Colour;
-use anyhow::Result;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+
+use ansi_term::Colour;
+use anyhow::Result;
 use tokio::sync::{mpsc, Mutex};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
