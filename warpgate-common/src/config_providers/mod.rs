@@ -1,15 +1,17 @@
 mod file;
-use crate::{ProtocolName, Secret, Target, UserSnapshot};
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use file::FileConfigProvider;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
+
+use crate::{ProtocolName, Secret, Target, UserSnapshot};
 
 pub enum AuthResult {
     Accepted { username: String },

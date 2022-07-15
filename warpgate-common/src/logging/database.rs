@@ -1,15 +1,17 @@
-use super::layer::ValuesLogLayer;
-use super::values::SerializedRecordValues;
+use std::sync::Arc;
+
 use once_cell::sync::OnceCell;
 use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use uuid::Uuid;
 use warpgate_db_entities::LogEntry;
+
+use super::layer::ValuesLogLayer;
+use super::values::SerializedRecordValues;
 
 static LOG_SENDER: OnceCell<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
     OnceCell::new();

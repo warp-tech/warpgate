@@ -1,4 +1,5 @@
-use super::pagination::{PaginatedResponse, PaginationParams};
+use std::sync::Arc;
+
 use futures::{SinkExt, StreamExt};
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
@@ -8,9 +9,10 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use warpgate_common::{SessionSnapshot, State};
+
+use super::pagination::{PaginatedResponse, PaginationParams};
 
 pub struct Api;
 

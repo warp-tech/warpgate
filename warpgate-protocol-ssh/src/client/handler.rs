@@ -1,14 +1,16 @@
-use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::ConnectionError;
+use std::pin::Pin;
+
 use futures::FutureExt;
 use russh::client::Session;
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
-use std::pin::Pin;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
 use warpgate_common::{Services, SessionId, TargetSSHOptions};
+
+use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
+use crate::ConnectionError;
 
 #[derive(Debug)]
 pub enum ClientHandlerEvent {

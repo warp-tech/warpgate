@@ -1,8 +1,9 @@
+use std::fmt::Debug;
+
 use bytes::Bytes;
 use data_encoding::HEXLOWER;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 use uuid::Uuid;
 
 use crate::helpers::rng::get_crypto_rng;

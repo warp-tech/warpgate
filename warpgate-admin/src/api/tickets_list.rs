@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;

@@ -1,19 +1,20 @@
-use crate::helpers::fs::secure_file;
-use crate::try_block;
-
-use super::{Error, Result};
-use bytes::{Bytes, BytesMut};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use bytes::{Bytes, BytesMut};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Recording;
+
+use super::{Error, Result};
+use crate::helpers::fs::secure_file;
+use crate::try_block;
 
 #[derive(Clone)]
 pub struct RecordingWriter {

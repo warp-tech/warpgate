@@ -1,8 +1,9 @@
+use std::path::Path;
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use config::{Config, Environment, File};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::Path;
-use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;

@@ -1,11 +1,10 @@
 mod channel_direct_tcpip;
 mod channel_session;
 mod handler;
-use self::handler::ClientHandlerEvent;
-use super::{ChannelOperation, DirectTCPIPParams};
-use crate::client::handler::ClientHandlerError;
-use crate::helpers::PublicKeyAsOpenSSH;
-use crate::keys::load_client_keys;
+use std::collections::HashMap;
+use std::net::ToSocketAddrs;
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
@@ -15,9 +14,6 @@ use handler::ClientHandler;
 use russh::client::Handle;
 use russh::{Preferred, Sig};
 use russh_keys::key::{self, PublicKey};
-use std::collections::HashMap;
-use std::net::ToSocketAddrs;
-use std::sync::Arc;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -25,6 +21,12 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::{SSHTargetAuth, Services, SessionId, TargetSSHOptions};
+
+use self::handler::ClientHandlerEvent;
+use super::{ChannelOperation, DirectTCPIPParams};
+use crate::client::handler::ClientHandlerError;
+use crate::helpers::PublicKeyAsOpenSSH;
+use crate::keys::load_client_keys;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {

@@ -2,12 +2,14 @@
 mod commands;
 mod config;
 mod logging;
-use crate::config::load_config;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{ArgAction, StructOpt};
 use logging::init_logging;
-use std::path::PathBuf;
 use tracing::*;
+
+use crate::config::load_config;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]

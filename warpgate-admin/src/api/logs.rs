@@ -1,9 +1,10 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_db_entities::LogEntry;
