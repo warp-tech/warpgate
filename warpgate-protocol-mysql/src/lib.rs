@@ -2,14 +2,13 @@
 mod client;
 mod common;
 mod stream;
+mod tls;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
 use common::compute_auth_challenge_response;
 use rand::Rng;
-use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
-use rustls::sign::CertifiedKey;
-use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls::ServerConfig;
 use sqlx_core_guts::io::Decode;
 use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
 use sqlx_core_guts::mysql::protocol::connect::{AuthSwitchRequest, Handshake, HandshakeResponse};
@@ -26,6 +25,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 
 use crate::client::{ConnectionOptions, MySQLClient};
+use crate::tls::FromCertificateAndKey;
 
 pub struct MySQLProtocolServer {
     services: Services,
@@ -39,18 +39,10 @@ impl MySQLProtocolServer {
     }
 }
 
-struct ResolveServerCert(Arc<CertifiedKey>);
-
-impl ResolvesServerCert for ResolveServerCert {
-    fn resolve(&self, _: ClientHello) -> Option<Arc<CertifiedKey>> {
-        Some(self.0.clone())
-    }
-}
-
 #[async_trait]
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
-        let (certificates, key_bytes) = {
+        let (certificate, key) = {
             let config = self.services.config.lock().await;
             let certificate_path = config
                 .paths_relative_to
@@ -58,55 +50,19 @@ impl ProtocolServer for MySQLProtocolServer {
             let key_path = config.paths_relative_to.join(&config.store.mysql.key);
 
             (
-                rustls_pemfile::certs(
-                    &mut std::fs::read(&certificate_path)
-                        .with_context(|| {
-                            format!(
-                                "reading SSL certificate from '{}'",
-                                certificate_path.display()
-                            )
-                        })?
-                        .as_slice(),
-                )
-                .map(|mut certs| {
-                    certs
-                        .drain(..)
-                        .map(Certificate)
-                        .collect::<Vec<Certificate>>()
-                })
-                .context("failed to parse tls certificates")?,
+                std::fs::read(&certificate_path).with_context(|| {
+                    format!(
+                        "reading SSL certificate from '{}'",
+                        certificate_path.display()
+                    )
+                })?,
                 std::fs::read(&key_path).with_context(|| {
                     format!("reading SSL private key from '{}'", key_path.display())
                 })?,
             )
         };
 
-        let mut key = rustls_pemfile::pkcs8_private_keys(&mut key_bytes.as_slice())?
-            .drain(..)
-            .next()
-            .map(PrivateKey);
-
-        if key.is_none() {
-            key = rustls_pemfile::rsa_private_keys(&mut key_bytes.as_slice())?
-                .drain(..)
-                .next()
-                .map(PrivateKey);
-        }
-
-        let key = key.context("no private keys in file")?;
-        let key = rustls::sign::any_supported_type(&key)?;
-
-        let cert_key = Arc::new(CertifiedKey {
-            cert: certificates,
-            key,
-            ocsp: None,
-            sct_list: None,
-        });
-
-        let tls_config = ServerConfig::builder()
-            .with_safe_defaults()
-            .with_client_cert_verifier(NoClientAuth::new())
-            .with_cert_resolver(Arc::new(ResolveServerCert(cert_key)));
+        let tls_config = ServerConfig::try_from_certificate_and_key(certificate, key)?;
 
         info!(?address, "Listening");
         let listener = TcpListener::bind(address).await?;
@@ -225,12 +181,12 @@ impl Session {
 
             if self.capabilities.contains(Capabilities::SSL) {
                 if self.stream.is_tls() {
-                    break resp
+                    break resp;
                 }
-                self.stream.upgrade(self.tls_config.clone()).await?;
-                continue
+                self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
+                continue;
             } else {
-                break resp
+                break resp;
             }
         };
 

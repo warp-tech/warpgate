@@ -4671,6 +4671,7 @@ dependencies = [
  "rustls-pemfile",
  "sha1",
  "sqlx-core-guts",
+ "thiserror",
  "tokio",
  "tokio-rustls",
  "tracing",
