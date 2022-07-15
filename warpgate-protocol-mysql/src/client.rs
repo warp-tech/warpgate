@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::BytesMut;
 use sqlx_core_guts::io::Decode;
 use sqlx_core_guts::mysql::options::MySqlConnectOptions;
@@ -13,7 +13,7 @@ use crate::common::compute_auth_challenge_response;
 use crate::stream::MySQLStream;
 
 pub struct MySQLClient {
-    pub stream: MySQLStream,
+    pub stream: MySQLStream<tokio_rustls::client::TlsStream<TcpStream>>,
     pub capabilities: Capabilities,
 }
 

@@ -90,7 +90,7 @@ impl Debug for MySQLProtocolServer {
 }
 
 struct Session {
-    stream: MySQLStream,
+    stream: MySQLStream<tokio_rustls::server::TlsStream<TcpStream>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     tls_config: Arc<ServerConfig>,
@@ -198,7 +198,7 @@ impl Session {
             }
         }
 
-        let challenge = self.challenge.clone();
+        let challenge = self.challenge;
         let req = AuthSwitchRequest {
             plugin: AuthPlugin::MySqlNativePassword,
             data: BytesMut::from(&challenge[..]).freeze(),
@@ -235,7 +235,7 @@ impl Session {
                 collation: handshake.collation,
                 database: handshake.database,
                 max_packet_size: handshake.max_packet_size,
-                capabilities: self.capabilities.clone(),
+                capabilities: self.capabilities,
             },
         )
         .await

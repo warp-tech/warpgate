@@ -1,22 +1,24 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use mysql_common::proto::codec::PacketCodec;
-use sqlx_core_guts::io::{Encode};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::sync::Arc;
+use sqlx_core_guts::io::Encode;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tracing::*;
 
-use crate::tls::{MaybeTlsStream, MaybeTlsStreamError};
+use crate::tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
-pub struct MySQLStream {
-    stream: MaybeTlsStream<TcpStream, tokio_rustls::server::TlsStream<TcpStream>>,
+pub struct MySQLStream<TS> where TcpStream: UpgradableStream<TS>,
+TS: AsyncRead + AsyncWrite + Unpin,
+{
+    stream: MaybeTlsStream<TcpStream, TS>,
     codec: PacketCodec,
     inbound_buffer: BytesMut,
     outbound_buffer: BytesMut,
 }
 
-impl MySQLStream {
+impl<TS> MySQLStream<TS> where TcpStream: UpgradableStream<TS>,
+TS: AsyncRead + AsyncWrite + Unpin {
     pub fn new(stream: TcpStream) -> Self {
         Self {
             stream: MaybeTlsStream::new(stream),
@@ -24,10 +26,6 @@ impl MySQLStream {
             inbound_buffer: BytesMut::new(),
             outbound_buffer: BytesMut::new(),
         }
-    }
-
-    pub fn inner(&mut self) -> &mut MaybeTlsStream<TcpStream, tokio_rustls::server::TlsStream<TcpStream>> {
-        &mut self.stream
     }
 
     pub fn push<'a, C, P: Encode<'a, C>>(&mut self, packet: &'a P, context: C) -> Result<()> {
@@ -41,7 +39,7 @@ impl MySQLStream {
 
     pub async fn flush(&mut self) -> Result<()> {
         trace!(outbound_buffer=?self.outbound_buffer, "sending");
-        self.stream.write(&self.outbound_buffer[..]).await?;
+        self.stream.write_all(&self.outbound_buffer[..]).await?;
         self.outbound_buffer = BytesMut::new();
         self.stream
             .flush()
@@ -72,8 +70,11 @@ impl MySQLStream {
         self.codec.reset_seq_id();
     }
 
-    pub async fn upgrade(mut self, tls_config: Arc<rustls::ServerConfig>) -> Result<Self, MaybeTlsStreamError> {
-        self.stream = self.stream.upgrade(tls_config).await?;
+    pub async fn upgrade(
+        mut self,
+        config: <TcpStream as UpgradableStream<TS>>::UpgradeConfig,
+    ) -> Result<Self, MaybeTlsStreamError> {
+        self.stream = self.stream.upgrade(config).await?;
         Ok(self)
     }
 
