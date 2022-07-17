@@ -1,9 +1,8 @@
+use std::error::Error;
 use std::sync::Arc;
 
-use anyhow::Result;
 use bytes::BytesMut;
 use sqlx_core_guts::io::Decode;
-use sqlx_core_guts::mysql::options::MySqlConnectOptions;
 use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
 use sqlx_core_guts::mysql::protocol::connect::{Handshake, HandshakeResponse, SslRequest};
 use sqlx_core_guts::mysql::protocol::response::ErrPacket;
@@ -12,11 +11,43 @@ use sqlx_core_guts::mysql::MySqlSslMode;
 use tokio::net::TcpStream;
 use tracing::*;
 
-use crate::common::compute_auth_challenge_response;
-use crate::stream::MySqlStream;
-use crate::tls::configure_tls_connector;
+use crate::common::{compute_auth_challenge_response, parse_mysql_uri, InvalidMySqlTargetConfig};
+use crate::stream::{MySqlStream, MySqlStreamError};
+use crate::tls::{configure_tls_connector, MaybeTlsStreamError, RustlsSetupError};
 
-pub struct MySQLClient {
+#[derive(thiserror::Error, Debug)]
+pub enum MySqlClientError {
+    #[error("Invalid target config")]
+    InvalidTargetConfig(#[from] InvalidMySqlTargetConfig),
+    #[error("protocol error")]
+    ProtocolError(String),
+    #[error("sudden disconnection")]
+    Eof,
+    #[error("server doesn't offer TLS")]
+    TlsNotSupported,
+    #[error("TLS setup failed")]
+    TlsSetup(#[from] RustlsSetupError),
+    #[error("TLS stream error")]
+    Tls(#[from] MaybeTlsStreamError),
+    #[error("Invalid domain name")]
+    InvalidDomainName,
+    #[error("sqlx")]
+    Sqlx(#[from] sqlx_core_guts::error::Error),
+    #[error("MySQL stream")]
+    MySqlStream(#[from] MySqlStreamError),
+    #[error("I/O")]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Other(#[from] Box<dyn Error + Send + Sync>),
+}
+
+impl MySqlClientError {
+    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
+}
+
+pub struct MySqlClient {
     pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,
     pub capabilities: Capabilities,
 }
@@ -28,9 +59,12 @@ pub struct ConnectionOptions {
     pub capabilities: Capabilities,
 }
 
-impl MySQLClient {
-    pub async fn connect(uri: &str, mut options: ConnectionOptions) -> Result<Self> {
-        let opts: MySqlConnectOptions = uri.parse()?;
+impl MySqlClient {
+    pub async fn connect(
+        uri: &str,
+        mut options: ConnectionOptions,
+    ) -> Result<Self, MySqlClientError> {
+        let opts = parse_mysql_uri(uri)?;
         let mut stream =
             MySqlStream::new(TcpStream::connect((opts.host.clone(), opts.port)).await?);
 
@@ -40,7 +74,7 @@ impl MySQLClient {
         }
 
         let Some(payload) = stream.recv().await? else {
-            anyhow::bail!("no handshake received");
+            return Err(MySqlClientError::Eof)
         };
         let handshake = Handshake::decode(payload)?;
 
@@ -49,7 +83,7 @@ impl MySQLClient {
             && opts.ssl_mode != MySqlSslMode::Preferred
             && !options.capabilities.contains(Capabilities::SSL)
         {
-            anyhow::bail!("server does not support SSL");
+            return Err(MySqlClientError::TlsNotSupported);
         }
 
         debug!(?handshake, "Received handshake");
@@ -71,7 +105,13 @@ impl MySQLClient {
             stream.push(&req, options.capabilities)?;
             stream.flush().await?;
             stream = stream
-                .upgrade((opts.host.as_str().try_into()?, client_config))
+                .upgrade((
+                    opts.host
+                        .as_str()
+                        .try_into()
+                        .map_err(|_| MySqlClientError::InvalidDomainName)?,
+                    client_config,
+                ))
                 .await?;
             info!("Target connection upgraded to TLS");
         }
@@ -97,13 +137,14 @@ impl MySQLClient {
                 }
                 Ok(scramble) => {
                     let Some(password) = opts.password else {
-                        error!("Password not set in the connection URI");
-                        anyhow::bail!("Password not set");
+                        return Err(InvalidMySqlTargetConfig::NoPassword.into())
                     };
                     response.auth_plugin = Some(AuthPlugin::MySqlNativePassword);
                     response.auth_response = Some(
                         BytesMut::from(
-                            compute_auth_challenge_response(scramble, &password)?.as_bytes(),
+                            compute_auth_challenge_response(scramble, &password)
+                                .map_err(MySqlClientError::other)?
+                                .as_bytes(),
                         )
                         .freeze(),
                     );
@@ -116,16 +157,21 @@ impl MySQLClient {
         stream.flush().await?;
 
         let Some(response) = stream.recv().await? else {
-            anyhow::bail!("no response received");
+            return Err(MySqlClientError::Eof)
         };
         if response.get(0) == Some(&0) || response.get(0) == Some(&0xfe) {
             debug!("Authorized");
         } else if response.get(0) == Some(&0xff) {
             let error = ErrPacket::decode_with(response, options.capabilities)?;
-            error!(?error, "Handshake failed");
-            anyhow::bail!("Handshake failed");
+            return Err(MySqlClientError::ProtocolError(format!(
+                "Handshake failed: {:?}",
+                error
+            )));
         } else {
-            anyhow::bail!("Unknown response type {:?}", response.get(0));
+            return Err(MySqlClientError::ProtocolError(format!(
+                "Unknown response type {:?}",
+                response.get(0)
+            )));
         }
 
         stream.reset_sequence_id();

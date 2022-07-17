@@ -14,7 +14,7 @@ use tokio::net::TcpStream;
 use tracing::*;
 use warpgate_common::helpers::rng::get_crypto_rng;
 
-use crate::client::{ConnectionOptions, MySQLClient};
+use crate::client::{ConnectionOptions, MySqlClient};
 use crate::common::compute_auth_challenge_response;
 use crate::stream::MySqlStream;
 
@@ -159,7 +159,7 @@ impl MySqlSession {
     }
 
     pub async fn run_authorized(mut self, handshake: HandshakeResponse) -> Result<()> {
-        let mut client = match MySQLClient::connect(
+        let mut client = match MySqlClient::connect(
             "mysql://dev:123@localhost:3306/elements_web?sslMode=REQUIRED",
             ConnectionOptions {
                 collation: handshake.collation,
@@ -174,7 +174,7 @@ impl MySqlSession {
             Err(error) => {
                 error!(?error, "Target connection failed");
                 self.send_error(1045, "Access denied").await?;
-                return Err(error);
+                anyhow::bail!("Client error: {:?}", error);
             }
         };
 
@@ -247,7 +247,7 @@ impl MySqlSession {
         Ok(())
     }
 
-    async fn passthrough_until_result(&mut self, client: &mut MySQLClient) -> Result<()> {
+    async fn passthrough_until_result(&mut self, client: &mut MySqlClient) -> Result<()> {
         loop {
             let Some(response) = client.stream.recv().await? else{
                 anyhow::bail!("no response received");

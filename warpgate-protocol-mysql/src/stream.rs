@@ -56,9 +56,7 @@ where
         trace!(outbound_buffer=?self.outbound_buffer, "sending");
         self.stream.write_all(&self.outbound_buffer[..]).await?;
         self.outbound_buffer = BytesMut::new();
-        self.stream
-            .flush()
-            .await?;
+        self.stream.flush().await?;
         Ok(())
     }
 

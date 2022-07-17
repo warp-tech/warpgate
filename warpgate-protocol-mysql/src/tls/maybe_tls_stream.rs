@@ -1,8 +1,9 @@
-use async_trait::async_trait;
-use rustls::{ClientConfig, ServerConfig, ServerName};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+
+use async_trait::async_trait;
+use rustls::{ClientConfig, ServerConfig, ServerName};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tracing::*;
 

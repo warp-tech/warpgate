@@ -9,7 +9,6 @@ use rustls::{
     Certificate, ClientConfig, Error as TlsError, OwnedTrustAnchor, PrivateKey, RootCertStore,
     ServerConfig, ServerName,
 };
-use tokio_rustls::TlsConnector;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RustlsSetupError {
