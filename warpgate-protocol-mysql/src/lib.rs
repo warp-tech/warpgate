@@ -3,6 +3,10 @@ mod client;
 mod common;
 mod stream;
 mod tls;
+use std::fmt::Debug;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
@@ -15,10 +19,7 @@ use sqlx_core_guts::mysql::protocol::connect::{AuthSwitchRequest, Handshake, Han
 use sqlx_core_guts::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use sqlx_core_guts::mysql::protocol::text::Query;
 use sqlx_core_guts::mysql::protocol::Capabilities;
-use std::fmt::Debug;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use stream::MySQLStream;
+use stream::MySqlStream;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::*;
 use warpgate_common::helpers::rng::get_crypto_rng;
@@ -90,7 +91,7 @@ impl Debug for MySQLProtocolServer {
 }
 
 struct Session {
-    stream: MySQLStream<tokio_rustls::server::TlsStream<TcpStream>>,
+    stream: MySqlStream<tokio_rustls::server::TlsStream<TcpStream>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     tls_config: Arc<ServerConfig>,
@@ -99,7 +100,7 @@ struct Session {
 impl Session {
     pub fn new(stream: TcpStream, tls_config: ServerConfig) -> Self {
         Self {
-            stream: MySQLStream::new(stream),
+            stream: MySqlStream::new(stream),
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
                 | Capabilities::FOUND_ROWS
@@ -172,7 +173,9 @@ impl Session {
         self.stream.flush().await?;
 
         let resp = loop {
-            let payload = self.stream.recv().await?;
+            let Some(payload) = self.stream.recv().await? else {
+            anyhow::bail!("no packet received");
+            };
             let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
                 .context("Failed to parse packet")?;
 
@@ -184,6 +187,7 @@ impl Session {
                     break resp;
                 }
                 self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
+                info!("Server connection upgraded to TLS");
                 continue;
             } else {
                 break resp;
@@ -208,7 +212,9 @@ impl Session {
         // self.push(&RawBytes::<
         self.stream.flush().await?;
 
-        let response = &self.stream.recv().await?;
+        let Some(response) = &self.stream.recv().await? else {
+            anyhow::bail!("no response received");
+        };
         if self.check_auth_response(response).await? {
             return self.run_authorized(resp).await;
         }
@@ -225,12 +231,12 @@ impl Session {
             },
             (),
         )?;
-        self.stream.flush().await
+        self.stream.flush().await.context("flush")
     }
 
     pub async fn run_authorized(mut self, handshake: HandshakeResponse) -> Result<()> {
         let mut client = match MySQLClient::connect(
-            "mysql://dev:123@localhost:3306/elements_web",
+            "mysql://dev:123@localhost:3306/elements_web?sslMode=REQUIRED",
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,
@@ -251,7 +257,9 @@ impl Session {
         loop {
             self.stream.reset_sequence_id();
             client.stream.reset_sequence_id();
-            let payload = self.stream.recv().await?;
+            let Some(payload) = self.stream.recv().await? else {
+                break;
+            };
             trace!(?payload, "server got packet");
 
             let com = payload.get(0);
@@ -266,7 +274,9 @@ impl Session {
 
                 let mut eof_ctr = 0;
                 loop {
-                    let response = client.stream.recv().await?;
+                    let Some(response) = client.stream.recv().await? else {
+            anyhow::bail!("no response received");
+                    };
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;
@@ -293,7 +303,9 @@ impl Session {
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
                 loop {
-                    let response = client.stream.recv().await?;
+                    let Some(response) = client.stream.recv().await? else{
+                        anyhow::bail!("no response received");
+                    };
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;

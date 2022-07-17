@@ -1,19 +1,23 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use bytes::BytesMut;
 use sqlx_core_guts::io::Decode;
 use sqlx_core_guts::mysql::options::MySqlConnectOptions;
 use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
-use sqlx_core_guts::mysql::protocol::connect::{Handshake, HandshakeResponse};
+use sqlx_core_guts::mysql::protocol::connect::{Handshake, HandshakeResponse, SslRequest};
 use sqlx_core_guts::mysql::protocol::response::ErrPacket;
 use sqlx_core_guts::mysql::protocol::Capabilities;
+use sqlx_core_guts::mysql::MySqlSslMode;
 use tokio::net::TcpStream;
 use tracing::*;
 
 use crate::common::compute_auth_challenge_response;
-use crate::stream::MySQLStream;
+use crate::stream::MySqlStream;
+use crate::tls::configure_tls_connector;
 
 pub struct MySQLClient {
-    pub stream: MySQLStream<tokio_rustls::client::TlsStream<TcpStream>>,
+    pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,
     pub capabilities: Capabilities,
 }
 
@@ -27,16 +31,38 @@ pub struct ConnectionOptions {
 impl MySQLClient {
     pub async fn connect(uri: &str, mut options: ConnectionOptions) -> Result<Self> {
         let opts: MySqlConnectOptions = uri.parse()?;
-        let mut stream = MySQLStream::new(TcpStream::connect((opts.host, opts.port)).await?);
+        let mut stream = MySqlStream::new(TcpStream::connect((opts.host.clone(), opts.port)).await?);
 
-        let payload = stream.recv().await?;
+        options.capabilities.remove(Capabilities::SSL);
+        if opts.ssl_mode != MySqlSslMode::Disabled {
+            options.capabilities |= Capabilities::SSL;
+        }
+
+        let Some(payload) = stream.recv().await? else {
+            anyhow::bail!("no handshake received");
+        };
         let handshake = Handshake::decode(payload)?;
 
         options.capabilities &= handshake.server_capabilities;
-        options.capabilities |= Capabilities::SSL;
 
         debug!(?handshake, "Received handshake");
         debug!(capabilities=?options.capabilities, "Capabilities");
+
+        if options.capabilities.contains(Capabilities::SSL) {
+            let client_config = Arc::new(
+                configure_tls_connector(true, true, None).await?
+            );
+            let req = SslRequest {
+                collation: options.collation,
+                max_packet_size: options.max_packet_size,
+            };
+            stream.push(&req, options.capabilities)?;
+            stream.flush().await?;
+            stream = stream
+                .upgrade((opts.host.as_str().try_into()?, client_config))
+                .await?;
+            info!("Client connection upgraded to TLS");
+        }
 
         let mut response = HandshakeResponse {
             auth_plugin: None,
@@ -77,7 +103,9 @@ impl MySQLClient {
         stream.push(&response, options.capabilities)?;
         stream.flush().await?;
 
-        let response = stream.recv().await?;
+        let Some(response) = stream.recv().await? else {
+            anyhow::bail!("no response received");
+        };
         if response.get(0) == Some(&0) || response.get(0) == Some(&0xfe) {
             debug!("Authorized");
         } else if response.get(0) == Some(&0xff) {

@@ -4679,6 +4679,8 @@ dependencies = [
  "warpgate-admin",
  "warpgate-common",
  "warpgate-db-entities",
+ "webpki",
+ "webpki-roots",
 ]
 
 [[package]]
