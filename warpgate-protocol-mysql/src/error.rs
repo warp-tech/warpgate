@@ -15,6 +15,8 @@ pub enum MySqlError {
     Eof,
     #[error("server doesn't offer TLS")]
     TlsNotSupported,
+    #[error("client doesn't support TLS")]
+    TlsNotSupportedByClient,
     #[error("TLS setup failed: {0}")]
     TlsSetup(#[from] RustlsSetupError),
     #[error("TLS stream error: {0}")]

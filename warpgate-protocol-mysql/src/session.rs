@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use rand::Rng;
 use rustls::ServerConfig;
 use sqlx_core_guts::io::{BufExt, Decode};
@@ -12,9 +12,9 @@ use sqlx_core_guts::mysql::protocol::Capabilities;
 use tokio::net::TcpStream;
 use tracing::*;
 use warpgate_common::helpers::rng::get_crypto_rng;
+use warpgate_common::Secret;
 
 use crate::client::{ConnectionOptions, MySqlClient};
-use crate::common::compute_auth_challenge_response;
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
@@ -48,11 +48,9 @@ impl MySqlSession {
         }
     }
 
-    async fn check_auth_response(&mut self, response: &[u8]) -> Result<bool, MySqlError> {
-        let expected_response = compute_auth_challenge_response(self.challenge, "123").map_err(MySqlError::other)?;
-
-        let client_response = password_hash::Output::new(response).map_err(MySqlError::other)?;
-        if client_response == expected_response {
+    async fn check_auth_response(&mut self, response: Secret<String>) -> Result<bool, MySqlError> {
+        let expected_response = "123".to_string();
+        if response.expose_secret() == &expected_response {
             self.stream.push(
                 &OkPacket {
                     affected_rows: 0,
@@ -74,7 +72,7 @@ impl MySqlSession {
         }
         self.stream.flush().await?;
 
-        Ok(client_response == expected_response)
+        Ok(response.expose_secret() == &expected_response)
     }
 
     pub async fn run(mut self) -> Result<(), MySqlError> {
@@ -84,7 +82,7 @@ impl MySqlSession {
 
         let handshake = Handshake {
             protocol_version: 10,
-            server_version: "Warpgate".to_owned(),
+            server_version: "8.0.0-Warpgate".to_owned(),
             connection_id: 1,
             auth_plugin_data: challenge_chain,
             server_capabilities: self.capabilities,
@@ -99,7 +97,8 @@ impl MySqlSession {
             let Some(payload) = self.stream.recv().await? else {
                 return Err(MySqlError::Eof);
             };
-            let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities).map_err(MySqlError::decode)?;
+            let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
+                .map_err(MySqlError::decode)?;
 
             trace!(?resp, "Handshake response");
             info!(capabilities=?self.capabilities, username=%resp.username, "User handshake");
@@ -109,25 +108,25 @@ impl MySqlSession {
                     break resp;
                 }
                 self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
-                info!("User connection upgraded to TLS");
                 continue;
             } else {
-                break resp;
+                self.send_error(1002, "Warpgate requires TLS - please enable it in your client: add `--ssl` on the CLI or add `?sslMode=PREFERRED` to your database URI").await?;
+                return Err(MySqlError::TlsNotSupportedByClient);
             }
         };
 
-        if resp.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
-            if let Some(response) = resp.auth_response.as_ref() {
-                if self.check_auth_response(response).await? {
+        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
+            if let Some(mut response) = resp.auth_response.clone() {
+                let password = Secret::new(response.get_str_nul()?);
+                if self.check_auth_response(password).await? {
                     return self.run_authorized(resp).await;
                 }
             }
         }
 
-        let challenge = self.challenge;
         let req = AuthSwitchRequest {
-            plugin: AuthPlugin::MySqlNativePassword,
-            data: BytesMut::from(&challenge[..]).freeze(),
+            plugin: AuthPlugin::MySqlClearPassword,
+            data: Bytes::new(),
         };
         self.stream.push(&req, ())?;
 
@@ -137,7 +136,8 @@ impl MySqlSession {
         let Some(response) = &self.stream.recv().await? else {
             return Err(MySqlError::Eof);
         };
-        if self.check_auth_response(response).await? {
+        let password = Secret::new(response.clone().get_str_nul()?);
+        if self.check_auth_response(password).await? {
             return self.run_authorized(resp).await;
         }
 
@@ -190,7 +190,7 @@ impl MySqlSession {
             // COM_QUERY
             if com == Some(&0x03) {
                 let query = Query::decode(payload)?;
-                trace!(?query, "server got query");
+                info!(query=%query.0, "SQL");
 
                 client.stream.push(&query, ())?;
                 client.stream.flush().await?;
@@ -205,10 +205,11 @@ impl MySqlSession {
                     self.stream.flush().await?;
                     if let Some(com) = response.get(0) {
                         if com == &0xfe {
+                            if self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
+                                break;
+                            }
                             eof_ctr += 1;
-                            if eof_ctr == 2
-                                && !self.capabilities.contains(Capabilities::DEPRECATE_EOF)
-                            {
+                            if eof_ctr == 2 {
                                 // todo check multiple results
                                 break;
                             }
@@ -246,7 +247,10 @@ impl MySqlSession {
         Ok(())
     }
 
-    async fn passthrough_until_result(&mut self, client: &mut MySqlClient) -> Result<(), MySqlError> {
+    async fn passthrough_until_result(
+        &mut self,
+        client: &mut MySqlClient,
+    ) -> Result<(), MySqlError> {
         loop {
             let Some(response) = client.stream.recv().await? else{
                 return Err(MySqlError::Eof);
