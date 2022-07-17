@@ -1,17 +1,15 @@
-use std::path::Path;
-use std::sync::Arc;
-
-use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
-use rustls::sign::CertifiedKey;
-use rustls::{Certificate, PrivateKey, ServerConfig};
-use tokio_rustls::TlsConnector;
-
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
-use rustls::{ClientConfig, Error as TlsError, OwnedTrustAnchor, RootCertStore, ServerName};
-
+use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
+use rustls::{
+    Certificate, ClientConfig, Error as TlsError, OwnedTrustAnchor, PrivateKey, RootCertStore,
+    ServerConfig, ServerName,
+};
+use tokio_rustls::TlsConnector;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RustlsSetupError {
@@ -107,10 +105,8 @@ pub async fn configure_tls_connector(
         if let Some(data) = root_cert {
             let mut cursor = Cursor::new(data);
 
-            for cert in rustls_pemfile::certs(&mut cursor)?
-            {
-                cert_store
-                    .add(&rustls::Certificate(cert))?;
+            for cert in rustls_pemfile::certs(&mut cursor)? {
+                cert_store.add(&rustls::Certificate(cert))?;
             }
         }
 

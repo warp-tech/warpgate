@@ -31,7 +31,8 @@ pub struct ConnectionOptions {
 impl MySQLClient {
     pub async fn connect(uri: &str, mut options: ConnectionOptions) -> Result<Self> {
         let opts: MySqlConnectOptions = uri.parse()?;
-        let mut stream = MySqlStream::new(TcpStream::connect((opts.host.clone(), opts.port)).await?);
+        let mut stream =
+            MySqlStream::new(TcpStream::connect((opts.host.clone(), opts.port)).await?);
 
         options.capabilities.remove(Capabilities::SSL);
         if opts.ssl_mode != MySqlSslMode::Disabled {
@@ -44,13 +45,24 @@ impl MySQLClient {
         let handshake = Handshake::decode(payload)?;
 
         options.capabilities &= handshake.server_capabilities;
+        if opts.ssl_mode != MySqlSslMode::Disabled
+            && opts.ssl_mode != MySqlSslMode::Preferred
+            && !options.capabilities.contains(Capabilities::SSL)
+        {
+            anyhow::bail!("server does not support SSL");
+        }
 
         debug!(?handshake, "Received handshake");
         debug!(capabilities=?options.capabilities, "Capabilities");
 
-        if options.capabilities.contains(Capabilities::SSL) {
+        if options.capabilities.contains(Capabilities::SSL)
+            && opts.ssl_mode != MySqlSslMode::Disabled
+        {
+            let accept_invalid_certs = opts.ssl_mode == MySqlSslMode::Preferred;
+            let accept_invalid_hostname = opts.ssl_mode != MySqlSslMode::VerifyIdentity;
             let client_config = Arc::new(
-                configure_tls_connector(true, true, None).await?
+                configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
+                    .await?,
             );
             let req = SslRequest {
                 collation: options.collation,
@@ -61,7 +73,7 @@ impl MySQLClient {
             stream = stream
                 .upgrade((opts.host.as_str().try_into()?, client_config))
                 .await?;
-            info!("Client connection upgraded to TLS");
+            info!("Target connection upgraded to TLS");
         }
 
         let mut response = HandshakeResponse {
