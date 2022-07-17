@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use bytes::{Buf, BytesMut};
 use rand::Rng;
 use rustls::ServerConfig;
@@ -16,6 +15,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::common::compute_auth_challenge_response;
+use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession {
@@ -36,7 +36,6 @@ impl MySqlSession {
                 | Capabilities::NO_SCHEMA
                 | Capabilities::PLUGIN_AUTH_LENENC_DATA
                 | Capabilities::CONNECT_WITH_DB
-                | Capabilities::CAN_HANDLE_EXPIRED_PASSWORDS
                 | Capabilities::SESSION_TRACK
                 | Capabilities::IGNORE_SPACE
                 | Capabilities::INTERACTIVE
@@ -49,10 +48,10 @@ impl MySqlSession {
         }
     }
 
-    async fn check_auth_response(&mut self, response: &[u8]) -> Result<bool> {
-        let expected_response = compute_auth_challenge_response(self.challenge, "123")?;
+    async fn check_auth_response(&mut self, response: &[u8]) -> Result<bool, MySqlError> {
+        let expected_response = compute_auth_challenge_response(self.challenge, "123").map_err(MySqlError::other)?;
 
-        let client_response = password_hash::Output::new(response)?;
+        let client_response = password_hash::Output::new(response).map_err(MySqlError::other)?;
         if client_response == expected_response {
             self.stream.push(
                 &OkPacket {
@@ -78,7 +77,7 @@ impl MySqlSession {
         Ok(client_response == expected_response)
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> Result<(), MySqlError> {
         let mut challenge_1 = BytesMut::from(&self.challenge[..]);
         let challenge_2 = challenge_1.split_off(8);
         let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
@@ -98,10 +97,9 @@ impl MySqlSession {
 
         let resp = loop {
             let Some(payload) = self.stream.recv().await? else {
-            anyhow::bail!("no packet received");
+                return Err(MySqlError::Eof);
             };
-            let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
-                .context("Failed to parse packet")?;
+            let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities).map_err(MySqlError::decode)?;
 
             trace!(?resp, "Handshake response");
             info!(capabilities=?self.capabilities, username=%resp.username, "User handshake");
@@ -137,7 +135,7 @@ impl MySqlSession {
         self.stream.flush().await?;
 
         let Some(response) = &self.stream.recv().await? else {
-            anyhow::bail!("no response received");
+            return Err(MySqlError::Eof);
         };
         if self.check_auth_response(response).await? {
             return self.run_authorized(resp).await;
@@ -146,7 +144,7 @@ impl MySqlSession {
         Ok(())
     }
 
-    async fn send_error(&mut self, code: u16, message: &str) -> Result<()> {
+    async fn send_error(&mut self, code: u16, message: &str) -> Result<(), MySqlError> {
         self.stream.push(
             &ErrPacket {
                 error_code: code,
@@ -155,10 +153,11 @@ impl MySqlSession {
             },
             (),
         )?;
-        self.stream.flush().await.context("flush")
+        self.stream.flush().await?;
+        Ok(())
     }
 
-    pub async fn run_authorized(mut self, handshake: HandshakeResponse) -> Result<()> {
+    pub async fn run_authorized(mut self, handshake: HandshakeResponse) -> Result<(), MySqlError> {
         let mut client = match MySqlClient::connect(
             "mysql://dev:123@localhost:3306/elements_web?sslMode=REQUIRED",
             ConnectionOptions {
@@ -170,13 +169,13 @@ impl MySqlSession {
         )
         .await
         {
-            Ok(c) => c,
             Err(error) => {
-                error!(?error, "Target connection failed");
+                error!(%error, "Target connection failed");
                 self.send_error(1045, "Access denied").await?;
-                anyhow::bail!("Client error: {:?}", error);
+                Err(error)
             }
-        };
+            x => x,
+        }?;
 
         loop {
             self.stream.reset_sequence_id();
@@ -199,7 +198,7 @@ impl MySqlSession {
                 let mut eof_ctr = 0;
                 loop {
                     let Some(response) = client.stream.recv().await? else {
-                        anyhow::bail!("no response received");
+                        return Err(MySqlError::Eof);
                     };
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
@@ -247,10 +246,10 @@ impl MySqlSession {
         Ok(())
     }
 
-    async fn passthrough_until_result(&mut self, client: &mut MySqlClient) -> Result<()> {
+    async fn passthrough_until_result(&mut self, client: &mut MySqlClient) -> Result<(), MySqlError> {
         loop {
             let Some(response) = client.stream.recv().await? else{
-                anyhow::bail!("no response received");
+                return Err(MySqlError::Eof);
             };
             trace!(?response, "client got packet");
             self.stream.push(&&response[..], ())?;

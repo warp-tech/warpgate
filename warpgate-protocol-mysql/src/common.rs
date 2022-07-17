@@ -1,21 +1,11 @@
-use std::error::Error;
-
 use sha1::Digest;
 use sqlx_core_guts::error::Error as SqlxError;
 use sqlx_core_guts::mysql::MySqlConnectOptions;
 use warpgate_common::ProtocolName;
 
-pub const PROTOCOL_NAME: ProtocolName = "MySQL";
+use crate::error::InvalidMySqlTargetConfig;
 
-#[derive(thiserror::Error, Debug)]
-pub enum InvalidMySqlTargetConfig {
-    #[error("Password not set")]
-    NoPassword,
-    #[error("URI parse error: {0}")]
-    UriParse(Box<dyn Error + Send + Sync>),
-    #[error("Unkown")]
-    Unknown,
-}
+pub const PROTOCOL_NAME: ProtocolName = "MySQL";
 
 pub fn parse_mysql_uri(uri: &str) -> Result<MySqlConnectOptions, InvalidMySqlTargetConfig> {
     uri.parse().map_err(|e| match e {

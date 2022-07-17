@@ -10,9 +10,9 @@ use crate::tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MySqlStreamError {
-    #[error("packet codec")]
+    #[error("packet codec error: {0}")]
     Codec(#[from] PacketCodecError),
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 }
 

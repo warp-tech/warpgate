@@ -1,6 +1,7 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
 mod client;
 mod common;
+mod error;
 mod session;
 mod stream;
 mod tls;
@@ -62,7 +63,7 @@ impl ProtocolServer for MySQLProtocolServer {
             tokio::spawn(async move {
                 match MySqlSession::new(stream, tls_config).run().await {
                     Ok(_) => info!(?addr, "Session finished"),
-                    Err(e) => error!(?addr, ?e, "Session failed"),
+                    Err(e) => error!(?addr, error=%e, "Session failed"),
                 }
             });
         }

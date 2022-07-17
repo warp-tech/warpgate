@@ -9,9 +9,9 @@ use tracing::*;
 
 #[derive(thiserror::Error, Debug)]
 pub enum MaybeTlsStreamError {
-    #[error("already upgraded")]
+    #[error("stream is already upgraded")]
     AlreadyUpgraded,
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 }
 
