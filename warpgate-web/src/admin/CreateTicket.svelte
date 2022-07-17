@@ -1,6 +1,7 @@
 <script lang="ts">
 import { api, UserSnapshot, Target, TicketAndSecret } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
+import { TargetKind } from 'gateway/lib/api';
 import { link } from 'svelte-spa-router'
 import { Alert, FormGroup } from 'sveltestrap'
 import { firstBy } from 'thenby'
@@ -56,7 +57,7 @@ async function create () {
         The secret is only shown once - you won't be able to see it again.
     </Alert>
 
-    {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
+    {#if selectedTarget?.options.kind === TargetKind.Ssh}
         <h3>Connection instructions</h3>
 
         <FormGroup floating label="SSH username">
@@ -65,6 +66,18 @@ async function create () {
 
         <FormGroup floating label="Example command">
             <input type="text" class="form-control" readonly value={'ssh ticket-' + result.secret + '@warpgate-host -p warpgate-port'} />
+        </FormGroup>
+    {/if}
+
+    {#if selectedTarget?.options.kind === TargetKind.MySql}
+        <h3>Connection instructions</h3>
+
+        <FormGroup floating label="MySQL username">
+            <input type="text" class="form-control" readonly value={'ticket-' + result.secret} />
+        </FormGroup>
+
+        <FormGroup floating label="Example command">
+            <input type="text" class="form-control" readonly value={'mysql -u ticket-' + result.secret + ' --host warpgate-host --port warpgate-port'} />
         </FormGroup>
     {/if}
 

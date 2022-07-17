@@ -1,5 +1,6 @@
 use crate::common::SessionExt;
 use crate::session::SessionMiddleware;
+use anyhow::Context;
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
@@ -66,7 +67,7 @@ impl Api {
             config_provider
                 .authorize(&body.username, &credentials, crate::common::PROTOCOL_NAME)
                 .await
-                .map_err(|e| e.context("Failed to authorize user"))?
+                .context("Failed to authorize user")?
         };
 
         match result {

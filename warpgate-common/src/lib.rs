@@ -14,10 +14,12 @@ mod services;
 mod state;
 mod try_macro;
 mod types;
+mod error;
 
 pub use config::*;
 pub use config_providers::*;
 pub use data::*;
+pub use error::WarpgateError;
 pub use protocols::*;
 pub use services::*;
 pub use state::{SessionState, SessionStateInit, State};

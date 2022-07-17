@@ -128,7 +128,7 @@
         }
 
         .protocol {
-            min-width: 3rem;
+            min-width: 3.5rem;
         }
 
         .meta {

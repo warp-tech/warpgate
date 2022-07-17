@@ -1,5 +1,6 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
 mod api;
+use regex::Regex;
 mod common;
 mod session;
 mod session_handle;
@@ -12,5 +13,10 @@ pub fn main() {
         env!("CARGO_PKG_VERSION"),
     )
     .server("/@warpgate/api");
-    println!("{}", api_service.spec());
+
+    let spec = api_service.spec();
+    let re = Regex::new(r"PaginatedResponse<(?P<name>\w+)>").unwrap();
+    let spec = re.replace_all(&spec, "Paginated$name");
+
+    println!("{}", spec);
 }

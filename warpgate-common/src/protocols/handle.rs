@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use warpgate_db_entities::Session;
 
-use crate::{SessionId, SessionState, State, Target};
+use crate::{SessionId, SessionState, State, Target, WarpgateError};
 
 pub trait SessionHandle {
     fn close(&mut self);
@@ -41,7 +40,7 @@ impl WarpgateServerHandle {
         &self.session_state
     }
 
-    pub async fn set_username(&mut self, username: String) -> Result<()> {
+    pub async fn set_username(&self, username: String) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
 
         {
@@ -64,7 +63,7 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub async fn set_target(&self, target: &Target) -> Result<()> {
+    pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
         {
             let mut state = self.session_state.lock().await;
@@ -77,7 +76,7 @@ impl WarpgateServerHandle {
         Session::Entity::update_many()
             .set(Session::ActiveModel {
                 target_snapshot: Set(Some(
-                    serde_json::to_string(&target).context("Error serializing target")?,
+                    serde_json::to_string(&target).map_err(WarpgateError::other)?,
                 )),
                 ..Default::default()
             })

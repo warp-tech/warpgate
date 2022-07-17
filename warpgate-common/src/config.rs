@@ -96,6 +96,12 @@ pub struct TargetHTTPOptions {
     pub headers: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetMySqlOptions {
+    #[serde(default = "_default_empty_string")]
+    pub uri: String,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
@@ -109,12 +115,14 @@ pub struct Target {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
-#[oai(discriminator_name = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
 pub enum TargetOptions {
     #[serde(rename = "ssh")]
     Ssh(TargetSSHOptions),
     #[serde(rename = "http")]
     Http(TargetHTTPOptions),
+    #[serde(rename = "mysql")]
+    MySql(TargetMySqlOptions),
     #[serde(rename = "web_admin")]
     WebAdmin(TargetWebAdminOptions),
 }

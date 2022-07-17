@@ -10,9 +10,15 @@ use sqlx_core_guts::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use sqlx_core_guts::mysql::protocol::text::Query;
 use sqlx_core_guts::mysql::protocol::Capabilities;
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tracing::*;
+use uuid::Uuid;
+use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::Secret;
+use warpgate_common::{
+    authorize_ticket, AuthCredential, AuthResult, Secret, Services, TargetOptions,
+    WarpgateServerHandle, TargetMySqlOptions,
+};
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
@@ -22,12 +28,24 @@ pub struct MySqlSession {
     stream: MySqlStream<tokio_rustls::server::TlsStream<TcpStream>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
+    username: Option<String>,
+    database: Option<String>,
     tls_config: Arc<ServerConfig>,
+    server_handle: Arc<Mutex<WarpgateServerHandle>>,
+    id: Uuid,
+    services: Services,
 }
 
 impl MySqlSession {
-    pub fn new(stream: TcpStream, tls_config: ServerConfig) -> Self {
+    pub async fn new(
+        server_handle: Arc<Mutex<WarpgateServerHandle>>,
+        services: Services,
+        stream: TcpStream,
+        tls_config: ServerConfig,
+    ) -> Self {
+        let id = server_handle.lock().await.id();
         Self {
+            services,
             stream: MySqlStream::new(stream),
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
@@ -45,34 +63,18 @@ impl MySqlSession {
                 | Capabilities::SSL,
             challenge: get_crypto_rng().gen(),
             tls_config: Arc::new(tls_config),
+            username: None,
+            database: None,
+            server_handle,
+            id,
         }
     }
 
-    async fn check_auth_response(&mut self, response: Secret<String>) -> Result<bool, MySqlError> {
-        let expected_response = "123".to_string();
-        if response.expose_secret() == &expected_response {
-            self.stream.push(
-                &OkPacket {
-                    affected_rows: 0,
-                    last_insert_id: 0,
-                    status: Status::empty(),
-                    warnings: 0,
-                },
-                (),
-            )?;
-        } else {
-            self.stream.push(
-                &ErrPacket {
-                    error_code: 1,
-                    error_message: "Access denied".to_owned(),
-                    sql_state: None,
-                },
-                (),
-            )?;
+    pub fn make_logging_span(&self) -> tracing::Span {
+        match self.username {
+            Some(ref username) => info_span!("MySQL", session=%self.id, session_username=%username),
+            None => info_span!("MySQL", session=%self.id),
         }
-        self.stream.flush().await?;
-
-        Ok(response.expose_secret() == &expected_response)
     }
 
     pub async fn run(mut self) -> Result<(), MySqlError> {
@@ -118,9 +120,7 @@ impl MySqlSession {
         if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
             if let Some(mut response) = resp.auth_response.clone() {
                 let password = Secret::new(response.get_str_nul()?);
-                if self.check_auth_response(password).await? {
-                    return self.run_authorized(resp).await;
-                }
+                return self.run_authorization(resp, password).await;
             }
         }
 
@@ -137,11 +137,7 @@ impl MySqlSession {
             return Err(MySqlError::Eof);
         };
         let password = Secret::new(response.clone().get_str_nul()?);
-        if self.check_auth_response(password).await? {
-            return self.run_authorized(resp).await;
-        }
-
-        Ok(())
+        return self.run_authorization(resp, password).await;
     }
 
     async fn send_error(&mut self, code: u16, message: &str) -> Result<(), MySqlError> {
@@ -157,7 +153,165 @@ impl MySqlSession {
         Ok(())
     }
 
-    pub async fn run_authorized(mut self, handshake: HandshakeResponse) -> Result<(), MySqlError> {
+    pub async fn run_authorization(
+        mut self,
+        handshake: HandshakeResponse,
+        password: Secret<String>,
+    ) -> Result<(), MySqlError> {
+        let selector: AuthSelector = (&handshake.username).into();
+
+        async fn fail(this: &mut MySqlSession) -> Result<(), MySqlError> {
+            this.stream.push(
+                &ErrPacket {
+                    error_code: 1,
+                    error_message: "Warpgate access denied".to_owned(),
+                    sql_state: None,
+                },
+                (),
+            )?;
+            this.stream.flush().await?;
+            return Ok(());
+        }
+
+        let credentials = vec![AuthCredential::Password(password)];
+        match selector {
+            AuthSelector::User {
+                username,
+                target_name,
+            } => {
+                let user_auth_result: AuthResult = {
+                    self.services
+                        .config_provider
+                        .lock()
+                        .await
+                        .authorize(&username, &credentials, crate::common::PROTOCOL_NAME)
+                        .await
+                        .map_err(|x| MySqlError::other(x))?
+                };
+
+                match user_auth_result {
+                    AuthResult::Accepted { username } => {
+                        let target_auth_result = {
+                            self.services
+                                .config_provider
+                                .lock()
+                                .await
+                                .authorize_target(&username, &target_name)
+                                .await
+                                .map_err(MySqlError::other)?
+                        };
+                        if !target_auth_result {
+                            warn!(
+                                "Target {} not authorized for user {}",
+                                target_name, username
+                            );
+                            return fail(&mut self).await;
+                        }
+                        return self.run_authorized(handshake, username, target_name).await;
+                    }
+                    AuthResult::Rejected | AuthResult::OtpNeeded => {
+                        return fail(&mut self).await;
+                    }
+                }
+            }
+            AuthSelector::Ticket { secret } => {
+                match authorize_ticket(&self.services.db, &secret)
+                    .await
+                    .map_err(MySqlError::other)?
+                {
+                    Some(ticket) => {
+                        info!("Authorized for {} with a ticket", ticket.target);
+                        self.services
+                            .config_provider
+                            .lock()
+                            .await
+                            .consume_ticket(&ticket.id)
+                            .await
+                            .map_err(MySqlError::other)?;
+
+                        return self
+                            .run_authorized(handshake, ticket.username, ticket.target)
+                            .await;
+                    }
+                    _ => return fail(&mut self).await,
+                }
+            }
+        }
+    }
+
+    async fn run_authorized(
+        mut self,
+        handshake: HandshakeResponse,
+        username: String,
+        target_name: String,
+    ) -> Result<(), MySqlError> {
+        self.stream.push(
+            &OkPacket {
+                affected_rows: 0,
+                last_insert_id: 0,
+                status: Status::empty(),
+                warnings: 0,
+            },
+            (),
+        )?;
+        self.stream.flush().await?;
+
+        info!(%username, "Authenticated");
+
+        let target = {
+            self.services
+                .config
+                .lock()
+                .await
+                .store
+                .targets
+                .iter()
+                .filter_map(|t| match t.options {
+                    TargetOptions::MySql(ref options) => Some((t, options)),
+                    _ => None,
+                })
+                .find(|(t, _)| t.name == target_name)
+                .map(|(t, opt)| (t.clone(), opt.clone()))
+        };
+
+        let Some((target, mysql_options)) = target else {
+            warn!("Selected target not found");
+            self.stream.push(
+                &ErrPacket {
+                    error_code: 1,
+                    error_message: "Warpgate access denied".to_owned(),
+                    sql_state: None,
+                },
+                (),
+            )?;
+            self.stream.flush().await?;
+            return Ok(());
+        };
+
+        {
+            let handle = self.server_handle.lock().await;
+            handle.set_username(username).await?;
+            handle.set_target(&target).await?;
+        }
+
+        let span = self.make_logging_span();
+        return self
+            .run_authorized_inner(handshake, mysql_options)
+            .instrument(span)
+            .await;
+    }
+
+    async fn run_authorized_inner(
+        mut self,
+        handshake: HandshakeResponse,
+        options: TargetMySqlOptions,
+    ) -> Result<(), MySqlError> {
+        self.database = handshake.database.clone();
+        self.username = Some(handshake.username);
+        if let Some(ref database) = handshake.database {
+            info!("Selected database: {database}");
+        }
+
         let mut client = match MySqlClient::connect(
             "mysql://dev:123@localhost:3306/elements_web?sslMode=REQUIRED",
             ConnectionOptions {
@@ -227,7 +381,8 @@ impl MySqlSession {
                 let mut buf = payload.clone();
                 buf.advance(1);
                 let db = buf.get_str(buf.len())?;
-                info!("Changing database to {db}");
+                self.database = Some(db.clone());
+                info!("Selected database: {db}");
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
                 self.passthrough_until_result(&mut client).await?;

@@ -2142,7 +2142,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "time 0.3.11",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -2696,7 +2696,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -2773,7 +2773,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -3343,7 +3343,7 @@ dependencies = [
  "sqlx",
  "tracing",
  "url",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -3403,7 +3403,7 @@ dependencies = [
  "sea-query-derive",
  "sea-query-driver",
  "serde_json",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -3746,7 +3746,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "url",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -4437,15 +4437,6 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom",
-]
-
-[[package]]
-name = "uuid"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd6469f4314d5f1ffec476e05f17cc9a78bc7a27a6a857842170bdf8d6f98d2f"
@@ -4556,6 +4547,7 @@ dependencies = [
  "mime_guess",
  "poem",
  "poem-openapi",
+ "regex",
  "russh-keys",
  "rust-embed",
  "sea-orm",
@@ -4564,7 +4556,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uuid 1.1.2",
+ "uuid",
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
@@ -4586,6 +4578,7 @@ dependencies = [
  "once_cell",
  "packet",
  "password-hash 0.4.1",
+ "poem",
  "poem-openapi",
  "rand",
  "rand_chacha",
@@ -4600,7 +4593,7 @@ dependencies = [
  "tracing-core",
  "tracing-subscriber",
  "url",
- "uuid 1.1.2",
+ "uuid",
  "warpgate-db-entities",
  "warpgate-db-migrations",
 ]
@@ -4614,7 +4607,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -4625,7 +4618,7 @@ dependencies = [
  "chrono",
  "sea-orm",
  "sea-orm-migration",
- "uuid 1.1.2",
+ "uuid",
 ]
 
 [[package]]
@@ -4643,13 +4636,14 @@ dependencies = [
  "percent-encoding",
  "poem",
  "poem-openapi",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
  "tracing",
- "uuid 1.1.2",
+ "uuid",
  "warpgate-admin",
  "warpgate-common",
  "warpgate-db-entities",
@@ -4675,7 +4669,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "uuid 0.8.2",
+ "uuid",
  "warpgate-admin",
  "warpgate-common",
  "warpgate-db-entities",
@@ -4701,7 +4695,7 @@ dependencies = [
  "time 0.3.11",
  "tokio",
  "tracing",
- "uuid 1.1.2",
+ "uuid",
  "warpgate-common",
  "warpgate-db-entities",
  "zeroize",

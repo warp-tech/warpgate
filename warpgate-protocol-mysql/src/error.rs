@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use sqlx_core_guts::error::Error as SqlxError;
+use warpgate_common::WarpgateError;
 
 use crate::stream::MySqlStreamError;
 use crate::tls::{MaybeTlsStreamError, RustlsSetupError};
@@ -31,6 +32,8 @@ pub enum MySqlError {
     Io(#[from] std::io::Error),
     #[error("packet decode error: {0}")]
     Decode(Box<dyn Error + Send + Sync>),
+    #[error(transparent)]
+    Warpgate(#[from] WarpgateError),
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
 }

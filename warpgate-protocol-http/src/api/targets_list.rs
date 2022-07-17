@@ -12,6 +12,7 @@ pub struct Api;
 #[derive(Debug, Serialize, Clone, Enum)]
 pub enum TargetKind {
     Http,
+    MySql,
     Ssh,
     WebAdmin,
 }
@@ -68,6 +69,7 @@ impl Api {
                     kind: match t.options {
                         TargetOptions::Ssh(_) => TargetKind::Ssh,
                         TargetOptions::Http(_) => TargetKind::Http,
+                        TargetOptions::MySql(_) => TargetKind::MySql,
                         TargetOptions::WebAdmin(_) => TargetKind::WebAdmin,
                     },
                 })

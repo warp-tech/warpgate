@@ -51,8 +51,7 @@ impl MySqlClient {
             return Err(MySqlError::TlsNotSupported);
         }
 
-        debug!(?handshake, "Received handshake");
-        debug!(capabilities=?options.capabilities, "Capabilities");
+        info!(capabilities=?options.capabilities, "Target handshake");
 
         if options.capabilities.contains(Capabilities::SSL)
             && opts.ssl_mode != MySqlSslMode::Disabled

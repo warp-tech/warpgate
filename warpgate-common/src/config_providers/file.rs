@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use data_encoding::BASE64_MIME;
 use sea_orm::ActiveValue::Set;
@@ -16,7 +15,7 @@ use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
 use crate::{
     AuthCredential, AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot,
-    WarpgateConfig,
+    WarpgateConfig, WarpgateError,
 };
 
 pub struct FileConfigProvider {
@@ -46,7 +45,7 @@ fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
 
 #[async_trait]
 impl ConfigProvider for FileConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>> {
+    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>, WarpgateError> {
         Ok(self
             .config
             .lock()
@@ -58,7 +57,7 @@ impl ConfigProvider for FileConfigProvider {
             .collect::<Vec<_>>())
     }
 
-    async fn list_targets(&mut self) -> Result<Vec<Target>> {
+    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
         Ok(self
             .config
             .lock()
@@ -75,7 +74,7 @@ impl ConfigProvider for FileConfigProvider {
         username: &str,
         credentials: &[AuthCredential],
         protocol: ProtocolName,
-    ) -> Result<AuthResult> {
+    ) -> Result<AuthResult, WarpgateError> {
         if credentials.is_empty() {
             return Ok(AuthResult::Rejected);
         }
@@ -167,6 +166,7 @@ impl ConfigProvider for FileConfigProvider {
             let required_kinds = match protocol {
                 "SSH" => &policy.ssh,
                 "HTTP" => &policy.http,
+                "MySQL" => &policy.mysql,
                 _ => {
                     error!(%protocol, "Unkown protocol");
                     return Ok(AuthResult::Rejected);
@@ -204,7 +204,11 @@ impl ConfigProvider for FileConfigProvider {
         })
     }
 
-    async fn authorize_target(&mut self, username: &str, target_name: &str) -> Result<bool> {
+    async fn authorize_target(
+        &mut self,
+        username: &str,
+        target_name: &str,
+    ) -> Result<bool, WarpgateError> {
         let config = self.config.lock().await;
         let user = config
             .store
@@ -220,7 +224,7 @@ impl ConfigProvider for FileConfigProvider {
         };
 
         let Some(target) = target else {
-            error!("Selected target not found: {}", target_name);
+            warn!("Selected target not found: {}", target_name);
             return Ok(false);
         };
 
@@ -244,11 +248,11 @@ impl ConfigProvider for FileConfigProvider {
         Ok(intersect)
     }
 
-    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<()> {
+    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<(), WarpgateError> {
         let db = self.db.lock().await;
         let ticket = Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
         let Some(ticket) = ticket else {
-            anyhow::bail!("Ticket not found: {}", ticket_id);
+            return Err(WarpgateError::InvalidTicket(ticket_id.clone()));
         };
 
         if let Some(uses_left) = ticket.uses_left {
