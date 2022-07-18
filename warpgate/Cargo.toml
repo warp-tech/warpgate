@@ -22,7 +22,7 @@ notify = "^5.0.0-beta.1"
 openssl = {version = "0.10", features = ["vendored"]}# Embed OpenSSL
 qrcode = "0.12"
 rcgen = {version = "0.9", features = ["zeroize"]}
-serde_yaml = "0.8.23"
+serde_yaml = "0.8.26"
 time = "0.3"
 tokio = {version = "1.20", features = ["tracing", "signal", "macros"]}
 tracing = "0.1"
