@@ -3,7 +3,7 @@ use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use poem_openapi::{Object, Union};
+use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::otp::OtpSecretKey;
@@ -17,8 +17,12 @@ const fn _default_false() -> bool {
     false
 }
 
-const fn _default_port() -> u16 {
+const fn _default_ssh_port() -> u16 {
     22
+}
+
+const fn _default_mysql_port() -> u16 {
+    3306
 }
 
 #[inline]
@@ -64,7 +68,7 @@ fn _default_empty_vec<T>() -> Vec<T> {
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
-    #[serde(default = "_default_port")]
+    #[serde(default = "_default_ssh_port")]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
@@ -97,10 +101,57 @@ pub struct TargetHTTPOptions {
     pub headers: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq)]
+pub enum TlsMode {
+    Disabled,
+    Preferred,
+    Required,
+}
+
+impl Default for TlsMode {
+    fn default() -> Self {
+        TlsMode::Preferred
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct Tls {
+    #[serde(default)]
+    pub mode: TlsMode,
+
+    #[serde(default)]
+    pub verify: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for Tls {
+    fn default() -> Self {
+        Self {
+            mode: TlsMode::default(),
+            verify: false,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
-    pub uri: String,
+    pub host: String,
+
+    #[serde(default = "_default_mysql_port")]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub password: Option<String>,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    #[serde(default)]
+    pub verify_tls: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]

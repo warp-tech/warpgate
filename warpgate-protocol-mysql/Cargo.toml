@@ -5,13 +5,10 @@ name = "warpgate-protocol-mysql"
 version = "0.3.0"
 
 [dependencies]
-sqlx-core-guts = { version = "0.6", features = [
-    "runtime-tokio-rustls",
-    "mysql",
-], path = "../../sqlx-core-guts/sqlx-core-guts" }
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
+warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols" }
 anyhow = { version = "1.0", features = ["std"] }
 async-trait = "0.1"
 tokio = { version = "1.19", features = ["tracing", "signal"] }
@@ -23,7 +20,7 @@ rand = "0.8"
 sha1 = "0.10.1"
 password-hash = { version = "0.2", features = ["std"] }
 delegate = "0.6"
-rustls = "0.20"
+rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0"
 tokio-rustls = "0.23"
 thiserror = "1.0"

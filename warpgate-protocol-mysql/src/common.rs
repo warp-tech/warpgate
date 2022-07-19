@@ -1,18 +1,7 @@
 use sha1::Digest;
-use sqlx_core_guts::error::Error as SqlxError;
-use sqlx_core_guts::mysql::MySqlConnectOptions;
 use warpgate_common::ProtocolName;
 
-use crate::error::InvalidMySqlTargetConfig;
-
 pub const PROTOCOL_NAME: ProtocolName = "MySQL";
-
-pub fn parse_mysql_uri(uri: &str) -> Result<MySqlConnectOptions, InvalidMySqlTargetConfig> {
-    uri.parse().map_err(|e| match e {
-        SqlxError::Configuration(e) => InvalidMySqlTargetConfig::UriParse(e),
-        _ => InvalidMySqlTargetConfig::Unknown,
-    })
-}
 
 pub fn compute_auth_challenge_response(
     challenge: [u8; 20],

@@ -1,15 +1,13 @@
 use std::error::Error;
 
-use sqlx_core_guts::error::Error as SqlxError;
 use warpgate_common::WarpgateError;
+use warpgate_database_protocols::error::Error as SqlxError;
 
 use crate::stream::MySqlStreamError;
 use crate::tls::{MaybeTlsStreamError, RustlsSetupError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MySqlError {
-    #[error("invalid target config: {0}")]
-    InvalidTargetConfig(#[from] InvalidMySqlTargetConfig),
     #[error("protocol error: {0}")]
     ProtocolError(String),
     #[error("sudden disconnection")]
@@ -36,16 +34,6 @@ pub enum MySqlError {
     Warpgate(#[from] WarpgateError),
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum InvalidMySqlTargetConfig {
-    #[error("Password not set")]
-    NoPassword,
-    #[error("URI parse error: {0}")]
-    UriParse(Box<dyn Error + Send + Sync>),
-    #[error("Unkown")]
-    Unknown,
 }
 
 impl MySqlError {

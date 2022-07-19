@@ -3,12 +3,6 @@ use std::sync::Arc;
 use bytes::{Buf, Bytes, BytesMut};
 use rand::Rng;
 use rustls::ServerConfig;
-use sqlx_core_guts::io::{BufExt, Decode};
-use sqlx_core_guts::mysql::protocol::auth::AuthPlugin;
-use sqlx_core_guts::mysql::protocol::connect::{AuthSwitchRequest, Handshake, HandshakeResponse};
-use sqlx_core_guts::mysql::protocol::response::{ErrPacket, OkPacket, Status};
-use sqlx_core_guts::mysql::protocol::text::Query;
-use sqlx_core_guts::mysql::protocol::Capabilities;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
@@ -19,6 +13,14 @@ use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, TargetMySqlOptions,
     TargetOptions, WarpgateServerHandle,
 };
+use warpgate_database_protocols::io::{BufExt, Decode};
+use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
+use warpgate_database_protocols::mysql::protocol::connect::{
+    AuthSwitchRequest, Handshake, HandshakeResponse,
+};
+use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
+use warpgate_database_protocols::mysql::protocol::text::Query;
+use warpgate_database_protocols::mysql::protocol::Capabilities;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
@@ -313,7 +315,7 @@ impl MySqlSession {
         }
 
         let mut client = match MySqlClient::connect(
-            &options.uri,
+            &options,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,

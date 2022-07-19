@@ -1,10 +1,10 @@
 use bytes::{Bytes, BytesMut};
 use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::proto::codec::PacketCodec;
-use sqlx_core_guts::io::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::*;
+use warpgate_database_protocols::io::Encode;
 
 use crate::tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
