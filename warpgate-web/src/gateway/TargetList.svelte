@@ -1,21 +1,16 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-import CopyButton from 'common/CopyButton.svelte'
-import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
+import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { api, Target, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
-import { FormGroup, Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
+import { Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
 import { serverInfo } from './lib/store'
 
 const dispatch = createEventDispatcher()
 
 let targets: Target[]|undefined
 let selectedTarget: Target|undefined
-let sshUsername: string
-
-$: sshUsername = makeSSHUsername(selectedTarget?.name, $serverInfo?.username)
-$: exampleCommand = makeExampleSSHCommand(selectedTarget?.name, $serverInfo?.username, $serverInfo)
 
 async function init () {
     targets = await api.getTargets()
@@ -63,6 +58,9 @@ init()
                 {#if target.kind === TargetKind.Ssh}
                     SSH
                 {/if}
+                {#if target.kind === TargetKind.MySql}
+                    MySQL
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
                 <Fa icon={faArrowRight} fw />
@@ -81,19 +79,12 @@ init()
         </div>
     </ModalHeader>
     <ModalBody>
-        {#if selectedTarget?.kind === TargetKind.Ssh}
-            <h3>Connection instructions</h3>
-
-            <FormGroup floating label="SSH username" class="d-flex align-items-center">
-                <input type="text" class="form-control" readonly value={sshUsername} />
-                <CopyButton text={sshUsername} />
-            </FormGroup>
-
-            <FormGroup floating label="Example command" class="d-flex align-items-center">
-                <input type="text" class="form-control" readonly value={exampleCommand} />
-                <CopyButton text={exampleCommand} />
-            </FormGroup>
-        {/if}
+        <h3>Connection instructions</h3>
+        <ConnectionInstructions
+            targetName={selectedTarget?.name}
+            username={$serverInfo?.username}
+            targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
+        />
     </ModalBody>
 </Modal>
 

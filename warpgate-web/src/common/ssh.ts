@@ -5,5 +5,5 @@ export function makeSSHUsername (targetName?: string, username?: string): string
 }
 
 export function makeExampleSSHCommand (targetName?: string, username?: string, serverInfo?: Info): string {
-    return `ssh ${makeSSHUsername(targetName, username)}@${serverInfo?.externalHost ?? 'warpgate-host'} -p ${serverInfo?.ports.ssh ?? 'warpgate-port'}`
+    return `ssh ${makeSSHUsername(targetName, username)}@${serverInfo?.externalHost ?? 'warpgate-host'} -p ${serverInfo?.ports.ssh ?? 'warpgate-ssh-port'}`
 }

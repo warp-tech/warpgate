@@ -1,17 +1,14 @@
 <script lang="ts">
 import { api, Target, UserSnapshot } from 'admin/lib/api'
-import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
+import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+import { TargetKind } from 'gateway/lib/api'
 import { Alert, FormGroup, Modal, ModalBody, ModalHeader } from 'sveltestrap'
-import { serverInfo } from 'gateway/lib/store'
-import CopyButton from 'common/CopyButton.svelte'
-import { makeTargetURL } from 'common/http'
 
 let error: Error|undefined
 let targets: Target[]|undefined
 let selectedTarget: Target|undefined
 let users: UserSnapshot[]|undefined
 let selectedUser: UserSnapshot|undefined
-let sshUsername = ''
 
 async function load () {
     targets = await api.getTargets()
@@ -22,11 +19,6 @@ async function load () {
 load().catch(e => {
     error = e
 })
-
-$: sshUsername = makeSSHUsername(selectedTarget?.name, selectedUser?.username)
-$: exampleCommand = makeExampleSSHCommand(selectedTarget?.name, selectedUser?.username, $serverInfo)
-$: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
-
 </script>
 
 {#if error}
@@ -42,7 +34,7 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
     {#each targets as target}
         <!-- svelte-ignore a11y-missing-attribute -->
         <a class="list-group-item list-group-item-action" on:click={() => {
-            if (target.options.kind !== 'TargetWebAdminOptions') {
+            if (target.options.kind !== 'WebAdmin') {
                 selectedTarget = target
             }
         }}>
@@ -50,10 +42,16 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
                 {target.name}
             </strong>
             <small class="text-muted ms-auto">
-                {#if target.options.kind === 'TargetSSHOptions'}
+                {#if target.options.kind === 'Http'}
+                    HTTP
+                {/if}
+                {#if target.options.kind === 'MySql'}
+                    MySQL
+                {/if}
+                {#if target.options.kind === 'Ssh'}
                     SSH
                 {/if}
-                {#if target.options.kind === 'TargetWebAdminOptions'}
+                {#if target.options.kind === 'WebAdmin'}
                     This web admin interface
                 {/if}
             </small>
@@ -67,17 +65,21 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
             {selectedTarget?.name}
         </div>
         <div class="target-type-label">
-            {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
+            {#if selectedTarget?.options.kind === 'MySql'}
+                MySQL target
+            {/if}
+            {#if selectedTarget?.options.kind === 'Ssh'}
                 SSH target
             {/if}
-            {#if selectedTarget?.options.kind === 'TargetWebAdminOptions'}
+            {#if selectedTarget?.options.kind === 'WebAdmin'}
                 This web admin interface
             {/if}
         </div>
     </ModalHeader>
     <ModalBody>
         <h3>Access instructions</h3>
-        {#if selectedTarget?.options.kind === 'Ssh'}
+
+        {#if selectedTarget?.options.kind === 'Ssh' || selectedTarget?.options.kind === 'MySql'}
             {#if users}
                 <FormGroup floating label="Select a user">
                     <select bind:value={selectedUser} class="form-control">
@@ -89,24 +91,18 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
                     </select>
                 </FormGroup>
             {/if}
-
-            <FormGroup floating label="SSH username" class="d-flex align-items-center">
-                <input type="text" class="form-control" readonly value={sshUsername} />
-                <CopyButton text={sshUsername} />
-            </FormGroup>
-
-            <FormGroup floating label="Example command" class="d-flex align-items-center">
-                <input type="text" class="form-control" readonly value={exampleCommand} />
-                <CopyButton text={exampleCommand} />
-            </FormGroup>
         {/if}
 
-        {#if selectedTarget?.options.kind === 'Http'}
-            <FormGroup floating label="Access URL" class="d-flex align-items-center">
-                <input type="text" class="form-control" readonly value={targetURL} />
-                <CopyButton text={targetURL} />
-            </FormGroup>
-        {/if}
+        <ConnectionInstructions
+            targetName={selectedTarget?.name}
+            username={selectedUser?.username}
+            targetKind={{
+                Ssh: TargetKind.Ssh,
+                WebAdmin: TargetKind.WebAdmin,
+                Http: TargetKind.Http,
+                MySql: TargetKind.MySql,
+            }[selectedTarget?.options.kind ?? '']}
+        />
     </ModalBody>
 </Modal>
 {/if}
