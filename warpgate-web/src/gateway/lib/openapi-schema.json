@@ -153,11 +153,12 @@
       },
       "PortsInfo": {
         "type": "object",
-        "required": [
-          "ssh"
-        ],
         "properties": {
           "ssh": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "mysql": {
             "type": "integer",
             "format": "uint16"
           }

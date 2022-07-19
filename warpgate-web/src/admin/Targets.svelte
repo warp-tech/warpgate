@@ -77,7 +77,7 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
     </ModalHeader>
     <ModalBody>
         <h3>Access instructions</h3>
-        {#if selectedTarget?.options.kind === 'TargetSSHOptions'}
+        {#if selectedTarget?.options.kind === 'Ssh'}
             {#if users}
                 <FormGroup floating label="Select a user">
                     <select bind:value={selectedUser} class="form-control">
@@ -101,7 +101,7 @@ $: targetURL = selectedTarget ? makeTargetURL(selectedTarget.name) : ''
             </FormGroup>
         {/if}
 
-        {#if selectedTarget?.options.kind === 'TargetHTTPOptions'}
+        {#if selectedTarget?.options.kind === 'Http'}
             <FormGroup floating label="Access URL" class="d-flex align-items-center">
                 <input type="text" class="form-control" readonly value={targetURL} />
                 <CopyButton text={targetURL} />

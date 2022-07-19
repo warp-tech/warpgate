@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -6,7 +7,7 @@ use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::otp::OtpSecretKey;
-use crate::Secret;
+use crate::{Secret, ListenEndpoint};
 
 const fn _default_true() -> bool {
     true
@@ -41,13 +42,13 @@ fn _default_database_url() -> Secret<String> {
 }
 
 #[inline]
-fn _default_http_listen() -> String {
-    "0.0.0.0:8888".to_owned()
+fn _default_http_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:8888".to_socket_addrs().unwrap().next().unwrap())
 }
 
 #[inline]
-fn _default_mysql_listen() -> String {
-    "0.0.0.0:33306".to_owned()
+fn _default_mysql_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:33306".to_socket_addrs().unwrap().next().unwrap())
 }
 
 #[inline]
@@ -165,8 +166,8 @@ pub struct Role {
     pub name: String,
 }
 
-fn _default_ssh_listen() -> String {
-    "0.0.0.0:2222".to_owned()
+fn _default_ssh_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap())
 }
 
 fn _default_ssh_client_key() -> String {
@@ -179,8 +180,11 @@ fn _default_ssh_keys_path() -> String {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SSHConfig {
+    #[serde(default = "_default_true")]
+    pub enable: bool,
+
     #[serde(default = "_default_ssh_listen")]
-    pub listen: String,
+    pub listen: ListenEndpoint,
 
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
@@ -192,6 +196,7 @@ pub struct SSHConfig {
 impl Default for SSHConfig {
     fn default() -> Self {
         SSHConfig {
+            enable: true,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             client_key: _default_ssh_client_key(),
@@ -201,11 +206,11 @@ impl Default for SSHConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HTTPConfig {
-    #[serde(default = "_default_false")]
+    #[serde(default = "_default_true")]
     pub enable: bool,
 
     #[serde(default = "_default_http_listen")]
-    pub listen: String,
+    pub listen: ListenEndpoint,
 
     #[serde(default)]
     pub certificate: String,
@@ -227,11 +232,11 @@ impl Default for HTTPConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MySQLConfig {
-    #[serde(default = "_default_false")]
+    #[serde(default = "_default_true")]
     pub enable: bool,
 
     #[serde(default = "_default_mysql_listen")]
-    pub listen: String,
+    pub listen: ListenEndpoint,
 
     #[serde(default)]
     pub certificate: String,

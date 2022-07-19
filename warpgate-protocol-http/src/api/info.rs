@@ -1,6 +1,3 @@
-use std::net::ToSocketAddrs;
-
-use crate::common::SessionExt;
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
@@ -9,11 +6,14 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::Services;
 
+use crate::common::SessionExt;
+
 pub struct Api;
 
 #[derive(Serialize, Object)]
 pub struct PortsInfo {
-    ssh: u16,
+    ssh: Option<u16>,
+    mysql: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -54,15 +54,22 @@ impl Api {
             external_host: external_host.map(&str::to_string),
             ports: if session.is_authenticated() {
                 PortsInfo {
-                    ssh: config
-                        .store
-                        .ssh
-                        .listen
-                        .to_socket_addrs()
-                        .map_or(0, |mut x| x.next().map(|x| x.port()).unwrap_or(0)),
+                    ssh: if config.store.ssh.enable {
+                        Some(config.store.ssh.listen.port())
+                    } else {
+                        None
+                    },
+                    mysql: if config.store.mysql.enable {
+                        Some(config.store.mysql.listen.port())
+                    } else {
+                        None
+                    },
                 }
             } else {
-                PortsInfo { ssh: 0 }
+                PortsInfo {
+                    ssh: None,
+                    mysql: None,
+                }
             },
         })))
     }
