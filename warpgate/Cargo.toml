@@ -9,7 +9,7 @@ ansi_term = "0.12"
 anyhow = {version = "1.0", features = ["backtrace"]}
 async-trait = "0.1"
 atty = "0.2"
-bytes = "1.1"
+bytes = "1.2"
 clap = {version = "3.2", features = ["derive"]}
 config = {version = "0.13", features = ["yaml"], default_features = false}
 console = {version = "0.15", default_features = false}
