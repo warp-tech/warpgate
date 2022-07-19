@@ -231,7 +231,7 @@ fn _default_ssh_keys_path() -> String {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SSHConfig {
-    #[serde(default = "_default_true")]
+    #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_ssh_listen")]
@@ -283,7 +283,7 @@ impl Default for HTTPConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MySQLConfig {
-    #[serde(default = "_default_true")]
+    #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_mysql_listen")]

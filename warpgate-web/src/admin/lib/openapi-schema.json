@@ -674,11 +674,31 @@
       "TargetMySqlOptions": {
         "type": "object",
         "required": [
-          "uri"
+          "host",
+          "port",
+          "username",
+          "tls",
+          "verify_tls"
         ],
         "properties": {
-          "uri": {
+          "host": {
             "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "verify_tls": {
+            "type": "boolean"
           }
         }
       },
@@ -854,6 +874,29 @@
             "type": "string"
           }
         }
+      },
+      "Tls": {
+        "type": "object",
+        "required": [
+          "mode",
+          "verify"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/TlsMode"
+          },
+          "verify": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TlsMode": {
+        "type": "string",
+        "enum": [
+          "Disabled",
+          "Preferred",
+          "Required"
+        ]
       },
       "UserSnapshot": {
         "type": "object",
