@@ -7,7 +7,7 @@ use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::otp::OtpSecretKey;
-use crate::{Secret, ListenEndpoint};
+use crate::{ListenEndpoint, Secret};
 
 const fn _default_true() -> bool {
     true

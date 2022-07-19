@@ -16,8 +16,8 @@ use uuid::Uuid;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Secret, Services, TargetOptions,
-    WarpgateServerHandle, TargetMySqlOptions,
+    authorize_ticket, AuthCredential, AuthResult, Secret, Services, TargetMySqlOptions,
+    TargetOptions, WarpgateServerHandle,
 };
 
 use crate::client::{ConnectionOptions, MySqlClient};
@@ -170,7 +170,7 @@ impl MySqlSession {
                 (),
             )?;
             this.stream.flush().await?;
-            return Ok(());
+            Ok(())
         }
 
         let credentials = vec![AuthCredential::Password(password)];
@@ -186,7 +186,7 @@ impl MySqlSession {
                         .await
                         .authorize(&username, &credentials, crate::common::PROTOCOL_NAME)
                         .await
-                        .map_err(|x| MySqlError::other(x))?
+                        .map_err(MySqlError::other)?
                 };
 
                 match user_auth_result {
@@ -313,7 +313,7 @@ impl MySqlSession {
         }
 
         let mut client = match MySqlClient::connect(
-            "mysql://dev:123@localhost:3306/elements_web?sslMode=REQUIRED",
+            &options.uri,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,

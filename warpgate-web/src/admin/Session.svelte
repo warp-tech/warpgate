@@ -27,11 +27,11 @@ async function close () {
 function getTargetDescription () {
     if (session?.target) {
         let address = '<unknown>'
-        if (session.target.options.kind === 'TargetSSHOptions') {
+        if (session.target.options.kind === 'Ssh') {
             const options = session.target.options as TargetSSHOptions
             address = `${options.host}:${options?.port}`
         }
-        if (session.target.options.kind === 'TargetHTTPOptions') {
+        if (session.target.options.kind === 'Http') {
             const options = session.target.options as unknown as TargetHTTPOptions
             address = options.url
         }

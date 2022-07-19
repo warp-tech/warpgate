@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, UserSnapshot, Target, TicketAndSecret } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
-import { TargetKind } from 'gateway/lib/api';
+import { TargetKind } from 'gateway/lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert, FormGroup } from 'sveltestrap'
 import { firstBy } from 'thenby'

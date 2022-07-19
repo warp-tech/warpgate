@@ -252,7 +252,7 @@ impl ConfigProvider for FileConfigProvider {
         let db = self.db.lock().await;
         let ticket = Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
         let Some(ticket) = ticket else {
-            return Err(WarpgateError::InvalidTicket(ticket_id.clone()));
+            return Err(WarpgateError::InvalidTicket(*ticket_id));
         };
 
         if let Some(uses_left) = ticket.uses_left {

@@ -5,6 +5,7 @@ mod config_providers;
 pub mod consts;
 mod data;
 pub mod db;
+mod error;
 pub mod eventhub;
 pub mod helpers;
 pub mod logging;
@@ -14,7 +15,6 @@ mod services;
 mod state;
 mod try_macro;
 mod types;
-mod error;
 
 pub use config::*;
 pub use config_providers::*;

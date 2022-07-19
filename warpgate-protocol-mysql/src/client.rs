@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 use tracing::*;
 
 use crate::common::{compute_auth_challenge_response, parse_mysql_uri};
-use crate::error::{MySqlError, InvalidMySqlTargetConfig};
+use crate::error::{InvalidMySqlTargetConfig, MySqlError};
 use crate::stream::MySqlStream;
 use crate::tls::configure_tls_connector;
 

@@ -40,7 +40,11 @@ pub trait ConfigProvider {
         protocol: ProtocolName,
     ) -> Result<AuthResult, WarpgateError>;
 
-    async fn authorize_target(&mut self, username: &str, target: &str) -> Result<bool, WarpgateError>;
+    async fn authorize_target(
+        &mut self,
+        username: &str,
+        target: &str,
+    ) -> Result<bool, WarpgateError>;
 
     async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<(), WarpgateError>;
 }

@@ -1,7 +1,7 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
 mod api;
-use regex::Regex;
 use poem_openapi::OpenApiService;
+use regex::Regex;
 
 pub fn main() {
     let api_service =
