@@ -8,7 +8,7 @@ version = "0.3.0"
 anyhow = "1.0"
 argon2 = "0.4"
 async-trait = "0.1"
-bytes = "1.1"
+bytes = "1.2"
 chrono = {version = "0.4", features = ["serde"]}
 data-encoding = "2.3"
 humantime-serde = "1.1"
