@@ -9,7 +9,7 @@ ansi_term = "0.12"
 anyhow = "1.0"
 async-trait = "0.1"
 bimap = "0.6"
-bytes = "1.1"
+bytes = "1.2"
 dialoguer = "0.10"
 futures = "0.3"
 russh = {version = "0.34.0-beta.5", features = ["openssl"]}
