@@ -103,8 +103,11 @@ pub struct TargetHTTPOptions {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq)]
 pub enum TlsMode {
+    #[serde(rename = "disabled")]
     Disabled,
+    #[serde(rename = "preferred")]
     Preferred,
+    #[serde(rename = "required")]
     Required,
 }
 
