@@ -38,7 +38,7 @@
     "format-duration": "^2.0.0",
     "moment": "^2.29.4",
     "sass": "^1.52.3",
-    "svelte": "^3.48.0",
+    "svelte": "^3.49.0",
     "svelte-check": "^2.7.2",
     "svelte-fa": "^3.0.1",
     "svelte-intersection-observer": "^0.10.0",
