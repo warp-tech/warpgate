@@ -1,0 +1,28 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-protocol-mysql"
+version = "0.3.0"
+
+[dependencies]
+warpgate-admin = { version = "*", path = "../warpgate-admin" }
+warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
+warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols" }
+anyhow = { version = "1.0", features = ["std"] }
+async-trait = "0.1"
+tokio = { version = "1.20", features = ["tracing", "signal"] }
+tracing = "0.1"
+uuid = { version = "1.0", features = ["v4"] }
+bytes = "1.1"
+mysql_common = "0.29"
+rand = "0.8"
+sha1 = "0.10.1"
+password-hash = { version = "0.2", features = ["std"] }
+delegate = "0.6"
+rustls = { version = "0.20", features = ["dangerous_configuration"] }
+rustls-pemfile = "1.0"
+tokio-rustls = "0.23"
+thiserror = "1.0"
+webpki = "0.22"
+webpki-roots = "0.22"

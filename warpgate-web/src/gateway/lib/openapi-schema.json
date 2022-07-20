@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.2.5"
+    "version": "0.3.0"
   },
   "servers": [
     {
@@ -153,11 +153,12 @@
       },
       "PortsInfo": {
         "type": "object",
-        "required": [
-          "ssh"
-        ],
         "properties": {
           "ssh": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "mysql": {
             "type": "integer",
             "format": "uint16"
           }
@@ -182,6 +183,7 @@
         "type": "string",
         "enum": [
           "Http",
+          "MySql",
           "Ssh",
           "WebAdmin"
         ]

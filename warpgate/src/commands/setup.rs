@@ -1,5 +1,6 @@
 use std::fs::{create_dir_all, File};
 use std::io::Write;
+use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -9,11 +10,32 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HTTPConfig, Role, SSHConfig, Secret, Services, Target, TargetOptions, TargetWebAdminOptions,
-    User, UserAuthCredential, WarpgateConfigStore,
+    HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Services, Target,
+    TargetOptions, TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
 };
 
 use crate::config::load_config;
+
+fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
+    loop {
+        let v = dialoguer::Input::with_theme(&ColorfulTheme::default())
+            .default(format!("{:?}", default))
+            .with_prompt(prompt)
+            .interact_text()
+            .and_then(|v| v.to_socket_addrs());
+        match v {
+            Ok(mut addr) => match addr.next() {
+                Some(addr) => return ListenEndpoint(addr),
+                None => {
+                    error!("No endpoints resolved");
+                }
+            },
+            Err(err) => {
+                error!("Failed to resolve this endpoint: {err}")
+            }
+        }
+    }
+}
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
@@ -57,10 +79,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    info!(
-        "* Paths can be either absolute or relative to {}.",
-        config_dir.canonicalize()?.display()
-    );
+    if !is_docker {
+        info!(
+            "* Paths can be either absolute or relative to {}.",
+            config_dir.canonicalize()?.display()
+        );
+    }
 
     // ---
 
@@ -89,17 +113,41 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
     if !is_docker {
-        store.ssh.listen = dialoguer::Input::with_theme(&theme)
-            .default(SSHConfig::default().listen)
-            .with_prompt("Endpoint to listen for SSH connections on")
-            .interact_text()?;
+        store.http.listen = prompt_endpoint(
+            "Endpoint to listen for HTTP connections on",
+            HTTPConfig::default().listen,
+        );
+
+        info!("You will now choose specific protocol listeners to be enabled.");
+        info!("");
+        info!("NB: Nothing will be exposed by default -");
+        info!("    you'll set target hosts in the config file later.");
+
+        store.ssh.enable = dialoguer::Confirm::with_theme(&theme)
+            .default(true)
+            .with_prompt("Accept SSH connections?")
+            .interact()?;
+
+        if store.ssh.enable {
+            store.ssh.listen = prompt_endpoint(
+                "Endpoint to listen for SSH connections on",
+                SSHConfig::default().listen,
+            );
+        }
 
         // ---
 
-        store.http.listen = dialoguer::Input::with_theme(&theme)
-            .default(HTTPConfig::default().listen)
-            .with_prompt("Endpoint to listen for HTTP connections on")
-            .interact_text()?;
+        store.mysql.enable = dialoguer::Confirm::with_theme(&theme)
+            .default(true)
+            .with_prompt("Accept MySQL connections?")
+            .interact()?;
+
+        if store.mysql.enable {
+            store.mysql.listen = prompt_endpoint(
+                "Endpoint to listen for MySQL connections on",
+                MySQLConfig::default().listen,
+            );
+        }
     }
 
     if store.http.enable {
@@ -119,6 +167,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         .join("tls.key.pem")
         .to_string_lossy()
         .to_string();
+
+    store.mysql.certificate = store.http.certificate.clone();
+    store.mysql.key = store.http.key.clone();
 
     // ---
 
@@ -168,7 +219,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
     {
-        info!("Generating HTTPS certificate");
+        info!("Generating a TLS certificate");
         let cert = generate_simple_self_signed(vec![
             "warpgate.local".to_string(),
             "localhost".to_string(),

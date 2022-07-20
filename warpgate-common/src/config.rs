@@ -1,12 +1,13 @@
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use poem_openapi::{Object, Union};
+use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::otp::OtpSecretKey;
-use crate::Secret;
+use crate::{ListenEndpoint, Secret};
 
 const fn _default_true() -> bool {
     true
@@ -16,8 +17,12 @@ const fn _default_false() -> bool {
     false
 }
 
-const fn _default_port() -> u16 {
+const fn _default_ssh_port() -> u16 {
     22
+}
+
+const fn _default_mysql_port() -> u16 {
+    3306
 }
 
 #[inline]
@@ -41,8 +46,13 @@ fn _default_database_url() -> Secret<String> {
 }
 
 #[inline]
-fn _default_http_listen() -> String {
-    "0.0.0.0:8888".to_owned()
+fn _default_http_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:8888".to_socket_addrs().unwrap().next().unwrap())
+}
+
+#[inline]
+fn _default_mysql_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:33306".to_socket_addrs().unwrap().next().unwrap())
 }
 
 #[inline]
@@ -58,7 +68,7 @@ fn _default_empty_vec<T>() -> Vec<T> {
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
-    #[serde(default = "_default_port")]
+    #[serde(default = "_default_ssh_port")]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
@@ -91,6 +101,59 @@ pub struct TargetHTTPOptions {
     pub headers: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq)]
+pub enum TlsMode {
+    Disabled,
+    Preferred,
+    Required,
+}
+
+impl Default for TlsMode {
+    fn default() -> Self {
+        TlsMode::Preferred
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct Tls {
+    #[serde(default)]
+    pub mode: TlsMode,
+
+    #[serde(default)]
+    pub verify: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for Tls {
+    fn default() -> Self {
+        Self {
+            mode: TlsMode::default(),
+            verify: false,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetMySqlOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_mysql_port")]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub password: Option<String>,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    #[serde(default)]
+    pub verify_tls: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
@@ -104,12 +167,14 @@ pub struct Target {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
-#[oai(discriminator_name = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
 pub enum TargetOptions {
     #[serde(rename = "ssh")]
     Ssh(TargetSSHOptions),
     #[serde(rename = "http")]
     Http(TargetHTTPOptions),
+    #[serde(rename = "mysql")]
+    MySql(TargetMySqlOptions),
     #[serde(rename = "web_admin")]
     WebAdmin(TargetWebAdminOptions),
 }
@@ -134,6 +199,8 @@ pub struct UserRequireCredentialsPolicy {
     pub http: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mysql: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -150,8 +217,8 @@ pub struct Role {
     pub name: String,
 }
 
-fn _default_ssh_listen() -> String {
-    "0.0.0.0:2222".to_owned()
+fn _default_ssh_listen() -> ListenEndpoint {
+    ListenEndpoint("0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap())
 }
 
 fn _default_ssh_client_key() -> String {
@@ -164,8 +231,11 @@ fn _default_ssh_keys_path() -> String {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SSHConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
     #[serde(default = "_default_ssh_listen")]
-    pub listen: String,
+    pub listen: ListenEndpoint,
 
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
@@ -177,6 +247,7 @@ pub struct SSHConfig {
 impl Default for SSHConfig {
     fn default() -> Self {
         SSHConfig {
+            enable: true,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             client_key: _default_ssh_client_key(),
@@ -186,11 +257,11 @@ impl Default for SSHConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HTTPConfig {
-    #[serde(default = "_default_false")]
+    #[serde(default = "_default_true")]
     pub enable: bool,
 
     #[serde(default = "_default_http_listen")]
-    pub listen: String,
+    pub listen: ListenEndpoint,
 
     #[serde(default)]
     pub certificate: String,
@@ -202,6 +273,32 @@ pub struct HTTPConfig {
 impl Default for HTTPConfig {
     fn default() -> Self {
         HTTPConfig {
+            enable: true,
+            listen: _default_http_listen(),
+            certificate: "".to_owned(),
+            key: "".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MySQLConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_mysql_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for MySQLConfig {
+    fn default() -> Self {
+        MySQLConfig {
             enable: true,
             listen: _default_http_listen(),
             certificate: "".to_owned(),
@@ -268,6 +365,9 @@ pub struct WarpgateConfigStore {
     pub http: HTTPConfig,
 
     #[serde(default)]
+    pub mysql: MySQLConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -282,6 +382,7 @@ impl Default for WarpgateConfigStore {
             database_url: _default_database_url(),
             ssh: SSHConfig::default(),
             http: HTTPConfig::default(),
+            mysql: MySQLConfig::default(),
             log: LogConfig::default(),
         }
     }

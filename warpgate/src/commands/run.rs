@@ -1,5 +1,3 @@
-use std::net::ToSocketAddrs;
-
 use anyhow::Result;
 use futures::StreamExt;
 #[cfg(target_os = "linux")]
@@ -9,6 +7,7 @@ use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
 use warpgate_common::{ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
+use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
@@ -24,29 +23,27 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
-    protocol_futures.push(
-        SSHProtocolServer::new(&services).await?.run(
-            config
-                .store
-                .ssh
-                .listen
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
-        ),
-    );
+    if config.store.ssh.enable {
+        protocol_futures.push(
+            SSHProtocolServer::new(&services)
+                .await?
+                .run(*config.store.ssh.listen),
+        );
+    }
 
     if config.store.http.enable {
         protocol_futures.push(
-            HTTPProtocolServer::new(&services).await?.run(
-                config
-                    .store
-                    .http
-                    .listen
-                    .to_socket_addrs()?
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("Failed to resolve the listen address"))?,
-            ),
+            HTTPProtocolServer::new(&services)
+                .await?
+                .run(*config.store.http.listen),
+        );
+    }
+
+    if config.store.mysql.enable {
+        protocol_futures.push(
+            MySQLProtocolServer::new(&services)
+                .await?
+                .run(*config.store.mysql.listen),
         );
     }
 
@@ -68,10 +65,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
-        info!("Accepting SSH connections on {}", config.store.ssh.listen);
+        info!("Accepting SSH connections on {:?}", config.store.ssh.listen);
         if config.store.http.enable {
             info!(
-                "Accepting HTTP connections on https://{}",
+                "Accepting HTTP connections on https://{:?}",
                 config.store.http.listen
             );
         }
@@ -99,6 +96,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     }
 
     drop(config);
+
+    if protocol_futures.is_empty() {
+        anyhow::bail!("No protocols are enabled in the config file, exiting");
+    }
 
     tokio::spawn(watch_config(cli.config.clone(), services.config.clone()));
 

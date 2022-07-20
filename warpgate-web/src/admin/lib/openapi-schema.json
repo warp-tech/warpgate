@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.2.5"
+    "version": "0.3.0"
   },
   "servers": [
     {
@@ -59,28 +59,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "items",
-                    "offset",
-                    "total"
-                  ],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SessionSnapshot"
-                      }
-                    },
-                    "offset": {
-                      "type": "integer",
-                      "format": "uint64"
-                    },
-                    "total": {
-                      "type": "integer",
-                      "format": "uint64"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PaginatedSessionSnapshot"
                 }
               }
             }
@@ -509,6 +488,30 @@
           }
         }
       },
+      "PaginatedSessionSnapshot": {
+        "type": "object",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionSnapshot"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "Recording": {
         "type": "object",
         "required": [
@@ -668,73 +671,138 @@
           }
         }
       },
+      "TargetMySqlOptions": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "tls",
+          "verify_tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "verify_tls": {
+            "type": "boolean"
+          }
+        }
+      },
       "TargetOptions": {
         "type": "object",
-        "anyOf": [
+        "oneOf": [
           {
-            "required": [
-              "kind"
-            ],
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetSSHOptions"
-              },
-              {
-                "type": "object",
-                "title": "TargetSSHOptions",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "example": "TargetSSHOptions"
-                  }
-                }
-              }
-            ]
+            "$ref": "#/components/schemas/TargetOptionsTargetSSHOptions"
           },
           {
-            "required": [
-              "kind"
-            ],
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetHTTPOptions"
-              },
-              {
-                "type": "object",
-                "title": "TargetHTTPOptions",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "example": "TargetHTTPOptions"
-                  }
-                }
-              }
-            ]
+            "$ref": "#/components/schemas/TargetOptionsTargetHTTPOptions"
           },
           {
-            "required": [
-              "kind"
-            ],
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetWebAdminOptions"
-              },
-              {
-                "type": "object",
-                "title": "TargetWebAdminOptions",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "example": "TargetWebAdminOptions"
-                  }
-                }
-              }
-            ]
+            "$ref": "#/components/schemas/TargetOptionsTargetMySqlOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptionsTargetWebAdminOptions"
           }
         ],
         "discriminator": {
-          "propertyName": "kind"
+          "propertyName": "kind",
+          "mapping": {
+            "Ssh": "#/components/schemas/TargetOptionsTargetSSHOptions",
+            "Http": "#/components/schemas/TargetOptionsTargetHTTPOptions",
+            "MySql": "#/components/schemas/TargetOptionsTargetMySqlOptions",
+            "WebAdmin": "#/components/schemas/TargetOptionsTargetWebAdminOptions"
+          }
         }
+      },
+      "TargetOptionsTargetHTTPOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Http"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetHTTPOptions"
+          }
+        ]
+      },
+      "TargetOptionsTargetMySqlOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "MySql"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetMySqlOptions"
+          }
+        ]
+      },
+      "TargetOptionsTargetSSHOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Ssh"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetSSHOptions"
+          }
+        ]
+      },
+      "TargetOptionsTargetWebAdminOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "WebAdmin"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetWebAdminOptions"
+          }
+        ]
       },
       "TargetSSHOptions": {
         "type": "object",
@@ -806,6 +874,29 @@
             "type": "string"
           }
         }
+      },
+      "Tls": {
+        "type": "object",
+        "required": [
+          "mode",
+          "verify"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/TlsMode"
+          },
+          "verify": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TlsMode": {
+        "type": "string",
+        "enum": [
+          "Disabled",
+          "Preferred",
+          "Required"
+        ]
       },
       "UserSnapshot": {
         "type": "object",

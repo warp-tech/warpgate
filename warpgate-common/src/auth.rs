@@ -20,7 +20,9 @@ impl From<&String> for AuthSelector {
             return AuthSelector::Ticket { secret };
         }
 
-        let mut parts = selector.splitn(2, ':');
+        let separator = if selector.contains('#') { '#' } else { ':' };
+
+        let mut parts = selector.splitn(2, separator);
         let username = parts.next().unwrap_or("").to_string();
         let target_name = parts.next().unwrap_or("").to_string();
         AuthSelector::User {

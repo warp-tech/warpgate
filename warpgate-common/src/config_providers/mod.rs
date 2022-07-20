@@ -1,7 +1,6 @@
 mod file;
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use file::FileConfigProvider;
@@ -11,7 +10,7 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
-use crate::{ProtocolName, Secret, Target, UserSnapshot};
+use crate::{ProtocolName, Secret, Target, UserSnapshot, WarpgateError};
 
 pub enum AuthResult {
     Accepted { username: String },
@@ -30,27 +29,31 @@ pub enum AuthCredential {
 
 #[async_trait]
 pub trait ConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>>;
+    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>, WarpgateError>;
 
-    async fn list_targets(&mut self) -> Result<Vec<Target>>;
+    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
 
     async fn authorize(
         &mut self,
         username: &str,
         credentials: &[AuthCredential],
         protocol: ProtocolName,
-    ) -> Result<AuthResult>;
+    ) -> Result<AuthResult, WarpgateError>;
 
-    async fn authorize_target(&mut self, username: &str, target: &str) -> Result<bool>;
+    async fn authorize_target(
+        &mut self,
+        username: &str,
+        target: &str,
+    ) -> Result<bool, WarpgateError>;
 
-    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<()>;
+    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<(), WarpgateError>;
 }
 
 //TODO: move this somewhere
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
-) -> Result<Option<Ticket::Model>> {
+) -> Result<Option<Ticket::Model>, WarpgateError> {
     let ticket = {
         let db = db.lock().await;
         Ticket::Entity::find()

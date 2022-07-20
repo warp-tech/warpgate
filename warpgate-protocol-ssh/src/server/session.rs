@@ -1003,7 +1003,7 @@ impl ServerSession {
     }
 
     async fn _auth_accept(&mut self, username: &str, target_name: &str) {
-        info!(username = username, "Authenticated");
+        info!(%username, "Authenticated");
 
         let _ = self
             .server_handle
@@ -1031,7 +1031,7 @@ impl ServerSession {
 
         let Some((target, ssh_options)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
-            info!("Selected target not found");
+            warn!("Selected target not found");
             return;
         };
 
