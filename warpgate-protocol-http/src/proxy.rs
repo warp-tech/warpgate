@@ -13,7 +13,7 @@ use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
-use warpgate_common::{try_block, TargetHTTPOptions};
+use warpgate_common::{try_block, TargetHTTPOptions, TlsMode};
 use warpgate_web::lookup_built_file;
 
 use crate::logging::log_request_result;
@@ -204,11 +204,19 @@ pub async fn proxy_normal_request(
 
     tracing::debug!("URI: {:?}", uri);
 
-    let client = reqwest::Client::builder()
+    let mut client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connection_verbose(true)
-        .build()
-        .context("Could not build request")?;
+        .connection_verbose(true);
+
+    if let TlsMode::Required = options.tls.mode {
+        client = client.https_only(true);
+    }
+    if !options.tls.verify {
+        client = client.danger_accept_invalid_certs(true);
+    }
+
+    let client = client.build().context("Could not build request")?;
+
     let mut client_request = client.request(req.method().into(), uri.clone());
 
     client_request = copy_server_request(&req, client_request);

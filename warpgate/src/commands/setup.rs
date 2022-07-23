@@ -246,7 +246,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     } else {
         info!(
             "  {} --config {} run",
-            std::env::args().next().unwrap_or_else(|| "warpgate".to_string()),
+            std::env::args()
+                .next()
+                .unwrap_or_else(|| "warpgate".to_string()),
             cli.config.display()
         );
     }

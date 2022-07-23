@@ -100,6 +100,9 @@ pub struct TargetHTTPOptions {
     pub url: String,
 
     #[serde(default)]
+    pub tls: Tls,
+
+    #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
 }
 
@@ -124,7 +127,7 @@ pub struct Tls {
     #[serde(default)]
     pub mode: TlsMode,
 
-    #[serde(default)]
+    #[serde(default="_default_true")]
     pub verify: bool,
 }
 
@@ -154,9 +157,6 @@ pub struct TargetMySqlOptions {
 
     #[serde(default)]
     pub tls: Tls,
-
-    #[serde(default)]
-    pub verify_tls: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
