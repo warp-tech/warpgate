@@ -45,7 +45,7 @@ pub enum ConnectionError {
     Key(#[from] russh_keys::Error),
 
     #[error(transparent)]
-    SSH(#[from] russh::Error),
+    Ssh(#[from] russh::Error),
 
     #[error("Could not resolve address")]
     Resolve,
@@ -377,7 +377,7 @@ impl RemoteClient {
                         Err(error) => {
                             let connection_error = match error {
                                 ClientHandlerError::ConnectionError(e) => e,
-                                ClientHandlerError::Ssh(e) => ConnectionError::SSH(e),
+                                ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
                                 ClientHandlerError::Internal => ConnectionError::Internal,
                             };
                             error!(error=?connection_error, "Connection error");
@@ -396,6 +396,7 @@ impl RemoteClient {
                             }
                         }
                         SSHTargetAuth::PublicKey => {
+                            #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {
                                 let key_str = key.as_openssh();

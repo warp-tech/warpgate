@@ -26,6 +26,7 @@ macro_rules! try_block {
 }
 
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn test_catch() {
     let mut caught = false;
     try_block!({
@@ -39,6 +40,7 @@ fn test_catch() {
 }
 
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn test_success() {
     try_block!({
         let _: u32 = "123".parse()?;

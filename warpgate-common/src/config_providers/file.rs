@@ -39,7 +39,7 @@ fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
     match c {
         UserAuthCredential::Password { .. } => k == "password",
         UserAuthCredential::PublicKey { .. } => k == "publickey",
-        UserAuthCredential::TOTP { .. } => k == "otp",
+        UserAuthCredential::Totp { .. } => k == "otp",
     }
 }
 
@@ -143,7 +143,7 @@ impl ConfigProvider for FileConfigProvider {
                 }
                 AuthCredential::Otp(client_otp) => {
                     match user.credentials.iter().find(|credential| match credential {
-                        UserAuthCredential::TOTP {
+                        UserAuthCredential::Totp {
                             key: ref user_otp_key,
                         } => verify_totp(client_otp.expose_secret(), user_otp_key),
                         _ => false,

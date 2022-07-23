@@ -192,7 +192,7 @@ pub enum UserAuthCredential {
     #[serde(rename = "publickey")]
     PublicKey { key: Secret<String> },
     #[serde(rename = "otp")]
-    TOTP {
+    Totp {
         #[serde(with = "crate::helpers::serde_base64_secret")]
         key: OtpSecretKey,
     },

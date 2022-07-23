@@ -98,6 +98,7 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
     let scheme = target_uri.scheme().context("No scheme in the URL")?;
     uri = uri.scheme(scheme.clone());
 
+    #[allow(clippy::unwrap_used)]
     if websocket {
         uri = uri.scheme(
             Scheme::from_str(if scheme == &Scheme::from_str("http").unwrap() {

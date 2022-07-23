@@ -815,7 +815,7 @@ impl ServerSession {
     pub async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        if self.rc_state == RCState::Connecting && data.get(0) == Some(&3) {
+        if self.rc_state == RCState::Connecting && data.first() == Some(&3) {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return Ok(());
