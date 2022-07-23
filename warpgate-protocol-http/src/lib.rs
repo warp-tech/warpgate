@@ -2,12 +2,17 @@
 mod api;
 mod catchall;
 mod common;
+mod error;
 mod logging;
 mod proxy;
 mod session;
 mod session_handle;
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
-use crate::session::{SessionMiddleware, SharedSessionStorage};
+
+use std::fmt::Debug;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
@@ -18,17 +23,17 @@ use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
-use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, Route, Server};
+use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
-use std::fmt::Debug;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
 use warpgate_web::Assets;
+
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
+use crate::error::error_page;
+use crate::session::{SessionMiddleware, SharedSessionStorage};
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -89,7 +94,15 @@ impl ProtocolServer for HTTPProtocolServer {
                         Ok(response)
                     }),
             )
-            .nest_no_strip("/", page_auth(catchall::catchall_endpoint))
+            .nest_no_strip(
+                "/",
+                page_auth(catchall::catchall_endpoint).around(move |ep, req| async move {
+                    Ok(match ep.call(req).await {
+                        Ok(response) => response.into_response(),
+                        Err(error) => error_page(error).into_response(),
+                    })
+                }),
+            )
             .around(move |ep, req| async move {
                 let sm = Data::<&Arc<Mutex<SessionMiddleware>>>::from_request_without_body(&req)
                     .await?

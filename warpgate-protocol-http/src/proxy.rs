@@ -219,7 +219,7 @@ pub async fn proxy_normal_request(
     let client_response = client
         .execute(client_request)
         .await
-        .context("Could not execute request")?;
+        .map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?;
     let status = client_response.status().clone();
 
     let mut response: Response = "".into();
