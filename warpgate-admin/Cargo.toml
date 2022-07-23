@@ -41,4 +41,4 @@ warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
 warpgate-web = { version = "*", path = "../warpgate-web" }
-regex = "1.5"
+regex = "1.6"
