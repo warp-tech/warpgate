@@ -3,6 +3,5 @@ deny = [
   "clippy::unwrap_used",
   "clippy::expect_used",
   "clippy::panic",
-#   "clippy::indexing_slicing",
-#   "clippy::integer_arithmetic",
+  "clippy::indexing_slicing",
 ]

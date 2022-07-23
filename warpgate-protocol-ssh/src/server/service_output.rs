@@ -35,6 +35,7 @@ impl ServiceOutput {
                         _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
                             if progress_visible.load(std::sync::atomic::Ordering::Relaxed) {
                                 tick_index = (tick_index + 1) % ticks.len();
+                                #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
                                 let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick));
                                 let output = format!("{ERASE_PROGRESS_SPINNER}{badge}");
