@@ -127,7 +127,7 @@ pub struct Tls {
     #[serde(default)]
     pub mode: TlsMode,
 
-    #[serde(default="_default_true")]
+    #[serde(default = "_default_true")]
     pub verify: bool,
 }
 
