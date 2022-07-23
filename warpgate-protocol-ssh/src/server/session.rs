@@ -270,7 +270,7 @@ impl ServerSession {
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
         match self.target.clone() {
             TargetSelection::None => {
-                panic!("Target not set");
+                anyhow::bail!("Invalid session state (target not set)")
             }
             TargetSelection::NotFound(name) => {
                 self.emit_service_message(&format!("Selected target not found: {name}"))
@@ -585,6 +585,7 @@ impl ServerSession {
             .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
             .await;
         if let Some(recorder) = recorder {
+            #[allow(clippy::unwrap_used)]
             let mut recorder = recorder.connection(TrafficConnectionParams {
                 dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
                 dst_port: params.port_to_connect as u16,
@@ -630,7 +631,7 @@ impl ServerSession {
         let _ = self
             .session_handle
             .as_mut()
-            .unwrap()
+            .context("Invalid session state")?
             .channel_success(server_channel_id.0)
             .await;
         self.pty_channels.push(channel_id);
@@ -790,7 +791,7 @@ impl ServerSession {
         let _ = self
             .session_handle
             .as_mut()
-            .unwrap()
+            .context("Invalid session state")?
             .channel_success(server_channel_id.0)
             .await;
         let _ = self.maybe_connect_remote().await;
@@ -1099,8 +1100,7 @@ impl ServerSession {
         let channels = all_channels
             .into_iter()
             .map(|x| self.map_channel_reverse(&x))
-            .filter(|x| x.is_ok())
-            .map(|x| x.unwrap())
+            .filter_map(|x| x.ok())
             .collect::<Vec<_>>();
 
         let _ = self

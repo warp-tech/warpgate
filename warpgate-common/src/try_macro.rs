@@ -30,7 +30,7 @@ fn test_catch() {
     let mut caught = false;
     try_block!({
         let _: u32 = "asdf".parse()?;
-        panic!();
+        assert!(false)
     } catch (e: anyhow::Error) {
         assert_eq!(e.to_string(), "asdf".parse::<i32>().unwrap_err().to_string());
         caught = true;
@@ -43,6 +43,6 @@ fn test_success() {
     try_block!({
         let _: u32 = "123".parse()?;
     } catch (_e: anyhow::Error) {
-        panic!();
+        assert!(false)
     });
 }

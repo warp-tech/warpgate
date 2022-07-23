@@ -139,7 +139,7 @@ impl MySqlSession {
             return Err(MySqlError::Eof);
         };
         let password = Secret::new(response.clone().get_str_nul()?);
-        return self.run_authorization(resp, password).await;
+        self.run_authorization(resp, password).await
     }
 
     async fn send_error(&mut self, code: u16, message: &str) -> Result<(), MySqlError> {
@@ -209,11 +209,9 @@ impl MySqlSession {
                             );
                             return fail(&mut self).await;
                         }
-                        return self.run_authorized(handshake, username, target_name).await;
+                        self.run_authorized(handshake, username, target_name).await
                     }
-                    AuthResult::Rejected | AuthResult::OtpNeeded => {
-                        return fail(&mut self).await;
-                    }
+                    AuthResult::Rejected | AuthResult::OtpNeeded => fail(&mut self).await,
                 }
             }
             AuthSelector::Ticket { secret } => {
@@ -231,11 +229,10 @@ impl MySqlSession {
                             .await
                             .map_err(MySqlError::other)?;
 
-                        return self
-                            .run_authorized(handshake, ticket.username, ticket.target)
-                            .await;
+                        self.run_authorized(handshake, ticket.username, ticket.target)
+                            .await
                     }
-                    _ => return fail(&mut self).await,
+                    _ => fail(&mut self).await,
                 }
             }
         }
@@ -297,10 +294,9 @@ impl MySqlSession {
         }
 
         let span = self.make_logging_span();
-        return self
-            .run_authorized_inner(handshake, mysql_options)
+        self.run_authorized_inner(handshake, mysql_options)
             .instrument(span)
-            .await;
+            .await
     }
 
     async fn run_authorized_inner(
@@ -341,7 +337,7 @@ impl MySqlSession {
             };
             trace!(?payload, "server got packet");
 
-            let com = payload.get(0);
+            let com = payload.first();
 
             // COM_QUERY
             if com == Some(&0x03) {
@@ -359,7 +355,7 @@ impl MySqlSession {
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;
-                    if let Some(com) = response.get(0) {
+                    if let Some(com) = response.first() {
                         if com == &0xfe {
                             if self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
                                 break;
@@ -415,7 +411,7 @@ impl MySqlSession {
             trace!(?response, "client got packet");
             self.stream.push(&&response[..], ())?;
             self.stream.flush().await?;
-            if let Some(com) = response.get(0) {
+            if let Some(com) = response.first() {
                 if com == &0 || com == &0xff || com == &0xfe {
                     break;
                 }

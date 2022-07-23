@@ -1,4 +1,8 @@
-use anyhow::Result;
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::str::FromStr;
+
+use anyhow::{Context, Result};
 use cookie::Cookie;
 use delegate::delegate;
 use futures::{SinkExt, StreamExt};
@@ -7,9 +11,6 @@ use http::uri::{Authority, Scheme};
 use http::Uri;
 use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::str::FromStr;
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
 use warpgate_common::{try_block, TargetHTTPOptions};
@@ -75,33 +76,40 @@ lazy_static::lazy_static! {
     };
 }
 
-fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Uri {
-    let target_uri = Uri::try_from(options.url.clone()).unwrap();
+fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
+    let target_uri = Uri::try_from(options.url.clone())?;
     let source_uri = req.uri().clone();
 
-    let authority = target_uri.authority().unwrap().to_string();
-    let authority = authority.split("@").last().unwrap();
-    let authority: Authority = authority.try_into().unwrap();
+    let authority = target_uri
+        .authority()
+        .context("No authority in the URL")?
+        .to_string();
+    let authority = authority.split("@").last().context("Authority is empty")?;
+    let authority: Authority = authority.try_into()?;
     let mut uri = http::uri::Builder::new()
         .authority(authority)
-        .path_and_query(source_uri.path_and_query().unwrap().clone());
+        .path_and_query(
+            source_uri
+                .path_and_query()
+                .context("No path in the URL")?
+                .clone(),
+        );
 
-    uri = uri.scheme(target_uri.scheme().unwrap().clone());
+    let scheme = target_uri.scheme().context("No scheme in the URL")?;
+    uri = uri.scheme(scheme.clone());
 
     if websocket {
         uri = uri.scheme(
-            Scheme::from_str(
-                if target_uri.scheme().unwrap() == &Scheme::from_str("http").unwrap() {
-                    "ws"
-                } else {
-                    "wss"
-                },
-            )
+            Scheme::from_str(if scheme == &Scheme::from_str("http").unwrap() {
+                "ws"
+            } else {
+                "wss"
+            })
             .unwrap(),
         );
     }
 
-    uri.build().unwrap()
+    Ok(uri.build()?)
 }
 
 fn copy_client_response<R: SomeResponse>(
@@ -131,20 +139,23 @@ fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOption
 }
 
 fn rewrite_response(resp: &mut Response, options: &TargetHTTPOptions) -> Result<()> {
-    let target_uri = Uri::try_from(options.url.clone()).unwrap();
+    let target_uri = Uri::try_from(options.url.clone())?;
     let headers = resp.headers_mut();
 
     if let Some(value) = headers.get_mut(http::header::LOCATION) {
-        let redirect_uri = Uri::try_from(value.as_bytes()).unwrap();
+        let redirect_uri = Uri::try_from(value.as_bytes())?;
         if redirect_uri.authority() == target_uri.authority() {
             let old_value = value.clone();
             *value = Uri::builder()
-                .path_and_query(redirect_uri.path_and_query().unwrap().clone())
-                .build()
-                .unwrap()
+                .path_and_query(
+                    redirect_uri
+                        .path_and_query()
+                        .context("No path in URL")?
+                        .clone(),
+                )
+                .build()?
                 .to_string()
-                .parse()
-                .unwrap();
+                .parse()?;
             debug!("Rewrote a redirect from {:?} to {:?}", old_value, value);
         }
     }
@@ -174,7 +185,8 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
             req.headers()
                 .get_all(k)
                 .iter()
-                .map(|v| v.to_str().unwrap().to_string())
+                .map(|v| v.to_str().map(|x| x.to_string()))
+                .filter_map(|x| x.ok())
                 .collect::<Vec<_>>()
                 .join("; "),
         );
@@ -187,7 +199,7 @@ pub async fn proxy_normal_request(
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
-    let uri = construct_uri(req, &options, false).to_string();
+    let uri = construct_uri(req, &options, false)?.to_string();
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -195,15 +207,18 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true)
         .build()
-        .unwrap();
+        .context("Could not build request")?;
     let mut client_request = client.request(req.method().into(), uri.clone());
 
     client_request = copy_server_request(&req, client_request);
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
 
-    let client_request = client_request.build().unwrap();
-    let client_response = client.execute(client_request).await.unwrap();
+    let client_request = client_request.build().context("Could not build request")?;
+    let client_response = client
+        .execute(client_request)
+        .await
+        .context("Could not execute request")?;
     let status = client_response.status().clone();
 
     let mut response: Response = "".into();
@@ -275,7 +290,7 @@ pub async fn proxy_websocket_request(
     ws: WebSocket,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
-    let uri = construct_uri(req, &options, true);
+    let uri = construct_uri(req, &options, true)?;
     proxy_ws_inner(req, ws, uri.clone(), options)
         .await
         .map_err(|error| {

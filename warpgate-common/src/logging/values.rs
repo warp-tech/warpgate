@@ -8,7 +8,7 @@ use tracing_core::Field;
 
 pub type SerializedRecordValuesInner = HashMap<&'static str, String>;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct SerializedRecordValues(SerializedRecordValuesInner);
 
 impl SerializedRecordValues {

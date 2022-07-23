@@ -13,7 +13,7 @@ use crate::helpers::rng::get_crypto_rng;
 pub type SessionId = Uuid;
 pub type ProtocolName = &'static str;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Secret<T>(T);
 
 impl Secret<String> {
@@ -94,9 +94,7 @@ impl<'de> Deserialize<'de> for ListenEndpoint {
             })?
             .next()
             .ok_or_else(|| {
-                return serde::de::Error::custom(format!(
-                    "failed to resolve {v} into a TCP endpoint"
-                ));
+                serde::de::Error::custom(format!("failed to resolve {v} into a TCP endpoint"))
             })?;
         Ok(Self(v))
     }

@@ -32,6 +32,7 @@ fn get_totp(key: &OtpSecretKey, label: Option<&str>) -> TOTP<OtpExposedSecretKey
 }
 
 pub fn verify_totp(code: &str, key: &OtpSecretKey) -> bool {
+    #[allow(clippy::unwrap_used)]
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()

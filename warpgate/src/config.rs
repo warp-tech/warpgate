@@ -29,7 +29,7 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
 
     let config = WarpgateConfig {
         store,
-        paths_relative_to: path.parent().unwrap().to_path_buf(),
+        paths_relative_to: path.parent().context("FS root reached")?.to_path_buf(),
     };
 
     info!(
@@ -83,7 +83,7 @@ pub async fn watch_config<P: AsRef<Path>>(
 ) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(1);
     let mut watcher = RecommendedWatcher::new(move |res| {
-        tx.blocking_send(res).unwrap();
+        let _ = tx.blocking_send(res);
     })?;
     watcher.configure(notify::Config::PreciseEvents(true))?;
     watcher.watch(path.as_ref(), RecursiveMode::NonRecursive)?;

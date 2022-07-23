@@ -232,15 +232,13 @@ impl ConfigProvider for FileConfigProvider {
             .roles
             .iter()
             .map(|x| config.store.roles.iter().find(|y| &y.name == x))
-            .filter(|x| x.is_some())
-            .map(|x| x.unwrap().to_owned())
+            .filter_map(|x| x.to_owned())
             .collect::<HashSet<_>>();
         let target_roles = target
             .allow_roles
             .iter()
             .map(|x| config.store.roles.iter().find(|y| &y.name == x))
-            .filter(|x| x.is_some())
-            .map(|x| x.unwrap().to_owned())
+            .filter_map(|x| x.to_owned())
             .collect::<HashSet<_>>();
 
         let intersect = user_roles.intersection(&target_roles).count() > 0;

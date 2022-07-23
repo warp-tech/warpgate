@@ -4,6 +4,7 @@ use crate::err_protocol;
 use crate::error::Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub enum AuthPlugin {
     MySqlClearPassword,
     MySqlNativePassword,

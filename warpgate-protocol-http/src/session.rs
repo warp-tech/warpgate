@@ -1,17 +1,19 @@
-use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
-use crate::session_handle::{
-    HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
-};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
+
 use poem::session::{Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, SessionId, WarpgateServerHandle, SessionStateInit};
+use warpgate_common::{Services, SessionId, SessionStateInit, WarpgateServerHandle};
+
+use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
+use crate::session_handle::{
+    HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
+};
 
 #[derive(Clone)]
 pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);
@@ -124,7 +126,9 @@ impl SessionMiddleware {
 
         session.set(SESSION_ID_SESSION_KEY, id);
 
-        let this = self.this.upgrade().unwrap();
+        let Some(this) = self.this.upgrade() else {
+            return Err(anyhow::anyhow!("Invalid session state").into())
+        };
         tokio::spawn({
             let session_storage = (*session_storage).clone();
             let poem_session_id: Option<String> = session.get(POEM_SESSION_ID_SESSION_KEY);

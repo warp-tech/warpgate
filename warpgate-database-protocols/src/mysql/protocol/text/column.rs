@@ -63,7 +63,7 @@ bitflags! {
 
 // https://dev.mysql.com/doc/internals/en/com-query-response.html#column-type
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "offline", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum ColumnType {

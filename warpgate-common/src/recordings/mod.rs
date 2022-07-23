@@ -30,6 +30,9 @@ pub enum Error {
 
     #[error("Disabled")]
     Disabled,
+
+    #[error("Invalid recording path")]
+    InvalidPath,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -71,7 +74,7 @@ impl SessionRecordings {
         }
 
         let path = self.path_for(id, &name);
-        tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
+        tokio::fs::create_dir_all(&path.parent().ok_or(Error::InvalidPath)?).await?;
         info!(%name, path=?path, "Recording session {}", id);
 
         let model = {

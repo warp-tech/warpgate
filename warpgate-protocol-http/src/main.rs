@@ -6,6 +6,7 @@ mod session;
 mod session_handle;
 use poem_openapi::OpenApiService;
 
+#[allow(clippy::unwrap_used)]
 pub fn main() {
     let api_service = OpenApiService::new(
         api::get(),

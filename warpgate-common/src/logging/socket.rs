@@ -49,9 +49,12 @@ where
                 return
             };
 
-            let buffer = BytesMut::from(
-                &serde_json::to_vec(&values).expect("Cannot serialize log entry, this is a bug")[..],
-            );
+            let Ok(serialized) = serde_json::to_vec(&values) else {
+                eprintln!("Failed to serialize log entry {values:?}");
+                continue
+            };
+
+            let buffer = BytesMut::from(&serialized[..]);
             if let Err(error) = socket.send_to(buffer.as_ref(), socket_address).await {
                 error!(%error, is_socket_logging_error=true, "Failed to forward log entry");
             }

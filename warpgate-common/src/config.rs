@@ -47,11 +47,13 @@ fn _default_database_url() -> Secret<String> {
 
 #[inline]
 fn _default_http_listen() -> ListenEndpoint {
+    #[allow(clippy::unwrap_used)]
     ListenEndpoint("0.0.0.0:8888".to_socket_addrs().unwrap().next().unwrap())
 }
 
 #[inline]
 fn _default_mysql_listen() -> ListenEndpoint {
+    #[allow(clippy::unwrap_used)]
     ListenEndpoint("0.0.0.0:33306".to_socket_addrs().unwrap().next().unwrap())
 }
 
@@ -77,7 +79,7 @@ pub struct TargetSSHOptions {
     pub auth: SSHTargetAuth,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum SSHTargetAuth {
     #[serde(rename = "password")]
@@ -182,7 +184,7 @@ pub enum TargetOptions {
     WebAdmin(TargetWebAdminOptions),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
@@ -221,6 +223,7 @@ pub struct Role {
 }
 
 fn _default_ssh_listen() -> ListenEndpoint {
+    #[allow(clippy::unwrap_used)]
     ListenEndpoint("0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap())
 }
 

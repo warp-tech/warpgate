@@ -3,6 +3,7 @@ mod api;
 use poem_openapi::OpenApiService;
 use regex::Regex;
 
+#[allow(clippy::unwrap_used)]
 pub fn main() {
     let api_service =
         OpenApiService::new(api::get(), "Warpgate Web Admin", env!("CARGO_PKG_VERSION"))

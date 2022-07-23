@@ -14,8 +14,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>) {
         std::env::set_var("RUST_LOG", "warpgate=info")
     }
 
-    let offset = UtcOffset::current_local_offset()
-        .unwrap_or_else(|_| UtcOffset::from_whole_seconds(0).unwrap());
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
     let env_filter = Arc::new(EnvFilter::from_default_env());
     let enable_colors = console::user_attended();
@@ -40,6 +39,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>) {
                     .with_ansi(enable_colors)
                     .with_timer(OffsetTime::new(
                         offset,
+                        #[allow(clippy::unwrap_used)]
                         format_description::parse("[day].[month].[year] [hour]:[minute]:[second]")
                             .unwrap(),
                     ))
@@ -56,6 +56,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>) {
                     .with_target(false)
                     .with_timer(OffsetTime::new(
                         offset,
+                        #[allow(clippy::unwrap_used)]
                         format_description::parse("[hour]:[minute]:[second]").unwrap(),
                     ))
                     .with_filter(dynamic_filter_fn(move |m, c| {

@@ -41,7 +41,7 @@ impl BufExt for Bytes {
 
     fn get_str_nul(&mut self) -> Result<String, Error> {
         self.get_bytes_nul().and_then(|bytes| {
-            from_utf8(&*bytes)
+            from_utf8(&bytes)
                 .map(ToOwned::to_owned)
                 .map_err(|err| err_protocol!("{}", err))
         })

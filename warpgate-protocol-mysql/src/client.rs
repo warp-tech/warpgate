@@ -125,9 +125,9 @@ impl MySqlClient {
         let Some(response) = stream.recv().await? else {
             return Err(MySqlError::Eof)
         };
-        if response.get(0) == Some(&0) || response.get(0) == Some(&0xfe) {
+        if response.first() == Some(&0) || response.first() == Some(&0xfe) {
             debug!("Authorized");
-        } else if response.get(0) == Some(&0xff) {
+        } else if response.first() == Some(&0xff) {
             let error = ErrPacket::decode_with(response, options.capabilities)?;
             return Err(MySqlError::ProtocolError(format!(
                 "handshake failed: {:?}",
@@ -136,7 +136,7 @@ impl MySqlClient {
         } else {
             return Err(MySqlError::ProtocolError(format!(
                 "unknown response type {:?}",
-                response.get(0)
+                response.first()
             )));
         }
 

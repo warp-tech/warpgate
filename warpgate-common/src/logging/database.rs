@@ -32,7 +32,11 @@ where
 
 pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
     tokio::spawn(async move {
-        let mut receiver = LOG_SENDER.get().unwrap().subscribe();
+        #[allow(clippy::expect_used)]
+        let mut receiver = LOG_SENDER
+            .get()
+            .expect("Log sender not ready yet")
+            .subscribe();
         loop {
             match receiver.recv().await {
                 Err(_) => break,

@@ -10,7 +10,7 @@ fix *ARGS:
     for p in {{projects}}; do cargo fix -p $p {{ARGS}}; done
 
 clippy *ARGS:
-    for p in {{projects}}; do cargo clippy -p $p {{ARGS}}; done
+    for p in {{projects}}; do cargo cranky -p $p {{ARGS}}; done
 
 yarn *ARGS:
     cd warpgate-web && yarn {{ARGS}}
