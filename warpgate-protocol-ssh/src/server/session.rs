@@ -508,6 +508,14 @@ impl ServerSession {
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
         self.service_output.hide_progress().await;
+
+        if self.pty_channels.is_empty() {
+            warn!("Target host key is not trusted, but there is no active PTY channel to show the trust prompt on.");
+            warn!("Connect to this target with an interactive session once to accept the host key.");
+            self.request_disconnect().await;
+            anyhow::bail!("No PTY channel to show an interactive prompt on")
+        }
+
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
             key.name()
