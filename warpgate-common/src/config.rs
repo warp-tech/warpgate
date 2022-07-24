@@ -230,6 +230,18 @@ fn _default_ssh_keys_path() -> String {
     "./data/keys".to_owned()
 }
 
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy)]
+pub enum SshHostKeyVerificationMode {
+    #[serde(rename = "prompt")]
+    #[default]
+    Prompt,
+    #[serde(rename = "auto_accept")]
+    AutoAccept,
+    #[serde(rename = "auto_reject")]
+    AutoReject,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SSHConfig {
     #[serde(default = "_default_false")]
@@ -243,6 +255,9 @@ pub struct SSHConfig {
 
     #[serde(default = "_default_ssh_client_key")]
     pub client_key: String,
+
+    #[serde(default)]
+    pub host_key_verification: SshHostKeyVerificationMode,
 }
 
 impl Default for SSHConfig {
@@ -252,6 +267,7 @@ impl Default for SSHConfig {
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             client_key: _default_ssh_client_key(),
+            host_key_verification: Default::default(),
         }
     }
 }
