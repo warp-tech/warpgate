@@ -6,9 +6,11 @@ use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
 use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{
-    Certificate, ClientConfig, Error as TlsError, OwnedTrustAnchor, PrivateKey, RootCertStore,
+    Certificate, ClientConfig, Error as TlsError, PrivateKey,
     ServerConfig, ServerName,
 };
+
+use super::ROOT_CERT_STORE;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RustlsSetupError {
@@ -92,14 +94,7 @@ pub async fn configure_tls_connector(
             .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier))
             .with_no_client_auth()
     } else {
-        let mut cert_store = RootCertStore::empty();
-        cert_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
+        let mut cert_store = ROOT_CERT_STORE.clone();
 
         if let Some(data) = root_cert {
             let mut cursor = Cursor::new(data);

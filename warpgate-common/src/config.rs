@@ -106,20 +106,15 @@ pub struct TargetHTTPOptions {
     pub headers: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq, Default)]
 pub enum TlsMode {
     #[serde(rename = "disabled")]
     Disabled,
     #[serde(rename = "preferred")]
+    #[default]
     Preferred,
     #[serde(rename = "required")]
     Required,
-}
-
-impl Default for TlsMode {
-    fn default() -> Self {
-        TlsMode::Preferred
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
