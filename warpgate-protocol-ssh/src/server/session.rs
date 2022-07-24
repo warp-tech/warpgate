@@ -20,12 +20,12 @@ use uuid::Uuid;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
-    ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
-    TrafficRecorder, self,
+    self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
+    TrafficRecorder,
 };
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
-    TargetOptions, TargetSSHOptions, WarpgateServerHandle,
+    authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId,
+    SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
 use super::service_output::ServiceOutput;
@@ -509,9 +509,32 @@ impl ServerSession {
     ) -> Result<()> {
         self.service_output.hide_progress().await;
 
+        let mode = self
+            .services
+            .config
+            .lock()
+            .await
+            .store
+            .ssh
+            .host_key_verification;
+
+        if mode == SshHostKeyVerificationMode::AutoAccept {
+            let _ = reply.send(true);
+            info!("Accepted untrusted host key (auto-accept is enabled)");
+            return Ok(());
+        }
+
+        if mode == SshHostKeyVerificationMode::AutoReject {
+            let _ = reply.send(false);
+            info!("Rejected untrusted host key (auto-reject is enabled)");
+            return Ok(());
+        }
+
         if self.pty_channels.is_empty() {
             warn!("Target host key is not trusted, but there is no active PTY channel to show the trust prompt on.");
-            warn!("Connect to this target with an interactive session once to accept the host key.");
+            warn!(
+                "Connect to this target with an interactive session once to accept the host key."
+            );
             self.request_disconnect().await;
             anyhow::bail!("No PTY channel to show an interactive prompt on")
         }
@@ -723,7 +746,7 @@ impl ServerSession {
             Err(error) => match error {
                 recordings::Error::Disabled => (),
                 error => error!(channel=%channel_id, ?error, "Failed to start recording"),
-            }
+            },
         }
     }
 
