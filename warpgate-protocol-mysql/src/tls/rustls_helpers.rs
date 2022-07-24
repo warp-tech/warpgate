@@ -5,10 +5,7 @@ use std::time::SystemTime;
 use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
 use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::{
-    Certificate, ClientConfig, Error as TlsError, PrivateKey,
-    ServerConfig, ServerName,
-};
+use rustls::{Certificate, ClientConfig, Error as TlsError, PrivateKey, ServerConfig, ServerName};
 
 use super::ROOT_CERT_STORE;
 
