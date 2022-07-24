@@ -25,6 +25,9 @@ pub enum Error {
     #[error("Database")]
     Database(#[from] sea_orm::DbErr),
 
+    #[error("Failed to serialize a recording item")]
+    Serialization(#[from] serde_json::Error),
+
     #[error("Writer is closed")]
     Closed,
 

@@ -21,7 +21,7 @@ use warpgate_common::auth::AuthSelector;
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
     ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
-    TrafficRecorder,
+    TrafficRecorder, self,
 };
 use warpgate_common::{
     authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId, Target,
@@ -705,15 +705,16 @@ impl ServerSession {
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, anyhow::Error>(recorder)
+            Ok::<_, recordings::Error>(recorder)
         }
         .await
         {
             Ok(recorder) => {
                 self.channel_recorders.insert(channel_id, recorder);
             }
-            Err(error) => {
-                error!(channel=%channel_id, ?error, "Failed to start recording");
+            Err(error) => match error {
+                recordings::Error::Disabled => (),
+                error => error!(channel=%channel_id, ?error, "Failed to start recording"),
             }
         }
     }

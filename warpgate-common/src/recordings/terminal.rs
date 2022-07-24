@@ -1,4 +1,3 @@
-use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -6,6 +5,7 @@ use warpgate_db_entities::Recording::RecordingKind;
 
 use super::writer::RecordingWriter;
 use super::Recorder;
+use super::{Result, Error};
 
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -84,7 +84,7 @@ impl TerminalRecorder {
     }
 
     async fn write_item(&mut self, item: &TerminalRecordingItem) -> Result<()> {
-        let mut serialized_item = serde_json::to_vec(&item)?;
+        let mut serialized_item = serde_json::to_vec(&item).map_err(|e| Error::Serialization(e))?;
         serialized_item.push(b'\n');
         self.writer.write(&serialized_item).await?;
         Ok(())
