@@ -2,6 +2,7 @@ use anyhow::Result;
 use futures::StreamExt;
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
+use tokio::signal::unix::SignalKind;
 use tracing::*;
 use warpgate_common::db::cleanup_db;
 use warpgate_common::logging::install_database_logger;
@@ -104,10 +105,15 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     tokio::spawn(watch_config(cli.config.clone(), services.config.clone()));
 
+    let mut sigusr1 = tokio::signal::unix::signal(SignalKind::user_defined1())?;
+
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 std::process::exit(1);
+            }
+            _ = sigusr1.recv() => {
+                break
             }
             result = protocol_futures.next() => {
                 match result {

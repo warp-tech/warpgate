@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [workspace]
 members = [
     "warpgate",
@@ -17,3 +19,7 @@ default-members = ["warpgate"]
 lto = true
 panic = "abort"
 strip = "debuginfo"
+
+[profile.coverage]
+inherits = "dev"
+rustflags = ["-Cinstrument-coverage"]
