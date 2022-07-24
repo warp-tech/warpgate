@@ -238,6 +238,27 @@ class TestClass:
         proc.wait(timeout=5)
         assert proc.returncode == 0
 
+    def test_ssh_conntest_fail(self, processes: ProcessManager):
+        ssh_port = alloc_port()
+        proc, _ = processes.start_wg(
+            config=dedent(
+                f'''\
+                users: []
+                targets:
+                -   name: ssh
+                    allow_roles: [role]
+                    ssh:
+                        host: localhost
+                        port: {ssh_port}
+                        username: {os.getlogin()}
+                '''
+            ),
+            args=['test-target', 'ssh']
+        )
+        proc.wait(timeout=5)
+        assert proc.returncode != 0
+
+
     def test_ssh_password_auth(self, processes: ProcessManager):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -280,6 +301,8 @@ class TestClass:
         assert ssh_client.returncode == 0
 
 
-# cargo llvm-cov --no-run --open
-
-# TestClass().test_ssh_password_auth()
+@pytest.fixture(scope='session', autouse=True)
+def report():
+    subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
+    yield
+    subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--html'], cwd=cargo_root)
