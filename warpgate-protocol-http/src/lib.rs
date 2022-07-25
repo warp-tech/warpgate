@@ -173,6 +173,6 @@ impl ProtocolServer for HTTPProtocolServer {
 
 impl Debug for HTTPProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SSHProtocolServer")
+        write!(f, "HTTPProtocolServer")
     }
 }

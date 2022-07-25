@@ -263,7 +263,7 @@ pub struct SSHConfig {
 impl Default for SSHConfig {
     fn default() -> Self {
         SSHConfig {
-            enable: true,
+            enable: false,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             client_key: _default_ssh_client_key(),
@@ -274,7 +274,7 @@ impl Default for SSHConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HTTPConfig {
-    #[serde(default = "_default_true")]
+    #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_http_listen")]
@@ -290,7 +290,7 @@ pub struct HTTPConfig {
 impl Default for HTTPConfig {
     fn default() -> Self {
         HTTPConfig {
-            enable: true,
+            enable: false,
             listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
@@ -316,7 +316,7 @@ pub struct MySQLConfig {
 impl Default for MySQLConfig {
     fn default() -> Self {
         MySQLConfig {
-            enable: true,
+            enable: false,
             listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),

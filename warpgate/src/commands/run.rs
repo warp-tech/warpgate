@@ -112,7 +112,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             result = protocol_futures.next() => {
                 match result {
                     Some(Err(error)) => {
-                        error!(?error, "SSH server error");
+                        error!(?error, "Server error");
                         std::process::exit(1);
                     },
                     None => break,

@@ -74,6 +74,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         roles: vec![Role {
             name: "warpgate:admin".to_owned(),
         }],
+        http: HTTPConfig {
+            enable: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
