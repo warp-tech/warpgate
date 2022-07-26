@@ -10,8 +10,6 @@ pub fn main() {
             .server("/@warpgate/admin/api");
 
     let spec = api_service.spec();
-    let re = Regex::new(r"TargetOptions\[(?P<name>\w+)\]").unwrap();
-    let spec = re.replace_all(&spec, "TargetOptions$name");
     let re = Regex::new(r"PaginatedResponse<(?P<name>\w+)>").unwrap();
     let spec = re.replace_all(&spec, "Paginated$name");
 

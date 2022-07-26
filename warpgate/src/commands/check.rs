@@ -13,10 +13,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 .join(&config.store.http.certificate),
         )
         .await
-        .with_context(|| format!("Checking HTTPS certificate"))?;
+        .with_context(|| "Checking HTTPS certificate".to_string())?;
         TlsPrivateKey::from_file(config.paths_relative_to.join(&config.store.http.key))
             .await
-            .with_context(|| format!("Checking HTTPS key"))?;
+            .with_context(|| "Checking HTTPS key".to_string())?;
     }
     if config.store.mysql.enable {
         TlsCertificateBundle::from_file(
@@ -25,10 +25,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 .join(&config.store.mysql.certificate),
         )
         .await
-        .with_context(|| format!("Checking MySQL certificate"))?;
+        .with_context(|| "Checking MySQL certificate".to_string())?;
         TlsPrivateKey::from_file(config.paths_relative_to.join(&config.store.mysql.key))
             .await
-            .with_context(|| format!("Checking MySQL key"))?;
+            .with_context(|| "Checking MySQL key".to_string())?;
     }
     info!("No problems found");
     Ok(())
