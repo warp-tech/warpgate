@@ -31,3 +31,6 @@ openapi:
     cd warpgate-web && yarn openapi:client:admin && yarn openapi:client:gateway
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
+
+udeps:
+    cargo udeps --all-targets

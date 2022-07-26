@@ -4391,7 +4391,6 @@ dependencies = [
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
- "warpgate-web",
 ]
 
 [[package]]
@@ -4414,6 +4413,8 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
+ "rustls",
+ "rustls-pemfile",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4427,6 +4428,7 @@ dependencies = [
  "uuid",
  "warpgate-db-entities",
  "warpgate-db-migrations",
+ "webpki",
 ]
 
 [[package]]
@@ -4501,7 +4503,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "delegate",
  "mysql_common",
  "once_cell",
  "password-hash 0.2.3",
@@ -4515,7 +4516,6 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "uuid",
- "warpgate-admin",
  "warpgate-common",
  "warpgate-database-protocols",
  "warpgate-db-entities",

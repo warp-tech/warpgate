@@ -13,6 +13,7 @@ mod protocols;
 pub mod recordings;
 mod services;
 mod state;
+mod tls;
 mod try_macro;
 mod types;
 
@@ -23,5 +24,6 @@ pub use error::WarpgateError;
 pub use protocols::*;
 pub use services::*;
 pub use state::{SessionState, SessionStateInit, State};
+pub use tls::*;
 pub use try_macro::*;
 pub use types::*;

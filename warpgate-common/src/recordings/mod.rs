@@ -19,13 +19,13 @@ use writer::RecordingWriter;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Database")]
+    #[error("Database: {0}")]
     Database(#[from] sea_orm::DbErr),
 
-    #[error("Failed to serialize a recording item")]
+    #[error("Failed to serialize a recording item: {0}")]
     Serialization(#[from] serde_json::Error),
 
     #[error("Writer is closed")]

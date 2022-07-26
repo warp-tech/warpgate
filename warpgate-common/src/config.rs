@@ -230,7 +230,6 @@ fn _default_ssh_keys_path() -> String {
     "./data/keys".to_owned()
 }
 
-
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
