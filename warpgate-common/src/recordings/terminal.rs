@@ -83,7 +83,7 @@ impl TerminalRecorder {
     }
 
     async fn write_item(&mut self, item: &TerminalRecordingItem) -> Result<()> {
-        let mut serialized_item = serde_json::to_vec(&item).map_err(|e| Error::Serialization(e))?;
+        let mut serialized_item = serde_json::to_vec(&item).map_err(Error::Serialization)?;
         serialized_item.push(b'\n');
         self.writer.write(&serialized_item).await?;
         Ok(())

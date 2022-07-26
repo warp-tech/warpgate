@@ -40,7 +40,7 @@ impl TlsCertificateBundle {
                 .collect::<Vec<Certificate>>()
         })?;
         if certificates.is_empty() {
-            return Err(RustlsSetupError::NoCertificates)
+            return Err(RustlsSetupError::NoCertificates);
         }
         Ok(Self {
             bytes,
@@ -77,30 +77,30 @@ impl TlsPrivateKey {
     }
 }
 
-impl Into<Vec<u8>> for TlsCertificateBundle {
-    fn into(self) -> Vec<u8> {
-        self.bytes
+impl From<TlsCertificateBundle> for Vec<u8> {
+    fn from(val: TlsCertificateBundle) -> Self {
+        val.bytes
     }
 }
 
-impl Into<Vec<u8>> for TlsPrivateKey {
-    fn into(self) -> Vec<u8> {
-        self.bytes
+impl From<TlsPrivateKey> for Vec<u8> {
+    fn from(val: TlsPrivateKey) -> Self {
+        val.bytes
     }
 }
 
-impl Into<RustlsCertificate> for TlsCertificateAndPrivateKey {
-    fn into(self) -> RustlsCertificate {
+impl From<TlsCertificateAndPrivateKey> for RustlsCertificate {
+    fn from(val: TlsCertificateAndPrivateKey) -> Self {
         RustlsCertificate::new()
-            .cert(self.certificate)
-            .key(self.private_key)
+            .cert(val.certificate)
+            .key(val.private_key)
     }
 }
 
-impl Into<CertifiedKey> for TlsCertificateAndPrivateKey {
-    fn into(self) -> CertifiedKey {
-        let cert = self.certificate;
-        let key = self.private_key;
+impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
+    fn from(val: TlsCertificateAndPrivateKey) -> Self {
+        let cert = val.certificate;
+        let key = val.private_key;
         CertifiedKey {
             cert: cert.certificates,
             key: key.key,
