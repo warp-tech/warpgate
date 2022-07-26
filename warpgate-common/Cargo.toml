@@ -16,7 +16,7 @@ lazy_static = "1.4"
 once_cell = "1.10"
 packet = "0.1"
 password-hash = "0.4"
-poem = "^1.3.30"
+poem = "^1.3.36"
 poem-openapi = {version = "2.0.4", features = ["swagger-ui", "chrono", "uuid", "static-files"]}
 rand = "0.8"
 rand_chacha = "0.3"
