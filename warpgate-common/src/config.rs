@@ -222,10 +222,6 @@ fn _default_ssh_listen() -> ListenEndpoint {
     ListenEndpoint("0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap())
 }
 
-fn _default_ssh_client_key() -> String {
-    "./client_key".to_owned()
-}
-
 fn _default_ssh_keys_path() -> String {
     "./data/keys".to_owned()
 }
@@ -252,9 +248,6 @@ pub struct SSHConfig {
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
 
-    #[serde(default = "_default_ssh_client_key")]
-    pub client_key: String,
-
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
 }
@@ -265,7 +258,6 @@ impl Default for SSHConfig {
             enable: false,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
-            client_key: _default_ssh_client_key(),
             host_key_verification: Default::default(),
         }
     }
