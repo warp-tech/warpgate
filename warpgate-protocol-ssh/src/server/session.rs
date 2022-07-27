@@ -38,6 +38,7 @@ use crate::{
 };
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 enum TargetSelection {
     None,
     NotFound(String),

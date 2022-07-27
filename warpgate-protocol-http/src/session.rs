@@ -2,15 +2,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use poem::session::{Session, SessionStorage};
+use async_trait::async_trait;
+use http::header::Entry;
+use poem::middleware::CookieJarManagerEndpoint;
+use poem::session::{
+    CookieConfig, ServerSession as PoemSessionMiddleware, ServerSessionEndpoint, Session,
+    SessionStorage,
+};
+use poem::web::cookie::Cookie;
 use poem::web::{Data, RemoteAddr};
-use poem::{FromRequest, Request};
+use poem::{Endpoint, FromRequest, IntoResponse, Middleware, Request, Response};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::{Services, SessionId, SessionStateInit, WarpgateServerHandle};
 
-use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
+use crate::common::{COOKIE_MAX_AGE, PROTOCOL_NAME, SESSION_MAX_AGE};
 use crate::session_handle::{
     HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
 };
@@ -20,7 +27,7 @@ pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);
 
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
-#[async_trait::async_trait]
+#[async_trait]
 impl SessionStorage for SharedSessionStorage {
     async fn load_session(
         &self,
@@ -55,16 +62,16 @@ impl SessionStorage for SharedSessionStorage {
     }
 }
 
-pub struct SessionMiddleware {
+pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
     session_timestamps: HashMap<SessionId, Instant>,
-    this: Weak<Mutex<SessionMiddleware>>,
+    this: Weak<Mutex<SessionStore>>,
 }
 
 static SESSION_ID_SESSION_KEY: &str = "session_id";
 static REQUEST_COUNTER_SESSION_KEY: &str = "request_counter";
 
-impl SessionMiddleware {
+impl SessionStore {
     pub fn new() -> Arc<Mutex<Self>> {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {
@@ -181,5 +188,62 @@ impl SessionMiddleware {
             self.session_handles.remove(&id);
             self.session_timestamps.remove(&id);
         }
+    }
+}
+
+pub struct SessionMiddleware {
+    inner: PoemSessionMiddleware<SharedSessionStorage>,
+}
+
+impl SessionMiddleware {
+    pub fn new(session_storage: SharedSessionStorage) -> Self {
+        Self {
+            inner: PoemSessionMiddleware::new(
+                CookieConfig::default()
+                    .secure(false)
+                    .max_age(COOKIE_MAX_AGE)
+                    .name("warpgate-http-session"),
+                session_storage,
+            ),
+        }
+    }
+}
+
+pub struct SessionMiddlewareEndpoint<E: Endpoint> {
+    inner: E,
+}
+
+impl<E: Endpoint> Middleware<E> for SessionMiddleware {
+    type Output = SessionMiddlewareEndpoint<
+        CookieJarManagerEndpoint<ServerSessionEndpoint<SharedSessionStorage, E>>,
+    >;
+
+    fn transform(&self, ep: E) -> Self::Output {
+        SessionMiddlewareEndpoint {
+            inner: self.inner.transform(ep),
+        }
+    }
+}
+
+#[async_trait]
+impl<E: Endpoint> Endpoint for SessionMiddlewareEndpoint<E> {
+    type Output = Response;
+
+    async fn call(&self, req: Request) -> poem::Result<Self::Output> {
+        let host = req.original_uri().host().map(|x| x.to_string());
+        let mut resp = self.inner.call(req).await?.into_response();
+        if let Some(host) = host {
+            if let Entry::Occupied(mut entry) = resp.headers_mut().entry(http::header::SET_COOKIE) {
+                if let Ok(cookie_str) = entry.get().to_str() {
+                    if let Ok(mut cookie) = Cookie::parse(cookie_str) {
+                        cookie.set_domain(host);
+                        if let Ok(value) = cookie.to_string().parse() {
+                            entry.insert(value);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(resp)
     }
 }

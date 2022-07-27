@@ -21,19 +21,22 @@ use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::session::MemoryStorage;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::{ProtocolServer, Services, Target, TargetTestError, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
+use warpgate_common::{
+    ProtocolServer, Services, Target, TargetTestError, TlsCertificateAndPrivateKey,
+    TlsCertificateBundle, TlsPrivateKey,
+};
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth};
 use crate::error::error_page;
-use crate::session::{SessionMiddleware, SharedSessionStorage};
+use crate::session::{SessionMiddleware, SessionStore, SharedSessionStorage};
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -62,7 +65,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let session_storage =
             SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
-        let session_middleware = SessionMiddleware::new();
+        let session_store = SessionStore::new();
 
         let app = Route::new()
             .nest(
@@ -104,7 +107,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 }),
             )
             .around(move |ep, req| async move {
-                let sm = Data::<&Arc<Mutex<SessionMiddleware>>>::from_request_without_body(&req)
+                let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?
                     .clone();
 
@@ -118,20 +121,14 @@ impl ProtocolServer for HTTPProtocolServer {
                 SetHeader::new()
                     .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
             )
-            .with(ServerSession::new(
-                CookieConfig::default()
-                    .secure(false)
-                    .max_age(COOKIE_MAX_AGE)
-                    .name("warpgate-http-session"),
-                session_storage.clone(),
-            ))
+            .with(SessionMiddleware::new(session_storage.clone()))
             .data(self.services.clone())
-            .data(session_middleware.clone())
+            .data(session_store.clone())
             .data(session_storage);
 
         tokio::spawn(async move {
             loop {
-                session_middleware.lock().await.vacuum().await;
+                session_store.lock().await.vacuum().await;
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
@@ -144,9 +141,11 @@ impl ProtocolServer for HTTPProtocolServer {
             let key_path = config.paths_relative_to.join(&config.store.http.key);
 
             TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path).await.with_context(|| {
-                    format!("reading TLS private key from '{}'", key_path.display())
-                })?,
+                certificate: TlsCertificateBundle::from_file(&certificate_path)
+                    .await
+                    .with_context(|| {
+                        format!("reading TLS private key from '{}'", key_path.display())
+                    })?,
                 private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
                     format!(
                         "reading TLS certificate from '{}'",
@@ -157,9 +156,10 @@ impl ProtocolServer for HTTPProtocolServer {
         };
 
         info!(?address, "Listening");
-        Server::new(TcpListener::bind(address).rustls(
-            RustlsConfig::new().fallback(certificate_and_key.into()),
-        ))
+        Server::new(
+            TcpListener::bind(address)
+                .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
+        )
         .run(app)
         .await?;
 

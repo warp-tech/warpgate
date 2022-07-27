@@ -84,7 +84,6 @@ init()
             targetName={selectedTarget?.name}
             username={$serverInfo?.username}
             targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
-            targetURL={selectedTarget?.url}
         />
     </ModalBody>
 </Modal>
