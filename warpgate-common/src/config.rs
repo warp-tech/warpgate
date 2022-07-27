@@ -104,6 +104,9 @@ pub struct TargetHTTPOptions {
 
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq, Default)]

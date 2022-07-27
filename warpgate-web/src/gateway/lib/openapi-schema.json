@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "servers": [
     {
@@ -158,6 +158,10 @@
             "type": "integer",
             "format": "uint16"
           },
+          "http": {
+            "type": "integer",
+            "format": "uint16"
+          },
           "mysql": {
             "type": "integer",
             "format": "uint16"
@@ -176,6 +180,9 @@
           },
           "kind": {
             "$ref": "#/components/schemas/TargetKind"
+          },
+          "external_host": {
+            "type": "string"
           }
         }
       },

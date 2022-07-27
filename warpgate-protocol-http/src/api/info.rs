@@ -13,6 +13,7 @@ pub struct Api;
 #[derive(Serialize, Object)]
 pub struct PortsInfo {
     ssh: Option<u16>,
+    http: Option<u16>,
     mysql: Option<u16>,
 }
 
@@ -59,6 +60,11 @@ impl Api {
                     } else {
                         None
                     },
+                    http: if config.store.http.enable {
+                        Some(config.store.http.listen.port())
+                    } else {
+                        None
+                    },
                     mysql: if config.store.mysql.enable {
                         Some(config.store.mysql.listen.port())
                     } else {
@@ -68,6 +74,7 @@ impl Api {
             } else {
                 PortsInfo {
                     ssh: None,
+                    http: None,
                     mysql: None,
                 }
             },

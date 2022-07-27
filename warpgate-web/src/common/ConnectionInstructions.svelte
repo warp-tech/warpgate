@@ -4,11 +4,12 @@
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
     import { makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername } from 'common/mysql'
-    import CopyButton from 'common/CopyButton.svelte'
     import { makeTargetURL } from 'common/http'
+    import CopyButton from 'common/CopyButton.svelte'
 
     export let targetName: string|undefined
     export let targetKind: TargetKind
+    export let targetExternalHost: string|undefined = undefined
     export let username: string|undefined
 
     $: sshUsername = makeSSHUsername(targetName, username)
@@ -16,7 +17,7 @@
     $: mySQLUsername = makeMySQLUsername(targetName, username)
     $: exampleMySQLCommand = makeExampleMySQLCommand(targetName, username, $serverInfo)
     $: exampleMySQLURI = makeExampleMySQLURI(targetName, username, $serverInfo)
-    $: targetURL = targetName ? makeTargetURL(targetName) : ''
+    $: targetURL = targetName ? makeTargetURL(targetName, targetExternalHost, $serverInfo) : ''
 </script>
 
 {#if targetKind === TargetKind.Ssh}
