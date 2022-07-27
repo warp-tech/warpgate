@@ -66,11 +66,19 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
-        info!("Accepting SSH connections on {:?}", config.store.ssh.listen);
+        if config.store.ssh.enable {
+            info!("Accepting SSH connections on {:?}", config.store.ssh.listen);
+        }
         if config.store.http.enable {
             info!(
                 "Accepting HTTP connections on https://{:?}",
                 config.store.http.listen
+            );
+        }
+        if config.store.mysql.enable {
+            info!(
+                "Accepting MySQL connections on {:?}",
+                config.store.mysql.listen
             );
         }
         info!("--------------------------------------------");
