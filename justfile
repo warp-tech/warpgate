@@ -12,6 +12,9 @@ fix *ARGS:
 clippy *ARGS:
     for p in {{projects}}; do cargo cranky -p $p {{ARGS}}; done
 
+test:
+    for p in {{projects}}; do cargo test -p $p; done
+
 yarn *ARGS:
     cd warpgate-web && yarn {{ARGS}}
 

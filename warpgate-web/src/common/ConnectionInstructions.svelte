@@ -2,22 +2,28 @@
     import { Alert, FormGroup } from 'sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername } from 'common/ssh'
-    import { makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername } from 'common/mysql'
-    import { makeTargetURL } from 'common/http'
+    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
 
     export let targetName: string|undefined
     export let targetKind: TargetKind
     export let targetExternalHost: string|undefined = undefined
     export let username: string|undefined
+    export let ticketSecret: string|undefined = undefined
 
-    $: sshUsername = makeSSHUsername(targetName, username)
-    $: exampleSSHCommand = makeExampleSSHCommand(targetName, username, $serverInfo)
-    $: mySQLUsername = makeMySQLUsername(targetName, username)
-    $: exampleMySQLCommand = makeExampleMySQLCommand(targetName, username, $serverInfo)
-    $: exampleMySQLURI = makeExampleMySQLURI(targetName, username, $serverInfo)
-    $: targetURL = targetName ? makeTargetURL(targetName, targetExternalHost, $serverInfo) : ''
+    $: opts = {
+        targetName,
+        username,
+        serverInfo: $serverInfo,
+        ticketSecret,
+        targetExternalHost,
+    }
+    $: sshUsername = makeSSHUsername(opts)
+    $: exampleSSHCommand = makeExampleSSHCommand(opts)
+    $: mySQLUsername = makeMySQLUsername(opts)
+    $: exampleMySQLCommand = makeExampleMySQLCommand(opts)
+    $: exampleMySQLURI = makeExampleMySQLURI(opts)
+    $: targetURL = targetName ? makeTargetURL(opts) : ''
 </script>
 
 {#if targetKind === TargetKind.Ssh}
