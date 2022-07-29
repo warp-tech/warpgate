@@ -24,5 +24,5 @@ pub enum TargetTestError {
 #[async_trait]
 pub trait ProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()>;
-    async fn test_target(self, target: Target) -> Result<(), TargetTestError>;
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError>;
 }

@@ -12,12 +12,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use client::{ConnectionOptions, MySqlClient};
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ProtocolServer, Services, SessionStateInit, Target, TargetTestError,
+    ProtocolServer, Services, SessionStateInit, Target, TargetOptions, TargetTestError,
     TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
 
@@ -108,7 +109,13 @@ impl ProtocolServer for MySQLProtocolServer {
         }
     }
 
-    async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
+        let TargetOptions::MySql(options) = target.options else {
+            return Err(TargetTestError::Misconfigured("Not a MySQL target".to_owned()));
+        };
+        MySqlClient::connect(&options, ConnectionOptions::default())
+            .await
+            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 }

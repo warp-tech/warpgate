@@ -47,7 +47,7 @@ impl ProtocolServer for SSHProtocolServer {
         run_server(self.services, address).await
     }
 
-    async fn test_target(self, target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
         let TargetOptions::Ssh(ssh_options) = target.options else {
             return Err(TargetTestError::Misconfigured("Not an SSH target".to_owned()));
         };
