@@ -24,6 +24,7 @@
     $: exampleMySQLCommand = makeExampleMySQLCommand(opts)
     $: exampleMySQLURI = makeExampleMySQLURI(opts)
     $: targetURL = targetName ? makeTargetURL(opts) : ''
+    $: authHeader = `Authorization: Warpgate ${ticketSecret}`
 </script>
 
 {#if targetKind === TargetKind.Ssh}
@@ -42,6 +43,12 @@
 <FormGroup floating label="Access URL" class="d-flex align-items-center">
     <input type="text" class="form-control" readonly value={targetURL} />
     <CopyButton text={targetURL} />
+</FormGroup>
+
+Alternatively, set the <code>Authorization</code> header when accessing the URL:
+<FormGroup floating label="Authorization header" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={authHeader} />
+    <CopyButton text={authHeader} />
 </FormGroup>
 {/if}
 

@@ -6,7 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::Services;
 
-use crate::common::SessionExt;
+use crate::common::{SessionAuthorization, SessionExt};
 
 pub struct Api;
 
@@ -24,6 +24,7 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     ports: PortsInfo,
+    authorized_via_ticket: bool,
 }
 
 #[derive(ApiResponse)]
@@ -53,6 +54,10 @@ impl Api {
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host: external_host.map(&str::to_string),
+            authorized_via_ticket: matches!(
+                session.get_auth(),
+                Some(SessionAuthorization::Ticket { .. })
+            ),
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {

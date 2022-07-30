@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::{Services, Target, TargetHTTPOptions, TargetOptions, WarpgateServerHandle};
 
-use crate::common::{gateway_redirect, SessionExt, SessionUsername};
+use crate::common::{gateway_redirect, SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
 #[derive(Deserialize)]
@@ -24,7 +24,6 @@ pub async fn catchall_endpoint(
     ws: Option<WebSocket>,
     session: &Session,
     body: Body,
-    username: Data<&SessionUsername>,
     services: Data<&Services>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
@@ -33,16 +32,6 @@ pub async fn catchall_endpoint(
     };
 
     session.set_target_name(target.name.clone());
-
-    if !services
-        .config_provider
-        .lock()
-        .await
-        .authorize_target(&username.0 .0, &target.name)
-        .await?
-    {
-        return Ok(gateway_redirect(req).into_response());
-    }
 
     if let Some(server_handle) = server_handle {
         server_handle.lock().await.set_target(&target).await?;
@@ -68,8 +57,48 @@ async fn get_target_for_request(
 ) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
     let session: &Session = <_>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
+    let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(req).await?;
 
-    if let Some(target_name) = params.warpgate_target.or(session.get_target_name()) {
+    let selected_target_name;
+    let need_role_auth;
+
+    let host_based_target_name = if let Some(host) = req.original_uri().host() {
+        services
+            .config
+            .lock()
+            .await
+            .store
+            .targets
+            .iter()
+            .filter_map(|t| match t.options {
+                TargetOptions::Http(ref options) => Some((t, options)),
+                _ => None,
+            })
+            .filter(|(_, o)| o.external_host.as_deref() == Some(host))
+            .next()
+            .map(|(t, _)| t.name.clone())
+    } else {
+        None
+    };
+
+    match *auth {
+        SessionAuthorization::Ticket { target_name, .. } => {
+            selected_target_name = Some(target_name.clone());
+            need_role_auth = false;
+        }
+        SessionAuthorization::User(_) => {
+            need_role_auth = true;
+
+            selected_target_name =
+                host_based_target_name.or(if let Some(warpgate_target) = params.warpgate_target {
+                    Some(warpgate_target)
+                } else {
+                    session.get_target_name()
+                });
+        }
+    };
+
+    if let Some(target_name) = selected_target_name {
         let target = {
             services
                 .config
@@ -87,29 +116,21 @@ async fn get_target_for_request(
                 .map(|(t, o)| (t.clone(), o.clone()))
         };
 
-        return Ok(target);
+        if let Some(target) = target {
+            if need_role_auth
+                && !services
+                    .config_provider
+                    .lock()
+                    .await
+                    .authorize_target(&auth.username(), &target.0.name)
+                    .await?
+            {
+                return Ok(None);
+            }
+
+            return Ok(Some(target));
+        }
     }
 
-    let Some(host) = req.original_uri().host() else {
-        return Ok(None);
-    };
-
-    let target = {
-        services
-            .config
-            .lock()
-            .await
-            .store
-            .targets
-            .iter()
-            .filter_map(|t| match t.options {
-                TargetOptions::Http(ref options) => Some((t, options)),
-                _ => None,
-            })
-            .filter(|(_, o)| o.external_host.as_deref() == Some(host))
-            .next()
-            .map(|(t, o)| (t.clone(), o.clone()))
-    };
-
-    return Ok(target);
+    return Ok(None);
 }

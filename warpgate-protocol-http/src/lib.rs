@@ -4,6 +4,7 @@ mod catchall;
 mod common;
 mod error;
 mod logging;
+mod middleware;
 mod proxy;
 mod session;
 mod session_handle;
@@ -21,7 +22,7 @@ use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
-use poem::session::MemoryStorage;
+use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -34,9 +35,10 @@ use warpgate_common::{
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
 use crate::error::error_page;
-use crate::session::{SessionMiddleware, SessionStore, SharedSessionStorage};
+use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
+use crate::session::{SessionStore, SharedSessionStorage};
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -121,7 +123,15 @@ impl ProtocolServer for HTTPProtocolServer {
                 SetHeader::new()
                     .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
             )
-            .with(SessionMiddleware::new(session_storage.clone()))
+            .with(TicketMiddleware::new())
+            .with(ServerSession::new(
+                CookieConfig::default()
+                    .secure(false)
+                    .max_age(COOKIE_MAX_AGE)
+                    .name("warpgate-http-session"),
+                session_storage.clone(),
+            ))
+            .with(CookieHostMiddleware::new())
             .data(self.services.clone())
             .data(session_store.clone())
             .data(session_storage);

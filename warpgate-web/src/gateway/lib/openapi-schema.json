@@ -95,7 +95,8 @@
         "type": "object",
         "required": [
           "version",
-          "ports"
+          "ports",
+          "authorized_via_ticket"
         ],
         "properties": {
           "version": {
@@ -112,6 +113,9 @@
           },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
+          },
+          "authorized_via_ticket": {
+            "type": "boolean"
           }
         }
       },

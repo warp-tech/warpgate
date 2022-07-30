@@ -1,4 +1,4 @@
-use crate::common::SessionExt;
+use crate::common::{SessionExt, SessionAuthorization};
 use crate::session::SessionStore;
 use anyhow::Context;
 use poem::session::Session;
@@ -83,7 +83,7 @@ impl Api {
                     .set_username(username.clone())
                     .await?;
                 info!(%username, "Authenticated");
-                session.set_username(username);
+                session.set_auth(SessionAuthorization::User(username));
                 Ok(LoginResponse::Success)
             }
             x => {
