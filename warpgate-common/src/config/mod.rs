@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
+use warpgate_sso::SsoProviderConfig;
 
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret};
@@ -359,6 +360,7 @@ pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
     pub users: Vec<User>,
     pub roles: Vec<Role>,
+    pub sso_providers: Vec<SsoProviderConfig>,
 
     #[serde(default)]
     pub recordings: RecordingsConfig,
@@ -388,6 +390,7 @@ impl Default for WarpgateConfigStore {
             targets: vec![],
             users: vec![],
             roles: vec![],
+            sso_providers: vec![],
             recordings: RecordingsConfig::default(),
             external_host: None,
             database_url: _default_database_url(),
