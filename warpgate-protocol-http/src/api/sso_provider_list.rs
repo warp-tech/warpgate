@@ -1,13 +1,16 @@
 use poem::session::Session;
 use poem::web::Data;
+use poem::Request;
 use poem_openapi::param::Query;
 use poem_openapi::payload::{Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use tracing::*;
-use warpgate_common::Services;
-use warpgate_sso::{SsoInternalProviderConfig, SsoLoginRequest};
+use warpgate_common::auth::AuthCredential;
+use warpgate_common::{AuthResult, Services};
+use warpgate_sso::SsoInternalProviderConfig;
 
-use crate::api::sso_provider_detail::SSO_REQUEST_SESSION_KEY;
+use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
+use crate::common::{authorize_session, get_auth_state_for_request};
 
 pub struct Api;
 
@@ -35,8 +38,6 @@ enum GetSsoProvidersResponse {
 enum ReturnToSsoResponse {
     #[oai(status = 307)]
     Ok,
-    #[oai(status = 400)]
-    BadRequest,
 }
 
 #[OpenApi]
@@ -70,26 +71,66 @@ impl Api {
     #[oai(path = "/sso/return", method = "get", operation_id = "return_to_sso")]
     async fn api_return_to_sso(
         &self,
+        req: &Request,
         session: &Session,
+        services: Data<&Services>,
         code: Query<Option<String>>,
     ) -> poem::Result<Response<ReturnToSsoResponse>> {
-        let Some(request) = session.get::<SsoLoginRequest>(SSO_REQUEST_SESSION_KEY) else {
-            warn!("Not in an active SSO process");
-            return Ok(Response::new(ReturnToSsoResponse::BadRequest));
+        fn make_err_response(err: &str) -> poem::Result<Response<ReturnToSsoResponse>> {
+            error!("SSO error: {err}");
+            Ok(Response::new(ReturnToSsoResponse::Ok)
+                .header("Location", format!("/@warpgate?login_error={err}")))
+        }
+
+        let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
+            return make_err_response("Not in an active SSO process");
         };
 
         let Some(ref code) = *code else {
-            warn!("No authorization code in the return URL request");
-            return Ok(Response::new(ReturnToSsoResponse::BadRequest));
+            return make_err_response("No authorization code in the return URL request");
         };
 
-        let response = request
+        let response = context
+            .request
             .verify_code((*code).clone())
             .await
             .map_err(poem::error::InternalServerError)?;
 
-        println!("{:?}", response);
+        if !response.email_verified.unwrap_or(true) {
+            return make_err_response("The SSO account's e-mail is not verified");
+        }
 
-        Ok(Response::new(ReturnToSsoResponse::Ok))
+        let Some(email) = response.email else {
+            return make_err_response("No e-mail information in the SSO response");
+        };
+
+        info!("SSO login as {email}");
+
+        let cred = AuthCredential::Sso {
+            provider: context.provider,
+            email: email.clone(),
+        };
+
+        let Some(username) = services.config_provider.lock().await.username_for_sso_credential(&cred).await? else {
+            return make_err_response(format!("No user matching {email}"));
+        };
+
+        let mut auth_state_store = services.auth_state_store.lock().await;
+        let state = get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+
+        let mut cp = services.config_provider.lock().await;
+
+        if cp.validate_credential(&username, &cred).await? {
+            state.add_valid_credential(cred);
+        }
+
+        match state.verify() {
+            AuthResult::Accepted { username } => {
+                authorize_session(req, username).await?;
+            }
+            _ => ()
+        }
+
+        Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", "/@warpgate"))
     }
 }

@@ -9,9 +9,10 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
-use crate::auth::{AuthCredential, CredentialKind};
-use crate::{ProtocolName, Secret, Target, UserSnapshot, WarpgateError};
+use crate::auth::{AuthCredential, CredentialKind, CredentialPolicy};
+use crate::{Secret, Target, UserSnapshot, WarpgateError};
 
+#[derive(Debug)]
 pub enum AuthResult {
     Accepted { username: String },
     Need(CredentialKind),
@@ -24,12 +25,21 @@ pub trait ConfigProvider {
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
 
-    async fn authorize(
+    async fn validate_credential(
         &mut self,
         username: &str,
-        credentials: &[AuthCredential],
-        protocol: ProtocolName,
-    ) -> Result<AuthResult, WarpgateError>;
+        client_credential: &AuthCredential,
+    ) -> Result<bool, WarpgateError>;
+
+    async fn username_for_sso_credential(
+        &mut self,
+        client_credential: &AuthCredential,
+    ) -> Result<Option<String>, WarpgateError>;
+
+    async fn get_credential_policy(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError>;
 
     async fn authorize_target(
         &mut self,

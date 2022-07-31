@@ -41,6 +41,53 @@
         "operationId": "login"
       }
     },
+    "/auth/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "otpLogin"
+      }
+    },
+    "/auth/state": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getAuthState"
+      }
+    },
     "/auth/logout": {
       "post": {
         "responses": {
@@ -166,6 +213,28 @@
   },
   "components": {
     "schemas": {
+      "ApiAuthState": {
+        "type": "string",
+        "enum": [
+          "NotStarted",
+          "Failed",
+          "PasswordNeeded",
+          "OtpNeeded",
+          "SsoNeeded",
+          "Success"
+        ]
+      },
+      "AuthStateResponseInternal": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
+          }
+        }
+      },
       "Info": {
         "type": "object",
         "required": [
@@ -194,22 +263,14 @@
           }
         }
       },
-      "LoginFailureReason": {
-        "type": "string",
-        "enum": [
-          "InvalidCredentials",
-          "OtpNeeded",
-          "SsoNeeded"
-        ]
-      },
       "LoginFailureResponse": {
         "type": "object",
         "required": [
-          "reason"
+          "state"
         ],
         "properties": {
-          "reason": {
-            "$ref": "#/components/schemas/LoginFailureReason"
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
           }
         }
       },
@@ -225,7 +286,15 @@
           },
           "password": {
             "type": "string"
-          },
+          }
+        }
+      },
+      "OtpLoginRequest": {
+        "type": "object",
+        "required": [
+          "otp"
+        ],
+        "properties": {
           "otp": {
             "type": "string"
           }

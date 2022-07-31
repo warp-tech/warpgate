@@ -7,11 +7,11 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthSelector, AuthCredential};
+use warpgate_common::auth::{AuthCredential, AuthSelector, AuthState};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    authorize_ticket, AuthResult, Secret, Services, TargetMySqlOptions,
-    TargetOptions, WarpgateServerHandle,
+    authorize_ticket, AuthResult, Secret, Services, TargetMySqlOptions, TargetOptions,
+    WarpgateServerHandle,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -175,20 +175,25 @@ impl MySqlSession {
             Ok(())
         }
 
-        let credentials = vec![AuthCredential::Password(password)];
         match selector {
             AuthSelector::User {
                 username,
                 target_name,
             } => {
-                let user_auth_result: AuthResult = {
-                    self.services
-                        .config_provider
-                        .lock()
-                        .await
-                        .authorize(&username, &credentials, crate::common::PROTOCOL_NAME)
-                        .await
-                        .map_err(MySqlError::other)?
+                let user_auth_result = {
+                    let mut cp = self.services.config_provider.lock().await;
+
+                    let credential = AuthCredential::Password(password);
+                    let mut state = AuthState::new(
+                        username.clone(),
+                        crate::common::PROTOCOL_NAME.to_string(),
+                        cp.get_credential_policy(&username).await?,
+                    );
+                    if cp.validate_credential(&username, &credential).await? {
+                        state.add_valid_credential(credential);
+                    }
+
+                    state.verify()
                 };
 
                 match user_auth_result {

@@ -11,15 +11,10 @@ use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
 use super::ConfigProvider;
-use crate::auth::{
-    AuthCredential, AuthState, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
-};
+use crate::auth::{AuthCredential, CredentialPolicy};
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
-use crate::{
-    AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig,
-    WarpgateError,
-};
+use crate::{Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig, WarpgateError};
 
 pub struct FileConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
@@ -64,16 +59,10 @@ impl ConfigProvider for FileConfigProvider {
             .collect::<Vec<_>>())
     }
 
-    async fn authorize(
+    async fn get_credential_policy(
         &mut self,
         username: &str,
-        credentials: &[AuthCredential],
-        protocol: ProtocolName,
-    ) -> Result<AuthResult, WarpgateError> {
-        if credentials.is_empty() {
-            return Ok(AuthResult::Rejected);
-        }
-
+    ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
         let user = {
             self.config
                 .lock()
@@ -86,37 +75,92 @@ impl ConfigProvider for FileConfigProvider {
         };
         let Some(user) = user else {
             error!("Selected user not found: {}", username);
-            return Ok(AuthResult::Rejected);
+            return Ok(None);
         };
 
-        let mut valid_credentials = vec![];
+        Ok(user
+            .require
+            .map(|r| Box::new(r.to_owned()) as Box<dyn CredentialPolicy + Sync + Send>))
+    }
 
-        for client_credential in credentials {
-            match client_credential {
-                AuthCredential::PublicKey {
-                    kind,
-                    public_key_bytes,
-                } => {
-                    let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
-                    base64_bytes.pop();
-                    base64_bytes.pop();
+    async fn username_for_sso_credential(
+        &mut self,
+        client_credential: &AuthCredential,
+    ) -> Result<Option<String>, WarpgateError> {
+        let AuthCredential::Sso { provider: client_provider, email : client_email} = client_credential else {
+            return Ok(None);
+        };
 
-                    let client_key = format!("{} {}", kind, base64_bytes);
-                    debug!(username = &user.username[..], "Client key: {}", client_key);
-
-                    if let Some(credential) =
-                        user.credentials.iter().find(|credential| match credential {
-                            UserAuthCredential::PublicKey { key: ref user_key } => {
-                                &client_key == user_key.expose_secret()
-                            }
-                            _ => false,
-                        })
-                    {
-                        valid_credentials.push((client_credential, credential))
+        Ok(self
+            .config
+            .lock()
+            .await
+            .store
+            .users
+            .iter()
+            .find(|x| {
+                for cred in x.credentials.iter() {
+                    if let UserAuthCredential::Sso { provider, email } = cred {
+                        if provider.as_ref().unwrap_or(client_provider) == client_provider
+                            && email == client_email
+                        {
+                            return true;
+                        }
                     }
                 }
-                AuthCredential::Password(client_password) => {
-                    match user.credentials.iter().find(|credential| match credential {
+                false
+            })
+            .map(|x| x.username.clone()))
+    }
+
+    async fn validate_credential(
+        &mut self,
+        username: &str,
+        client_credential: &AuthCredential,
+    ) -> Result<bool, WarpgateError> {
+        let user = {
+            self.config
+                .lock()
+                .await
+                .store
+                .users
+                .iter()
+                .find(|x| x.username == username)
+                .map(User::to_owned)
+        };
+        let Some(user) = user else {
+            error!("Selected user not found: {}", username);
+            return Ok(false);
+        };
+
+        match client_credential {
+            AuthCredential::PublicKey {
+                kind,
+                public_key_bytes,
+            } => {
+                let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
+                base64_bytes.pop();
+                base64_bytes.pop();
+
+                let client_key = format!("{} {}", kind, base64_bytes);
+                debug!(username = &user.username[..], "Client key: {}", client_key);
+
+                return Ok(user
+                    .credentials
+                    .iter()
+                    .find(|credential| match credential {
+                        UserAuthCredential::PublicKey { key: ref user_key } => {
+                            &client_key == user_key.expose_secret()
+                        }
+                        _ => false,
+                    })
+                    .is_some());
+            }
+            AuthCredential::Password(client_password) => {
+                return Ok(user
+                    .credentials
+                    .iter()
+                    .find(|credential| match credential {
                         UserAuthCredential::Password {
                             hash: ref user_password_hash,
                         } => verify_password_hash(
@@ -131,59 +175,39 @@ impl ConfigProvider for FileConfigProvider {
                             false
                         }),
                         _ => false,
-                    }) {
-                        Some(credential) => valid_credentials.push((client_credential, credential)),
-                        None => return Ok(AuthResult::Rejected),
-                    }
-                }
-                AuthCredential::Otp(client_otp) => {
-                    match user.credentials.iter().find(|credential| match credential {
+                    })
+                    .is_some())
+            }
+            AuthCredential::Otp(client_otp) => {
+                return Ok(user
+                    .credentials
+                    .iter()
+                    .find(|credential| match credential {
                         UserAuthCredential::Totp {
                             key: ref user_otp_key,
                         } => verify_totp(client_otp.expose_secret(), user_otp_key),
                         _ => false,
-                    }) {
-                        Some(credential) => valid_credentials.push((client_credential, credential)),
-                        None => return Ok(AuthResult::Rejected),
-                    }
-                }
-                AuthCredential::Sso {
-                    provider: client_provider,
-                    email: client_email,
-                } => {
-                    for credential in user.credentials.iter() {
-                        if let UserAuthCredential::Sso {
-                            ref provider,
-                            ref email,
-                        } = credential
-                        {
-                            if provider.as_ref().unwrap_or(client_provider) == client_provider {
-                                if email == client_email {
-                                    valid_credentials.push((client_credential, credential))
-                                } else {
-                                    return Ok(AuthResult::Rejected);
-                                }
-                            }
+                    })
+                    .is_some())
+            }
+            AuthCredential::Sso {
+                provider: client_provider,
+                email: client_email,
+            } => {
+                for credential in user.credentials.iter() {
+                    if let UserAuthCredential::Sso {
+                        ref provider,
+                        ref email,
+                    } = credential
+                    {
+                        if provider.as_ref().unwrap_or(client_provider) == client_provider {
+                            return Ok(email == client_email);
                         }
                     }
                 }
+                return Ok(false);
             }
         }
-
-        if valid_credentials.is_empty() {
-            warn!(
-                username = &user.username[..],
-                "Client credentials did not match"
-            );
-        }
-
-        let mut state = AuthState::new(user.username.clone(), protocol.to_string(), user.require);
-
-        for pair in valid_credentials.into_iter() {
-            state.add_valid_credential(pair.0.clone());
-        }
-
-        Ok(state.verify())
     }
 
     async fn authorize_target(

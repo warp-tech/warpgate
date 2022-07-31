@@ -5,8 +5,9 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
 use warpgate_common::Services;
-use warpgate_sso::SsoClient;
+use warpgate_sso::{SsoClient, SsoLoginRequest};
 
 pub struct Api;
 
@@ -24,7 +25,13 @@ enum StartSsoResponse {
     NotFound,
 }
 
-pub static SSO_REQUEST_SESSION_KEY: &str = "sso_request";
+pub static SSO_CONTEXT_SESSION_KEY: &str = "sso_request";
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SsoContext {
+    pub provider: String,
+    pub request: SsoLoginRequest,
+}
 
 #[OpenApi]
 impl Api {
@@ -72,11 +79,15 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone());
 
         let sso_req = client
-            .start_login(return_url.to_string()).await
+            .start_login(return_url.to_string())
+            .await
             .map_err(poem::error::InternalServerError)?;
 
         let url = sso_req.auth_url().to_string();
-        session.set(SSO_REQUEST_SESSION_KEY, sso_req);
+        session.set(SSO_CONTEXT_SESSION_KEY, SsoContext {
+            provider: name,
+            request: sso_req,
+        });
 
         Ok(StartSsoResponse::Ok(Json(StartSsoResponseParams { url })))
     }

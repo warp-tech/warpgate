@@ -1,14 +1,11 @@
 use std::collections::HashSet;
 
-use tracing::*;
-
 use super::{AuthCredential, CredentialKind};
 use crate::{UserRequireCredentialsPolicy};
 
 pub enum CredentialPolicyResponse {
     Ok,
     Need(CredentialKind),
-    Reject,
 }
 
 pub trait CredentialPolicy {
@@ -29,10 +26,7 @@ impl CredentialPolicy for UserRequireCredentialsPolicy {
             "SSH" => &self.ssh,
             "HTTP" => &self.http,
             "MySQL" => &self.mysql,
-            _ => {
-                error!(%protocol, "Unknown protocol");
-                return CredentialPolicyResponse::Reject;
-            }
+            _ => unreachable!(),
         };
         if let Some(required_kinds) = required_kinds {
             let mut remaining_required_kinds = HashSet::<CredentialKind>::new();
