@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::{AuthCredential, CredentialKind};
-use crate::{UserRequireCredentialsPolicy};
+use crate::UserRequireCredentialsPolicy;
 
 pub enum CredentialPolicyResponse {
     Ok,

@@ -15,7 +15,10 @@ pub struct SsoProviderConfig {
 
 impl SsoProviderConfig {
     pub fn label(&self) -> &str {
-        return self.label.as_deref().unwrap_or_else(|| self.provider.label());
+        return self
+            .label
+            .as_deref()
+            .unwrap_or_else(|| self.provider.label());
     }
 }
 

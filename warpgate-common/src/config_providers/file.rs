@@ -80,7 +80,7 @@ impl ConfigProvider for FileConfigProvider {
 
         Ok(user
             .require
-            .map(|r| Box::new(r.to_owned()) as Box<dyn CredentialPolicy + Sync + Send>))
+            .map(|r| Box::new(r) as Box<dyn CredentialPolicy + Sync + Send>))
     }
 
     async fn username_for_sso_credential(
@@ -145,50 +145,38 @@ impl ConfigProvider for FileConfigProvider {
                 let client_key = format!("{} {}", kind, base64_bytes);
                 debug!(username = &user.username[..], "Client key: {}", client_key);
 
-                return Ok(user
-                    .credentials
-                    .iter()
-                    .find(|credential| match credential {
-                        UserAuthCredential::PublicKey { key: ref user_key } => {
-                            &client_key == user_key.expose_secret()
-                        }
-                        _ => false,
-                    })
-                    .is_some());
+                return Ok(user.credentials.iter().any(|credential| match credential {
+                    UserAuthCredential::PublicKey { key: ref user_key } => {
+                        &client_key == user_key.expose_secret()
+                    }
+                    _ => false,
+                }));
             }
             AuthCredential::Password(client_password) => {
-                return Ok(user
-                    .credentials
-                    .iter()
-                    .find(|credential| match credential {
-                        UserAuthCredential::Password {
-                            hash: ref user_password_hash,
-                        } => verify_password_hash(
-                            client_password.expose_secret(),
-                            user_password_hash.expose_secret(),
-                        )
-                        .unwrap_or_else(|e| {
-                            error!(
-                                username = &user.username[..],
-                                "Error verifying password hash: {}", e
-                            );
-                            false
-                        }),
-                        _ => false,
-                    })
-                    .is_some())
+                return Ok(user.credentials.iter().any(|credential| match credential {
+                    UserAuthCredential::Password {
+                        hash: ref user_password_hash,
+                    } => verify_password_hash(
+                        client_password.expose_secret(),
+                        user_password_hash.expose_secret(),
+                    )
+                    .unwrap_or_else(|e| {
+                        error!(
+                            username = &user.username[..],
+                            "Error verifying password hash: {}", e
+                        );
+                        false
+                    }),
+                    _ => false,
+                }))
             }
             AuthCredential::Otp(client_otp) => {
-                return Ok(user
-                    .credentials
-                    .iter()
-                    .find(|credential| match credential {
-                        UserAuthCredential::Totp {
-                            key: ref user_otp_key,
-                        } => verify_totp(client_otp.expose_secret(), user_otp_key),
-                        _ => false,
-                    })
-                    .is_some())
+                return Ok(user.credentials.iter().any(|credential| match credential {
+                    UserAuthCredential::Totp {
+                        key: ref user_otp_key,
+                    } => verify_totp(client_otp.expose_secret(), user_otp_key),
+                    _ => false,
+                }))
             }
             AuthCredential::Sso {
                 provider: client_provider,

@@ -218,6 +218,7 @@ impl ServerSession {
     }
 
     async fn get_auth_state(&mut self, username: &str) -> Result<&mut AuthState> {
+        #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none() || self.auth_state.as_ref().unwrap().username() != username {
             let mut cp = self.services.config_provider.lock().await;
             self.auth_state = Some(AuthState::new(

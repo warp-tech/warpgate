@@ -43,7 +43,7 @@ impl AuthStateStore {
                 .get_credential_policy(username)
                 .await?,
         );
-        self.store.insert(id.clone(), state);
+        self.store.insert(id, state);
 
         #[allow(clippy::unwrap_used)]
         Ok((id, self.store.get_mut(&id).unwrap()))

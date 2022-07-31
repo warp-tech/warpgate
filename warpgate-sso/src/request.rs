@@ -48,7 +48,7 @@ impl SsoLoginRequest {
                 &id_token.signing_alg()?,
             )?;
             if actual_access_token_hash != *expected_access_token_hash {
-                return Err(SsoError::Mitm)
+                return Err(SsoError::Mitm);
             }
         }
 

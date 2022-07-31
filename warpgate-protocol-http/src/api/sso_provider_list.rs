@@ -112,7 +112,7 @@ impl Api {
         };
 
         let Some(username) = services.config_provider.lock().await.username_for_sso_credential(&cred).await? else {
-            return make_err_response(format!("No user matching {email}"));
+            return make_err_response(&format!("No user matching {email}"));
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
