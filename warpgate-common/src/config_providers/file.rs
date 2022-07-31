@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use data_encoding::BASE64_MIME;
+use data_encoding::BASE64;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
@@ -102,9 +102,7 @@ impl ConfigProvider for FileConfigProvider {
                     kind,
                     public_key_bytes,
                 } => {
-                    let mut base64_bytes = BASE64_MIME.encode(public_key_bytes);
-                    base64_bytes.pop();
-                    base64_bytes.pop();
+                    let mut base64_bytes = BASE64.encode(public_key_bytes);
 
                     let client_key = format!("{} {}", kind, base64_bytes);
                     debug!(username = &user.username[..], "Client key: {}", client_key);
