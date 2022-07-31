@@ -4659,6 +4659,7 @@ dependencies = [
  "once_cell",
  "openidconnect",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

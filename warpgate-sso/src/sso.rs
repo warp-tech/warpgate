@@ -4,49 +4,45 @@ use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetada
 use openidconnect::reqwest::async_http_client;
 use openidconnect::{CsrfToken, Nonce, PkceCodeChallenge, RedirectUrl, Scope};
 
-use crate::config::SsoProviderConfig;
+use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::SsoError;
 
 pub struct SsoClient {
-    config: SsoProviderConfig,
-    provider_metadata: CoreProviderMetadata,
+    config: SsoInternalProviderConfig,
+}
+
+pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
+    let metadata =
+        CoreProviderMetadata::discover_async(config.issuer_url().clone(), async_http_client)
+            .await
+            .map_err(|e| SsoError::Discovery(format!("{e}")))?;
+    Ok(CoreClient::from_provider_metadata(
+        metadata,
+        config.client_id().clone(),
+        Some(config.client_secret().clone()),
+    ))
 }
 
 impl SsoClient {
-    pub async fn new(config: SsoProviderConfig) -> Result<Self, SsoError> {
-        let provider_metadata =
-            CoreProviderMetadata::discover_async(config.issuer_url().clone(), async_http_client)
-                .await
-                .map_err(|e| SsoError::Discovery(format!("{e}")))?;
-
-        Ok(Self {
-            config,
-            provider_metadata,
-        })
+    pub fn new(config: SsoInternalProviderConfig) -> Self {
+        Self { config }
     }
 
-    fn make_client(&self) -> CoreClient {
-        CoreClient::from_provider_metadata(
-            self.provider_metadata.clone(),
-            self.config.client_id().clone(),
-            Some(self.config.client_secret().clone()),
-        )
-    }
-
-    pub fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
+    pub async fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-        let client = self.make_client();
+        let redirect_url = RedirectUrl::new(redirect_url)?;
+        let client = make_client(&self.config).await?;
         let mut auth_req = client
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
                 CsrfToken::new_random,
                 Nonce::new_random,
             )
-            .set_redirect_uri(Cow::Owned(RedirectUrl::new(redirect_url)?));
+            .set_redirect_uri(Cow::Owned(redirect_url.clone()));
 
-        for scope in vec!["email", "profile"] {
+        for scope in self.config.scopes() {
             auth_req = auth_req.add_scope(Scope::new(scope.to_string()));
         }
 
@@ -57,7 +53,8 @@ impl SsoClient {
             csrf_token,
             nonce,
             pkce_verifier,
-            client,
+            redirect_url,
+            config: self.config.clone(),
         })
     }
 }

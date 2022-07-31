@@ -1,7 +1,11 @@
 <script lang="ts">
 import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup } from 'sveltestrap'
-import { api, LoginFailureReason, LoginFailureResponseFromJSON } from 'gateway/lib/api'
+import Fa from 'svelte-fa'
+import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+import { faGoogle } from '@fortawesome/free-brands-svg-icons'
+
+import { api, LoginFailureReason, LoginFailureResponseFromJSON, SsoProviderDescription, SsoProviderKind } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 
@@ -68,6 +72,16 @@ function onInputKey (event: KeyboardEvent) {
         login()
     }
 }
+
+async function startSSO (provider: SsoProviderDescription) {
+    busy = true
+    try {
+        const params = await api.startSso(provider)
+        location.href = params.url
+    } catch {
+        busy = false
+    }
+}
 </script>
 
 <form class="mt-5" autocomplete="on">
@@ -115,10 +129,14 @@ function onInputKey (event: KeyboardEvent) {
 
     <AsyncButton
         outline
+        class="d-flex align-items-center"
         type="submit"
         disabled={busy}
         click={login}
-    >Login</AsyncButton>
+    >
+        Login
+        <Fa class="ms-2" icon={faArrowRight} />
+    </AsyncButton>
 
     {#if incorrectCredentials}
         <Alert color="danger">Incorrect credentials</Alert>
@@ -127,3 +145,22 @@ function onInputKey (event: KeyboardEvent) {
         <Alert color="danger">{error}</Alert>
     {/if}
 </form>
+
+{#await api.getSsoProviders() then ssoProviders}
+<div class="mt-5">
+    {#each ssoProviders as ssoProvider}
+        <button
+            class="btn d-flex align-items-center w-100 btn-outline-primary"
+            disabled={busy}
+            on:click={() => startSSO(ssoProvider)}
+        >
+            <span class="m-auto">
+                {#if ssoProvider.kind === SsoProviderKind.Google}
+                    <Fa fw class="me-2" icon={faGoogle} />
+                {/if}
+                {ssoProvider.label}
+            </span>
+        </button>
+    {/each}
+</div>
+{/await}

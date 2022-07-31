@@ -87,6 +87,81 @@
         },
         "operationId": "get_targets"
       }
+    },
+    "/sso/providers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SsoProviderDescription"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_sso_providers"
+      }
+    },
+    "/sso/return": {
+      "get": {
+        "parameters": [
+          {
+            "name": "state",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": false,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "operationId": "return_to_sso"
+      }
+    },
+    "/sso/providers/{name}/start": {
+      "get": {
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSsoResponseParams"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "start_sso"
+      }
     }
   },
   "components": {
@@ -169,6 +244,43 @@
           "mysql": {
             "type": "integer",
             "format": "uint16"
+          }
+        }
+      },
+      "SsoProviderDescription": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SsoProviderKind"
+          }
+        }
+      },
+      "SsoProviderKind": {
+        "type": "string",
+        "enum": [
+          "Google",
+          "Custom"
+        ]
+      },
+      "StartSsoResponseParams": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
           }
         }
       },
