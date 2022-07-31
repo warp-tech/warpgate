@@ -922,6 +922,7 @@ impl ServerSession {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -943,6 +944,7 @@ impl ServerSession {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
             Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -970,6 +972,7 @@ impl ServerSession {
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
+            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject, // TODO SSO
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject

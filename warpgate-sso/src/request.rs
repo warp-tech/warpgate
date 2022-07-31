@@ -48,7 +48,7 @@ impl SsoLoginRequest {
                 &id_token.signing_alg()?,
             )?;
             if actual_access_token_hash != *expected_access_token_hash {
-                panic!("Invalid access token");
+                return Err(SsoError::Mitm)
             }
         }
 

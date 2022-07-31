@@ -15,7 +15,10 @@ let password = ''
 let otp = ''
 let incorrectCredentials = false
 let otpInputVisible = false
+let ssoRequiredNow = false
 let busy = false
+
+let ssoProvidersPromise = api.getSsoProviders()
 
 async function login () {
     busy = true
@@ -53,6 +56,15 @@ async function _login () {
                     incorrectCredentials = true
                 } else if (failure.reason === LoginFailureReason.OtpNeeded) {
                     presentOTPInput()
+                } else if (failure.reason === LoginFailureReason.SsoNeeded) {
+                    const providers = await ssoProvidersPromise
+                    if (!providers.length) {
+                        // todo
+                    }
+                    if (providers.length === 1) {
+                        startSSO(providers[0])
+                    }
+                    ssoRequiredNow = true
                 }
             } else {
                 error = new Error(await response.text())
@@ -84,69 +96,71 @@ async function startSSO (provider: SsoProviderDescription) {
 }
 </script>
 
-<form class="mt-5" autocomplete="on">
-    <div class="page-summary-bar">
-        <h1>Welcome</h1>
-    </div>
+{#if !ssoRequiredNow}
+    <form class="mt-5" autocomplete="on">
+        <div class="page-summary-bar">
+            <h1>Welcome</h1>
+        </div>
 
-    {#if !otpInputVisible}
-    <FormGroup floating label="Username">
-        <!-- svelte-ignore a11y-autofocus -->
-        <input
-            bind:value={username}
-            on:keypress={onInputKey}
-            name="username"
-            autocomplete="username"
+        {#if !otpInputVisible}
+        <FormGroup floating label="Username">
+            <!-- svelte-ignore a11y-autofocus -->
+            <input
+                bind:value={username}
+                on:keypress={onInputKey}
+                name="username"
+                autocomplete="username"
+                disabled={busy}
+                class="form-control"
+                autofocus />
+        </FormGroup>
+
+        <FormGroup floating label="Password">
+            <input
+                bind:value={password}
+                on:keypress={onInputKey}
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                disabled={busy}
+                class="form-control" />
+        </FormGroup>
+        {/if}
+
+        {#if otpInputVisible}
+        <FormGroup floating label="One-time password">
+            <!-- svelte-ignore a11y-autofocus -->
+            <input
+                bind:value={otp}
+                on:keypress={onInputKey}
+                name="otp"
+                autofocus
+                disabled={busy}
+                class="form-control" />
+        </FormGroup>
+        {/if}
+
+        <AsyncButton
+            outline
+            class="d-flex align-items-center"
+            type="submit"
             disabled={busy}
-            class="form-control"
-            autofocus />
-    </FormGroup>
+            click={login}
+        >
+            Login
+            <Fa class="ms-2" icon={faArrowRight} />
+        </AsyncButton>
 
-    <FormGroup floating label="Password">
-        <input
-            bind:value={password}
-            on:keypress={onInputKey}
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            disabled={busy}
-            class="form-control" />
-    </FormGroup>
-    {/if}
+        {#if incorrectCredentials}
+            <Alert color="danger">Incorrect credentials</Alert>
+        {/if}
+        {#if error}
+            <Alert color="danger">{error}</Alert>
+        {/if}
+    </form>
+{/if}
 
-    {#if otpInputVisible}
-    <FormGroup floating label="One-time password">
-        <!-- svelte-ignore a11y-autofocus -->
-        <input
-            bind:value={otp}
-            on:keypress={onInputKey}
-            name="otp"
-            autofocus
-            disabled={busy}
-            class="form-control" />
-    </FormGroup>
-    {/if}
-
-    <AsyncButton
-        outline
-        class="d-flex align-items-center"
-        type="submit"
-        disabled={busy}
-        click={login}
-    >
-        Login
-        <Fa class="ms-2" icon={faArrowRight} />
-    </AsyncButton>
-
-    {#if incorrectCredentials}
-        <Alert color="danger">Incorrect credentials</Alert>
-    {/if}
-    {#if error}
-        <Alert color="danger">{error}</Alert>
-    {/if}
-</form>
-
-{#await api.getSsoProviders() then ssoProviders}
+{#await ssoProvidersPromise then ssoProviders}
 <div class="mt-5">
     {#each ssoProviders as ssoProvider}
         <button

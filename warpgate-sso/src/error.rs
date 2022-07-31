@@ -6,6 +6,8 @@ use openidconnect::{ClaimsVerificationError, SigningError};
 pub enum SsoError {
     #[error("provider is OAuth2, not OIDC")]
     NotOidc,
+    #[error("the token was replaced in flight")]
+    Mitm,
     #[error("config parse error: {0}")]
     UrlParse(#[from] openidconnect::url::ParseError),
     #[error("provider discovery error: {0}")]

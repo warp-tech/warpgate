@@ -15,6 +15,7 @@ use crate::{ProtocolName, Secret, Target, UserSnapshot, WarpgateError};
 pub enum AuthResult {
     Accepted { username: String },
     OtpNeeded,
+    SsoNeeded,
     Rejected,
 }
 
@@ -24,6 +25,10 @@ pub enum AuthCredential {
     PublicKey {
         kind: String,
         public_key_bytes: Bytes,
+    },
+    Sso {
+        provider: String,
+        email: String,
     },
 }
 

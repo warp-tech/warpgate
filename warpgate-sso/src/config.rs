@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use openidconnect::{ClientId, ClientSecret, IssuerUrl};
 use serde::{Deserialize, Serialize};
 
+#[allow(clippy::unwrap_used)]
 pub static GOOGLE_ISSUER_URL: Lazy<IssuerUrl> =
     Lazy::new(|| IssuerUrl::new("https://accounts.google.com".to_string()).unwrap());
 
@@ -14,19 +15,19 @@ pub struct SsoProviderConfig {
 
 impl SsoProviderConfig {
     pub fn label(&self) -> &str {
-        return self.label.as_deref().unwrap_or(&self.provider.label());
+        return self.label.as_deref().unwrap_or_else(|| self.provider.label());
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SsoInternalProviderConfig {
-    #[serde(rename="google")]
+    #[serde(rename = "google")]
     Google {
         client_id: ClientId,
         client_secret: ClientSecret,
     },
-    #[serde(rename="custom")]
+    #[serde(rename = "custom")]
     Custom {
         name: String,
         label: String,
@@ -38,6 +39,7 @@ pub enum SsoInternalProviderConfig {
 }
 
 impl SsoInternalProviderConfig {
+    #[inline]
     pub fn label(&self) -> &'static str {
         match self {
             SsoInternalProviderConfig::Google { .. } => "Google",
@@ -45,6 +47,7 @@ impl SsoInternalProviderConfig {
         }
     }
 
+    #[inline]
     pub fn client_id(&self) -> &ClientId {
         match self {
             SsoInternalProviderConfig::Google { client_id, .. } => client_id,
@@ -52,6 +55,7 @@ impl SsoInternalProviderConfig {
         }
     }
 
+    #[inline]
     pub fn client_secret(&self) -> &ClientSecret {
         match self {
             SsoInternalProviderConfig::Google { client_secret, .. } => client_secret,
@@ -59,6 +63,7 @@ impl SsoInternalProviderConfig {
         }
     }
 
+    #[inline]
     pub fn issuer_url(&self) -> &IssuerUrl {
         match self {
             SsoInternalProviderConfig::Google { .. } => &GOOGLE_ISSUER_URL,
@@ -66,6 +71,7 @@ impl SsoInternalProviderConfig {
         }
     }
 
+    #[inline]
     pub fn scopes(&self) -> Vec<String> {
         match self {
             SsoInternalProviderConfig::Google { .. } => vec!["email".to_string()],

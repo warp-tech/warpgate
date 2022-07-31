@@ -112,11 +112,11 @@
       "get": {
         "parameters": [
           {
-            "name": "state",
+            "name": "code",
             "schema": {
               "type": "string"
             },
-            "in": "path",
+            "in": "query",
             "required": false,
             "deprecated": false
           }
@@ -198,7 +198,8 @@
         "type": "string",
         "enum": [
           "InvalidCredentials",
-          "OtpNeeded"
+          "OtpNeeded",
+          "SsoNeeded"
         ]
       },
       "LoginFailureResponse": {

@@ -211,7 +211,7 @@ impl MySqlSession {
                         }
                         self.run_authorized(handshake, username, target_name).await
                     }
-                    AuthResult::Rejected | AuthResult::OtpNeeded => fail(&mut self).await,
+                    AuthResult::Rejected | AuthResult::OtpNeeded | AuthResult::SsoNeeded => fail(&mut self).await,
                 }
             }
             AuthSelector::Ticket { secret } => {

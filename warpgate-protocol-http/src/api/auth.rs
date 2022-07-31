@@ -24,6 +24,7 @@ struct LoginRequest {
 enum LoginFailureReason {
     InvalidCredentials,
     OtpNeeded,
+    SsoNeeded,
 }
 
 #[derive(Object)]
@@ -93,6 +94,7 @@ impl Api {
                         AuthResult::Accepted { .. } => unreachable!(),
                         AuthResult::Rejected => LoginFailureReason::InvalidCredentials,
                         AuthResult::OtpNeeded => LoginFailureReason::OtpNeeded,
+                        AuthResult::SsoNeeded => LoginFailureReason::SsoNeeded,
                     },
                 })))
             }

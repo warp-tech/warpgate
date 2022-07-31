@@ -40,6 +40,7 @@ fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
         UserAuthCredential::Password { .. } => k == "password",
         UserAuthCredential::PublicKey { .. } => k == "publickey",
         UserAuthCredential::Totp { .. } => k == "otp",
+        UserAuthCredential::Sso { .. } => k == "sso",
     }
 }
 
@@ -152,6 +153,22 @@ impl ConfigProvider for FileConfigProvider {
                         None => return Ok(AuthResult::Rejected),
                     }
                 }
+                AuthCredential::Sso {
+                    provider: client_provider,
+                    email: client_email,
+                } => {
+                    for credential in user.credentials.iter() {
+                        if let UserAuthCredential::Sso { ref provider, ref email } = credential {
+                            if provider.as_ref().unwrap_or(client_provider) == client_provider {
+                                if email == client_email {
+                                    valid_credentials.push(credential)
+                                } else {
+                                    return Ok(AuthResult::Rejected);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -189,6 +206,8 @@ impl ConfigProvider for FileConfigProvider {
                     });
                 } else if remaining_required_kinds.contains(&"otp".to_string()) {
                     return Ok(AuthResult::OtpNeeded);
+                } else if remaining_required_kinds.contains(&"sso".to_string()) {
+                    return Ok(AuthResult::SsoNeeded);
                 } else {
                     return Ok(AuthResult::Rejected);
                 }

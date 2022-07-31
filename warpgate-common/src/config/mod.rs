@@ -195,6 +195,11 @@ pub enum UserAuthCredential {
         #[serde(with = "crate::helpers::serde_base64_secret")]
         key: OtpSecretKey,
     },
+    #[serde(rename = "sso")]
+    Sso {
+        provider: Option<String>,
+        email: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

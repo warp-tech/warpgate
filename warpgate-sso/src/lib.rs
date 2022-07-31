@@ -1,8 +1,8 @@
 mod config;
+mod error;
 mod request;
 mod response;
 mod sso;
-mod error;
 
 pub use config::*;
 pub use error::*;
