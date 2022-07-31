@@ -171,9 +171,6 @@
         "responses": {
           "307": {
             "description": ""
-          },
-          "400": {
-            "description": ""
           }
         },
         "operationId": "return_to_sso"
@@ -340,6 +337,9 @@
         "type": "string",
         "enum": [
           "Google",
+          "Apple",
+          "Microsoft",
+          "Azure",
           "Custom"
         ]
       },

@@ -17,6 +17,8 @@ pub struct Api;
 #[derive(Enum)]
 pub enum SsoProviderKind {
     Google,
+    Apple,
+    Azure,
     Custom,
 }
 
@@ -61,6 +63,8 @@ impl Api {
                     label: p.label().to_string(),
                     kind: match p.provider {
                         SsoInternalProviderConfig::Google { .. } => SsoProviderKind::Google,
+                        SsoInternalProviderConfig::Apple { .. } => SsoProviderKind::Apple,
+                        SsoInternalProviderConfig::Azure { .. } => SsoProviderKind::Azure,
                         SsoInternalProviderConfig::Custom { .. } => SsoProviderKind::Custom,
                     },
                 })

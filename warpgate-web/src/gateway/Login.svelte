@@ -3,7 +3,7 @@ import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup, Spinner } from 'sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-import { faGoogle } from '@fortawesome/free-brands-svg-icons'
+import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
 import { api, ApiAuthState, LoginFailureResponseFromJSON, SsoProviderDescription, SsoProviderKind } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
@@ -179,13 +179,19 @@ async function startSSO (provider: SsoProviderDescription) {
             <div class="mt-5">
                 {#each ssoProviders as ssoProvider}
                     <button
-                        class="btn d-flex align-items-center w-100 btn-outline-primary"
+                        class="btn d-flex align-items-center w-100 mb-2 btn-outline-primary"
                         disabled={busy}
                         on:click={() => startSSO(ssoProvider)}
                     >
                         <span class="m-auto">
                             {#if ssoProvider.kind === SsoProviderKind.Google}
                                 <Fa fw class="me-2" icon={faGoogle} />
+                            {/if}
+                            {#if ssoProvider.kind === SsoProviderKind.Microsoft || ssoProvider.kind === SsoProviderKind.Azure}
+                                <Fa fw class="me-2" icon={faMicrosoft} />
+                            {/if}
+                            {#if ssoProvider.kind === SsoProviderKind.Apple}
+                                <Fa fw class="me-2" icon={faApple} />
                             {/if}
                             {ssoProvider.label}
                         </span>

@@ -14,7 +14,7 @@ pub struct SsoClient {
 
 pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
     let metadata =
-        CoreProviderMetadata::discover_async(config.issuer_url().clone(), async_http_client)
+        CoreProviderMetadata::discover_async(config.issuer_url()?, async_http_client)
             .await
             .map_err(|e| SsoError::Discovery(format!("{e}")))?;
     Ok(CoreClient::from_provider_metadata(
