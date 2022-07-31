@@ -6,13 +6,14 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::Services;
 
-use crate::common::SessionExt;
+use crate::common::{SessionAuthorization, SessionExt};
 
 pub struct Api;
 
 #[derive(Serialize, Object)]
 pub struct PortsInfo {
     ssh: Option<u16>,
+    http: Option<u16>,
     mysql: Option<u16>,
 }
 
@@ -23,6 +24,7 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     ports: PortsInfo,
+    authorized_via_ticket: bool,
 }
 
 #[derive(ApiResponse)]
@@ -52,10 +54,19 @@ impl Api {
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host: external_host.map(&str::to_string),
+            authorized_via_ticket: matches!(
+                session.get_auth(),
+                Some(SessionAuthorization::Ticket { .. })
+            ),
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {
                         Some(config.store.ssh.listen.port())
+                    } else {
+                        None
+                    },
+                    http: if config.store.http.enable {
+                        Some(config.store.http.listen.port())
                     } else {
                         None
                     },
@@ -68,6 +79,7 @@ impl Api {
             } else {
                 PortsInfo {
                     ssh: None,
+                    http: None,
                     mysql: None,
                 }
             },

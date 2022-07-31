@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "servers": [
     {
@@ -657,17 +657,24 @@
       "TargetHTTPOptions": {
         "type": "object",
         "required": [
-          "url"
+          "url",
+          "tls"
         ],
         "properties": {
           "url": {
             "type": "string"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
           },
           "headers": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "external_host": {
+            "type": "string"
           }
         }
       },
@@ -677,8 +684,7 @@
           "host",
           "port",
           "username",
-          "tls",
-          "verify_tls"
+          "tls"
         ],
         "properties": {
           "host": {
@@ -696,9 +702,6 @@
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
-          },
-          "verify_tls": {
-            "type": "boolean"
           }
         }
       },
@@ -706,29 +709,29 @@
         "type": "object",
         "oneOf": [
           {
-            "$ref": "#/components/schemas/TargetOptionsTargetSSHOptions"
+            "$ref": "#/components/schemas/TargetOptions_TargetSSHOptions"
           },
           {
-            "$ref": "#/components/schemas/TargetOptionsTargetHTTPOptions"
+            "$ref": "#/components/schemas/TargetOptions_TargetHTTPOptions"
           },
           {
-            "$ref": "#/components/schemas/TargetOptionsTargetMySqlOptions"
+            "$ref": "#/components/schemas/TargetOptions_TargetMySqlOptions"
           },
           {
-            "$ref": "#/components/schemas/TargetOptionsTargetWebAdminOptions"
+            "$ref": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
-            "Ssh": "#/components/schemas/TargetOptionsTargetSSHOptions",
-            "Http": "#/components/schemas/TargetOptionsTargetHTTPOptions",
-            "MySql": "#/components/schemas/TargetOptionsTargetMySqlOptions",
-            "WebAdmin": "#/components/schemas/TargetOptionsTargetWebAdminOptions"
+            "Ssh": "#/components/schemas/TargetOptions_TargetSSHOptions",
+            "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
+            "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
+            "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
           }
         }
       },
-      "TargetOptionsTargetHTTPOptions": {
+      "TargetOptions_TargetHTTPOptions": {
         "allOf": [
           {
             "type": "object",
@@ -747,7 +750,7 @@
           }
         ]
       },
-      "TargetOptionsTargetMySqlOptions": {
+      "TargetOptions_TargetMySqlOptions": {
         "allOf": [
           {
             "type": "object",
@@ -766,7 +769,7 @@
           }
         ]
       },
-      "TargetOptionsTargetSSHOptions": {
+      "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
             "type": "object",
@@ -785,7 +788,7 @@
           }
         ]
       },
-      "TargetOptionsTargetWebAdminOptions": {
+      "TargetOptions_TargetWebAdminOptions": {
         "allOf": [
           {
             "type": "object",

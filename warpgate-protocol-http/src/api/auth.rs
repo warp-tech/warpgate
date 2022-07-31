@@ -1,5 +1,5 @@
-use crate::common::SessionExt;
-use crate::session::SessionMiddleware;
+use crate::common::{SessionExt, SessionAuthorization};
+use crate::session::SessionStore;
 use anyhow::Context;
 use poem::session::Session;
 use poem::web::Data;
@@ -54,7 +54,7 @@ impl Api {
         req: &Request,
         session: &Session,
         services: Data<&Services>,
-        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
+        session_middleware: Data<&Arc<Mutex<SessionStore>>>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut credentials = vec![AuthCredential::Password(Secret::new(body.password.clone()))];
@@ -83,7 +83,7 @@ impl Api {
                     .set_username(username.clone())
                     .await?;
                 info!(%username, "Authenticated");
-                session.set_username(username);
+                session.set_auth(SessionAuthorization::User(username));
                 Ok(LoginResponse::Success)
             }
             x => {
@@ -103,7 +103,7 @@ impl Api {
     async fn api_auth_logout(
         &self,
         session: &Session,
-        session_middleware: Data<&Arc<Mutex<SessionMiddleware>>>,
+        session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
         session_middleware.lock().await.remove_session(session);
         session.clear();

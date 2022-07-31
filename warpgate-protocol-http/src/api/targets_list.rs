@@ -1,11 +1,11 @@
-use crate::common::{endpoint_auth, SessionUsername};
-use futures::stream::{self};
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::{Services, TargetOptions};
+
+use crate::common::{endpoint_auth, SessionAuthorization};
 
 pub struct Api;
 
@@ -21,6 +21,7 @@ pub enum TargetKind {
 pub struct Target {
     pub name: String,
     pub kind: TargetKind,
+    pub external_host: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -40,27 +41,37 @@ impl Api {
     async fn api_get_all_targets(
         &self,
         services: Data<&Services>,
-        username: Data<&SessionUsername>,
+        auth: Data<&SessionAuthorization>,
     ) -> poem::Result<GetTargetsResponse> {
         let targets = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?
         };
         let mut targets = stream::iter(targets)
-            .filter_map(|t| {
+            .filter(|t| {
                 let services = services.clone();
-                let username = &username;
+                let auth = auth.clone();
+                let name = t.name.clone();
                 async move {
-                    let mut config_provider = services.config_provider.lock().await;
-                    match config_provider.authorize_target(&username.0.0, &t.name).await {
-                        Ok(true) => Some(t),
-                        _ => None,
+                    match auth {
+                        SessionAuthorization::Ticket { target_name, .. } => target_name == name,
+                        SessionAuthorization::User(_) => {
+                            let mut config_provider = services.config_provider.lock().await;
+                            match config_provider
+                                .authorize_target(auth.username(), &name)
+                                .await
+                            {
+                                Ok(true) => true,
+                                _ => false,
+                            }
+                        }
                     }
                 }
             })
             .collect::<Vec<_>>()
             .await;
         targets.sort_by(|a, b| a.name.cmp(&b.name));
+
         Ok(GetTargetsResponse::Ok(Json(
             targets
                 .into_iter()
@@ -71,6 +82,10 @@ impl Api {
                         TargetOptions::Http(_) => TargetKind::Http,
                         TargetOptions::MySql(_) => TargetKind::MySql,
                         TargetOptions::WebAdmin(_) => TargetKind::WebAdmin,
+                    },
+                    external_host: match t.options {
+                        TargetOptions::Http(ref opt) => opt.external_host.clone(),
+                        _ => None,
                     },
                 })
                 .collect(),

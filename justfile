@@ -12,6 +12,9 @@ fix *ARGS:
 clippy *ARGS:
     for p in {{projects}}; do cargo cranky -p $p {{ARGS}}; done
 
+test:
+    for p in {{projects}}; do cargo test -p $p; done
+
 yarn *ARGS:
     cd warpgate-web && yarn {{ARGS}}
 
@@ -31,3 +34,6 @@ openapi:
     cd warpgate-web && yarn openapi:client:admin && yarn openapi:client:gateway
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
+
+udeps:
+    cargo udeps --all-targets

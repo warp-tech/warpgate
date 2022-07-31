@@ -4,6 +4,7 @@ mod catchall;
 mod common;
 mod error;
 mod logging;
+mod middleware;
 mod proxy;
 mod session;
 mod session_handle;
@@ -19,7 +20,7 @@ use common::page_admin_auth;
 pub use common::PROTOCOL_NAME;
 use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
-use poem::listener::{Listener, RustlsCertificate, RustlsConfig, TcpListener};
+use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
@@ -28,12 +29,16 @@ use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::{ProtocolServer, Services, Target, TargetTestError};
+use warpgate_common::{
+    ProtocolServer, Services, Target, TargetOptions, TargetTestError, TlsCertificateAndPrivateKey,
+    TlsCertificateBundle, TlsPrivateKey,
+};
 use warpgate_web::Assets;
 
 use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
 use crate::error::error_page;
-use crate::session::{SessionMiddleware, SharedSessionStorage};
+use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
+use crate::session::{SessionStore, SharedSessionStorage};
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -62,7 +67,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let session_storage =
             SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
-        let session_middleware = SessionMiddleware::new();
+        let session_store = SessionStore::new();
 
         let app = Route::new()
             .nest(
@@ -104,7 +109,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 }),
             )
             .around(move |ep, req| async move {
-                let sm = Data::<&Arc<Mutex<SessionMiddleware>>>::from_request_without_body(&req)
+                let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?
                     .clone();
 
@@ -118,6 +123,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 SetHeader::new()
                     .overriding(http::header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
             )
+            .with(TicketMiddleware::new())
             .with(ServerSession::new(
                 CookieConfig::default()
                     .secure(false)
@@ -125,54 +131,67 @@ impl ProtocolServer for HTTPProtocolServer {
                     .name("warpgate-http-session"),
                 session_storage.clone(),
             ))
+            .with(CookieHostMiddleware::new())
             .data(self.services.clone())
-            .data(session_middleware.clone())
+            .data(session_store.clone())
             .data(session_storage);
 
         tokio::spawn(async move {
             loop {
-                session_middleware.lock().await.vacuum().await;
+                session_store.lock().await.vacuum().await;
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 
-        let (certificate, key) = {
+        let certificate_and_key = {
             let config = self.services.config.lock().await;
             let certificate_path = config
                 .paths_relative_to
                 .join(&config.store.http.certificate);
             let key_path = config.paths_relative_to.join(&config.store.http.key);
 
-            (
-                std::fs::read(&certificate_path).with_context(|| {
+            TlsCertificateAndPrivateKey {
+                certificate: TlsCertificateBundle::from_file(&certificate_path)
+                    .await
+                    .with_context(|| {
+                        format!("reading TLS private key from '{}'", key_path.display())
+                    })?,
+                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
                     format!(
-                        "reading SSL certificate from '{}'",
+                        "reading TLS certificate from '{}'",
                         certificate_path.display()
                     )
                 })?,
-                std::fs::read(&key_path).with_context(|| {
-                    format!("reading SSL private key from '{}'", key_path.display())
-                })?,
-            )
+            }
         };
 
         info!(?address, "Listening");
-        Server::new(TcpListener::bind(address).rustls(
-            RustlsConfig::new().fallback(RustlsCertificate::new().cert(certificate).key(key)),
-        ))
+        Server::new(
+            TcpListener::bind(address)
+                .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
+        )
         .run(app)
         .await?;
 
         Ok(())
     }
 
-    async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
+        let TargetOptions::Http(options) = target.options else {
+            return Err(TargetTestError::Misconfigured("Not an HTTP target".to_owned()));
+        };
+        let request = poem::Request::builder().uri_str("http://host/").finish();
+        crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
+            .await
+            .map_err(|e| {
+                return TargetTestError::ConnectionError(format!("{e}"));
+            })?;
         Ok(())
     }
 }
 
 impl Debug for HTTPProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SSHProtocolServer")
+        write!(f, "HTTPProtocolServer")
     }
 }

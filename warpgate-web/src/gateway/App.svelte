@@ -43,7 +43,12 @@ init()
             </div>
 
             {#if $serverInfo?.username}
-                <div class="ms-auto">{$serverInfo.username}</div>
+                <div class="ms-auto">
+                    {$serverInfo.username}
+                    {#if $serverInfo.authorizedViaTicket}
+                        <span class="ml-2">(ticket auth)</span>
+                    {/if}
+                </div>
                 <button class="btn btn-link" on:click={logout} title="Log out">
                     <Fa icon={faSignOut} fw />
                 </button>

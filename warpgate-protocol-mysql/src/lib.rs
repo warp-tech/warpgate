@@ -8,17 +8,23 @@ mod stream;
 mod tls;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use client::{ConnectionOptions, MySqlClient};
+use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::*;
-use warpgate_common::{ProtocolServer, Services, SessionStateInit, Target, TargetTestError};
+use warpgate_common::{
+    ProtocolServer, Services, SessionStateInit, Target, TargetOptions, TargetTestError,
+    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
 
 use crate::session::MySqlSession;
 use crate::session_handle::MySqlSessionHandle;
-use crate::tls::FromCertificateAndKey;
+use crate::tls::ResolveServerCert;
 
 pub struct MySQLProtocolServer {
     services: Services,
@@ -35,27 +41,34 @@ impl MySQLProtocolServer {
 #[async_trait]
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
-        let (certificate, key) = {
+        let certificate_and_key = {
             let config = self.services.config.lock().await;
             let certificate_path = config
                 .paths_relative_to
                 .join(&config.store.mysql.certificate);
             let key_path = config.paths_relative_to.join(&config.store.mysql.key);
 
-            (
-                std::fs::read(&certificate_path).with_context(|| {
+            TlsCertificateAndPrivateKey {
+                certificate: TlsCertificateBundle::from_file(&certificate_path)
+                    .await
+                    .with_context(|| {
+                        format!("reading SSL private key from '{}'", key_path.display())
+                    })?,
+                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
                     format!(
                         "reading SSL certificate from '{}'",
                         certificate_path.display()
                     )
                 })?,
-                std::fs::read(&key_path).with_context(|| {
-                    format!("reading SSL private key from '{}'", key_path.display())
-                })?,
-            )
+            }
         };
 
-        let tls_config = ServerConfig::try_from_certificate_and_key(certificate, key)?;
+        let tls_config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_client_cert_verifier(NoClientAuth::new())
+            .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+                certificate_and_key.into(),
+            ))));
 
         info!(?address, "Listening");
         let listener = TcpListener::bind(address).await?;
@@ -96,7 +109,13 @@ impl ProtocolServer for MySQLProtocolServer {
         }
     }
 
-    async fn test_target(self, _target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
+        let TargetOptions::MySql(options) = target.options else {
+            return Err(TargetTestError::Misconfigured("Not a MySQL target".to_owned()));
+        };
+        MySqlClient::connect(&options, ConnectionOptions::default())
+            .await
+            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 }

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use poem::session::{Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
@@ -20,7 +21,7 @@ pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);
 
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
-#[async_trait::async_trait]
+#[async_trait]
 impl SessionStorage for SharedSessionStorage {
     async fn load_session(
         &self,
@@ -55,16 +56,16 @@ impl SessionStorage for SharedSessionStorage {
     }
 }
 
-pub struct SessionMiddleware {
+pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
     session_timestamps: HashMap<SessionId, Instant>,
-    this: Weak<Mutex<SessionMiddleware>>,
+    this: Weak<Mutex<SessionStore>>,
 }
 
 static SESSION_ID_SESSION_KEY: &str = "session_id";
 static REQUEST_COUNTER_SESSION_KEY: &str = "request_counter";
 
-impl SessionMiddleware {
+impl SessionStore {
     pub fn new() -> Arc<Mutex<Self>> {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {

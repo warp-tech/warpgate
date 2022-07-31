@@ -72,9 +72,14 @@ lazy_static::lazy_static! {
         s.insert(http::header::UPGRADE);
         s.insert(http::header::CONNECTION);
         s.insert(http::header::STRICT_TRANSPORT_SECURITY);
+        s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
         s
     };
 }
+
+const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+const X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
+const X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
@@ -195,6 +200,17 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
+fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
+    if let Some(host) = req.headers().get(http::header::HOST) {
+        target = target.header(X_FORWARDED_HOST.clone(), host.to_str()?.to_string());
+    }
+    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str().to_owned());
+    if let Some(addr) = req.remote_addr().as_socket_addr() {
+        target = target.header(X_FORWARDED_FOR.clone(), addr.to_string());
+    }
+    Ok(target)
+}
+
 pub async fn proxy_normal_request(
     req: &Request,
     body: Body,
@@ -220,6 +236,7 @@ pub async fn proxy_normal_request(
     let mut client_request = client.request(req.method().into(), uri.clone());
 
     client_request = copy_server_request(&req, client_request);
+    client_request = inject_forwarding_headers(&req, client_request)?;
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
 
@@ -325,6 +342,7 @@ async fn proxy_ws_inner(
         );
 
     client_request = copy_server_request(&req, client_request);
+    client_request = inject_forwarding_headers(&req, client_request)?;
     client_request = rewrite_request(client_request, options)?;
 
     let (client, client_response) = connect_async_with_config(

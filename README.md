@@ -8,10 +8,10 @@
 
 ---
 
-Warpgate is a smart SSH & HTTPS bastion host for Linux that can be used with _any_ SSH client.
+Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't need special client apps.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
-* Warpgate will record every SSH session for you to view (live) and replay later through a built-in admin web UI.
+* Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
 * 2FA support
 * Single binary with no dependencies.
@@ -46,17 +46,17 @@ The project is currently in **alpha** stage and is gathering community feedback.
 
 In particular, we're working on:
 
-* Support for tunneling database connections,
-* Requesting admin approval for sessions
+* Requesting admin approvals for sessions
+* Support for tunneling PostgreSQL connections,
 * and much more.
 
 ## How it works
 
-Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH and HTTPS connections and provide an (optional) web admin UI.
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS and MySQL connections and provide an (optional) web admin UI.
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) for details.
 
-It receives SSH connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
+It receives connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
 
 When connecting through HTTPS, Warpgate presents a selection of available targets, and will then proxy all traffic in a session to the selected target. You can switch between targets at any time.
 

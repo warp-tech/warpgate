@@ -2,10 +2,9 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-mysql"
-version = "0.3.0"
+version = "0.4.0"
 
 [dependencies]
-warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols" }
@@ -19,7 +18,6 @@ mysql_common = "0.29"
 rand = "0.8"
 sha1 = "0.10.1"
 password-hash = { version = "0.2", features = ["std"] }
-delegate = "0.6"
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0"
 tokio-rustls = "0.23"

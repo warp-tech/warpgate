@@ -13,16 +13,16 @@ pub enum TargetTestError {
     Unreachable,
     #[error("authentication failed")]
     AuthenticationError,
-    #[error("connection error")]
+    #[error("connection error: {0}")]
     ConnectionError(String),
-    #[error("misconfigured")]
+    #[error("misconfigured: {0}")]
     Misconfigured(String),
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 }
 
 #[async_trait]
 pub trait ProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()>;
-    async fn test_target(self, target: Target) -> Result<(), TargetTestError>;
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError>;
 }

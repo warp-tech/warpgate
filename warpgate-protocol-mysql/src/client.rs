@@ -29,6 +29,30 @@ pub struct ConnectionOptions {
     pub capabilities: Capabilities,
 }
 
+impl Default for ConnectionOptions {
+    fn default() -> Self {
+        ConnectionOptions {
+            collation: 33,
+            database: None,
+            max_packet_size: 0xffff_ffff,
+            capabilities: Capabilities::PROTOCOL_41
+                | Capabilities::PLUGIN_AUTH
+                | Capabilities::FOUND_ROWS
+                | Capabilities::LONG_FLAG
+                | Capabilities::NO_SCHEMA
+                | Capabilities::PLUGIN_AUTH_LENENC_DATA
+                | Capabilities::CONNECT_WITH_DB
+                | Capabilities::SESSION_TRACK
+                | Capabilities::IGNORE_SPACE
+                | Capabilities::INTERACTIVE
+                | Capabilities::TRANSACTIONS
+                | Capabilities::DEPRECATE_EOF
+                | Capabilities::SECURE_CONNECTION
+                | Capabilities::SSL,
+        }
+    }
+}
+
 impl MySqlClient {
     pub async fn connect(
         target: &TargetMySqlOptions,

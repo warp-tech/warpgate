@@ -102,6 +102,7 @@ load().catch(e => {
                 Http: TargetKind.Http,
                 MySql: TargetKind.MySql,
             }[selectedTarget?.options.kind ?? '']}
+            targetExternalHost={selectedTarget?.options['externalHost']}
         />
     </ModalBody>
 </Modal>
