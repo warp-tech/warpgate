@@ -908,9 +908,9 @@ impl ServerSession {
         let selector: AuthSelector = (&ssh_username).into();
 
         info!(
-            "Public key auth as {:?} with key FP {}",
+            "Public key auth as {:?} with key {}",
             selector,
-            key.fingerprint()
+            key.public_key_base64()
         );
 
         self.credentials.push(AuthCredential::PublicKey {

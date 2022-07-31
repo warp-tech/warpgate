@@ -270,7 +270,6 @@ class TestClass:
         proc.wait(timeout=5)
         assert proc.returncode != 0
 
-
     def test_ssh_password_auth(self, processes: ProcessManager):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -312,13 +311,123 @@ class TestClass:
         assert ssh_client.communicate()[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
+    def test_ssh_user_ed25519_pubkey_auth(self, processes: ProcessManager):
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(ssh_port)
+        _, wg_port = processes.start_wg(
+            dedent(
+                f'''\
+                targets:
+                -   name: ssh
+                    allow_roles: [role]
+                    ssh:
+                        host: localhost
+                        port: {ssh_port}
+                        username: {os.getlogin()}
+                users:
+                -   username: user
+                    roles: [role]
+                    credentials:
+                    -   type: publickey
+                        key: {open('ssh-keys/id_ed25519.pub').read().strip()}
+                '''
+            ),
+        )
+        wait_port(wg_port)
+        logging.info('running')
+
+        ssh_client = processes.start_ssh_client(
+            'user:ssh@localhost',
+            '-p',
+            str(wg_port),
+            '-i',
+            'ssh-keys/id_ed25519',
+            '-o',
+            'PreferredAuthentications=publickey',
+            'ls',
+            '/bin/sh',
+        )
+        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.returncode == 0
+
+        ssh_client = processes.start_ssh_client(
+            'user:ssh@localhost',
+            '-p',
+            str(wg_port),
+            '-i',
+            'ssh-keys/id_rsa',
+            '-o',
+            'PreferredAuthentications=publickey',
+            'ls',
+            '/bin/sh',
+        )
+        assert ssh_client.communicate()[0] == b''
+        assert ssh_client.returncode != 0
+
+    def test_ssh_user_rsa_pubkey_auth(self, processes: ProcessManager):
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(ssh_port)
+        _, wg_port = processes.start_wg(
+            dedent(
+                f'''\
+                targets:
+                -   name: ssh
+                    allow_roles: [role]
+                    ssh:
+                        host: localhost
+                        port: {ssh_port}
+                        username: {os.getlogin()}
+                users:
+                -   username: user
+                    roles: [role]
+                    credentials:
+                    -   type: publickey
+                        key: {open('ssh-keys/id_rsa.pub').read().strip()}
+                '''
+            ),
+        )
+        wait_port(wg_port)
+        logging.info('running')
+
+        ssh_client = processes.start_ssh_client(
+            'user:ssh@localhost',
+            '-p',
+            str(wg_port),
+            '-i',
+            'ssh-keys/id_rsa',
+            '-o',
+            'PreferredAuthentications=publickey',
+            'ls',
+            '/bin/sh',
+        )
+        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.returncode == 0
+
+        ssh_client = processes.start_ssh_client(
+            'user:ssh@localhost',
+            '-p',
+            str(wg_port),
+            '-i',
+            'ssh-keys/id_ed25519',
+            '-o',
+            'PreferredAuthentications=publickey',
+            'ls',
+            '/bin/sh',
+        )
+        assert ssh_client.communicate()[0] == b''
+        assert ssh_client.returncode != 0
+
+
 
 @pytest.fixture(scope='session', autouse=True)
 def report():
-    subprocess.check_call(['cargo', 'llvm-cov', 'clean', '--workspace'], cwd=cargo_root)
     subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
     yield
-    subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--html'], cwd=cargo_root)
+    subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 
 
 # logging.info('Prebuilding binary')
