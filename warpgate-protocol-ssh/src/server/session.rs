@@ -17,14 +17,14 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, AuthCredential, CredentialKind};
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
 };
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId,
+    authorize_ticket, AuthResult, Secret, Services, SessionId,
     SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
@@ -921,8 +921,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
-            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -943,8 +942,7 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
-            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -967,12 +965,12 @@ impl ServerSession {
         match self.try_auth(&selector).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Partial {
+            Ok(AuthResult::Need(CredentialKind::Otp)) => russh::server::Auth::Partial {
                 name: Cow::Borrowed("Two-factor authentication"),
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
-            Ok(AuthResult::SsoNeeded) => russh::server::Auth::Reject, // TODO SSO
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject, // TODO SSO
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject

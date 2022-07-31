@@ -7,10 +7,10 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, AuthCredential};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Secret, Services, TargetMySqlOptions,
+    authorize_ticket, AuthResult, Secret, Services, TargetMySqlOptions,
     TargetOptions, WarpgateServerHandle,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
@@ -211,7 +211,7 @@ impl MySqlSession {
                         }
                         self.run_authorized(handshake, username, target_name).await
                     }
-                    AuthResult::Rejected | AuthResult::OtpNeeded | AuthResult::SsoNeeded => fail(&mut self).await,
+                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
                 }
             }
             AuthSelector::Ticket { secret } => {

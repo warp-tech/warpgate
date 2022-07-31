@@ -11,11 +11,14 @@ use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
 use super::ConfigProvider;
+use crate::auth::{
+    AuthCredential, AuthState, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+};
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
 use crate::{
-    AuthCredential, AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot,
-    WarpgateConfig, WarpgateError,
+    AuthResult, ProtocolName, Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig,
+    WarpgateError,
 };
 
 pub struct FileConfigProvider {
@@ -32,15 +35,6 @@ impl FileConfigProvider {
             db: db.clone(),
             config: config.clone(),
         }
-    }
-}
-
-fn credential_is_type(c: &UserAuthCredential, k: &str) -> bool {
-    match c {
-        UserAuthCredential::Password { .. } => k == "password",
-        UserAuthCredential::PublicKey { .. } => k == "publickey",
-        UserAuthCredential::Totp { .. } => k == "otp",
-        UserAuthCredential::Sso { .. } => k == "sso",
     }
 }
 
@@ -118,7 +112,7 @@ impl ConfigProvider for FileConfigProvider {
                             _ => false,
                         })
                     {
-                        valid_credentials.push(credential)
+                        valid_credentials.push((client_credential, credential))
                     }
                 }
                 AuthCredential::Password(client_password) => {
@@ -138,7 +132,7 @@ impl ConfigProvider for FileConfigProvider {
                         }),
                         _ => false,
                     }) {
-                        Some(credential) => valid_credentials.push(credential),
+                        Some(credential) => valid_credentials.push((client_credential, credential)),
                         None => return Ok(AuthResult::Rejected),
                     }
                 }
@@ -149,7 +143,7 @@ impl ConfigProvider for FileConfigProvider {
                         } => verify_totp(client_otp.expose_secret(), user_otp_key),
                         _ => false,
                     }) {
-                        Some(credential) => valid_credentials.push(credential),
+                        Some(credential) => valid_credentials.push((client_credential, credential)),
                         None => return Ok(AuthResult::Rejected),
                     }
                 }
@@ -158,10 +152,14 @@ impl ConfigProvider for FileConfigProvider {
                     email: client_email,
                 } => {
                     for credential in user.credentials.iter() {
-                        if let UserAuthCredential::Sso { ref provider, ref email } = credential {
+                        if let UserAuthCredential::Sso {
+                            ref provider,
+                            ref email,
+                        } = credential
+                        {
                             if provider.as_ref().unwrap_or(client_provider) == client_provider {
                                 if email == client_email {
-                                    valid_credentials.push(credential)
+                                    valid_credentials.push((client_credential, credential))
                                 } else {
                                     return Ok(AuthResult::Rejected);
                                 }
@@ -179,48 +177,13 @@ impl ConfigProvider for FileConfigProvider {
             );
         }
 
-        if let Some(ref policy) = user.require {
-            let required_kinds = match protocol {
-                "SSH" => &policy.ssh,
-                "HTTP" => &policy.http,
-                "MySQL" => &policy.mysql,
-                _ => {
-                    error!(%protocol, "Unkown protocol");
-                    return Ok(AuthResult::Rejected);
-                }
-            };
-            if let Some(required_kinds) = required_kinds {
-                let mut remaining_required_kinds = HashSet::new();
-                remaining_required_kinds.extend(required_kinds);
-                for kind in required_kinds {
-                    if valid_credentials
-                        .iter()
-                        .any(|x| credential_is_type(x, kind))
-                    {
-                        remaining_required_kinds.remove(kind);
-                    }
-                }
-                if remaining_required_kinds.is_empty() {
-                    return Ok(AuthResult::Accepted {
-                        username: user.username.clone(),
-                    });
-                } else if remaining_required_kinds.contains(&"otp".to_string()) {
-                    return Ok(AuthResult::OtpNeeded);
-                } else if remaining_required_kinds.contains(&"sso".to_string()) {
-                    return Ok(AuthResult::SsoNeeded);
-                } else {
-                    return Ok(AuthResult::Rejected);
-                }
-            }
+        let mut state = AuthState::new(user.username.clone(), protocol.to_string(), user.require);
+
+        for pair in valid_credentials.into_iter() {
+            state.add_valid_credential(pair.0.clone());
         }
 
-        Ok(if !valid_credentials.is_empty() {
-            AuthResult::Accepted {
-                username: user.username.clone(),
-            }
-        } else {
-            AuthResult::Rejected
-        })
+        Ok(state.verify())
     }
 
     async fn authorize_target(

@@ -6,10 +6,11 @@ use poem::web::Data;
 use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use warpgate_common::auth::{CredentialKind, AuthCredential};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{AuthCredential, AuthResult, Secret, Services};
+use warpgate_common::{AuthResult, Secret, Services};
 
 pub struct Api;
 
@@ -93,8 +94,12 @@ impl Api {
                     reason: match x {
                         AuthResult::Accepted { .. } => unreachable!(),
                         AuthResult::Rejected => LoginFailureReason::InvalidCredentials,
-                        AuthResult::OtpNeeded => LoginFailureReason::OtpNeeded,
-                        AuthResult::SsoNeeded => LoginFailureReason::SsoNeeded,
+                        AuthResult::Need(CredentialKind::Otp) => LoginFailureReason::OtpNeeded,
+                        AuthResult::Need(CredentialKind::Sso) => LoginFailureReason::SsoNeeded,
+                        AuthResult::Need(kind) => {
+                            error!("Unsupported required credential kind: {kind:?}");
+                            LoginFailureReason::InvalidCredentials
+                        }
                     },
                 })))
             }

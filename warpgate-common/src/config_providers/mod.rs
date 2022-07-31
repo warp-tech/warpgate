@@ -2,7 +2,6 @@ mod file;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 pub use file::FileConfigProvider;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
@@ -10,26 +9,13 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
+use crate::auth::{AuthCredential, CredentialKind};
 use crate::{ProtocolName, Secret, Target, UserSnapshot, WarpgateError};
 
 pub enum AuthResult {
     Accepted { username: String },
-    OtpNeeded,
-    SsoNeeded,
+    Need(CredentialKind),
     Rejected,
-}
-
-pub enum AuthCredential {
-    Otp(Secret<String>),
-    Password(Secret<String>),
-    PublicKey {
-        kind: String,
-        public_key_bytes: Bytes,
-    },
-    Sso {
-        provider: String,
-        email: String,
-    },
 }
 
 #[async_trait]
