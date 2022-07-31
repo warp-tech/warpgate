@@ -105,14 +105,14 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     tokio::spawn(watch_config(cli.config.clone(), services.config.clone()));
 
-    let mut sigusr1 = tokio::signal::unix::signal(SignalKind::user_defined1())?;
+    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
 
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 std::process::exit(1);
             }
-            _ = sigusr1.recv() => {
+            _ = sigint.recv() => {
                 break
             }
             result = protocol_futures.next() => {

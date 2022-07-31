@@ -1,8 +1,10 @@
 import logging
 import os
+import threading
 import psutil
 import pytest
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -25,16 +27,24 @@ def alloc_port():
 
 def wait_port(port):
     logging.debug(f'Waiting for port {port}')
-    while True:
-        try:
-            s = socket.create_connection(('localhost', port))
-            s.recv(1)
-            s.close()
-            logging.debug(f'Port {port} is up')
-            break
-        except socket.error:
-            time.sleep(0.1)
-            continue
+
+    def wait():
+        while True:
+            try:
+                s = socket.create_connection(('localhost', port))
+                s.recv(1)
+                s.close()
+                logging.debug(f'Port {port} is up')
+                break
+            except socket.error:
+                time.sleep(0.1)
+                continue
+
+    t = threading.Thread(target=wait, daemon=True)
+    t.start()
+    t.join(timeout=5)
+    if t.is_alive():
+        raise Exception(f'Port {port} is not up')
 
 
 @dataclass
@@ -55,6 +65,8 @@ class ProcessManager:
                 p = psutil.Process(child.pid)
             except psutil.NoSuchProcess:
                 continue
+
+            p.send_signal(signal.SIGINT)
 
             for sp in p.children(recursive=True):
                 try:
@@ -160,16 +172,16 @@ class ProcessManager:
         args = args or ['run']
         p = subprocess.Popen(
             [
-                'cargo',
-                'llvm-cov',
-                'run',
-                '--no-report',
-                '--',
+                f'{cargo_root}/target/llvm-cov-target/debug/warpgate',
                 '--config',
                 str(config_path),
                 *args,
             ],
             cwd=cargo_root,
+            env={
+                **os.environ,
+                'LLVM_PROFILE_FILE': f'{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw',
+            },
         )
         self.children.append(p)
         return p, port
@@ -233,7 +245,7 @@ class TestClass:
                         username: {os.getlogin()}
                 '''
             ),
-            args=['test-target', 'ssh']
+            args=['test-target', 'ssh'],
         )
         proc.wait(timeout=5)
         assert proc.returncode == 0
@@ -303,6 +315,20 @@ class TestClass:
 
 @pytest.fixture(scope='session', autouse=True)
 def report():
+    subprocess.check_call(['cargo', 'llvm-cov', 'clean', '--workspace'], cwd=cargo_root)
     subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
     yield
     subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--html'], cwd=cargo_root)
+
+
+# logging.info('Prebuilding binary')
+# subprocess.call(
+#     [
+#         'cargo',
+#         'llvm-cov',
+#         'run',
+#         '--no-report',
+#     ],
+#     cwd=cargo_root,
+# )
+# logging.info('Done')
