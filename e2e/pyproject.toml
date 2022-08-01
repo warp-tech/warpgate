@@ -10,6 +10,7 @@ pytest = "^7.1.2"
 psutil = "^5.9.1"
 
 [tool.poetry.dev-dependencies]
+flake8 = "^5.0.2"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
