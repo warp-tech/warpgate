@@ -1,57 +1,17 @@
 import logging
 import os
+import paramiko
 from pathlib import Path
 from textwrap import dedent
 
 from .conftest import ProcessManager
-from .util import alloc_port, wait_port
+from .util import wait_port
 
 
-class TestClass:
-    def test_ssh_conntest_success(self, processes: ProcessManager, wg_c_ed25519_pubkey: Path):
-        ssh_port = processes.start_ssh_server(
-            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
-        )
-        wait_port(ssh_port)
-        proc, _ = processes.start_wg(
-            config=dedent(
-                f'''\
-                users: []
-                targets:
-                -   name: ssh
-                    allow_roles: [role]
-                    ssh:
-                        host: localhost
-                        port: {ssh_port}
-                        username: {os.getlogin()}
-                '''
-            ),
-            args=['test-target', 'ssh'],
-        )
-        proc.wait(timeout=5)
-        assert proc.returncode == 0
-
-    def test_ssh_conntest_fail(self, processes: ProcessManager):
-        ssh_port = alloc_port()
-        proc, _ = processes.start_wg(
-            config=dedent(
-                f'''\
-                users: []
-                targets:
-                -   name: ssh
-                    allow_roles: [role]
-                    ssh:
-                        host: localhost
-                        port: {ssh_port}
-                        username: {os.getlogin()}
-                '''
-            ),
-            args=['test-target', 'ssh']
-        )
-        proc.wait(timeout=5)
-        assert proc.returncode != 0
-
-    def test_ssh_password_auth(self, processes: ProcessManager, wg_c_ed25519_pubkey: Path):
+class TestSSHUserAuthClass:
+    def test_ssh_password_auth(
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
+    ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
@@ -76,7 +36,7 @@ class TestClass:
             ),
         )
         wait_port(wg_port)
-        logging.info('running')
+
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
             '-p',
@@ -92,11 +52,29 @@ class TestClass:
         assert ssh_client.communicate()[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
-    def test_ssh_user_ed25519_pubkey_auth(self, processes: ProcessManager, wg_c_ed25519_pubkey: Path):
+        ssh_client = processes.start_ssh_client(
+            'user:ssh@localhost',
+            '-p',
+            str(wg_port),
+            '-i',
+            '/dev/null',
+            '-o',
+            'PreferredAuthentications=password',
+            'ls',
+            '/bin/sh',
+            password='321',
+        )
+        ssh_client.communicate()
+        assert ssh_client.returncode != 0
+
+    def test_ssh_user_ed25519_pubkey_auth(
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
+    ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
         wait_port(ssh_port)
+
         _, wg_port = processes.start_wg(
             dedent(
                 f'''\
@@ -117,7 +95,6 @@ class TestClass:
             ),
         )
         wait_port(wg_port)
-        logging.info('running')
 
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
@@ -147,7 +124,9 @@ class TestClass:
         assert ssh_client.communicate()[0] == b''
         assert ssh_client.returncode != 0
 
-    def test_ssh_user_rsa_pubkey_auth(self, processes: ProcessManager, wg_c_ed25519_pubkey: Path):
+    def test_ssh_user_rsa_pubkey_auth(
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
+    ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )

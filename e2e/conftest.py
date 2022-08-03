@@ -204,3 +204,13 @@ def report():
 @pytest.fixture
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / 'ssh-keys/wg/client-ed25519.pub'
+
+
+@pytest.fixture
+def otp_key_base64():
+    return 'Isj0ekwF1YsKW8VUUQiU4awp/9dMnyMcTPH9rlr1OsE='
+
+
+@pytest.fixture
+def otp_key_base32():
+    return 'ELEPI6SMAXKYWCS3YVKFCCEU4GWCT76XJSPSGHCM6H624WXVHLAQ'

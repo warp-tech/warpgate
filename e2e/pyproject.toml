@@ -8,9 +8,13 @@ authors = ["Your Name <you@example.com>"]
 python = "^3.7"
 pytest = "^7.1.2"
 psutil = "^5.9.1"
+pyotp = "^2.6.0"
+paramiko = "^2.11.0"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^5.0.2"
+pytest = "^7.1.2"
+ssh2-python = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
