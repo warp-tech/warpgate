@@ -24,7 +24,7 @@ poem-openapi = { version = "^2.0.4", features = [
     "uuid",
     "static-files",
 ] }
-russh-keys = { version = "0.22.0-beta.3", features = ["openssl"] }
+russh-keys = { version = "0.22.0-beta.4", features = ["openssl"] }
 rust-embed = "6.3"
 sea-orm = { version = "^0.9", features = [
     "sqlx-sqlite",
