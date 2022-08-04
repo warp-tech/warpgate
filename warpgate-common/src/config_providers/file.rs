@@ -102,7 +102,7 @@ impl ConfigProvider for FileConfigProvider {
                     kind,
                     public_key_bytes,
                 } => {
-                    let mut base64_bytes = BASE64.encode(public_key_bytes);
+                    let base64_bytes = BASE64.encode(public_key_bytes);
 
                     let client_key = format!("{} {}", kind, base64_bytes);
                     debug!(username = &user.username[..], "Client key: {}", client_key);
