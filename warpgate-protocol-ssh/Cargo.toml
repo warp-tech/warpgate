@@ -13,7 +13,7 @@ bytes = "1.2"
 dialoguer = "0.10"
 futures = "0.3"
 russh = {version = "0.34.0-beta.5", features = ["openssl"]}
-russh-keys = {version = "0.22.0-beta.3", features = ["openssl"]}
+russh-keys = {version = "0.22.0-beta.4", features = ["openssl"]}
 sea-orm = {version = "^0.9", features = ["runtime-tokio-native-tls"], default-features = false}
 thiserror = "1.0"
 time = "0.3"
