@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
+use warpgate_sso::SsoProviderConfig;
 
+use crate::auth::CredentialKind;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret};
 
@@ -194,16 +196,32 @@ pub enum UserAuthCredential {
         #[serde(with = "crate::helpers::serde_base64_secret")]
         key: OtpSecretKey,
     },
+    #[serde(rename = "sso")]
+    Sso {
+        provider: Option<String>,
+        email: String,
+    },
+}
+
+impl UserAuthCredential {
+    pub fn kind(&self) -> CredentialKind {
+        match self {
+            Self::Password { .. } => CredentialKind::Password,
+            Self::PublicKey { .. } => CredentialKind::PublicKey,
+            Self::Totp { .. } => CredentialKind::Otp,
+            Self::Sso { .. } => CredentialKind::Sso,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub http: Option<Vec<String>>,
+    pub http: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh: Option<Vec<String>>,
+    pub ssh: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mysql: Option<Vec<String>>,
+    pub mysql: Option<Vec<CredentialKind>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -359,6 +377,7 @@ pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
     pub users: Vec<User>,
     pub roles: Vec<Role>,
+    pub sso_providers: Vec<SsoProviderConfig>,
 
     #[serde(default)]
     pub recordings: RecordingsConfig,
@@ -388,6 +407,7 @@ impl Default for WarpgateConfigStore {
             targets: vec![],
             users: vec![],
             roles: vec![],
+            sso_providers: vec![],
             recordings: RecordingsConfig::default(),
             external_host: None,
             database_url: _default_database_url(),

@@ -41,6 +41,53 @@
         "operationId": "login"
       }
     },
+    "/auth/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "otpLogin"
+      }
+    },
+    "/auth/state": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getAuthState"
+      }
+    },
     "/auth/logout": {
       "post": {
         "responses": {
@@ -87,10 +134,104 @@
         },
         "operationId": "get_targets"
       }
+    },
+    "/sso/providers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SsoProviderDescription"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_sso_providers"
+      }
+    },
+    "/sso/return": {
+      "get": {
+        "parameters": [
+          {
+            "name": "code",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": ""
+          }
+        },
+        "operationId": "return_to_sso"
+      }
+    },
+    "/sso/providers/{name}/start": {
+      "get": {
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSsoResponseParams"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "start_sso"
+      }
     }
   },
   "components": {
     "schemas": {
+      "ApiAuthState": {
+        "type": "string",
+        "enum": [
+          "NotStarted",
+          "Failed",
+          "PasswordNeeded",
+          "OtpNeeded",
+          "SsoNeeded",
+          "Success"
+        ]
+      },
+      "AuthStateResponseInternal": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
+          }
+        }
+      },
       "Info": {
         "type": "object",
         "required": [
@@ -119,21 +260,14 @@
           }
         }
       },
-      "LoginFailureReason": {
-        "type": "string",
-        "enum": [
-          "InvalidCredentials",
-          "OtpNeeded"
-        ]
-      },
       "LoginFailureResponse": {
         "type": "object",
         "required": [
-          "reason"
+          "state"
         ],
         "properties": {
-          "reason": {
-            "$ref": "#/components/schemas/LoginFailureReason"
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
           }
         }
       },
@@ -149,7 +283,15 @@
           },
           "password": {
             "type": "string"
-          },
+          }
+        }
+      },
+      "OtpLoginRequest": {
+        "type": "object",
+        "required": [
+          "otp"
+        ],
+        "properties": {
           "otp": {
             "type": "string"
           }
@@ -169,6 +311,46 @@
           "mysql": {
             "type": "integer",
             "format": "uint16"
+          }
+        }
+      },
+      "SsoProviderDescription": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SsoProviderKind"
+          }
+        }
+      },
+      "SsoProviderKind": {
+        "type": "string",
+        "enum": [
+          "Google",
+          "Apple",
+          "Microsoft",
+          "Azure",
+          "Custom"
+        ]
+      },
+      "StartSsoResponseParams": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
           }
         }
       },

@@ -17,15 +17,15 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthCredential, AuthSelector, AuthState, CredentialKind};
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
 };
 use warpgate_common::{
-    authorize_ticket, AuthCredential, AuthResult, Secret, Services, SessionId,
-    SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions, WarpgateServerHandle,
+    authorize_ticket, AuthResult, Secret, Services, SessionId, SshHostKeyVerificationMode, Target,
+    TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
 use super::service_output::ServiceOutput;
@@ -71,10 +71,10 @@ pub struct ServerSession {
     target: TargetSelection,
     traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
     traffic_connection_recorders: HashMap<Uuid, ConnectionRecorder>,
-    credentials: Vec<AuthCredential>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
     service_output: ServiceOutput,
+    auth_state: Option<AuthState>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -136,12 +136,12 @@ impl ServerSession {
             target: TargetSelection::None,
             traffic_recorders: HashMap::new(),
             traffic_connection_recorders: HashMap::new(),
-            credentials: vec![],
             hub,
             event_sender: event_sender.clone(),
             service_output: ServiceOutput::new(Box::new(move |data| {
                 so_tx.send(BytesMut::from(data).freeze()).context("x")
             })),
+            auth_state: None,
         };
 
         let this = Arc::new(Mutex::new(this));
@@ -215,6 +215,20 @@ impl ServerSession {
         });
 
         Ok(this)
+    }
+
+    async fn get_auth_state(&mut self, username: &str) -> Result<&mut AuthState> {
+        #[allow(clippy::unwrap_used)]
+        if self.auth_state.is_none() || self.auth_state.as_ref().unwrap().username() != username {
+            let mut cp = self.services.config_provider.lock().await;
+            self.auth_state = Some(AuthState::new(
+                username.to_string(),
+                crate::PROTOCOL_NAME.to_string(),
+                cp.get_credential_policy(username).await?,
+            ));
+        }
+        #[allow(clippy::unwrap_used)]
+        Ok(self.auth_state.as_mut().unwrap())
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -913,15 +927,19 @@ impl ServerSession {
             key.fingerprint()
         );
 
-        self.credentials.push(AuthCredential::PublicKey {
-            kind: key.name().to_string(),
-            public_key_bytes: Bytes::from(key.public_key_bytes()),
-        });
-
-        match self.try_auth(&selector).await {
+        match self
+            .try_auth(
+                &selector,
+                AuthCredential::PublicKey {
+                    kind: key.name().to_string(),
+                    public_key_bytes: Bytes::from(key.public_key_bytes()),
+                },
+            )
+            .await
+        {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -937,12 +955,13 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Password key auth as {:?}", selector);
 
-        self.credentials.push(AuthCredential::Password(password));
-
-        match self.try_auth(&selector).await {
+        match self
+            .try_auth(&selector, AuthCredential::Password(password))
+            .await
+        {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -958,18 +977,19 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
-        if let Some(otp) = response {
-            self.credentials.push(AuthCredential::Otp(otp));
-        }
+        let Some(otp) = response else {
+            return russh::server::Auth::Reject
+        };
 
-        match self.try_auth(&selector).await {
+        match self.try_auth(&selector, AuthCredential::Otp(otp)).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::OtpNeeded) => russh::server::Auth::Partial {
+            Ok(AuthResult::Need(CredentialKind::Otp)) => russh::server::Auth::Partial {
                 name: Cow::Borrowed("Two-factor authentication"),
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
             },
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject, // TODO SSO
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -977,20 +997,28 @@ impl ServerSession {
         }
     }
 
-    async fn try_auth(&mut self, selector: &AuthSelector) -> Result<AuthResult> {
+    async fn try_auth(
+        &mut self,
+        selector: &AuthSelector,
+        credential: AuthCredential,
+    ) -> Result<AuthResult> {
         match selector {
             AuthSelector::User {
                 username,
                 target_name,
             } => {
-                let user_auth_result: AuthResult = {
-                    self.services
-                        .config_provider
-                        .lock()
-                        .await
-                        .authorize(username, &self.credentials, crate::PROTOCOL_NAME)
-                        .await?
-                };
+                let cp = self.services.config_provider.clone();
+                let state = self.get_auth_state(username).await?;
+                if cp
+                    .lock()
+                    .await
+                    .validate_credential(username, &credential)
+                    .await?
+                {
+                    state.add_valid_credential(credential);
+                }
+
+                let user_auth_result = state.verify();
 
                 match user_auth_result {
                     AuthResult::Accepted { username } => {
