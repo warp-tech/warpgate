@@ -981,7 +981,7 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
-        let cred = response.map(|otp| AuthCredential::Otp(otp));
+        let cred = response.map(AuthCredential::Otp);
 
         match self.try_auth(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,

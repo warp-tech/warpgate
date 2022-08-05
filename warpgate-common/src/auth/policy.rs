@@ -43,12 +43,10 @@ impl CredentialPolicy for UserRequireCredentialsPolicy {
             } else {
                 CredentialPolicyResponse::Ok
             }
+        } else if valid_credentials.is_empty() {
+            CredentialPolicyResponse::NeedMoreCredentials
         } else {
-            if valid_credentials.is_empty() {
-                CredentialPolicyResponse::NeedMoreCredentials
-            } else {
-                CredentialPolicyResponse::Ok
-            }
+            CredentialPolicyResponse::Ok
         }
     }
 }
