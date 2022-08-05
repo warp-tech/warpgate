@@ -377,6 +377,8 @@ pub struct WarpgateConfigStore {
     pub targets: Vec<Target>,
     pub users: Vec<User>,
     pub roles: Vec<Role>,
+
+    #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
     #[serde(default)]
