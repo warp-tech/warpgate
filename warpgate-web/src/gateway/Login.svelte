@@ -187,7 +187,7 @@ async function startSSO (provider: SsoProviderDescription) {
                             {#if ssoProvider.kind === SsoProviderKind.Google}
                                 <Fa fw class="me-2" icon={faGoogle} />
                             {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Microsoft || ssoProvider.kind === SsoProviderKind.Azure}
+                            {#if ssoProvider.kind === SsoProviderKind.Azure}
                                 <Fa fw class="me-2" icon={faMicrosoft} />
                             {/if}
                             {#if ssoProvider.kind === SsoProviderKind.Apple}

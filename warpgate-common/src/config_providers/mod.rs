@@ -16,6 +16,7 @@ use crate::{Secret, Target, UserSnapshot, WarpgateError};
 pub enum AuthResult {
     Accepted { username: String },
     Need(CredentialKind),
+    NeedMoreCredentials,
     Rejected,
 }
 

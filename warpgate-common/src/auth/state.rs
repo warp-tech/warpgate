@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
-use tracing::*;
+use tracing::warn;
 
 use super::{AuthCredential, CredentialPolicy, CredentialPolicyResponse};
 use crate::AuthResult;
@@ -58,6 +58,9 @@ impl AuthState {
                 CredentialPolicyResponse::Ok => {}
                 CredentialPolicyResponse::Need(kind) => {
                     return AuthResult::Need(kind);
+                }
+                CredentialPolicyResponse::NeedMoreCredentials => {
+                    return AuthResult::Rejected;
                 }
             }
         }

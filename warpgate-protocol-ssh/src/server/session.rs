@@ -930,16 +930,18 @@ impl ServerSession {
         match self
             .try_auth(
                 &selector,
-                AuthCredential::PublicKey {
+                Some(AuthCredential::PublicKey {
                     kind: key.name().to_string(),
                     public_key_bytes: Bytes::from(key.public_key_bytes()),
-                },
+                }),
             )
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_) | AuthResult::NeedMoreCredentials) => {
+                russh::server::Auth::Reject
+            }
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -956,12 +958,14 @@ impl ServerSession {
         info!("Password key auth as {:?}", selector);
 
         match self
-            .try_auth(&selector, AuthCredential::Password(password))
+            .try_auth(&selector, Some(AuthCredential::Password(password)))
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject,
+            Ok(AuthResult::Need(_) | AuthResult::NeedMoreCredentials) => {
+                russh::server::Auth::Reject
+            }
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject
@@ -977,14 +981,15 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
-        let Some(otp) = response else {
-            return russh::server::Auth::Reject
-        };
+        let cred = response.map(|otp| AuthCredential::Otp(otp));
 
-        match self.try_auth(&selector, AuthCredential::Otp(otp)).await {
+        match self.try_auth(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::Need(CredentialKind::Otp)) => russh::server::Auth::Partial {
+            Ok(
+                AuthResult::Rejected
+                | AuthResult::NeedMoreCredentials
+                | AuthResult::Need(CredentialKind::Otp),
+            ) => russh::server::Auth::Partial {
                 name: Cow::Borrowed("Two-factor authentication"),
                 instructions: Cow::Borrowed(""),
                 prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
@@ -1000,7 +1005,7 @@ impl ServerSession {
     async fn try_auth(
         &mut self,
         selector: &AuthSelector,
-        credential: AuthCredential,
+        credential: Option<AuthCredential>,
     ) -> Result<AuthResult> {
         match selector {
             AuthSelector::User {
@@ -1009,13 +1014,16 @@ impl ServerSession {
             } => {
                 let cp = self.services.config_provider.clone();
                 let state = self.get_auth_state(username).await?;
-                if cp
-                    .lock()
-                    .await
-                    .validate_credential(username, &credential)
-                    .await?
-                {
-                    state.add_valid_credential(credential);
+
+                if let Some(credential) = credential {
+                    if cp
+                        .lock()
+                        .await
+                        .validate_credential(username, &credential)
+                        .await?
+                    {
+                        state.add_valid_credential(credential);
+                    }
                 }
 
                 let user_auth_result = state.verify();

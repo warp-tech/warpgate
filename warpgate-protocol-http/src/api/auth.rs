@@ -75,6 +75,7 @@ impl From<AuthResult> for ApiAuthState {
             AuthResult::Need(CredentialKind::Otp) => ApiAuthState::OtpNeeded,
             AuthResult::Need(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
             AuthResult::Need(CredentialKind::PublicKey) => ApiAuthState::Failed,
+            AuthResult::NeedMoreCredentials => ApiAuthState::Failed,
             AuthResult::Accepted { .. } => ApiAuthState::Success,
         }
     }

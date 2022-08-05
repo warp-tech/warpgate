@@ -5,6 +5,7 @@ use crate::UserRequireCredentialsPolicy;
 
 pub enum CredentialPolicyResponse {
     Ok,
+    NeedMoreCredentials,
     Need(CredentialKind),
 }
 
@@ -38,9 +39,16 @@ impl CredentialPolicy for UserRequireCredentialsPolicy {
             }
 
             if let Some(kind) = remaining_required_kinds.into_iter().next() {
-                return CredentialPolicyResponse::Need(kind);
+                CredentialPolicyResponse::Need(kind)
+            } else {
+                CredentialPolicyResponse::Ok
+            }
+        } else {
+            if valid_credentials.is_empty() {
+                CredentialPolicyResponse::NeedMoreCredentials
+            } else {
+                CredentialPolicyResponse::Ok
             }
         }
-        CredentialPolicyResponse::Ok
     }
 }

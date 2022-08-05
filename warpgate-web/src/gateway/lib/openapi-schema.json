@@ -338,7 +338,6 @@
         "enum": [
           "Google",
           "Apple",
-          "Microsoft",
           "Azure",
           "Custom"
         ]
