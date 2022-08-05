@@ -1,0 +1,142 @@
+import os
+import subprocess
+import pytest
+from textwrap import dedent
+
+from .conftest import ProcessManager
+from .util import wait_port, alloc_port
+
+
+@pytest.fixture(scope='class')
+def ssh_port(processes, wg_c_ed25519_pubkey):
+    yield processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
+
+
+@pytest.fixture(scope='class')
+def wg_port(processes, ssh_port):
+    _, wg_port = processes.start_wg(
+        dedent(
+            f'''\
+            targets:
+            -   name: ssh
+                allow_roles: [role]
+                ssh:
+                    host: localhost
+                    port: {ssh_port}
+                    username: {os.getlogin()}
+            users:
+            -   username: user
+                roles: [role]
+                credentials:
+                -   type: password
+                    hash: '$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0' # 123
+            '''
+        ),
+    )
+    wait_port(ssh_port)
+    wait_port(wg_port)
+    yield wg_port
+
+
+common_args = [
+    'user:ssh@localhost',
+    '-i',
+    '/dev/null',
+    '-o',
+    'PreferredAuthentications=password',
+]
+
+
+class Test:
+    def test_pty(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-tt',
+            *common_args,
+            'echo',
+            'hello',
+            password='123',
+        )
+
+        output = ssh_client.communicate()[0]
+        assert b'Warpgate' in output
+        assert b'Selected target:' in output
+        assert b'hello\r\n' in output
+
+    def test_signals(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            'sh', '-c',
+            '"pkill -9 sh"',
+            password='123',
+        )
+
+        assert ssh_client.returncode != 0
+
+    def test_direct_tcpip(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        local_port = alloc_port()
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            '-L', f'{local_port}:localhost:22',
+            'sleep', '15',
+            password='123',
+        )
+
+        data = wait_port(local_port)
+        assert b'SSH-2.0' in data
+        ssh_client.kill()
+
+    def test_shell(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        script = dedent(
+            f'''
+            set timeout 10
+
+            spawn ssh -tt user:ssh@localhost -p {wg_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password
+
+            expect "password:"
+            sleep 0.5
+            send "123\\r"
+
+            expect "#"
+            sleep 0.5
+            send "ls /bin/sh\\r"
+            send "exit\\r"
+
+            expect {{
+                "/bin/sh"  {{ exit 0; }}
+                eof {{ exit 1; }}
+            }}
+
+            exit 1
+            '''
+        )
+
+        ssh_client = processes.start(
+            ['expect', '-d'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+        )
+
+        output = ssh_client.communicate(script.encode())[0]
+        assert ssh_client.returncode == 0, output

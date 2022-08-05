@@ -16,14 +16,17 @@ def alloc_port():
 def wait_port(port):
     logging.debug(f'Waiting for port {port}')
 
+    data = b''
+
     def wait():
+        nonlocal data
         while True:
             try:
                 s = socket.create_connection(('localhost', port))
-                s.recv(1)
+                data = s.recv(100)
                 s.close()
                 logging.debug(f'Port {port} is up')
-                break
+                return data
             except socket.error:
                 time.sleep(0.1)
                 continue
@@ -33,3 +36,4 @@ def wait_port(port):
     t.join(timeout=5)
     if t.is_alive():
         raise Exception(f'Port {port} is not up')
+    return data

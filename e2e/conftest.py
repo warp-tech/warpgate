@@ -5,6 +5,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -56,7 +57,7 @@ class ProcessManager:
 
     def start_ssh_server(self, trusted_keys=[]):
         port = alloc_port()
-        data_dir = self.ctx.tmpdir / 'sshd'
+        data_dir = self.ctx.tmpdir / f'sshd-{uuid.uuid4()}'
         data_dir.mkdir(parents=True)
         authorized_keys_path = data_dir / 'authorized_keys'
         authorized_keys_path.write_text('\n'.join(trusted_keys))
@@ -104,7 +105,7 @@ class ProcessManager:
 
     def start_wg(self, config='', args=None):
         port = alloc_port()
-        data_dir = self.ctx.tmpdir / 'wg-data'
+        data_dir = self.ctx.tmpdir / f'wg-data-{uuid.uuid4()}'
         data_dir.mkdir(parents=True)
         keys_dir = data_dir / 'keys'
         keys_dir.mkdir(parents=True)
@@ -154,7 +155,7 @@ class ProcessManager:
         self.children.append(p)
         return p, port
 
-    def start_ssh_client(self, *args, password=None):
+    def start_ssh_client(self, *args, password=None, **kwargs):
         preargs = []
         if password:
             preargs = ['sshpass', '-p', password]
@@ -164,25 +165,33 @@ class ProcessManager:
                 'ssh',
                 # '-v',
                 '-o',
+                'IdentitiesOnly=yes',
+                '-o',
                 'StrictHostKeychecking=no',
                 '-o',
                 'UserKnownHostsFile=/dev/null',
                 *args,
             ],
             stdout=subprocess.PIPE,
+            **kwargs,
         )
         self.children.append(p)
         return p
 
+    def start(self, args, **kwargs):
+        p = subprocess.Popen(args, **kwargs)
+        self.children.append(p)
+        return p
 
-@pytest.fixture
+
+@pytest.fixture(scope='session')
 def ctx():
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx = Context(tmpdir=Path(tmpdir))
         yield ctx
 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def processes(ctx):
     mgr = ProcessManager(ctx)
     try:
@@ -193,6 +202,7 @@ def processes(ctx):
 
 @pytest.fixture(scope='session', autouse=True)
 def report():
+    # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
     subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
     yield
     subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
@@ -201,16 +211,16 @@ def report():
 # ----
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / 'ssh-keys/wg/client-ed25519.pub'
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def otp_key_base64():
     return 'Isj0ekwF1YsKW8VUUQiU4awp/9dMnyMcTPH9rlr1OsE='
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def otp_key_base32():
     return 'ELEPI6SMAXKYWCS3YVKFCCEU4GWCT76XJSPSGHCM6H624WXVHLAQ'

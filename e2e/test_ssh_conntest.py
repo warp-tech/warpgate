@@ -6,8 +6,8 @@ from .conftest import ProcessManager
 from .util import alloc_port, wait_port
 
 
-class TestSSHConnectionTest:
-    def test_ssh_conntest_success(
+class Test:
+    def test_success(
         self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
     ):
         ssh_port = processes.start_ssh_server(
@@ -32,7 +32,7 @@ class TestSSHConnectionTest:
         proc.wait(timeout=5)
         assert proc.returncode == 0
 
-    def test_ssh_conntest_fail(self, processes: ProcessManager):
+    def test_fail(self, processes: ProcessManager):
         ssh_port = alloc_port()
         proc, _ = processes.start_wg(
             config=dedent(
