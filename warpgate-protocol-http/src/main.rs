@@ -1,9 +1,6 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
-mod api;
+use warpgate_protocol_http::api;
 use regex::Regex;
-mod common;
-mod session;
-mod session_handle;
 use poem_openapi::OpenApiService;
 
 #[allow(clippy::unwrap_used)]

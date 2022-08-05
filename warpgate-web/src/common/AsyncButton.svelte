@@ -22,6 +22,7 @@ async function _click () {
 
 <Button
     on:click={_click}
+    class={$$props.class}
     outline={outline}
     color={color}
     type={type}

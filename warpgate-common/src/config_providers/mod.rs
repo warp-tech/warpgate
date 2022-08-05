@@ -2,7 +2,6 @@ mod file;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 pub use file::FileConfigProvider;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
@@ -10,21 +9,14 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
-use crate::{ProtocolName, Secret, Target, UserSnapshot, WarpgateError};
+use crate::auth::{AuthCredential, CredentialKind, CredentialPolicy};
+use crate::{Secret, Target, UserSnapshot, WarpgateError};
 
+#[derive(Debug)]
 pub enum AuthResult {
     Accepted { username: String },
-    OtpNeeded,
+    Need(CredentialKind),
     Rejected,
-}
-
-pub enum AuthCredential {
-    Otp(Secret<String>),
-    Password(Secret<String>),
-    PublicKey {
-        kind: String,
-        public_key_bytes: Bytes,
-    },
 }
 
 #[async_trait]
@@ -33,12 +25,21 @@ pub trait ConfigProvider {
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
 
-    async fn authorize(
+    async fn validate_credential(
         &mut self,
         username: &str,
-        credentials: &[AuthCredential],
-        protocol: ProtocolName,
-    ) -> Result<AuthResult, WarpgateError>;
+        client_credential: &AuthCredential,
+    ) -> Result<bool, WarpgateError>;
+
+    async fn username_for_sso_credential(
+        &mut self,
+        client_credential: &AuthCredential,
+    ) -> Result<Option<String>, WarpgateError>;
+
+    async fn get_credential_policy(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError>;
 
     async fn authorize_target(
         &mut self,

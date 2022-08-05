@@ -1,5 +1,5 @@
 #![feature(type_alias_impl_trait, let_else, try_blocks)]
-mod api;
+pub mod api;
 mod catchall;
 mod common;
 mod error;

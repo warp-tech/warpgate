@@ -7,11 +7,18 @@ use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
-use warpgate_common::{ProtocolName, Services, TargetOptions};
+use tokio::sync::Mutex;
+use tracing::*;
+use uuid::Uuid;
+use warpgate_common::auth::{AuthState, AuthStateStore};
+use warpgate_common::{ProtocolName, Services, TargetOptions, WarpgateError};
+
+use crate::session::SessionStore;
 
 pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
+static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 pub static SESSION_MAX_AGE: Duration = Duration::from_secs(60 * 30);
 pub static COOKIE_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -23,6 +30,7 @@ pub trait SessionExt {
     fn get_username(&self) -> Option<String>;
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
+    fn get_auth_state_id(&self) -> Option<AuthStateId>;
 }
 
 impl SessionExt for Session {
@@ -53,7 +61,14 @@ impl SessionExt for Session {
     fn set_auth(&self, auth: SessionAuthorization) {
         self.set(AUTH_SESSION_KEY, auth);
     }
+
+    fn get_auth_state_id(&self) -> Option<AuthStateId> {
+        self.get(AUTH_STATE_ID_SESSION_KEY)
+    }
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AuthStateId(pub Uuid);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum SessionAuthorization {
@@ -160,4 +175,51 @@ pub fn gateway_redirect(req: &Request) -> Response {
     );
 
     Redirect::temporary(path).into_response()
+}
+
+pub async fn get_auth_state_for_request<'a>(
+    username: &str,
+    session: &Session,
+    store: &'a mut AuthStateStore,
+) -> Result<&'a mut AuthState, WarpgateError> {
+    match session.get_auth_state_id() {
+        Some(id) => {
+            if !store.contains_key(&id.0) {
+                session.remove(AUTH_STATE_ID_SESSION_KEY)
+            }
+        }
+        None => (),
+    };
+
+    match session.get_auth_state_id() {
+        Some(id) => Ok(store.get_mut(&id.0).unwrap()),
+        None => {
+            let (id, state) = store
+                .create(&username, crate::common::PROTOCOL_NAME)
+                .await?;
+            session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
+            Ok(state)
+        }
+    }
+}
+
+pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {
+    let session_middleware: Data<&Arc<Mutex<SessionStore>>> =
+        <_>::from_request_without_body(&req).await?;
+    let session: &Session = <_>::from_request_without_body(&req).await?;
+
+    let server_handle = session_middleware
+        .lock()
+        .await
+        .create_handle_for(&req)
+        .await?;
+    server_handle
+        .lock()
+        .await
+        .set_username(username.clone())
+        .await?;
+    info!(%username, "Authenticated");
+    session.set_auth(SessionAuthorization::User(username));
+
+    Ok(())
 }

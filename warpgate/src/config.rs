@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
@@ -77,32 +77,47 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     }
 }
 
-pub async fn watch_config<P: AsRef<Path>>(
+#[must_use]
+pub fn watch_config<P: AsRef<Path> + Send + 'static>(
     path: P,
     config: Arc<Mutex<WarpgateConfig>>,
-) -> Result<()> {
-    let (tx, mut rx) = mpsc::channel(1);
+) -> Result<broadcast::Receiver<()>> {
+    let (tx, mut rx) = mpsc::channel(16);
     let mut watcher = RecommendedWatcher::new(move |res| {
         let _ = tx.blocking_send(res);
     })?;
     watcher.configure(notify::Config::PreciseEvents(true))?;
     watcher.watch(path.as_ref(), RecursiveMode::NonRecursive)?;
 
-    loop {
-        match rx.recv().await {
-            Some(Ok(event)) => {
-                if event.kind.is_modify() {
-                    match load_config(path.as_ref(), false) {
-                        Ok(new_config) => {
-                            *(config.lock().await) = new_config;
-                            info!("Reloaded config");
+    let path = PathBuf::from(path.as_ref());
+    let (tx2, rx2) = broadcast::channel(16);
+    tokio::spawn(async move {
+        let _watcher = watcher; // avoid dropping the watcher
+        loop {
+            match rx.recv().await {
+                Some(Ok(event)) => {
+                    if event.kind.is_modify() {
+                        match load_config(&path, false) {
+                            Ok(new_config) => {
+                                *(config.lock().await) = new_config;
+                                let _ = tx2.send(());
+                                info!("Reloaded config");
+                            }
+                            Err(error) => error!(?error, "Failed to reload config"),
                         }
-                        Err(error) => error!(?error, "Failed to reload config"),
                     }
                 }
+                Some(Err(error)) => error!(?error, "Failed to watch config"),
+                None => {
+                    error!("Config watch failed");
+                    break;
+                }
             }
-            Some(Err(error)) => error!(?error, "Failed to watch config"),
-            None => error!("Config watch failed"),
         }
-    }
+
+        #[allow(unreachable_code)]
+        Ok::<_, anyhow::Error>(())
+    });
+
+    Ok(rx2)
 }
