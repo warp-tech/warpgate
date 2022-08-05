@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use futures::StreamExt;
 #[cfg(target_os = "linux")]
@@ -110,7 +112,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         anyhow::bail!("No protocols are enabled in the config file, exiting");
     }
 
-    tokio::spawn(watch_config(cli.config.clone(), services.config.clone()));
+    tokio::spawn(watch_config_and_reload(
+        PathBuf::from(&cli.config),
+        services.clone(),
+    ));
 
     loop {
         tokio::select! {
@@ -131,5 +136,27 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     }
 
     info!("Exiting");
+    Ok(())
+}
+
+pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Result<()> {
+    let mut reload_event = watch_config(path, services.config.clone())?;
+
+    while let Ok(()) = reload_event.recv().await {
+        let state = services.state.lock().await;
+        let mut cp = services.config_provider.lock().await;
+        for (id, session) in state.sessions.iter() {
+            let mut session = session.lock().await;
+            if let (Some(username), Some(target)) =
+                (session.username.as_ref(), session.target.as_ref())
+            {
+                if !cp.authorize_target(username, &target.name).await? {
+                    warn!(sesson_id=%id, %username, target=&target.name, "Session no longer authorized after config reload");
+                    session.handle.close();
+                }
+            }
+        }
+    }
+
     Ok(())
 }
