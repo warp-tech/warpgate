@@ -59,11 +59,8 @@ class TestSSHUserAuthClass:
         except BaseException as e:
             print(e)
 
-        print(s.userauth_authenticated())
-
         totp = pyotp.TOTP(otp_key_base32)
         s.userauth_keyboardinteractive('user:ssh', totp.now())
-        print(s.userauth_authenticated())
 
         chan = s.open_session()
         chan.execute('ls /bin/sh')
