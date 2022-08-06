@@ -180,15 +180,13 @@ impl MySqlSession {
                 username,
                 target_name,
             } => {
-                let user_auth_result = {
-                    let mut cp = self.services.config_provider.lock().await;
+                let state_arc = self.services.auth_state_store.lock().await.create(&username, crate::common::PROTOCOL_NAME).await?.1;
+                let mut state = state_arc.lock().await;
 
+                let user_auth_result = {
                     let credential = AuthCredential::Password(password);
-                    let mut state = AuthState::new(
-                        username.clone(),
-                        crate::common::PROTOCOL_NAME.to_string(),
-                        cp.get_credential_policy(&username).await?,
-                    );
+
+                    let mut cp = self.services.config_provider.lock().await;
                     if cp.validate_credential(&username, &credential).await? {
                         state.add_valid_credential(credential);
                     }
@@ -198,6 +196,7 @@ impl MySqlSession {
 
                 match user_auth_result {
                     AuthResult::Accepted { username } => {
+                        self.services.auth_state_store.lock().await.complete(state.id()).await;
                         let target_auth_result = {
                             self.services
                                 .config_provider

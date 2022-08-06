@@ -12,7 +12,7 @@ use warpgate_db_entities::Ticket;
 use crate::auth::{AuthCredential, CredentialKind, CredentialPolicy};
 use crate::{Secret, Target, UserSnapshot, WarpgateError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AuthResult {
     Accepted { username: String },
     Need(CredentialKind),

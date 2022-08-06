@@ -1,47 +1,47 @@
-use std::time::{Duration, Instant};
-
-use once_cell::sync::Lazy;
 use tracing::warn;
+use uuid::Uuid;
 
 use super::{AuthCredential, CredentialPolicy, CredentialPolicyResponse};
 use crate::AuthResult;
 
-#[allow(clippy::unwrap_used)]
-pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));
-
 pub struct AuthState {
+    id: Uuid,
     username: String,
     protocol: String,
     policy: Option<Box<dyn CredentialPolicy + Sync + Send>>,
     valid_credentials: Vec<AuthCredential>,
-    started_at: Instant,
 }
 
 impl AuthState {
-    pub fn new(
+    pub(crate) fn new(
+        id: Uuid,
         username: String,
         protocol: String,
         policy: Option<Box<dyn CredentialPolicy + Sync + Send>>,
     ) -> Self {
         Self {
+            id,
             username,
             protocol,
             policy,
             valid_credentials: vec![],
-            started_at: Instant::now(),
         }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
     }
 
     pub fn username(&self) -> &str {
         &self.username
     }
 
-    pub fn add_valid_credential(&mut self, credential: AuthCredential) {
-        self.valid_credentials.push(credential);
+    pub fn protocol(&self) -> &str {
+        &self.protocol
     }
 
-    pub fn is_expired(&self) -> bool {
-        self.started_at.elapsed() > *TIMEOUT
+    pub fn add_valid_credential(&mut self, credential: AuthCredential) {
+        self.valid_credentials.push(credential);
     }
 
     pub fn verify(&self) -> AuthResult {

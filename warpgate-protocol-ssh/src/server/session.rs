@@ -74,7 +74,7 @@ pub struct ServerSession {
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
     service_output: ServiceOutput,
-    auth_state: Option<AuthState>,
+    auth_state: Option<Arc<Mutex<AuthState>>>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -217,18 +217,23 @@ impl ServerSession {
         Ok(this)
     }
 
-    async fn get_auth_state(&mut self, username: &str) -> Result<&mut AuthState> {
+    async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
-        if self.auth_state.is_none() || self.auth_state.as_ref().unwrap().username() != username {
-            let mut cp = self.services.config_provider.lock().await;
-            self.auth_state = Some(AuthState::new(
-                username.to_string(),
-                crate::PROTOCOL_NAME.to_string(),
-                cp.get_credential_policy(username).await?,
-            ));
+        if self.auth_state.is_none()
+            || self.auth_state.as_ref().unwrap().lock().await.username() != username
+        {
+            let state = self
+                .services
+                .auth_state_store
+                .lock()
+                .await
+                .create(username, crate::PROTOCOL_NAME)
+                .await?
+                .1;
+            self.auth_state = Some(state);
         }
         #[allow(clippy::unwrap_used)]
-        Ok(self.auth_state.as_mut().unwrap())
+        Ok(self.auth_state.as_ref().map(Clone::clone).unwrap())
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -1013,7 +1018,9 @@ impl ServerSession {
                 target_name,
             } => {
                 let cp = self.services.config_provider.clone();
-                let state = self.get_auth_state(username).await?;
+
+                let state_arc = self.get_auth_state(username).await?;
+                let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
                     if cp
@@ -1030,6 +1037,11 @@ impl ServerSession {
 
                 match user_auth_result {
                     AuthResult::Accepted { username } => {
+                        self.services
+                            .auth_state_store
+                            .lock()
+                            .await
+                            .complete(state.id());
                         let target_auth_result = {
                             self.services
                                 .config_provider

@@ -92,8 +92,9 @@ impl Api {
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut auth_state_store = services.auth_state_store.lock().await;
-        let state =
+        let state_arc =
             get_auth_state_for_request(&body.username, session, &mut auth_state_store).await?;
+        let mut state = state_arc.lock().await;
 
         let mut cp = services.config_provider.lock().await;
 
@@ -107,6 +108,7 @@ impl Api {
 
         match state.verify() {
             AuthResult::Accepted { username } => {
+                auth_state_store.complete(state.id()).await;
                 authorize_session(req, username).await?;
                 Ok(LoginResponse::Success)
             }
@@ -131,11 +133,13 @@ impl Api {
 
         let mut auth_state_store = services.auth_state_store.lock().await;
 
-        let Some(state) = state_id.and_then(|id| auth_state_store.get_mut(&id.0)) else {
+        let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 state: ApiAuthState::NotStarted,
             })))
         };
+
+        let mut state = state_arc.lock().await;
 
         let mut cp = services.config_provider.lock().await;
 
@@ -146,6 +150,7 @@ impl Api {
 
         match state.verify() {
             AuthResult::Accepted { username } => {
+                auth_state_store.complete(state.id()).await;
                 authorize_session(req, username).await?;
                 Ok(LoginResponse::Success)
             }
@@ -163,13 +168,15 @@ impl Api {
     ) -> poem::Result<AuthStateResponse> {
         let state_id = session.get_auth_state_id();
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
+        let auth_state_store = services.auth_state_store.lock().await;
 
-        let Some(state) = state_id.and_then(|id| auth_state_store.get_mut(&id.0)) else {
+        let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
             return Ok(AuthStateResponse::Ok(Json(AuthStateResponseInternal {
                 state: ApiAuthState::NotStarted,
             })));
         };
+
+        let state = state_arc.lock().await;
 
         Ok(AuthStateResponse::Ok(Json(AuthStateResponseInternal {
             state: state.verify().into(),
