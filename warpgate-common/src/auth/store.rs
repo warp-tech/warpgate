@@ -52,16 +52,15 @@ impl AuthStateStore {
         protocol: &str,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
-        let state = AuthState::new(
-            id.clone(),
-            username.to_string(),
-            protocol.to_string(),
-            self.config_provider
-                .lock()
-                .await
-                .get_credential_policy(username)
-                .await?,
-        );
+        let Some(policy) = self.config_provider
+        .lock()
+        .await
+        .get_credential_policy(username)
+        .await? else {
+            return Err(WarpgateError::UserNotFound)
+        };
+
+        let state = AuthState::new(id, username.to_string(), protocol.to_string(), policy);
         self.store
             .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));
 

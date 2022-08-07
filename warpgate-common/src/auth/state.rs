@@ -1,4 +1,3 @@
-use tracing::warn;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialPolicy, CredentialPolicyResponse};
@@ -8,7 +7,8 @@ pub struct AuthState {
     id: Uuid,
     username: String,
     protocol: String,
-    policy: Option<Box<dyn CredentialPolicy + Sync + Send>>,
+    force_rejected: bool,
+    policy: Box<dyn CredentialPolicy + Sync + Send>,
     valid_credentials: Vec<AuthCredential>,
 }
 
@@ -17,12 +17,13 @@ impl AuthState {
         id: Uuid,
         username: String,
         protocol: String,
-        policy: Option<Box<dyn CredentialPolicy + Sync + Send>>,
+        policy: Box<dyn CredentialPolicy + Sync + Send>,
     ) -> Self {
         Self {
             id,
             username,
             protocol,
+            force_rejected: false,
             policy,
             valid_credentials: vec![],
         }
@@ -44,28 +45,21 @@ impl AuthState {
         self.valid_credentials.push(credential);
     }
 
+    pub fn reject(&mut self) {
+        self.force_rejected = true;
+    }
+
     pub fn verify(&self) -> AuthResult {
-        if self.valid_credentials.is_empty() {
-            warn!(
-                username=%self.username,
-                "No matching valid credentials"
-            );
+        if self.force_rejected {
             return AuthResult::Rejected;
         }
-
-        if let Some(ref policy) = self.policy {
-            match policy.is_sufficient(&self.protocol, &self.valid_credentials[..]) {
-                CredentialPolicyResponse::Ok => {}
-                CredentialPolicyResponse::Need(kind) => {
-                    return AuthResult::Need(kind);
-                }
-                CredentialPolicyResponse::NeedMoreCredentials => {
-                    return AuthResult::Rejected;
-                }
+        match self.policy.is_sufficient(&self.protocol, &self.valid_credentials[..]) {
+            CredentialPolicyResponse::Ok => AuthResult::Accepted {
+                username: self.username.clone(),
+            },
+            CredentialPolicyResponse::Need(kinds) => {
+                return AuthResult::Need(kinds);
             }
-        }
-        AuthResult::Accepted {
-            username: self.username.clone(),
         }
     }
 }

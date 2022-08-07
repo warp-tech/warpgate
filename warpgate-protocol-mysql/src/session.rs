@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthSelector, AuthState};
+use warpgate_common::auth::{AuthCredential, AuthSelector};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
     authorize_ticket, AuthResult, Secret, Services, TargetMySqlOptions, TargetOptions,
@@ -180,7 +180,14 @@ impl MySqlSession {
                 username,
                 target_name,
             } => {
-                let state_arc = self.services.auth_state_store.lock().await.create(&username, crate::common::PROTOCOL_NAME).await?.1;
+                let state_arc = self
+                    .services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .create(&username, crate::common::PROTOCOL_NAME)
+                    .await?
+                    .1;
                 let mut state = state_arc.lock().await;
 
                 let user_auth_result = {
@@ -196,7 +203,12 @@ impl MySqlSession {
 
                 match user_auth_result {
                     AuthResult::Accepted { username } => {
-                        self.services.auth_state_store.lock().await.complete(state.id()).await;
+                        self.services
+                            .auth_state_store
+                            .lock()
+                            .await
+                            .complete(state.id())
+                            .await;
                         let target_auth_result = {
                             self.services
                                 .config_provider
@@ -216,8 +228,7 @@ impl MySqlSession {
                         self.run_authorized(handshake, username, target_name).await
                     }
                     AuthResult::Rejected
-                    | AuthResult::Need(_)
-                    | AuthResult::NeedMoreCredentials => fail(&mut self).await, // TODO SSO
+                    | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
                 }
             }
             AuthSelector::Ticket { secret } => {

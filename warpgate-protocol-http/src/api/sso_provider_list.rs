@@ -137,6 +137,6 @@ impl Api {
             _ => ()
         }
 
-        Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", "/@warpgate"))
+        Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", "/@warpgate#/login"))
     }
 }
