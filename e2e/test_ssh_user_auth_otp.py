@@ -20,7 +20,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_port = processes.start_wg(
+        _, wg_ports = processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -45,7 +45,7 @@ class Test:
         )
 
         wait_port(ssh_port)
-        wait_port(wg_port)
+        wait_port([wg_ports['ssh']])
 
         totp = pyotp.TOTP(otp_key_base32)
 
@@ -53,7 +53,7 @@ class Test:
             f'''
             set timeout 10
 
-            spawn ssh user:ssh@localhost -p {wg_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
+            spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
             expect "Two-factor authentication"
             sleep 0.5
@@ -77,7 +77,7 @@ class Test:
             f'''
             set timeout 10
 
-            spawn ssh user:ssh@localhost -p {wg_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
+            spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
             expect "Two-factor authentication"
             sleep 0.5

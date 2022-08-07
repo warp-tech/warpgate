@@ -1,4 +1,5 @@
 import os
+import threading
 import psutil
 import pytest
 import shutil
@@ -104,7 +105,8 @@ class ProcessManager:
         return port
 
     def start_wg(self, config='', args=None):
-        port = alloc_port()
+        ssh_port = alloc_port()
+        http_port = alloc_port()
         data_dir = self.ctx.tmpdir / f'wg-data-{uuid.uuid4()}'
         data_dir.mkdir(parents=True)
         keys_dir = data_dir / 'keys'
@@ -114,6 +116,8 @@ class ProcessManager:
             Path('ssh-keys/wg/client-rsa'),
             Path('ssh-keys/wg/host-ed25519'),
             Path('ssh-keys/wg/host-rsa'),
+            Path('certs/tls.certificate.pem'),
+            Path('certs/tls.key.pem'),
         ]:
             shutil.copy(k, keys_dir / k.name)
         config_path = data_dir / 'warpgate.yaml'
@@ -122,19 +126,18 @@ class ProcessManager:
                 f'''\
                 ssh:
                     enable: true
-                    listen: 0.0.0.0:{port}
+                    listen: 0.0.0.0:{ssh_port}
                     keys: {keys_dir}
                     host_key_verification: auto_accept
                 http:
-                    enable: false
-                mysql:
-                    enable: false
+                    enable: true
+                    listen: 0.0.0.0:{http_port}
+                    certificate: {keys_dir}/tls.certificate.pem
+                    key: {keys_dir}/tls.key.pem
                 recordings:
                     enable: false
                 roles:
                 - name: role
-                http:
-                    enable: false
                 '''
             ) + config
         )
@@ -153,7 +156,10 @@ class ProcessManager:
             },
         )
         self.children.append(p)
-        return p, port
+        return p, {
+            'ssh': ssh_port,
+            'http': http_port,
+        }
 
     def start_ssh_client(self, *args, password=None, **kwargs):
         preargs = []
@@ -208,6 +214,30 @@ def report():
     subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 
 
+@pytest.fixture(scope='session')
+def echo_server_port():
+    from flask import Flask, request, json
+    app = Flask(__name__)
+
+    @app.route("/")
+    def echo():
+        return json({
+            'method': request.method,
+            'args': request.args,
+            'path': request.path,
+        })
+
+    port = alloc_port()
+
+    def runner():
+        app.run(port=port)
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+
+    yield port
+
+
 # ----
 
 
@@ -224,3 +254,11 @@ def otp_key_base64():
 @pytest.fixture(scope='session')
 def otp_key_base32():
     return 'ELEPI6SMAXKYWCS3YVKFCCEU4GWCT76XJSPSGHCM6H624WXVHLAQ'
+
+
+@pytest.fixture(scope='session')
+def password_123_hash():
+    return '$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0'
+
+
+subprocess.call('chmod 600 ssh-keys/id*', shell=True)

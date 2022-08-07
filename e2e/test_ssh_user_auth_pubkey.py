@@ -15,7 +15,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_port = processes.start_wg(
+        _, wg_ports = processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -36,12 +36,12 @@ class Test:
         )
 
         wait_port(ssh_port)
-        wait_port(wg_port)
+        wait_port(wg_ports['ssh'])
 
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
             '-p',
-            str(wg_port),
+            str(wg_ports['ssh']),
             '-o',
             'IdentityFile=ssh-keys/id_ed25519',
             '-o',
@@ -55,7 +55,7 @@ class Test:
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
             '-p',
-            str(wg_port),
+            str(wg_ports['ssh']),
             '-o',
             'IdentityFile=ssh-keys/id_rsa',
             '-o',
@@ -73,7 +73,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_port = processes.start_wg(
+        _, wg_ports = processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -94,12 +94,12 @@ class Test:
         )
 
         wait_port(ssh_port)
-        wait_port(wg_port)
+        wait_port(wg_ports['ssh'])
 
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
             '-p',
-            str(wg_port),
+            str(wg_ports['ssh']),
             '-o',
             'IdentityFile=ssh-keys/id_rsa',
             '-o',
@@ -113,7 +113,7 @@ class Test:
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
             '-p',
-            str(wg_port),
+            str(wg_ports['ssh']),
             '-o',
             'IdentityFile=ssh-keys/id_ed25519',
             '-o',

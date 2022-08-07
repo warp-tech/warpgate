@@ -13,8 +13,8 @@ def ssh_port(processes, wg_c_ed25519_pubkey):
 
 
 @pytest.fixture(scope='class')
-def wg_port(processes, ssh_port):
-    _, wg_port = processes.start_wg(
+def wg_port(processes, ssh_port, password_123_hash):
+    _, wg_ports = processes.start_wg(
         dedent(
             f'''\
             targets:
@@ -29,13 +29,13 @@ def wg_port(processes, ssh_port):
                 roles: [role]
                 credentials:
                 -   type: password
-                    hash: '$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0' # 123
+                    hash: '{password_123_hash}'
             '''
         ),
     )
     wait_port(ssh_port)
-    wait_port(wg_port)
-    yield wg_port
+    wait_port(wg_ports['ssh'])
+    yield wg_ports['ssh']
 
 
 common_args = [
@@ -48,6 +48,26 @@ common_args = [
 
 
 class Test:
+    def test_stdout_stderr(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            *common_args,
+            'sh',
+            '-c',
+            '"echo -n stdout; echo -n stderr >&2"',
+            password='123',
+            stderr=subprocess.PIPE,
+        )
+
+        stdout, stderr = ssh_client.communicate()
+        assert b'stdout' == stdout
+        assert stderr.endswith(b'stderr')
+
     def test_pty(
         self,
         processes: ProcessManager,
