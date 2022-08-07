@@ -2,27 +2,60 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert, Spinner } from 'sveltestrap'
 import Fa from 'svelte-fa'
+import Router, { push } from 'svelte-spa-router'
+import { wrap } from 'svelte-spa-router/wrap'
+import { get } from 'svelte/store'
 import { api } from 'gateway/lib/api'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-import Login from './Login.svelte'
-import TargetList from './TargetList.svelte'
 import Logo from 'common/Logo.svelte'
 
 let redirecting = false
+let serverInfoPromise = reloadServerInfo()
 
 async function init () {
-    await reloadServerInfo()
+    await serverInfoPromise
 }
 
 async function logout () {
     await api.logout()
     await reloadServerInfo()
+    push('/login')
 }
 
 function onPageResume () {
     redirecting = false
     init()
+}
+
+async function requireLogin (detail) {
+    await serverInfoPromise
+    if (!get(serverInfo)?.username) {
+        let url = detail.location
+        if (detail.querystring) {
+            url += '?' + detail.querystring
+        }
+        push('/login?next=' + encodeURIComponent(url))
+        return false
+    }
+    return true
+}
+
+const routes = {
+    '/': wrap({
+        asyncComponent: () => import('./TargetList.svelte'),
+        props: {
+            'on:navigation': () => redirecting = true,
+        },
+        conditions: [requireLogin],
+    }),
+    '/login': wrap({
+        asyncComponent: () => import('./Login.svelte'),
+    }),
+    '/login/:stateId': wrap({
+        asyncComponent: () => import('./OutOfBandAuth.svelte'),
+        conditions: [requireLogin],
+    }),
 }
 
 init()
@@ -38,9 +71,9 @@ init()
         <Spinner />
     {:else}
         <div class="d-flex align-items-center mt-5 mb-5">
-            <div class="logo">
+            <a class="logo" href="/@warpgate">
                 <Logo />
-            </div>
+            </a>
 
             {#if $serverInfo?.username}
                 <div class="ms-auto">
@@ -56,12 +89,7 @@ init()
         </div>
 
         <main>
-            {#if $serverInfo?.username}
-                <TargetList
-                on:navigation={() => redirecting = true} />
-            {:else}
-                <Login />
-            {/if}
+            <Router {routes}/>
         </main>
 
         <footer class="mt-5">

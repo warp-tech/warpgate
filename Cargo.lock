@@ -4620,6 +4620,7 @@ dependencies = [
  "bytes 1.2.1",
  "chrono",
  "data-encoding",
+ "futures",
  "humantime-serde",
  "lazy_static",
  "once_cell",
@@ -4691,6 +4692,7 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "cookie",
  "data-encoding",
  "delegate",
