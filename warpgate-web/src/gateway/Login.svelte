@@ -116,7 +116,7 @@ function onInputKey (event: KeyboardEvent) {
 async function startSSO (provider: SsoProviderDescription) {
     busy = true
     try {
-        const p = await api.startSso(provider)
+        const p = await api.startSso({ name: provider.name, next: nextURL })
         location.href = p.url
     } catch {
         busy = false

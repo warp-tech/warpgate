@@ -1,7 +1,7 @@
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
-use poem_openapi::param::Path;
+use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,7 @@ pub static SSO_CONTEXT_SESSION_KEY: &str = "sso_request";
 pub struct SsoContext {
     pub provider: String,
     pub request: SsoLoginRequest,
+    pub next_url: Option<String>,
 }
 
 #[OpenApi]
@@ -45,6 +46,7 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         name: Path<String>,
+        next: Query<Option<String>>,
     ) -> poem::Result<StartSsoResponse> {
         let config = services.config.lock().await;
 
@@ -70,6 +72,7 @@ impl Api {
             SsoContext {
                 provider: name,
                 request: sso_req,
+                next_url: next.0.clone(),
             },
         );
 

@@ -134,9 +134,12 @@ impl Api {
                 auth_state_store.complete(state.id()).await;
                 authorize_session(req, username).await?;
             }
-            _ => ()
+            _ => (),
         }
 
-        Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", "/@warpgate#/login"))
+        Ok(Response::new(ReturnToSsoResponse::Ok).header(
+            "Location",
+            context.next_url.as_deref().unwrap_or("/@warpgate#/login"),
+        ))
     }
 }
