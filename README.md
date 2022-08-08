@@ -26,6 +26,8 @@ Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't nee
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
 
+![](docs/banner.png)
+
 ## Getting started & downloads
 
 * See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page (or [Getting started on Docker](https://github.com/warp-tech/warpgate/wiki/Getting-started-on-Docker)).
@@ -89,7 +91,7 @@ The binary is in `target/{debug|release}`.
 * Rust 🦀
   * HTTP: `poem-web`
   * Database: SQLite via `sea-orm` + `sqlx`
-  * SSH: `russh`
+  * SSH: `russh`****
 * Typescript
   * Svelte
   * Bootstrap
