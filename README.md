@@ -9,6 +9,12 @@
 </p>
 
 
+<p align="center">
+  <a href="https://ko-fi.com/J3J8KWTF">
+    <img src="https://cdn.ko-fi.com/cdn/kofi3.png?v=2" width="150">
+  </a>
+</p>
+
 ---
 
 Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't need special client apps.
