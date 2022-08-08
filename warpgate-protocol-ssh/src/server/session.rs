@@ -856,6 +856,7 @@ impl ServerSession {
             channel_id,
             ChannelOperation::RequestSubsystem(name),
         ));
+        let _ = self.maybe_connect_remote().await;
         Ok(())
     }
 
