@@ -1046,8 +1046,32 @@ impl ServerSession {
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
+                    let mut login_url = match self
+                        .services
+                        .config
+                        .lock()
+                        .await
+                        .construct_external_url(None)
+                    {
+                        Ok(url) => url,
+                        Err(error) => {
+                            error!(?error, "Failed to construct external URL");
+                            return russh::server::Auth::Reject {
+                                proceed_with_methods: None,
+                            };
+                        }
+                    };
+
+                    login_url.set_path("@warpgate");
+                    login_url
+                        .set_fragment(Some(&format!("/login?next=%2Flogin%2F{auth_state_id}")));
+
                     russh::server::Auth::Partial {
-                        name: Cow::Owned(format!("Web-based authentication: please open https://... {auth_state_id} in your browser")),
+                        name: Cow::Owned(format!(concat!(
+                            "----------------------------------------------------------------\n",
+                            "Warpgate authentication: please open {} in your browser\n",
+                            "----------------------------------------------------------------\n"
+                        ), login_url)),
                         instructions: Cow::Borrowed(""),
                         prompts: Cow::Owned(vec![(Cow::Borrowed("Press Enter when done: "), true)]),
                     }

@@ -1,6 +1,6 @@
 <script lang="ts">
 import { get } from 'svelte/store'
-import { push, querystring, replace } from 'svelte-spa-router'
+import { querystring, replace } from 'svelte-spa-router'
 import { Alert, FormGroup, Spinner } from 'sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
@@ -22,7 +22,7 @@ let authState: ApiAuthState|undefined = undefined
 
 let ssoProvidersPromise = api.getSsoProviders()
 
-const nextURL = new URLSearchParams(get(querystring)).get('next')
+const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
 const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
 
 async function init () {

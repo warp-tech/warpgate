@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Spinner } from 'sveltestrap'
+import { Alert, Spinner } from 'sveltestrap'
 
 import { api, ApiAuthState, AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
@@ -29,26 +29,37 @@ async function reject () {
 {#await init()}
     <Spinner />
 {:then}
-    OOB auth for {authState.protocol}
+    <div class="page-summary-bar">
+        <h1>Authorization request</h1>
+    </div>
+
+    <p>Authorize this {authState.protocol} session?</p>
 
     {#if authState.state === ApiAuthState.Success}
-        Approved
+        <Alert color="success">
+            Approved
+        </Alert>
     {:else if authState.state === ApiAuthState.Failed}
-        Rejected
+        <Alert color="danger">
+            Rejected
+        </Alert>
     {:else}
-        <AsyncButton
-            outline
-            class="d-flex align-items-center"
-            click={approve}
-        >
-            Approve
-        </AsyncButton>
-        <AsyncButton
-            outline
-            class="d-flex align-items-center"
-            click={reject}
-        >
-            Reject
-        </AsyncButton>
+        <div class="d-flex">
+            <AsyncButton
+                color="primary"
+                class="d-flex align-items-center ms-auto"
+                click={approve}
+            >
+                Authorize
+            </AsyncButton>
+            <AsyncButton
+                outline
+                color="secondary"
+                class="d-flex align-items-center ms-2"
+                click={reject}
+            >
+                Reject
+            </AsyncButton>
+        </div>
     {/if}
 {/await}
