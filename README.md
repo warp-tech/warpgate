@@ -1,10 +1,19 @@
 <br/>
 
+<p align="center">
 <img src="warpgate-web/public/assets/logo.svg" width="100" />
-
+</p>
 <br/>
+<p align="center">
+<a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp; <a href="https://twitter.com/eugeeeeny"><img alt="Twitter" src="https://shields.io/badge/Subscribe-News-blue?logo=twitter&style=for-the-badge&color=blue"></a>
+</p>
 
-<a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=for-the-badge"/></a> &nbsp;
+
+<p align="center">
+  <a href="https://ko-fi.com/J3J8KWTF">
+    <img src="https://cdn.ko-fi.com/cdn/kofi3.png?v=2" width="150">
+  </a>
+</p>
 
 ---
 
@@ -13,9 +22,11 @@ Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't nee
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
-* Native 2FA and SSO support
+* Native 2FA and SSO support (TOTP & OpenID Connect)
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
+
+![](docs/banner.png)
 
 ## Getting started & downloads
 
@@ -80,7 +91,7 @@ The binary is in `target/{debug|release}`.
 * Rust 🦀
   * HTTP: `poem-web`
   * Database: SQLite via `sea-orm` + `sqlx`
-  * SSH: `russh`
+  * SSH: `russh`****
 * Typescript
   * Svelte
   * Bootstrap
