@@ -16,7 +16,7 @@ Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't nee
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards your connections straight to the target instead.
-* Native 2FA and SSO support
+* Native 2FA and SSO support (TOTP & OpenID Connect)
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
 
