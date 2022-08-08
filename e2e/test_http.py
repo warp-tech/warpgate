@@ -37,7 +37,7 @@ class Test:
 
         response = session.get(f'{url}/?warpgate-target=echo', allow_redirects=False)
         assert response.status_code == 307
-        assert response.headers['location'] == '/@warpgate#/login?next=%2F%3Fwarpgate%2Dtarget%echo'
+        assert response.headers['location'] == '/@warpgate#/login?next=%2F%3Fwarpgate%2Dtarget%3Decho'
 
         response = session.get(f'{url}/@warpgate/api/info').json()
         assert response['username'] is None
