@@ -37,3 +37,8 @@ class Test:
         response = session.get(f'{url}/?warpgate_target=http', allow_redirects=False)
         assert response.status_code == 307
         assert response.headers['location'] == '/@warpgate#/login?next=%2F%3Fwarpgate%5Ftarget%3Dhttp'
+
+        response = session.post(f'{url}/@warpgate/api/auth/login', json={
+            'username': 'user',
+            'password': '123',
+        })
