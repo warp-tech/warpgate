@@ -9,16 +9,8 @@ pub enum WarpgateError {
     DatabaseError(#[from] sea_orm::DbErr),
     #[error("ticket not found: {0}")]
     InvalidTicket(Uuid),
-    #[error("invalid credential type")]
-    InvalidCredentialType,
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
-    #[error("user not found")]
-    UserNotFound,
-    #[error("failed to parse url: {0}")]
-    UrlParse(#[from] url::ParseError),
-    #[error("external_url config option is not set")]
-    ExternalHostNotSet,
 }
 
 impl ResponseError for WarpgateError {

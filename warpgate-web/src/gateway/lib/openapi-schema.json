@@ -71,16 +71,6 @@
         "operationId": "otpLogin"
       }
     },
-    "/auth/logout": {
-      "post": {
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "operationId": "logout"
-      }
-    },
     "/auth/state": {
       "get": {
         "responses": {
@@ -93,108 +83,19 @@
                 }
               }
             }
-          },
-          "404": {
-            "description": ""
           }
         },
-        "operationId": "getDefaultAuthState"
+        "operationId": "getAuthState"
       }
     },
-    "/auth/state/{id}": {
-      "get": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "operationId": "get_auth_state"
-      }
-    },
-    "/auth/state/{id}/approve": {
+    "/auth/logout": {
       "post": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false
-          }
-        ],
         "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
-          },
-          "404": {
+          "201": {
             "description": ""
           }
         },
-        "operationId": "approve_auth"
-      }
-    },
-    "/auth/state/{id}/reject": {
-      "post": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "operationId": "reject_auth"
+        "operationId": "logout"
       }
     },
     "/info": {
@@ -286,15 +187,6 @@
             "in": "path",
             "required": true,
             "deprecated": false
-          },
-          {
-            "name": "next",
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "required": false,
-            "deprecated": false
           }
         ],
         "responses": {
@@ -326,21 +218,15 @@
           "PasswordNeeded",
           "OtpNeeded",
           "SsoNeeded",
-          "WebUserApprovalNeeded",
-          "PublicKeyNeeded",
           "Success"
         ]
       },
       "AuthStateResponseInternal": {
         "type": "object",
         "required": [
-          "protocol",
           "state"
         ],
         "properties": {
-          "protocol": {
-            "type": "string"
-          },
           "state": {
             "$ref": "#/components/schemas/ApiAuthState"
           }

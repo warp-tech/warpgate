@@ -1,9 +1,10 @@
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
-use poem_openapi::param::{Path, Query};
+use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use warpgate_common::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
@@ -30,7 +31,6 @@ pub static SSO_CONTEXT_SESSION_KEY: &str = "sso_request";
 pub struct SsoContext {
     pub provider: String,
     pub request: SsoLoginRequest,
-    pub next_url: Option<String>,
 }
 
 #[OpenApi]
@@ -46,14 +46,31 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         name: Path<String>,
-        next: Query<Option<String>>,
     ) -> poem::Result<StartSsoResponse> {
         let config = services.config.lock().await;
 
         let name = name.0;
+        let ext_host = config
+            .store
+            .external_host
+            .as_deref()
+            .or_else(|| req.original_uri().host());
+        let Some(ext_host) = ext_host  else {
+            return Err(poem::Error::from_string("external_host config option is required for SSO", http::status::StatusCode::INTERNAL_SERVER_ERROR));
+        };
+        let ext_port = config.store.http.listen.port();
 
-        let mut return_url = config.construct_external_url(req.original_uri().host())?;
-        return_url.set_path("@warpgate/api/sso/return");
+        let mut return_url = Url::parse(&format!("https://{ext_host}/@warpgate/api/sso/return"))
+            .map_err(|e| {
+                poem::Error::from_string(
+                    format!("failed to construct the return URL: {e}"),
+                    http::status::StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            })?;
+
+        if ext_port != 443 {
+            let _ = return_url.set_port(Some(ext_port));
+        }
 
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name) else {
             return Ok(StartSsoResponse::NotFound);
@@ -67,14 +84,10 @@ impl Api {
             .map_err(poem::error::InternalServerError)?;
 
         let url = sso_req.auth_url().to_string();
-        session.set(
-            SSO_CONTEXT_SESSION_KEY,
-            SsoContext {
-                provider: name,
-                request: sso_req,
-                next_url: next.0.clone(),
-            },
-        );
+        session.set(SSO_CONTEXT_SESSION_KEY, SsoContext {
+            provider: name,
+            request: sso_req,
+        });
 
         Ok(StartSsoResponse::Ok(Json(StartSsoResponseParams { url })))
     }

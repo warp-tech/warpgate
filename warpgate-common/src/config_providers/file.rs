@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,10 +11,7 @@ use uuid::Uuid;
 use warpgate_db_entities::Ticket;
 
 use super::ConfigProvider;
-use crate::auth::{
-    AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, PerProtocolCredentialPolicy,
-};
+use crate::auth::{AuthCredential, CredentialPolicy};
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
 use crate::{Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig, WarpgateError};
@@ -81,52 +78,9 @@ impl ConfigProvider for FileConfigProvider {
             return Ok(None);
         };
 
-        let supported_credential_types: HashSet<CredentialKind> =
-            user.credentials.iter().map(|x| x.kind()).collect();
-        let default_policy = Box::new(AnySingleCredentialPolicy {
-            supported_credential_types: supported_credential_types.clone(),
-        }) as Box<dyn CredentialPolicy + Sync + Send>;
-
-        if let Some(req) = user.require {
-            let mut policy = PerProtocolCredentialPolicy {
-                default: default_policy,
-                protocols: HashMap::new(),
-            };
-
-            if let Some(p) = req.http {
-                policy.protocols.insert(
-                    "HTTP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.mysql {
-                policy.protocols.insert(
-                    "MySQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.ssh {
-                policy.protocols.insert(
-                    "SSH",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types,
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-
-            Ok(Some(
-                Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
-            ))
-        } else {
-            Ok(Some(default_policy))
-        }
+        Ok(user
+            .require
+            .map(|r| Box::new(r) as Box<dyn CredentialPolicy + Sync + Send>))
     }
 
     async fn username_for_sso_credential(
@@ -239,7 +193,6 @@ impl ConfigProvider for FileConfigProvider {
                 }
                 return Ok(false);
             }
-            _ => return Err(WarpgateError::InvalidCredentialType),
         }
     }
 

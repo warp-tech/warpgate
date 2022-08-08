@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
-use url::Url;
 use warpgate_sso::SsoProviderConfig;
 
 use crate::auth::CredentialKind;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret, WarpgateError};
+use crate::{ListenEndpoint, Secret};
 
 const fn _default_true() -> bool {
     true
@@ -426,25 +425,4 @@ impl Default for WarpgateConfigStore {
 pub struct WarpgateConfig {
     pub store: WarpgateConfigStore,
     pub paths_relative_to: PathBuf,
-}
-
-impl WarpgateConfig {
-    pub fn construct_external_url(
-        &self,
-        fallback_host: Option<&str>,
-    ) -> Result<Url, WarpgateError> {
-        let ext_host = self.store.external_host.as_deref().or(fallback_host);
-        let Some(ext_host) = ext_host  else {
-          return Err(WarpgateError::ExternalHostNotSet);
-        };
-        let ext_port = self.store.http.listen.port();
-
-        let mut url = Url::parse(&format!("https://{ext_host}/"))?;
-
-        if ext_port != 443 {
-            let _ = url.set_port(Some(ext_port));
-        }
-
-        Ok(url)
-    }
 }

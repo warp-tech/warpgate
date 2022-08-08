@@ -77,6 +77,7 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     }
 }
 
+#[must_use]
 pub fn watch_config<P: AsRef<Path> + Send + 'static>(
     path: P,
     config: Arc<Mutex<WarpgateConfig>>,

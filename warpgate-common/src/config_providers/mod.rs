@@ -1,5 +1,4 @@
 mod file;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,10 +12,11 @@ use warpgate_db_entities::Ticket;
 use crate::auth::{AuthCredential, CredentialKind, CredentialPolicy};
 use crate::{Secret, Target, UserSnapshot, WarpgateError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AuthResult {
     Accepted { username: String },
-    Need(HashSet<CredentialKind>),
+    Need(CredentialKind),
+    NeedMoreCredentials,
     Rejected,
 }
 
