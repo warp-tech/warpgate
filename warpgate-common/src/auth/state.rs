@@ -53,13 +53,14 @@ impl AuthState {
         if self.force_rejected {
             return AuthResult::Rejected;
         }
-        match self.policy.is_sufficient(&self.protocol, &self.valid_credentials[..]) {
+        match self
+            .policy
+            .is_sufficient(&self.protocol, &self.valid_credentials[..])
+        {
             CredentialPolicyResponse::Ok => AuthResult::Accepted {
                 username: self.username.clone(),
             },
-            CredentialPolicyResponse::Need(kinds) => {
-                return AuthResult::Need(kinds);
-            }
+            CredentialPolicyResponse::Need(kinds) => AuthResult::Need(kinds),
         }
     }
 }

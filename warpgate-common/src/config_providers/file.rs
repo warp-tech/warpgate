@@ -12,8 +12,8 @@ use warpgate_db_entities::Ticket;
 
 use super::ConfigProvider;
 use crate::auth::{
-    AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialPolicy,
-    PerProtocolCredentialPolicy, CredentialKind,
+    AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
+    CredentialPolicy, PerProtocolCredentialPolicy,
 };
 use crate::helpers::hash::verify_password_hash;
 use crate::helpers::otp::verify_totp;
@@ -115,7 +115,7 @@ impl ConfigProvider for FileConfigProvider {
                 policy.protocols.insert(
                     "SSH",
                     Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
+                        supported_credential_types,
                         required_credential_types: p.into_iter().collect(),
                     }),
                 );
@@ -239,7 +239,7 @@ impl ConfigProvider for FileConfigProvider {
                 }
                 return Ok(false);
             }
-            _ => return Err(WarpgateError::InvalidCredentialType)
+            _ => return Err(WarpgateError::InvalidCredentialType),
         }
     }
 
