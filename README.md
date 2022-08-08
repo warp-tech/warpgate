@@ -91,7 +91,7 @@ The binary is in `target/{debug|release}`.
 * Rust 🦀
   * HTTP: `poem-web`
   * Database: SQLite via `sea-orm` + `sqlx`
-  * SSH: `russh`****
+  * SSH: `russh`
 * Typescript
   * Svelte
   * Bootstrap
