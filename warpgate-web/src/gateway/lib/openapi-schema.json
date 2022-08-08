@@ -286,6 +286,15 @@
             "in": "path",
             "required": true,
             "deprecated": false
+          },
+          {
+            "name": "next",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false
           }
         ],
         "responses": {
