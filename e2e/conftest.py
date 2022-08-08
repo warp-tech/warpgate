@@ -1,11 +1,13 @@
 import os
 import threading
+import warnings
 import psutil
 import pytest
 import shutil
 import signal
 import subprocess
 import tempfile
+import urllib3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -216,12 +218,13 @@ def report():
 
 @pytest.fixture(scope='session')
 def echo_server_port():
-    from flask import Flask, request, json
+    from flask import Flask, request, jsonify
     app = Flask(__name__)
 
-    @app.route("/")
-    def echo():
-        return json({
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def echo(path):
+        return jsonify({
             'method': request.method,
             'args': request.args,
             'path': request.path,
@@ -262,3 +265,4 @@ def password_123_hash():
 
 
 subprocess.call('chmod 600 ssh-keys/id*', shell=True)
+warnings.simplefilter('ignore', urllib3.exceptions.InsecureRequestWarning)

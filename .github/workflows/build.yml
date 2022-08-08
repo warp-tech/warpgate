@@ -12,7 +12,6 @@ jobs:
 
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
           target: x86_64-unknown-linux-gnu
           override: true
 
@@ -42,7 +41,6 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          toolchain: nightly
           use-cross: true
           args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
 

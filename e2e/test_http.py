@@ -10,7 +10,7 @@ def wg_port(processes, echo_server_port, password_123_hash):
         dedent(
             f'''\
             targets:
-            -   name: http
+            -   name: echo
                 allow_roles: [role]
                 http:
                     url: http://localhost:{echo_server_port}
@@ -34,11 +34,25 @@ class Test:
         session = requests.Session()
         session.verify = False
         url = f'https://localhost:{wg_port}'
-        response = session.get(f'{url}/?warpgate_target=http', allow_redirects=False)
+
+        response = session.get(f'{url}/?warpgate-target=echo', allow_redirects=False)
         assert response.status_code == 307
-        assert response.headers['location'] == '/@warpgate#/login?next=%2F%3Fwarpgate%5Ftarget%3Dhttp'
+        assert response.headers['location'] == '/@warpgate#/login?next=%2F%3Fwarpgate%2Dtarget%echo'
+
+        response = session.get(f'{url}/@warpgate/api/info').json()
+        assert response['username'] is None
 
         response = session.post(f'{url}/@warpgate/api/auth/login', json={
             'username': 'user',
             'password': '123',
         })
+        assert response.status_code == 201
+
+        response = session.get(f'{url}/@warpgate/api/info').json()
+        assert response['username'] == 'user'
+
+        response = session.get(f'{url}/some/path?a=b&warpgate-target=echo&c=d', allow_redirects=False)
+        assert response.json()['method'] == 'GET'
+        assert response.json()['path'] == '/some/path'
+        assert response.json()['args']['a'] == 'b'
+        assert response.json()['args']['c'] == 'd'
