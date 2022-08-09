@@ -23,6 +23,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
         let config = services.config.lock().await;
         russh::server::Config {
             auth_rejection_time: std::time::Duration::from_secs(1),
+            connection_timeout: Some(std::time::Duration::from_secs(300)),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
             ..Default::default()

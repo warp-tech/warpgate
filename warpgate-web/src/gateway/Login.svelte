@@ -1,5 +1,6 @@
 <script lang="ts">
-import { replace } from 'svelte-spa-router'
+import { get } from 'svelte/store'
+import { querystring, replace } from 'svelte-spa-router'
 import { Alert, FormGroup, Spinner } from 'sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
@@ -9,25 +10,47 @@ import { api, ApiAuthState, LoginFailureResponseFromJSON, SsoProviderDescription
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 
+export let params: { stateId?: string } = {}
+
 let error: Error|null = null
 let username = ''
 let password = ''
 let otp = ''
 let busy = false
 
-let authState = ApiAuthState.NotStarted
+let authState: ApiAuthState|undefined = undefined
 
 let ssoProvidersPromise = api.getSsoProviders()
 
-const nextURL = new URLSearchParams(location.search).get('next')
+const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
 const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
 
 async function init () {
-    authState = (await api.getAuthState()).state
+    try {
+        authState = (await api.getDefaultAuthState()).state
+    } catch (err) {
+        if (err.status) {
+            const response = err as Response
+            if (response.status === 404) {
+                authState = ApiAuthState.NotStarted
+            }
+        }
+    }
     continueWithState()
 }
 
+function success () {
+    if (nextURL) {
+        replace(nextURL)
+    } else {
+        replace('/')
+    }
+}
+
 async function continueWithState () {
+    if (authState === ApiAuthState.Success) {
+        success()
+    }
     if (authState === ApiAuthState.SsoNeeded) {
         const providers = await ssoProvidersPromise
         if (!providers.length) {
@@ -65,18 +88,15 @@ async function _login () {
                 },
             })
         }
-        if (nextURL) {
-            location.href = nextURL
-        } else {
-            await reloadServerInfo()
-            replace('/')
-        }
+        await reloadServerInfo()
+        success()
     } catch (err) {
         if (err.status) {
             const response = err as Response
             if (response.status === 401) {
                 const failure = LoginFailureResponseFromJSON(await response.json())
                 authState = failure.state
+
                 continueWithState()
             } else {
                 error = new Error(await response.text())
@@ -96,8 +116,8 @@ function onInputKey (event: KeyboardEvent) {
 async function startSSO (provider: SsoProviderDescription) {
     busy = true
     try {
-        const params = await api.startSso(provider)
-        location.href = params.url
+        const p = await api.startSso({ name: provider.name, next: nextURL })
+        location.href = p.url
     } catch {
         busy = false
     }
@@ -115,6 +135,10 @@ async function startSSO (provider: SsoProviderDescription) {
                 <h1>Continue login</h1>
             {/if}
         </div>
+        {#if params.stateId}
+        //todo
+        loggin in for auth state id {params.stateId}
+        {/if}
         {#if authState === ApiAuthState.OtpNeeded}
             <FormGroup floating label="One-time password">
                 <!-- svelte-ignore a11y-autofocus -->

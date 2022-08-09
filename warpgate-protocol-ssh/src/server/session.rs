@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::hash_map::Entry::Vacant;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -10,11 +10,11 @@ use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::{Bytes, BytesMut};
 use russh::server::Session;
-use russh::{CryptoVec, Sig};
+use russh::{CryptoVec, MethodSet, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthSelector, AuthState, CredentialKind};
@@ -53,6 +53,12 @@ enum Event {
     Client(RCEvent),
 }
 
+enum KeyboardInteractiveState {
+    None,
+    OtpRequested,
+    WebAuthRequested(broadcast::Receiver<AuthResult>),
+}
+
 pub struct ServerSession {
     pub id: SessionId,
     username: Option<String>,
@@ -74,7 +80,8 @@ pub struct ServerSession {
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
     service_output: ServiceOutput,
-    auth_state: Option<AuthState>,
+    auth_state: Option<Arc<Mutex<AuthState>>>,
+    keyboard_interactive_state: KeyboardInteractiveState,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -142,6 +149,7 @@ impl ServerSession {
                 so_tx.send(BytesMut::from(data).freeze()).context("x")
             })),
             auth_state: None,
+            keyboard_interactive_state: KeyboardInteractiveState::None,
         };
 
         let this = Arc::new(Mutex::new(this));
@@ -217,18 +225,23 @@ impl ServerSession {
         Ok(this)
     }
 
-    async fn get_auth_state(&mut self, username: &str) -> Result<&mut AuthState> {
+    async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
-        if self.auth_state.is_none() || self.auth_state.as_ref().unwrap().username() != username {
-            let mut cp = self.services.config_provider.lock().await;
-            self.auth_state = Some(AuthState::new(
-                username.to_string(),
-                crate::PROTOCOL_NAME.to_string(),
-                cp.get_credential_policy(username).await?,
-            ));
+        if self.auth_state.is_none()
+            || self.auth_state.as_ref().unwrap().lock().await.username() != username
+        {
+            let state = self
+                .services
+                .auth_state_store
+                .lock()
+                .await
+                .create(username, crate::PROTOCOL_NAME)
+                .await?
+                .1;
+            self.auth_state = Some(state);
         }
         #[allow(clippy::unwrap_used)]
-        Ok(self.auth_state.as_mut().unwrap())
+        Ok(self.auth_state.as_ref().map(Clone::clone).unwrap())
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -939,13 +952,17 @@ impl ServerSession {
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::Need(_) | AuthResult::NeedMoreCredentials) => {
-                russh::server::Auth::Reject
-            }
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
+                proceed_with_methods: Some(MethodSet::all()),
+            },
+            Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+            },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
-                russh::server::Auth::Reject
+                russh::server::Auth::Reject {
+                    proceed_with_methods: None,
+                }
             }
         }
     }
@@ -963,13 +980,17 @@ impl ServerSession {
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject,
-            Ok(AuthResult::Need(_) | AuthResult::NeedMoreCredentials) => {
-                russh::server::Auth::Reject
-            }
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
+                proceed_with_methods: None,
+            },
+            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject {
+                proceed_with_methods: None,
+            },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
-                russh::server::Auth::Reject
+                russh::server::Auth::Reject {
+                    proceed_with_methods: None,
+                }
             }
         }
     }
@@ -982,25 +1003,109 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
-        let cred = response.map(AuthCredential::Otp);
+        let cred;
+        match &mut self.keyboard_interactive_state {
+            KeyboardInteractiveState::None => {
+                cred = None;
+            }
+            KeyboardInteractiveState::OtpRequested => {
+                cred = response.map(AuthCredential::Otp);
+            }
+            KeyboardInteractiveState::WebAuthRequested(event) => {
+                cred = None;
+                let _ = event.recv().await;
+                // the auth state has been updated by now
+            }
+        }
+
+        self.keyboard_interactive_state = KeyboardInteractiveState::None;
 
         match self.try_auth(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(
-                AuthResult::Rejected
-                | AuthResult::NeedMoreCredentials
-                | AuthResult::Need(CredentialKind::Otp),
-            ) => russh::server::Auth::Partial {
-                name: Cow::Borrowed("Two-factor authentication"),
-                instructions: Cow::Borrowed(""),
-                prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
+            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
+                proceed_with_methods: None,
             },
-            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject, // TODO SSO
+            Ok(AuthResult::Need(kinds)) => {
+                if kinds.contains(&CredentialKind::Otp) {
+                    self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
+                    russh::server::Auth::Partial {
+                        name: Cow::Borrowed("Two-factor authentication"),
+                        instructions: Cow::Borrowed(""),
+                        prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
+                    }
+                } else if kinds.contains(&CredentialKind::WebUserApproval) {
+                    let Some(auth_state) = self.auth_state.as_ref() else {
+                        return russh::server::Auth::Reject { proceed_with_methods: None};
+                    };
+                    let auth_state_id = *auth_state.lock().await.id();
+                    let event = self
+                        .services
+                        .auth_state_store
+                        .lock()
+                        .await
+                        .subscribe(auth_state_id);
+                    self.keyboard_interactive_state =
+                        KeyboardInteractiveState::WebAuthRequested(event);
+
+                    let mut login_url = match self
+                        .services
+                        .config
+                        .lock()
+                        .await
+                        .construct_external_url(None)
+                    {
+                        Ok(url) => url,
+                        Err(error) => {
+                            error!(?error, "Failed to construct external URL");
+                            return russh::server::Auth::Reject {
+                                proceed_with_methods: None,
+                            };
+                        }
+                    };
+
+                    login_url.set_path("@warpgate");
+                    login_url
+                        .set_fragment(Some(&format!("/login?next=%2Flogin%2F{auth_state_id}")));
+
+                    russh::server::Auth::Partial {
+                        name: Cow::Owned(format!(
+                            concat!(
+                            "----------------------------------------------------------------\n",
+                            "Warpgate authentication: please open {} in your browser\n",
+                            "----------------------------------------------------------------\n"
+                        ),
+                            login_url
+                        )),
+                        instructions: Cow::Borrowed(""),
+                        prompts: Cow::Owned(vec![(Cow::Borrowed("Press Enter when done: "), true)]),
+                    }
+                } else {
+                    russh::server::Auth::Reject {
+                        proceed_with_methods: None,
+                    }
+                }
+            }
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
-                russh::server::Auth::Reject
+                russh::server::Auth::Reject {
+                    proceed_with_methods: None,
+                }
             }
         }
+    }
+
+    fn get_remaining_auth_methods(&self, kinds: HashSet<CredentialKind>) -> MethodSet {
+        let mut m = MethodSet::empty();
+        for kind in kinds {
+            match kind {
+                CredentialKind::Password => m.insert(MethodSet::PASSWORD),
+                CredentialKind::Otp => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
+                CredentialKind::WebUserApproval => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
+                CredentialKind::PublicKey => m.insert(MethodSet::PUBLICKEY),
+                CredentialKind::Sso => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
+            }
+        }
+        m
     }
 
     async fn try_auth(
@@ -1014,7 +1119,9 @@ impl ServerSession {
                 target_name,
             } => {
                 let cp = self.services.config_provider.clone();
-                let state = self.get_auth_state(username).await?;
+
+                let state_arc = self.get_auth_state(username).await?;
+                let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
                     if cp
@@ -1031,6 +1138,12 @@ impl ServerSession {
 
                 match user_auth_result {
                     AuthResult::Accepted { username } => {
+                        self.services
+                            .auth_state_store
+                            .lock()
+                            .await
+                            .complete(state.id())
+                            .await;
                         let target_auth_result = {
                             self.services
                                 .config_provider

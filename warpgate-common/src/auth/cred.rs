@@ -13,6 +13,8 @@ pub enum CredentialKind {
     Otp,
     #[serde(rename = "sso")]
     Sso,
+    #[serde(rename = "web")]
+    WebUserApproval,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +29,7 @@ pub enum AuthCredential {
         provider: String,
         email: String,
     },
+    WebUserApproval,
 }
 
 impl AuthCredential {
@@ -36,6 +39,7 @@ impl AuthCredential {
             Self::PublicKey { .. } => CredentialKind::PublicKey,
             Self::Otp { .. } => CredentialKind::Otp,
             Self::Sso { .. } => CredentialKind::Sso,
+            Self::WebUserApproval => CredentialKind::WebUserApproval,
         }
     }
 }

@@ -170,18 +170,18 @@ pub fn gateway_redirect(req: &Request) -> Response {
         .unwrap_or("".into());
 
     let path = format!(
-        "/@warpgate?next={}",
+        "/@warpgate#/login?next={}",
         utf8_percent_encode(&path, NON_ALPHANUMERIC),
     );
 
     Redirect::temporary(path).into_response()
 }
 
-pub async fn get_auth_state_for_request<'a>(
+pub async fn get_auth_state_for_request(
     username: &str,
     session: &Session,
-    store: &'a mut AuthStateStore,
-) -> Result<&'a mut AuthState, WarpgateError> {
+    store: &mut AuthStateStore,
+) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     match session.get_auth_state_id() {
         Some(id) => {
             if !store.contains_key(&id.0) {
@@ -192,7 +192,7 @@ pub async fn get_auth_state_for_request<'a>(
     };
 
     match session.get_auth_state_id() {
-        Some(id) => Ok(store.get_mut(&id.0).unwrap()),
+        Some(id) => Ok(store.get(&id.0).unwrap()),
         None => {
             let (id, state) = store
                 .create(&username, crate::common::PROTOCOL_NAME)
