@@ -45,7 +45,7 @@ class Test:
         )
 
         wait_port(ssh_port)
-        wait_port([wg_ports['ssh']])
+        wait_port(wg_ports['ssh'])
 
         totp = pyotp.TOTP(otp_key_base32)
 
