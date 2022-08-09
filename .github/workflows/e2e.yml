@@ -19,6 +19,7 @@ jobs:
 
       - name: Install build deps
         run: |
+          sudo apt-get install openssh-client
           cargo install just
           cargo install cargo-llvm-cov
           cargo clean
