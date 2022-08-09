@@ -844,7 +844,7 @@ dependencies = [
  "rand",
  "sha2 0.10.2",
  "subtle",
- "time 0.3.11",
+ "time 0.3.13",
  "version_check",
 ]
 
@@ -2191,7 +2191,7 @@ dependencies = [
  "smallvec",
  "subprocess",
  "thiserror",
- "time 0.3.11",
+ "time 0.3.13",
  "uuid",
 ]
 
@@ -2716,7 +2716,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
- "time 0.3.11",
+ "time 0.3.13",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -3013,7 +3013,7 @@ checksum = "d7fa2d386df8533b02184941c76ae2e0d0c1d053f5d43339169d80f21275fc5e"
 dependencies = [
  "pem",
  "ring",
- "time 0.3.11",
+ "time 0.3.13",
  "yasna 0.5.0",
  "zeroize",
 ]
@@ -4013,9 +4013,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.11"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c91f41dcb2f096c05f0873d667dceec1087ce5bcf984ec8ffb19acddbb3217"
+checksum = "db76ff9fa4b1458b3c7f077f3ff9887394058460d21e634355b273aaf11eea45"
 dependencies = [
  "itoa",
  "libc",
@@ -4323,7 +4323,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "time 0.3.11",
+ "time 0.3.13",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -4571,7 +4571,7 @@ dependencies = [
  "rcgen",
  "sd-notify",
  "serde_yaml",
- "time 0.3.11",
+ "time 0.3.13",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4758,7 +4758,7 @@ dependencies = [
  "russh-keys",
  "sea-orm",
  "thiserror",
- "time 0.3.11",
+ "time 0.3.13",
  "tokio",
  "tracing",
  "uuid",
@@ -5026,7 +5026,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "346d34a236c9d3e5f3b9b74563f238f955bbd05fa0b8b4efa53c130c43982f4c"
 dependencies = [
- "time 0.3.11",
+ "time 0.3.13",
 ]
 
 [[package]]
