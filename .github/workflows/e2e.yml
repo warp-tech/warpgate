@@ -11,6 +11,7 @@ jobs:
       - name: Build deps
         run: |
           cargo clean
+          cargo install cargo-llvm-cov
           rustup component add llvm-tools-preview
 
       - name: Run
