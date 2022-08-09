@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthState, CredentialKind};
-use warpgate_common::{AuthResult, Secret, Services};
+use warpgate_common::{AuthResult, Secret, Services, WarpgateError};
 
 use crate::common::{
     authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,
@@ -104,8 +104,20 @@ impl Api {
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let mut auth_state_store = services.auth_state_store.lock().await;
-        let state_arc =
-            get_auth_state_for_request(&body.username, session, &mut auth_state_store).await?;
+        let state_arc = match get_auth_state_for_request(
+            &body.username,
+            session,
+            &mut auth_state_store,
+        )
+        .await
+        {
+            Err(WarpgateError::UserNotFound) => {
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    state: ApiAuthState::Failed,
+                })))
+            }
+            x => x,
+        }?;
         let mut state = state_arc.lock().await;
 
         let mut cp = services.config_provider.lock().await;
