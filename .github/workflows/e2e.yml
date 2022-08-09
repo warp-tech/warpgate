@@ -1,0 +1,16 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: install deps
+        working-directory: e2e
+        run: |
+          pip3 install poetry
+          poetry install
+          poetry run ./run.sh
