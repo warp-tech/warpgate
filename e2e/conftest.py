@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 import psutil
@@ -233,7 +234,7 @@ def echo_server_port():
     port = alloc_port()
 
     def runner():
-        app.run(port=port)
+        app.run(port=port, load_dotenv=False)
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
@@ -264,6 +265,7 @@ def password_123_hash():
     return '$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0'
 
 
+logging.basicConfig(level=logging.DEBUG)
 requests.packages.urllib3.disable_warnings()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 subprocess.call('chmod 600 ssh-keys/id*', shell=True)

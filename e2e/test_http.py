@@ -62,6 +62,9 @@ class TestHTTPProto:
         assert response['username'] == 'user'
 
         response = session.get(f'{url}/some/path?a=b&warpgate-target=echo&c=d', allow_redirects=False)
+        print(response)
+        print(response.text)
+        assert response.status_code == 200
         assert response.json()['method'] == 'GET'
         assert response.json()['path'] == '/some/path'
         assert response.json()['args']['a'] == 'b'

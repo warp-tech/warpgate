@@ -53,7 +53,7 @@ class Test:
             f'''
             set timeout 10
 
-            spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
+            spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
             expect "Two-factor authentication"
             sleep 0.5
@@ -67,11 +67,11 @@ class Test:
         )
 
         ssh_client = processes.start(
-            ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+            ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode())[0]
-        assert ssh_client.returncode == 0, output
+        output, stderr = ssh_client.communicate(script.encode())
+        assert ssh_client.returncode == 0, output + stderr
 
         script = dedent(
             f'''
