@@ -1,5 +1,4 @@
 from asyncio import subprocess
-import os
 import pyotp
 from pathlib import Path
 from textwrap import dedent
@@ -29,7 +28,6 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
                 users:
                 -   username: user
                     roles: [role]

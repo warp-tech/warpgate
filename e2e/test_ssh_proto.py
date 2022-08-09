@@ -1,4 +1,3 @@
-import os
 import subprocess
 import pytest
 from textwrap import dedent
@@ -23,7 +22,6 @@ def wg_port(processes, ssh_port, password_123_hash):
                 ssh:
                     host: localhost
                     port: {ssh_port}
-                    username: {os.getlogin()}
             -   name: ssh-bad-domain
                 allow_roles: [role]
                 ssh:

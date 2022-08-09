@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -24,7 +23,6 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
                 '''
             ),
             args=['test-target', 'ssh'],
@@ -44,8 +42,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
-                '''
+                                        '''
             ),
             args=['test-target', 'ssh'],
         )
