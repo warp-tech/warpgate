@@ -3,16 +3,32 @@ name: Test
 on: [push, pull_request]
 
 jobs:
-  Build:
+  E2E:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
 
-      - name: Build deps
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install build deps
         run: |
-          cargo clean
+          cargo install just
           cargo install cargo-llvm-cov
+          cargo clean
           rustup component add llvm-tools-preview
+
+      - name: Build admin UI
+        run: |
+          just yarn
+          just openapi
+          just yarn build
 
       - name: Run
         working-directory: e2e
