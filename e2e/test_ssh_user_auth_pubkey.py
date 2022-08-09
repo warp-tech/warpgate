@@ -79,7 +79,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                                        users:
+                users:
                 -   username: user
                     roles: [role]
                     credentials:
