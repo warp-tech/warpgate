@@ -31,6 +31,11 @@ jobs:
           just openapi
           just yarn build
 
+      - name: Build images
+        working-directory: e2e
+        run: |
+          make image-ssh-server
+
       - name: Run
         working-directory: e2e
         run: |
