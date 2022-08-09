@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -8,7 +7,7 @@ from .util import wait_port
 
 class Test:
     def test_ed25519(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, username
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -23,7 +22,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
+                        username: {username}
                 users:
                 -   username: user
                     roles: [role]
@@ -65,9 +64,7 @@ class Test:
         assert ssh_client.communicate()[0] == b''
         assert ssh_client.returncode != 0
 
-    def test_rsa(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
-    ):
+    def test_rsa(self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, username):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
@@ -81,7 +78,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
+                        username: {username}
                 users:
                 -   username: user
                     roles: [role]

@@ -1,5 +1,6 @@
 import logging
 import os
+import pwd
 import threading
 import psutil
 import pytest
@@ -271,6 +272,11 @@ def otp_key_base32():
 @pytest.fixture(scope='session')
 def password_123_hash():
     return '$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0'
+
+
+@pytest.fixture(scope='session')
+def username():
+    return pwd.getpwuid(os.getuid())[0]
 
 
 logging.basicConfig(level=logging.DEBUG)

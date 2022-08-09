@@ -1,4 +1,3 @@
-import os
 import subprocess
 import pytest
 from textwrap import dedent
@@ -13,7 +12,7 @@ def ssh_port(processes, wg_c_ed25519_pubkey):
 
 
 @pytest.fixture(scope='class')
-def wg_port(processes, ssh_port, password_123_hash):
+def wg_port(processes, ssh_port, password_123_hash, username):
     _, wg_ports = processes.start_wg(
         dedent(
             f'''\
@@ -23,7 +22,7 @@ def wg_port(processes, ssh_port, password_123_hash):
                 ssh:
                     host: localhost
                     port: {ssh_port}
-                    username: {os.getlogin()}
+                    username: {username}
             -   name: ssh-bad-domain
                 allow_roles: [role]
                 ssh:
@@ -102,7 +101,8 @@ class Test:
             str(wg_port),
             '-v',
             *common_args,
-            'sh', '-c',
+            'sh',
+            '-c',
             '"pkill -9 sh"',
             password='123',
         )
@@ -120,8 +120,10 @@ class Test:
             str(wg_port),
             '-v',
             *common_args,
-            '-L', f'{local_port}:localhost:22',
-            'sleep', '15',
+            '-L',
+            f'{local_port}:localhost:22',
+            'sleep',
+            '15',
             password='123',
         )
 

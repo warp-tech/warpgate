@@ -1,5 +1,4 @@
 from asyncio import subprocess
-import os
 import pyotp
 from pathlib import Path
 from textwrap import dedent
@@ -15,6 +14,7 @@ class Test:
         wg_c_ed25519_pubkey: Path,
         otp_key_base32: str,
         otp_key_base64: str,
+        username,
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -29,7 +29,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {os.getlogin()}
+                        username: {username}
                 users:
                 -   username: user
                     roles: [role]
@@ -67,7 +67,10 @@ class Test:
         )
 
         ssh_client = processes.start(
-            ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            ['expect'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
 
         output, stderr = ssh_client.communicate(script.encode())
