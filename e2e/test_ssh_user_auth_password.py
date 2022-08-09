@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -7,11 +8,7 @@ from .util import wait_port
 
 class Test:
     def test(
-        self,
-        processes: ProcessManager,
-        wg_c_ed25519_pubkey: Path,
-        password_123_hash,
-        username,
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -26,7 +23,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                        username: {username}
+                        username: {os.getlogin()}
                 users:
                 -   username: user
                     roles: [role]
