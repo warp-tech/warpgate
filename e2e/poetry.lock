@@ -138,6 +138,29 @@ async = ["asgiref (>=3.2)"]
 dotenv = ["python-dotenv"]
 
 [[package]]
+name = "flask-sock"
+version = "0.5.2"
+description = "WebSocket support for Flask"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+flask = ">=2"
+simple-websocket = ">=0.5.1"
+
+[[package]]
+name = "h11"
+version = "0.13.0"
+description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+typing-extensions = {version = "*", markers = "python_version < \"3.8\""}
+
+[[package]]
 name = "idna"
 version = "3.3"
 description = "Internationalized Domain Names in Applications (IDNA)"
@@ -371,6 +394,17 @@ socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use_chardet_on_py3 = ["chardet (>=3.0.2,<6)"]
 
 [[package]]
+name = "simple-websocket"
+version = "0.8.0"
+description = "Simple WebSocket server and client for Python"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+wsproto = "*"
+
+[[package]]
 name = "six"
 version = "1.16.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -416,6 +450,19 @@ secure = ["pyOpenSSL (>=0.14)", "cryptography (>=1.3.4)", "idna (>=2.0.0)", "cer
 socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 
 [[package]]
+name = "websocket-client"
+version = "1.3.3"
+description = "WebSocket client for Python with low level API options"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+
+[package.extras]
+docs = ["Sphinx (>=3.4)", "sphinx-rtd-theme (>=0.5)"]
+optional = ["python-socks", "wsaccel"]
+test = ["websockets"]
+
+[[package]]
 name = "werkzeug"
 version = "2.2.1"
 description = "The comprehensive WSGI web application library."
@@ -428,6 +475,17 @@ MarkupSafe = ">=2.1.1"
 
 [package.extras]
 watchdog = ["watchdog"]
+
+[[package]]
+name = "wsproto"
+version = "1.1.0"
+description = "WebSockets state-machine based protocol implementation"
+category = "main"
+optional = false
+python-versions = ">=3.7.0"
+
+[package.dependencies]
+h11 = ">=0.9.0,<1"
 
 [[package]]
 name = "zipp"
@@ -444,7 +502,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.7"
-content-hash = "756a91a65963bab6dc1ed9b806cf475f09966b1c64551497f87d7ddb3d301a5e"
+content-hash = "5f35fb40904521418ed8cf0d0c2bbe36011c91f7aaeb672603572d930ff42763"
 
 [metadata.files]
 atomicwrites = []
@@ -458,6 +516,8 @@ colorama = []
 cryptography = []
 flake8 = []
 flask = []
+flask-sock = []
+h11 = []
 idna = []
 importlib-metadata = []
 iniconfig = [
@@ -481,10 +541,13 @@ pyotp = []
 pyparsing = []
 pytest = []
 requests = []
+simple-websocket = []
 six = []
 ssh2-python = []
 tomli = []
 typing-extensions = []
 urllib3 = []
+websocket-client = []
 werkzeug = []
+wsproto = []
 zipp = []

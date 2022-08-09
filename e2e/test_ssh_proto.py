@@ -24,6 +24,10 @@ def wg_port(processes, ssh_port, password_123_hash):
                     host: localhost
                     port: {ssh_port}
                     username: {os.getlogin()}
+            -   name: ssh-bad-domain
+                allow_roles: [role]
+                ssh:
+                    host: baddomainsomething
             users:
             -   username: user
                 roles: [role]
@@ -160,3 +164,27 @@ class Test:
 
         output = ssh_client.communicate(script.encode())[0]
         assert ssh_client.returncode == 0, output
+
+    def test_connection_error(
+        self,
+        processes: ProcessManager,
+        wg_port,
+    ):
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-tt',
+            'user:ssh-bad-domain@localhost',
+            '-i',
+            '/dev/null',
+            '-o',
+            'PreferredAuthentications=password',
+            'echo',
+            'hello',
+            password='123',
+            stderr=subprocess.PIPE,
+        )
+
+        stdout = ssh_client.communicate()[0]
+        assert b'Selected target: ssh-bad-domain' in stdout
+        assert ssh_client.returncode != 0

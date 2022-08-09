@@ -220,7 +220,9 @@ def report():
 @pytest.fixture(scope='session')
 def echo_server_port():
     from flask import Flask, request, jsonify
+    from flask_sock import Sock
     app = Flask(__name__)
+    sock = Sock(app)
 
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
@@ -230,6 +232,12 @@ def echo_server_port():
             'args': request.args,
             'path': request.path,
         })
+
+    @sock.route('/socket')
+    def ws_echo(ws):
+        while True:
+            data = ws.receive()
+            ws.send(data)
 
     port = alloc_port()
 
