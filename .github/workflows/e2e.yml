@@ -1,4 +1,4 @@
-name: Build
+name: Test
 
 on: [push, pull_request]
 
@@ -8,7 +8,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: install deps
+      - name: Build deps
+        run: |
+          cargo clean
+          rustup component add llvm-tools-preview
+
+      - name: Run
         working-directory: e2e
         run: |
           pip3 install poetry
