@@ -36,9 +36,13 @@ jobs:
         run: |
           make image-ssh-server
 
-      - name: Run
+      - name: Install deps
         working-directory: e2e
         run: |
           pip3 install poetry
           poetry install
+
+      - name: Run
+        working-directory: e2e
+        run: |
           poetry run ./run.sh
