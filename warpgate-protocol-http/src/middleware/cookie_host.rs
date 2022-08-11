@@ -3,6 +3,8 @@ use http::header::Entry;
 use poem::web::cookie::Cookie;
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
 
+use crate::common::SESSION_COOKIE_NAME;
+
 pub struct CookieHostMiddleware {}
 
 impl CookieHostMiddleware {
@@ -36,9 +38,11 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             if let Entry::Occupied(mut entry) = resp.headers_mut().entry(http::header::SET_COOKIE) {
                 if let Ok(cookie_str) = entry.get().to_str() {
                     if let Ok(mut cookie) = Cookie::parse(cookie_str) {
-                        cookie.set_domain(host);
-                        if let Ok(value) = cookie.to_string().parse() {
-                            entry.insert(value);
+                        if cookie.name() == SESSION_COOKIE_NAME {
+                            cookie.set_domain(host);
+                            if let Ok(value) = cookie.to_string().parse() {
+                                entry.insert(value);
+                            }
                         }
                     }
                 }
