@@ -35,7 +35,7 @@ use warpgate_common::{
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE, SESSION_COOKIE_NAME};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
@@ -128,7 +128,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 CookieConfig::default()
                     .secure(false)
                     .max_age(COOKIE_MAX_AGE)
-                    .name("warpgate-http-session"),
+                    .name(SESSION_COOKIE_NAME),
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new())
