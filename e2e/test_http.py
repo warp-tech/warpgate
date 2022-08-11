@@ -18,6 +18,10 @@ def wg_port(processes, echo_server_port, password_123_hash, otp_key_base64):
                 allow_roles: [role]
                 http:
                     url: http://localhost:{echo_server_port}
+            -   name: baddomain
+                allow_roles: [role]
+                http:
+                    url: http://localhostfoobar
             users:
             -   username: user
                 roles: [role]
@@ -51,10 +55,8 @@ class TestHTTPProto:
 
         response = session.get(f'{url}/?warpgate-target=echo', allow_redirects=False)
         assert response.status_code == 307
-        assert (
-            response.headers['location']
-            == '/@warpgate#/login?next=%2F%3Fwarpgate%2Dtarget%3Decho'
-        )
+        redirect = response.headers['location']
+        assert redirect == '/@warpgate#/login?next=%2F%3Fwarpgate%2Dtarget%3Decho'
 
         response = session.get(f'{url}/@warpgate/api/info').json()
         assert response['username'] is None
@@ -239,3 +241,30 @@ class TestHTTPWebsocket:
         assert ws.recv() == b'test'
         ws.ping()
         ws.close()
+
+
+class TestHTTPCookies:
+    def test(
+        self,
+        wg_port,
+    ):
+        wait_port(wg_port, recv=False)
+        session = requests.Session()
+        session.verify = False
+        url = f'https://localhost:{wg_port}'
+        headers = {'Host': f'localhost:{wg_port}'}
+
+        session.post(
+            f'{url}/@warpgate/api/auth/login',
+            json={
+                'username': 'user',
+                'password': '123',
+            },
+            headers=headers,
+        )
+
+        response = session.get(f'{url}/set-cookie?warpgate-target=echo', headers=headers)
+        print(response.headers)
+
+        cookies = session.cookies.get_dict()
+        assert cookies['cookie'] == 'valuez'

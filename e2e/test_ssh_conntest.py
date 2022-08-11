@@ -42,7 +42,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                                        '''
+                '''
             ),
             args=['test-target', 'ssh'],
         )

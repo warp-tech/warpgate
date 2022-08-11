@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 import pytest
 from textwrap import dedent
 
@@ -32,6 +33,8 @@ def wg_port(processes, ssh_port, password_123_hash):
                 credentials:
                 -   type: password
                     hash: '{password_123_hash}'
+                -   type: publickey
+                    key: {open('ssh-keys/id_rsa.pub').read().strip()}
             '''
         ),
     )
@@ -186,3 +189,33 @@ class Test:
         stdout = ssh_client.communicate()[0]
         assert b'Selected target: ssh-bad-domain' in stdout
         assert ssh_client.returncode != 0
+
+    def test_sftp(
+        self,
+        wg_port,
+    ):
+        with tempfile.TemporaryDirectory() as f:
+            subprocess.check_call(
+                [
+                    'sftp',
+                    '-P',
+                    str(wg_port),
+                    '-o',
+                    'User=user:ssh',
+                    '-o',
+                    'IdentitiesOnly=yes',
+                    '-o',
+                    'IdentityFile=ssh-keys/id_rsa',
+                    '-o',
+                    'PreferredAuthentications=publickey',
+                    '-o',
+                    'StrictHostKeychecking=no',
+                    '-o',
+                    'UserKnownHostsFile=/dev/null',
+                    'localhost:/etc/passwd',
+                    f,
+                ],
+                stdout=subprocess.PIPE,
+            )
+
+            assert 'root:x:0:0:root' in open(f + '/passwd').read()

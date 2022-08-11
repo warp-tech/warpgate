@@ -201,7 +201,7 @@ def ctx():
 
 
 @pytest.fixture(scope='session')
-def processes(ctx):
+def processes(ctx, report_generation):
     mgr = ProcessManager(ctx)
     try:
         yield mgr
@@ -210,7 +210,7 @@ def processes(ctx):
 
 
 @pytest.fixture(scope='session', autouse=True)
-def report():
+def report_generation():
     # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
     subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
     yield
@@ -223,6 +223,12 @@ def echo_server_port():
     from flask_sock import Sock
     app = Flask(__name__)
     sock = Sock(app)
+
+    @app.route('/set-cookie')
+    def set_cookie():
+        response = jsonify({})
+        response.set_cookie('cookie', 'value')
+        return response
 
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
