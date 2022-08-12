@@ -267,4 +267,4 @@ class TestHTTPCookies:
         print(response.headers)
 
         cookies = session.cookies.get_dict()
-        assert cookies['cookie'] == 'valuez'
+        assert cookies['cookie'] == 'value'
