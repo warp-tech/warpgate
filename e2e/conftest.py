@@ -1,6 +1,5 @@
 import logging
 import os
-import threading
 import psutil
 import pytest
 import requests
@@ -16,6 +15,7 @@ from textwrap import dedent
 from typing import List
 
 from .util import alloc_port
+from .test_http_common import http_common_wg_port, echo_server_port  # noqa
 
 
 cargo_root = Path(os.getcwd()).parent
@@ -26,8 +26,15 @@ class Context:
     tmpdir: Path
 
 
+@dataclass
+class Child:
+    process: subprocess.Popen
+    stop_signal: signal.Signals
+    stop_timeout: float
+
+
 class ProcessManager:
-    children: List[subprocess.Popen]
+    children: List[Child]
 
     def __init__(self, ctx: Context) -> None:
         self.children = []
@@ -36,11 +43,11 @@ class ProcessManager:
     def stop(self):
         for child in self.children:
             try:
-                p = psutil.Process(child.pid)
+                p = psutil.Process(child.process.pid)
             except psutil.NoSuchProcess:
                 continue
 
-            p.send_signal(signal.SIGINT)
+            p.send_signal(child.stop_signal)
 
             for sp in p.children(recursive=True):
                 try:
@@ -48,16 +55,15 @@ class ProcessManager:
                 except psutil.NoSuchProcess:
                     pass
 
-            p.terminate()
-
             try:
-                p.wait(timeout=3)
+                p.wait(timeout=child.stop_timeout)
             except psutil.TimeoutExpired:
                 for sp in p.children(recursive=True):
                     try:
                         sp.kill()
                     except psutil.NoSuchProcess:
                         pass
+                p.kill()
 
     def start_ssh_server(self, trusted_keys=[]):
         port = alloc_port()
@@ -88,7 +94,7 @@ class ProcessManager:
         authorized_keys_path.chmod(0o600)
         config_path.chmod(0o600)
 
-        p = subprocess.Popen(
+        self.start(
             [
                 'docker',
                 'run',
@@ -104,7 +110,6 @@ class ProcessManager:
                 str(config_path),
             ]
         )
-        self.children.append(p)
         return port
 
     def start_wg(self, config='', args=None):
@@ -141,11 +146,12 @@ class ProcessManager:
                     enable: false
                 roles:
                 - name: role
+                - name: admin
                 '''
             ) + config
         )
         args = args or ['run']
-        p = subprocess.Popen(
+        p = self.start(
             [
                 f'{cargo_root}/target/llvm-cov-target/debug/warpgate',
                 '--config',
@@ -157,8 +163,9 @@ class ProcessManager:
                 **os.environ,
                 'LLVM_PROFILE_FILE': f'{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw',
             },
+            stop_signal=signal.SIGINT,
+            stop_timeout=5,
         )
-        self.children.append(p)
         return p, {
             'ssh': ssh_port,
             'http': http_port,
@@ -168,7 +175,7 @@ class ProcessManager:
         preargs = []
         if password:
             preargs = ['sshpass', '-p', password]
-        p = subprocess.Popen(
+        p = self.start(
             [
                 *preargs,
                 'ssh',
@@ -184,12 +191,11 @@ class ProcessManager:
             stdout=subprocess.PIPE,
             **kwargs,
         )
-        self.children.append(p)
         return p
 
-    def start(self, args, **kwargs):
+    def start(self, args, stop_timeout=3, stop_signal=signal.SIGTERM, **kwargs):
         p = subprocess.Popen(args, **kwargs)
-        self.children.append(p)
+        self.children.append(Child(process=p, stop_signal=stop_signal, stop_timeout=stop_timeout))
         return p
 
 
@@ -214,46 +220,7 @@ def report_generation():
     # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
     subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
     yield
-    subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
-
-
-@pytest.fixture(scope='session')
-def echo_server_port():
-    from flask import Flask, request, jsonify
-    from flask_sock import Sock
-    app = Flask(__name__)
-    sock = Sock(app)
-
-    @app.route('/set-cookie')
-    def set_cookie():
-        response = jsonify({})
-        response.set_cookie('cookie', 'value')
-        return response
-
-    @app.route('/', defaults={'path': ''})
-    @app.route('/<path:path>')
-    def echo(path):
-        return jsonify({
-            'method': request.method,
-            'args': request.args,
-            'path': request.path,
-        })
-
-    @sock.route('/socket')
-    def ws_echo(ws):
-        while True:
-            data = ws.receive()
-            ws.send(data)
-
-    port = alloc_port()
-
-    def runner():
-        app.run(port=port, load_dotenv=False)
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
-
-    yield port
+    # subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 
 
 # ----

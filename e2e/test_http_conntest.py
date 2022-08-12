@@ -39,20 +39,3 @@ class Test:
         )
         proc.wait(timeout=5)
         assert proc.returncode != 0
-
-    def test_fail_badproto(self, processes):
-        proc, _ = processes.start_wg(
-            config=dedent(
-                '''\
-                users: []
-                targets:
-                -   name: target
-                    allow_roles: [role]
-                    ssh:
-                        host: localhost
-                '''
-            ),
-            args=['test-target', 'target'],
-        )
-        proc.wait(timeout=5)
-        assert proc.returncode != 0
