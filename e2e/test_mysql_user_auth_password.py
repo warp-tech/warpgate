@@ -2,7 +2,7 @@ import subprocess
 from textwrap import dedent
 
 from .conftest import ProcessManager
-from .util import wait_port, wait_mysql_port
+from .util import wait_port, wait_mysql_port, mysql_client_ssl_opt
 
 
 class Test:
@@ -43,7 +43,7 @@ class Test:
                 'localhost',
                 '--port',
                 str(wg_ports["mysql"]),
-                '--ssl',
+                mysql_client_ssl_opt,
                 'db',
             ],
             stdin=subprocess.PIPE,
@@ -62,7 +62,7 @@ class Test:
                 'localhost',
                 '--port',
                 str(wg_ports["mysql"]),
-                '--ssl',
+                mysql_client_ssl_opt,
                 'db',
             ],
             stdin=subprocess.PIPE,

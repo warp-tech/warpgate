@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 import socket
 import subprocess
@@ -7,6 +8,11 @@ import time
 
 
 last_port = 1234
+
+mysql_client_ssl_opt = '--ssl'
+if 'GITHUB_ACTION' in os.environ:
+    # Github uses MySQL instead of MariaDB
+    mysql_client_ssl_opt = '--ssl-mode=REQUIRED'
 
 
 def alloc_port():
@@ -50,7 +56,7 @@ def wait_mysql_port(port):
     def wait():
         while True:
             try:
-                subprocess.check_call(f'mysql --user=root --password=123 --host=localhost --port={port} --ssl --execute="show schemas;"', shell=True)
+                subprocess.check_call(f'mysql --user=root --password=123 --host=localhost --port={port} {mysql_client_ssl_opt} --execute="show schemas;"', shell=True)
                 logging.debug(f'Port {port} is up')
                 break
             except subprocess.CalledProcessError:
