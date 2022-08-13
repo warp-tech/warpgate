@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "e2e"
+name = "tests"
 version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]

@@ -3,7 +3,7 @@ name: Test
 on: [push, pull_request]
 
 jobs:
-  E2E:
+  Tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -32,17 +32,17 @@ jobs:
           just yarn build
 
       - name: Build images
-        working-directory: e2e
+        working-directory: tests
         run: |
           make all
 
       - name: Install deps
-        working-directory: e2e
+        working-directory: tests
         run: |
           pip3 install poetry
           poetry install
 
       - name: Run
-        working-directory: e2e
+        working-directory: tests
         run: |
           poetry run ./run.sh
