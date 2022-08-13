@@ -46,3 +46,10 @@ jobs:
         working-directory: tests
         run: |
           poetry run ./run.sh
+          cargo llvm-cov --no-run --hide-instantiations --html --lcov > coverage.lcov
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
