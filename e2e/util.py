@@ -1,5 +1,7 @@
 import logging
+import requests
 import socket
+import subprocess
 import threading
 import time
 
@@ -40,3 +42,45 @@ def wait_port(port, recv=True):
     if t.is_alive():
         raise Exception(f'Port {port} is not up')
     return data
+
+
+def wait_mysql_port(port):
+    logging.debug(f'Waiting for MySQL port {port}')
+
+    def wait():
+        while True:
+            try:
+                subprocess.check_call(f'mysql --user=root --password=123 --host=localhost --port={port} --ssl --execute="show schemas;"', shell=True)
+                logging.debug(f'Port {port} is up')
+                break
+            except subprocess.CalledProcessError:
+                time.sleep(1)
+                continue
+
+    t = threading.Thread(target=wait, daemon=True)
+    t.start()
+    t.join(timeout=60)
+    if t.is_alive():
+        raise Exception(f'Port {port} is not up')
+
+
+def create_ticket(url, username, target_name):
+    session = requests.Session()
+    session.verify = False
+    response = session.post(
+        f'{url}/@warpgate/api/auth/login',
+        json={
+            'username': 'admin',
+            'password': '123',
+        },
+    )
+    assert response.status_code // 100 == 2
+    response = session.post(
+        f'{url}/@warpgate/admin/api/tickets',
+        json={
+            'username': username,
+            'target_name': target_name,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()['secret']

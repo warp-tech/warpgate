@@ -112,9 +112,24 @@ class ProcessManager:
         )
         return port
 
+    def start_mysql_server(self):
+        port = alloc_port()
+        self.start(
+            [
+                'docker',
+                'run',
+                '--rm',
+                '-p',
+                f'{port}:3306',
+                'warpgate-e2e-mysql-server'
+            ]
+        )
+        return port
+
     def start_wg(self, config='', args=None):
         ssh_port = alloc_port()
         http_port = alloc_port()
+        mysql_port = alloc_port()
         data_dir = self.ctx.tmpdir / f'wg-data-{uuid.uuid4()}'
         data_dir.mkdir(parents=True)
         keys_dir = data_dir / 'keys'
@@ -140,6 +155,11 @@ class ProcessManager:
                 http:
                     enable: true
                     listen: 0.0.0.0:{http_port}
+                    certificate: {keys_dir}/tls.certificate.pem
+                    key: {keys_dir}/tls.key.pem
+                mysql:
+                    enable: true
+                    listen: 0.0.0.0:{mysql_port}
                     certificate: {keys_dir}/tls.certificate.pem
                     key: {keys_dir}/tls.key.pem
                 recordings:
@@ -169,6 +189,7 @@ class ProcessManager:
         return p, {
             'ssh': ssh_port,
             'http': http_port,
+            'mysql': mysql_port,
         }
 
     def start_ssh_client(self, *args, password=None, **kwargs):

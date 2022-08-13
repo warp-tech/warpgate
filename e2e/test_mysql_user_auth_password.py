@@ -1,0 +1,72 @@
+import subprocess
+from textwrap import dedent
+
+from .conftest import ProcessManager
+from .util import wait_port, wait_mysql_port
+
+
+class Test:
+    def test(self, processes: ProcessManager, password_123_hash):
+        db_port = processes.start_mysql_server()
+
+        _, wg_ports = processes.start_wg(
+            dedent(
+                f'''\
+                targets:
+                -   name: db
+                    allow_roles: [role]
+                    mysql:
+                        host: localhost
+                        port: {db_port}
+                        user: root
+                        password: '123'
+                users:
+                -   username: user
+                    roles: [role]
+                    credentials:
+                    -   type: password
+                        hash: '{password_123_hash}'
+                '''
+            ),
+        )
+
+        wait_mysql_port(db_port)
+        wait_port(wg_ports['mysql'])
+
+        client = processes.start(
+            [
+                'mysql',
+                '--user',
+                'user#db',
+                '-p123',
+                '--host',
+                'localhost',
+                '--port',
+                str(wg_ports["mysql"]),
+                '--ssl',
+                'db',
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        assert b'\ndb\n' in client.communicate(b'show schemas;')[0]
+        assert client.returncode == 0
+
+        client = processes.start(
+            [
+                'mysql',
+                '--user',
+                'user:db',
+                '-pwrong',
+                '--host',
+                'localhost',
+                '--port',
+                str(wg_ports["mysql"]),
+                '--ssl',
+                'db',
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        client.communicate(b'show schemas;')
+        assert client.returncode != 0

@@ -34,7 +34,7 @@ jobs:
       - name: Build images
         working-directory: e2e
         run: |
-          make image-ssh-server
+          make all
 
       - name: Install deps
         working-directory: e2e

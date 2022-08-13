@@ -1,7 +1,6 @@
 import requests
 
-
-from .util import wait_port
+from .util import create_ticket, wait_port
 
 
 class TestHTTPUserAuthTicket:
@@ -10,27 +9,9 @@ class TestHTTPUserAuthTicket:
         http_common_wg_port,
     ):
         wait_port(http_common_wg_port, recv=False)
-
-        session = requests.Session()
-        session.verify = False
         url = f'https://localhost:{http_common_wg_port}'
-        response = session.post(
-            f'{url}/@warpgate/api/auth/login',
-            json={
-                'username': 'admin',
-                'password': '123',
-            },
-        )
-        assert response.status_code // 100 == 2
-        response = session.post(
-            f'{url}/@warpgate/admin/api/tickets',
-            json={
-                'username': 'user',
-                'target_name': 'echo',
-            },
-        )
-        assert response.status_code == 201
-        secret = response.json()['secret']
+
+        secret = create_ticket(url, 'user', 'echo')
 
         # ---
 
