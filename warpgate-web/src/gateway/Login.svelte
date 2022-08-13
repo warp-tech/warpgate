@@ -41,7 +41,7 @@ async function init () {
 
 function success () {
     if (nextURL) {
-        replace(nextURL)
+        location.assign(nextURL)
     } else {
         replace('/')
     }
