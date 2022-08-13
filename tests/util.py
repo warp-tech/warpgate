@@ -56,7 +56,7 @@ def wait_mysql_port(port):
     def wait():
         while True:
             try:
-                subprocess.check_call(f'mysql --user=root --password=123 --host=127.0.0.1 --port={port} {mysql_client_ssl_opt} --execute="show schemas;"', shell=True)
+                subprocess.check_call(f'mysql --user=root --password=123 --host=127.0.0.1 --port={port} --execute="show schemas;"', shell=True)
                 logging.debug(f'Port {port} is up')
                 break
             except subprocess.CalledProcessError:
