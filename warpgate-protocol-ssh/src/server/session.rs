@@ -936,9 +936,9 @@ impl ServerSession {
         let selector: AuthSelector = (&ssh_username).into();
 
         info!(
-            "Public key auth as {:?} with key FP {}",
+            "Public key auth as {:?} with key {}",
             selector,
-            key.fingerprint()
+            key.public_key_base64()
         );
 
         match self
@@ -1065,7 +1065,7 @@ impl ServerSession {
 
                     login_url.set_path("@warpgate");
                     login_url
-                        .set_fragment(Some(&format!("/login?next=%2Flogin%2F{auth_state_id}")));
+                        .set_fragment(Some(&format!("/login/{auth_state_id}")));
 
                     russh::server::Auth::Partial {
                         name: Cow::Owned(format!(

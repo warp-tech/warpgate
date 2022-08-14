@@ -18,3 +18,5 @@ host_key*
 data
 config.*.yaml
 config.yaml
+__pycache__
+.pytest_cache

@@ -49,8 +49,6 @@ pub enum SsoInternalProviderConfig {
     },
     #[serde(rename = "custom")]
     Custom {
-        name: String,
-        label: String,
         client_id: ClientId,
         client_secret: ClientSecret,
         issuer_url: IssuerUrl,

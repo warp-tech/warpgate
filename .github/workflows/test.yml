@@ -1,0 +1,55 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  Tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install build deps
+        run: |
+          sudo apt-get install openssh-client expect
+          cargo install just
+          cargo install cargo-llvm-cov
+          cargo clean
+          rustup component add llvm-tools-preview
+
+      - name: Build admin UI
+        run: |
+          just yarn
+          just openapi
+          just yarn build
+
+      - name: Build images
+        working-directory: tests
+        run: |
+          make all
+
+      - name: Install deps
+        working-directory: tests
+        run: |
+          pip3 install poetry
+          poetry install
+
+      - name: Run
+        working-directory: tests
+        run: |
+          poetry run ./run.sh
+          cargo llvm-cov --no-run --hide-instantiations --lcov > coverage.lcov
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -183,7 +183,7 @@ async function startSSO (provider: SsoProviderDescription) {
                 click={login}
             >
                 Login
-                <Fa class="ms-2" icon={faArrowRight} />
+                <Fa class="ms-2" fw icon={faArrowRight} />
             </AsyncButton>
 
             {#if authState === ApiAuthState.Failed}
