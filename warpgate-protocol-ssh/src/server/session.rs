@@ -1064,8 +1064,7 @@ impl ServerSession {
                     };
 
                     login_url.set_path("@warpgate");
-                    login_url
-                        .set_fragment(Some(&format!("/login/{auth_state_id}")));
+                    login_url.set_fragment(Some(&format!("/login/{auth_state_id}")));
 
                     russh::server::Auth::Partial {
                         name: Cow::Owned(format!(

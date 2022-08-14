@@ -18,7 +18,8 @@ use russh_keys::PublicKeyBase64;
 pub use server::run_server;
 use uuid::Uuid;
 use warpgate_common::{
-    ProtocolName, ProtocolServer, Services, Target, TargetOptions, TargetTestError, SshHostKeyVerificationMode,
+    ProtocolName, ProtocolServer, Services, SshHostKeyVerificationMode, Target, TargetOptions,
+    TargetTestError,
 };
 
 use crate::client::{RCCommand, RemoteClient};
@@ -82,7 +83,15 @@ impl ProtocolServer for SSHProtocolServer {
                     println!("\nHost key ({}): {}", key.name(), key.public_key_base64());
                     println!("There is no trusted {} key for this host.", key.name());
 
-                    match self.services.config.lock().await.store.ssh.host_key_verification {
+                    match self
+                        .services
+                        .config
+                        .lock()
+                        .await
+                        .store
+                        .ssh
+                        .host_key_verification
+                    {
                         SshHostKeyVerificationMode::AutoAccept => {
                             let _ = reply.send(true);
                         }

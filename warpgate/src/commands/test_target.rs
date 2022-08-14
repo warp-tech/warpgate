@@ -53,7 +53,7 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         }
         Ok(()) => {
             info!("Connection successful!");
-            return Ok(())
+            return Ok(());
         }
     }
 
