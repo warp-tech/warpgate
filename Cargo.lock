@@ -4649,7 +4649,6 @@ dependencies = [
  "humantime-serde",
  "lazy_static",
  "once_cell",
- "packet",
  "password-hash 0.4.1",
  "poem",
  "poem-openapi",
@@ -4666,7 +4665,6 @@ dependencies = [
  "totp-rs",
  "tracing",
  "tracing-core",
- "tracing-subscriber",
  "url",
  "uuid",
  "warpgate-sso",
@@ -4839,7 +4837,6 @@ dependencies = [
 name = "warpgate-sso"
 version = "0.5.0"
 dependencies = [
- "async-trait",
  "bytes 1.2.1",
  "once_cell",
  "openidconnect",
@@ -4848,7 +4845,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]

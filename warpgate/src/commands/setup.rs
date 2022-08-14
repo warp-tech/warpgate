@@ -10,8 +10,8 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Target,
-    TargetOptions, TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
+    HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Target, TargetOptions,
+    TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
 };
 use warpgate_core::Services;
 

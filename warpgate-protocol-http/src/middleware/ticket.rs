@@ -65,7 +65,6 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
 
                 if let Some(ticket_model) = {
                     let ticket = Secret::new(ticket);
-                    let cp = services.config_provider.lock().await;
                     if let Some(res) = authorize_ticket(&services.db, &ticket).await? {
                         consume_ticket(&services.db, &res.id).await?;
                         Some(res)

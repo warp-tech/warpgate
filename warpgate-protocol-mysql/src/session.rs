@@ -7,12 +7,10 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthSelector, AuthResult};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{
-    Secret, TargetMySqlOptions, TargetOptions,
-};
-use warpgate_core::{WarpgateServerHandle, Services, authorize_ticket, consume_ticket};
+use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{

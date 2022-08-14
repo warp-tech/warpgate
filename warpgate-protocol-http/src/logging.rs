@@ -5,8 +5,7 @@ use tracing::*;
 use crate::session_handle::WarpgateServerHandleFromRequest;
 
 pub async fn span_for_request(req: &Request) -> poem::Result<Span> {
-    let handle = WarpgateServerHandleFromRequest::from_request_without_body(req)
-        .await;
+    let handle = WarpgateServerHandleFromRequest::from_request_without_body(req).await;
 
     Ok(match handle {
         Ok(ref handle) => {

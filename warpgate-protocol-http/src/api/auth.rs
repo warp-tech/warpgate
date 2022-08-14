@@ -9,9 +9,9 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthState, CredentialKind, AuthResult};
-use warpgate_core::{Services};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::{Secret, WarpgateError};
+use warpgate_core::Services;
 
 use crate::common::{
     authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,

@@ -4,9 +4,9 @@ use tokio::net::UnixDatagram;
 use tracing::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
+use warpgate_common::WarpgateConfig;
 
 use super::layer::ValuesLogLayer;
-use warpgate_common::WarpgateConfig;
 
 static SKIP_KEY: &str = "is_socket_logging_error";
 
