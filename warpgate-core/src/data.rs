@@ -2,9 +2,8 @@ use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warpgate_db_entities::Session;
-
-use crate::{SessionId, Target, User};
+use warpgate_db_entities::{Session};
+use warpgate_common::{SessionId, Target, User};
 
 #[derive(Serialize, Deserialize, Object)]
 pub struct SessionSnapshot {

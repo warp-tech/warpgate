@@ -5,11 +5,10 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{
     ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
 };
+use warpgate_common::helpers::fs::secure_file;
+use warpgate_common::WarpgateConfig;
 use warpgate_db_entities::LogEntry;
 use warpgate_db_migrations::migrate_database;
-
-use crate::helpers::fs::secure_file;
-use crate::WarpgateConfig;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;

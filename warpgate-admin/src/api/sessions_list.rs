@@ -10,7 +10,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
-use warpgate_common::{SessionSnapshot, State};
+use warpgate_core::{SessionSnapshot, State};
 
 use super::pagination::{PaginatedResponse, PaginationParams};
 

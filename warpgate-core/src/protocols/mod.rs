@@ -4,8 +4,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use async_trait::async_trait;
 pub use handle::{SessionHandle, WarpgateServerHandle};
-
-use crate::Target;
+use warpgate_common::Target;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {

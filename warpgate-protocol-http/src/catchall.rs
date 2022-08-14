@@ -7,7 +7,8 @@ use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, Target, TargetHTTPOptions, TargetOptions, WarpgateServerHandle};
+use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
+use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::common::{gateway_redirect, SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};

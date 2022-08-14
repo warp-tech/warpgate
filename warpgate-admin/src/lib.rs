@@ -2,7 +2,7 @@
 mod api;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
-use warpgate_common::Services;
+use warpgate_core::Services;
 
 pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
     let api_service = OpenApiService::new(

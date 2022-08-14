@@ -1,10 +1,14 @@
 [package]
 edition = "2021"
 license = "Apache-2.0"
-name = "warpgate-common"
+name = "warpgate-core"
 version = "0.5.0"
 
 [dependencies]
+warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
+warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
+
 anyhow = "1.0"
 argon2 = "0.4"
 async-trait = "0.1"

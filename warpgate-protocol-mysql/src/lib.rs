@@ -18,9 +18,9 @@ use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ProtocolServer, Services, SessionStateInit, Target, TargetOptions, TargetTestError,
-    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+    Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
 use crate::session::MySqlSession;
 use crate::session_handle::MySqlSessionHandle;

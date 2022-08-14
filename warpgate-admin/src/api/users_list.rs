@@ -4,7 +4,7 @@ use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use tokio::sync::Mutex;
-use warpgate_common::{ConfigProvider, UserSnapshot};
+use warpgate_core::{ConfigProvider, UserSnapshot};
 
 pub struct Api;
 

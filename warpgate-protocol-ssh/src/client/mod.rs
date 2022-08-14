@@ -20,7 +20,8 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::{SSHTargetAuth, Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
+use warpgate_core::Services;
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};

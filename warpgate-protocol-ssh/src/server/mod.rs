@@ -13,7 +13,7 @@ pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tracing::*;
-use warpgate_common::{Services, SessionStateInit};
+use warpgate_core::{Services, SessionStateInit};
 
 use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;

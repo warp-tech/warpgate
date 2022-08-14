@@ -7,9 +7,10 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::{SessionId, ProtocolName, Target};
 use warpgate_db_entities::Session;
 
-use crate::{ProtocolName, SessionHandle, SessionId, Target, WarpgateServerHandle};
+use crate::{SessionHandle, WarpgateServerHandle};
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,

@@ -9,7 +9,8 @@ use poem::{FromRequest, Request};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, SessionId, SessionStateInit, WarpgateServerHandle};
+use warpgate_common::SessionId;
+use warpgate_core::{Services, SessionStateInit, WarpgateServerHandle};
 
 use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
 use crate::session_handle::{

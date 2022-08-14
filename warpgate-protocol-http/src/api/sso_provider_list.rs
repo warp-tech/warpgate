@@ -5,8 +5,8 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::{Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use tracing::*;
-use warpgate_common::auth::AuthCredential;
-use warpgate_common::{AuthResult, Services};
+use warpgate_common::auth::{AuthCredential, AuthResult};
+use warpgate_core::Services;
 use warpgate_sso::SsoInternalProviderConfig;
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
@@ -120,7 +120,8 @@ impl Api {
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
-        let state_arc = get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+        let state_arc =
+            get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
 
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;

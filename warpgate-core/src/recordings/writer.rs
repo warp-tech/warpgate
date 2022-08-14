@@ -10,11 +10,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::helpers::fs::secure_file;
+use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
 use super::{Error, Result};
-use crate::helpers::fs::secure_file;
-use crate::try_block;
 
 #[derive(Clone)]
 pub struct RecordingWriter {

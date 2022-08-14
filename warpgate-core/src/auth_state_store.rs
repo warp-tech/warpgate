@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
+use warpgate_common::auth::{AuthResult, AuthState};
+use warpgate_common::WarpgateError;
 
-use super::AuthState;
-use crate::{AuthResult, ConfigProvider, WarpgateError};
+use crate::ConfigProvider;
 
 #[allow(clippy::unwrap_used)]
 pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));

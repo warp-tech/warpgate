@@ -3,34 +3,26 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use data_encoding::BASE64;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use tracing::*;
-use uuid::Uuid;
-use warpgate_db_entities::Ticket;
-
-use super::ConfigProvider;
-use crate::auth::{
+use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
     CredentialPolicy, PerProtocolCredentialPolicy,
 };
-use crate::helpers::hash::verify_password_hash;
-use crate::helpers::otp::verify_totp;
-use crate::{Target, User, UserAuthCredential, UserSnapshot, WarpgateConfig, WarpgateError};
+use warpgate_common::helpers::hash::verify_password_hash;
+use warpgate_common::helpers::otp::verify_totp;
+use warpgate_common::{Target, User, UserAuthCredential, WarpgateConfig, WarpgateError};
+
+use super::ConfigProvider;
+use crate::UserSnapshot;
 
 pub struct FileConfigProvider {
-    db: Arc<Mutex<DatabaseConnection>>,
     config: Arc<Mutex<WarpgateConfig>>,
 }
 
 impl FileConfigProvider {
-    pub async fn new(
-        db: &Arc<Mutex<DatabaseConnection>>,
-        config: &Arc<Mutex<WarpgateConfig>>,
-    ) -> Self {
+    pub async fn new(config: &Arc<Mutex<WarpgateConfig>>) -> Self {
         Self {
-            db: db.clone(),
             config: config.clone(),
         }
     }
@@ -283,21 +275,5 @@ impl ConfigProvider for FileConfigProvider {
         let intersect = user_roles.intersection(&target_roles).count() > 0;
 
         Ok(intersect)
-    }
-
-    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
-        let ticket = Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
-        let Some(ticket) = ticket else {
-            return Err(WarpgateError::InvalidTicket(*ticket_id));
-        };
-
-        if let Some(uses_left) = ticket.uses_left {
-            let mut model: Ticket::ActiveModel = ticket.into();
-            model.uses_left = Set(Some(uses_left - 1));
-            model.update(&*db).await?;
-        }
-
-        Ok(())
     }
 }

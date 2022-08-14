@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
+use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
-use crate::{SessionId, SessionState, State, Target, WarpgateError};
+use crate::{SessionState, State};
 
 pub trait SessionHandle {
     fn close(&mut self);

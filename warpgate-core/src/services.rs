@@ -4,11 +4,11 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use warpgate_common::WarpgateConfig;
 
-use crate::auth::AuthStateStore;
 use crate::db::{connect_to_db, sanitize_db};
 use crate::recordings::SessionRecordings;
-use crate::{ConfigProvider, FileConfigProvider, State, WarpgateConfig};
+use crate::{AuthStateStore, ConfigProvider, FileConfigProvider, State};
 
 #[derive(Clone)]
 pub struct Services {
@@ -30,7 +30,7 @@ impl Services {
         let recordings = Arc::new(Mutex::new(recordings));
 
         let config = Arc::new(Mutex::new(config));
-        let config_provider = Arc::new(Mutex::new(FileConfigProvider::new(&db, &config).await));
+        let config_provider = Arc::new(Mutex::new(FileConfigProvider::new(&config).await));
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(config_provider.clone())));
 

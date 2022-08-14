@@ -4573,7 +4573,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4600,6 +4600,7 @@ dependencies = [
  "tracing-subscriber",
  "warpgate-admin",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-protocol-http",
  "warpgate-protocol-mysql",
  "warpgate-protocol-ssh",
@@ -4607,7 +4608,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4629,13 +4630,14 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
 ]
 
 [[package]]
 name = "warpgate-common"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4667,6 +4669,45 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "warpgate-sso",
+ "webpki",
+]
+
+[[package]]
+name = "warpgate-core"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "bytes 1.2.1",
+ "chrono",
+ "data-encoding",
+ "futures",
+ "humantime-serde",
+ "lazy_static",
+ "once_cell",
+ "packet",
+ "password-hash 0.4.1",
+ "poem",
+ "poem-openapi",
+ "rand",
+ "rand_chacha",
+ "rand_core",
+ "rustls",
+ "rustls-pemfile",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "totp-rs",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "warpgate-common",
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-sso",
@@ -4675,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bitflags",
  "bytes 1.2.1",
@@ -4688,7 +4729,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4696,11 +4737,12 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "warpgate-common",
 ]
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-std",
  "chrono",
@@ -4711,7 +4753,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4735,6 +4777,7 @@ dependencies = [
  "uuid",
  "warpgate-admin",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "warpgate-sso",
  "warpgate-web",
@@ -4742,7 +4785,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4761,6 +4804,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-database-protocols",
  "warpgate-db-entities",
  "webpki",
@@ -4768,7 +4812,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4786,13 +4830,14 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "zeroize",
 ]
 
 [[package]]
 name = "warpgate-sso"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "bytes 1.2.1",
@@ -4808,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "rust-embed",
  "serde",

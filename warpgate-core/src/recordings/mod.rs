@@ -7,9 +7,9 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::helpers::fs::secure_directory;
+use warpgate_common::{RecordingsConfig, SessionId, WarpgateConfig};
 use warpgate_db_entities::Recording::{self, RecordingKind};
-
-use crate::{RecordingsConfig, SessionId, WarpgateConfig};
 mod terminal;
 mod traffic;
 mod writer;
@@ -58,7 +58,7 @@ impl SessionRecordings {
         path.push(&config.store.recordings.path);
         if config.store.recordings.enable {
             std::fs::create_dir_all(&path)?;
-            crate::helpers::fs::secure_directory(&path)?;
+            secure_directory(&path)?;
         }
         Ok(Self {
             db,

@@ -7,7 +7,8 @@ use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SessionId, TargetSSHOptions};
+use warpgate_core::Services;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
 use crate::ConnectionError;

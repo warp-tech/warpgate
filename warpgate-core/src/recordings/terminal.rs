@@ -39,7 +39,7 @@ pub enum TerminalRecordingItem {
         time: f32,
         #[serde(default)]
         stream: TerminalRecordingStreamId,
-        #[serde(with = "crate::helpers::serde_base64")]
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
     PtyResize {

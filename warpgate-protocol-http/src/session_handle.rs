@@ -6,7 +6,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::{FromRequest, Request, RequestBody};
 use tokio::sync::{mpsc, Mutex};
-use warpgate_common::{SessionHandle, WarpgateServerHandle};
+use warpgate_core::{SessionHandle, WarpgateServerHandle};
 
 use crate::session::SessionStore;
 

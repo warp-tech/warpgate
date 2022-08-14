@@ -17,16 +17,16 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthSelector, AuthState, CredentialKind};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
 use warpgate_common::eventhub::{EventHub, EventSender};
-use warpgate_common::recordings::{
+use warpgate_common::{
+    Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
+};
+use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
 };
-use warpgate_common::{
-    authorize_ticket, AuthResult, Secret, Services, SessionId, SshHostKeyVerificationMode, Target,
-    TargetOptions, TargetSSHOptions, WarpgateServerHandle,
-};
+use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
 
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
@@ -1168,12 +1168,7 @@ impl ServerSession {
                 match authorize_ticket(&self.services.db, secret).await? {
                     Some(ticket) => {
                         info!("Authorized for {} with a ticket", ticket.target);
-                        self.services
-                            .config_provider
-                            .lock()
-                            .await
-                            .consume_ticket(&ticket.id)
-                            .await?;
+                        consume_ticket(&self.services.db, &ticket.id).await?;
                         self._auth_accept(&ticket.username, &ticket.target).await;
                         Ok(AuthResult::Accepted {
                             username: ticket.username.clone(),

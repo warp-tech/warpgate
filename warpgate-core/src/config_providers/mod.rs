@@ -1,24 +1,18 @@
 mod file;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use file::FileConfigProvider;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::auth::{AuthCredential, CredentialPolicy};
+use warpgate_common::{Secret, Target, WarpgateError};
 use warpgate_db_entities::Ticket;
 
-use crate::auth::{AuthCredential, CredentialKind, CredentialPolicy};
-use crate::{Secret, Target, UserSnapshot, WarpgateError};
-
-#[derive(Debug, Clone)]
-pub enum AuthResult {
-    Accepted { username: String },
-    Need(HashSet<CredentialKind>),
-    Rejected,
-}
+use crate::UserSnapshot;
 
 #[async_trait]
 pub trait ConfigProvider {
@@ -47,8 +41,6 @@ pub trait ConfigProvider {
         username: &str,
         target: &str,
     ) -> Result<bool, WarpgateError>;
-
-    async fn consume_ticket(&mut self, ticket_id: &Uuid) -> Result<(), WarpgateError>;
 }
 
 //TODO: move this somewhere
@@ -84,4 +76,23 @@ pub async fn authorize_ticket(
             Ok(None)
         }
     }
+}
+
+pub async fn consume_ticket(
+    db: &Arc<Mutex<DatabaseConnection>>,
+    ticket_id: &Uuid,
+) -> Result<(), WarpgateError> {
+    let db = db.lock().await;
+    let ticket = Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
+    let Some(ticket) = ticket else {
+        return Err(WarpgateError::InvalidTicket(*ticket_id));
+    };
+
+    if let Some(uses_left) = ticket.uses_left {
+        let mut model: Ticket::ActiveModel = ticket.into();
+        model.uses_left = Set(Some(uses_left - 1));
+        model.update(&*db).await?;
+    }
+
+    Ok(())
 }
