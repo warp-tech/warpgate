@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[oai(rename = "Target")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: u64,
+    pub id: u32,
     pub target_id: Uuid,
     pub role_id: Uuid,
 }

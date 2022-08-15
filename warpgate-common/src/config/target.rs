@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::defaults::*;
 use crate::Secret;
@@ -14,22 +15,31 @@ pub struct TargetSSHOptions {
     #[serde(default = "_default_username")]
     pub username: String,
     #[serde(default)]
-    #[oai(skip)]
     pub auth: SSHTargetAuth,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
 #[serde(untagged)]
+#[oai(discriminator_name = "kind", one_of)]
 pub enum SSHTargetAuth {
     #[serde(rename = "password")]
-    Password { password: Secret<String> },
+    Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
-    PublicKey,
+    PublicKey(SshTargetPublicKeyAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct SshTargetPasswordAuth {
+    pub password: Secret<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetPublicKeyAuth {
 }
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {
-        SSHTargetAuth::PublicKey
+        SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())
     }
 }
 
@@ -101,6 +111,8 @@ pub struct TargetWebAdminOptions {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
+    #[serde(default)]
+    pub id: Uuid,
     pub name: String,
     #[serde(default = "_default_empty_vec")]
     pub allow_roles: Vec<String>,

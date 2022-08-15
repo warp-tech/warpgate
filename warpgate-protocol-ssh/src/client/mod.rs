@@ -388,15 +388,15 @@ impl RemoteClient {
 
                     let mut auth_result = false;
                     match ssh_options.auth {
-                        SSHTargetAuth::Password { password } => {
+                        SSHTargetAuth::Password(auth) => {
                             auth_result = session
-                                .authenticate_password(ssh_options.username.clone(), password.expose_secret())
+                                .authenticate_password(ssh_options.username.clone(), auth.password.expose_secret())
                                 .await?;
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
-                        SSHTargetAuth::PublicKey => {
+                        SSHTargetAuth::PublicKey(_) => {
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {

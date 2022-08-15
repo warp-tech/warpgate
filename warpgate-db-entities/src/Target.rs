@@ -17,6 +17,17 @@ pub enum TargetKind {
     WebAdmin,
 }
 
+impl From<&TargetOptions> for TargetKind {
+    fn from(options: &TargetOptions) -> Self {
+        match options {
+            TargetOptions::Http(_) => Self::Http,
+            TargetOptions::MySql(_) => Self::MySql,
+            TargetOptions::Ssh(_) => Self::Ssh,
+            TargetOptions::WebAdmin(_) => Self::WebAdmin,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
 pub enum SshAuthKind {
@@ -58,6 +69,7 @@ impl TryFrom<Model> for Target {
     fn try_from(model: Model) -> Result<Self, Self::Error> {
         let options: TargetOptions = serde_json::from_value(model.options)?;
         Ok(Self {
+            id: model.id,
             name: model.name,
             allow_roles: vec![],
             options,

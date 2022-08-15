@@ -7,6 +7,7 @@ use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
@@ -157,6 +158,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     if store.http.enable {
         store.targets.push(Target {
+            id: Uuid::new_v4(),
             name: "Web admin".to_owned(),
             allow_roles: vec!["warpgate:admin".to_owned()],
             options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),

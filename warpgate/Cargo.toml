@@ -27,6 +27,7 @@ time = "0.3"
 tokio = {version = "1.20", features = ["tracing", "signal", "macros"]}
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
+uuid = "1.0"
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
 warpgate-core = {version = "*", path = "../warpgate-core"}

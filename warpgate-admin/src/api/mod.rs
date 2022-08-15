@@ -12,6 +12,7 @@ pub mod targets_list;
 pub mod tickets_detail;
 pub mod tickets_list;
 pub mod users_list;
+mod targets_detail;
 
 pub fn get() -> impl OpenApi {
     (
@@ -20,6 +21,7 @@ pub fn get() -> impl OpenApi {
         recordings_detail::Api,
         users_list::Api,
         targets_list::Api,
+        targets_detail::Api,
         tickets_list::Api,
         tickets_detail::Api,
         known_hosts_list::Api,

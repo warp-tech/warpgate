@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "servers": [
     {
@@ -224,7 +224,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Target"
+                    "$ref": "#/components/schemas/TargetSnapshot"
                   }
                 }
               }
@@ -467,7 +467,16 @@
           }
         }
       },
-      "Target": {
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "Http",
+          "MySql",
+          "Ssh",
+          "WebAdmin"
+        ]
+      },
+      "TargetSnapshot": {
         "type": "object",
         "required": [
           "name",
@@ -484,15 +493,6 @@
             "type": "string"
           }
         }
-      },
-      "TargetKind": {
-        "type": "string",
-        "enum": [
-          "Http",
-          "MySql",
-          "Ssh",
-          "WebAdmin"
-        ]
       }
     }
   }

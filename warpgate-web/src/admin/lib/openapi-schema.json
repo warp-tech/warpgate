@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "servers": [
     {
@@ -235,6 +235,73 @@
           }
         },
         "operationId": "get_targets"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Target"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_target"
+      }
+    },
+    "/target/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Target"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_target"
       }
     },
     "/tickets": {
@@ -415,6 +482,21 @@
   },
   "components": {
     "schemas": {
+      "CreateTargetRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "options"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/TargetOptions"
+          }
+        }
+      },
       "CreateTicketRequest": {
         "type": "object",
         "required": [
@@ -597,6 +679,62 @@
           }
         }
       },
+      "SSHTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
+            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          }
+        }
+      },
+      "SSHTargetAuth_SshTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetPasswordAuth"
+          }
+        ]
+      },
+      "SSHTargetAuth_SshTargetPublicKeyAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "PublicKey"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
+          }
+        ]
+      },
       "SessionSnapshot": {
         "type": "object",
         "required": [
@@ -632,14 +770,33 @@
           }
         }
       },
+      "SshTargetPasswordAuth": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "SshTargetPublicKeyAuth": {
+        "type": "object"
+      },
       "Target": {
         "type": "object",
         "required": [
+          "id",
           "name",
           "allow_roles",
           "options"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "type": "string"
           },
@@ -812,7 +969,8 @@
         "required": [
           "host",
           "port",
-          "username"
+          "username",
+          "auth"
         ],
         "properties": {
           "host": {
@@ -824,6 +982,9 @@
           },
           "username": {
             "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SSHTargetAuth"
           }
         }
       },
