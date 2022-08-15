@@ -4214,9 +4214,9 @@ dependencies = [
 
 [[package]]
 name = "totp-rs"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ba0e3360f3f4440e1fb3a17ca6e06fdfef0a62acdc70829cd564d677656ff4e"
+checksum = "c44da613dc546a6a3db824c5f1d6672d06e304a588e3816446abe13a68c3f72f"
 dependencies = [
  "base32",
  "constant_time_eq",
