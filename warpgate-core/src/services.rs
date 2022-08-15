@@ -4,11 +4,13 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
-use warpgate_common::WarpgateConfig;
+use warpgate_common::{ConfigProviderKind, WarpgateConfig};
 
 use crate::db::{connect_to_db, sanitize_db};
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProvider, FileConfigProvider, State};
+use crate::{AuthStateStore, ConfigProvider, FileConfigProvider, State, DatabaseConfigProvider};
+
+type ConfigProviderArc = Arc<Mutex<dyn ConfigProvider + Send + 'static>>;
 
 #[derive(Clone)]
 pub struct Services {
@@ -16,7 +18,7 @@ pub struct Services {
     pub recordings: Arc<Mutex<SessionRecordings>>,
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub state: Arc<Mutex<State>>,
-    pub config_provider: Arc<Mutex<dyn ConfigProvider + Send + 'static>>,
+    pub config_provider: ConfigProviderArc,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
 }
 
@@ -29,8 +31,17 @@ impl Services {
         let recordings = SessionRecordings::new(db.clone(), &config)?;
         let recordings = Arc::new(Mutex::new(recordings));
 
+        let provider = config.store.config_provider.clone();
         let config = Arc::new(Mutex::new(config));
-        let config_provider = Arc::new(Mutex::new(FileConfigProvider::new(&config).await));
+
+        let config_provider = match provider {
+            ConfigProviderKind::File => {
+                Arc::new(Mutex::new(FileConfigProvider::new(&config).await)) as ConfigProviderArc
+            }
+            ConfigProviderKind::Database => {
+                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db, &config).await)) as ConfigProviderArc
+            }
+        };
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(config_provider.clone())));
 

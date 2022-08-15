@@ -17,6 +17,8 @@ pub enum WarpgateError {
     UserNotFound,
     #[error("failed to parse url: {0}")]
     UrlParse(#[from] url::ParseError),
+    #[error("deserialization failed: {0}")]
+    DeserializeJson(#[from] serde_json::Error),
     #[error("external_url config option is not set")]
     ExternalHostNotSet,
 }
