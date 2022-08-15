@@ -2,20 +2,24 @@ use std::sync::Arc;
 
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
-use poem::web::{Data, FromRequest};
+use poem::web::{Data, FromRequest, Redirect};
 use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::{Services, Target, TargetHTTPOptions, TargetOptions, WarpgateServerHandle};
 
-use crate::common::{gateway_redirect, SessionAuthorization, SessionExt};
+use crate::common::{SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
 #[derive(Deserialize)]
 struct QueryParams {
     #[serde(rename = "warpgate-target")]
     warpgate_target: Option<String>,
+}
+
+pub fn target_select_redirect() -> Response {
+    Redirect::temporary("/@warpgate").into_response()
 }
 
 #[handler]
@@ -28,7 +32,7 @@ pub async fn catchall_endpoint(
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
     let Some((target, options)) = get_target_for_request(req, services.0).await? else {
-        return Ok(gateway_redirect(req).into_response());
+        return Ok(target_select_redirect());
     };
 
     session.set_target_name(target.name.clone());
