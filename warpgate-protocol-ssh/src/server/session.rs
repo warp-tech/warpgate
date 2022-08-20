@@ -33,8 +33,8 @@ use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
-    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCEvent, RCState,
-    RemoteClient, ServerChannelId, X11Request,
+    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
+    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, X11Request,
 };
 
 #[derive(Clone)]
@@ -68,7 +68,7 @@ pub struct ServerSession {
     channel_recorders: HashMap<Uuid, TerminalRecorder>,
     channel_map: BiMap<ServerChannelId, Uuid>,
     channel_pty_size_map: HashMap<Uuid, PtyRequest>,
-    rc_tx: UnboundedSender<(RCCommand, oneshot::Sender<Result<()>>)>,
+    rc_tx: UnboundedSender<(RCCommand, RCCommandReply)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
     remote_address: SocketAddr,
@@ -309,7 +309,8 @@ impl ServerSession {
             TargetSelection::Found(target, ssh_options) => {
                 if self.rc_state == RCState::NotInitialized {
                     self.rc_state = RCState::Connecting;
-                    self.send_command(RCCommand::Connect(ssh_options)).map_err(|_| anyhow::anyhow!("cannot send command"))?;
+                    self.send_command(RCCommand::Connect(ssh_options))
+                        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
                     self.service_output.show_progress();
                     self.emit_service_message(&format!("Selected target: {}", target.name))
                         .await?;
@@ -629,8 +630,8 @@ impl ServerSession {
         info!(%channel, "Opening session channel");
         self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
-        self
-            .send_command_and_wait(RCCommand::Channel(channel, ChannelOperation::OpenShell)).await?;
+        self.send_command_and_wait(RCCommand::Channel(channel, ChannelOperation::OpenShell))
+            .await?;
         Ok(())
     }
 
@@ -667,7 +668,8 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             uuid,
             ChannelOperation::OpenDirectTCPIP(params),
-        )).await?;
+        ))
+        .await?;
         Ok(())
     }
 
@@ -691,7 +693,8 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestPty(request),
-        )).await?;
+        ))
+        .await?;
         let _ = self
             .session_handle
             .as_mut()
@@ -719,10 +722,11 @@ impl ServerSession {
                 self.channel_recorders.remove(&channel_id);
             }
         }
-        let _ = self.send_command(RCCommand::Channel(
+        self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::ResizePty(request),
-        ));
+        ))
+        .await?;
         Ok(())
     }
 
@@ -743,7 +747,8 @@ impl ServerSession {
                 self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestExec(command.to_string()),
-                )).await?;
+                ))
+                .await?;
 
                 self.start_terminal_recording(
                     channel_id,
@@ -794,7 +799,8 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestX11(request),
-        )).await?;
+        ))
+        .await?;
         Ok(())
     }
 
@@ -806,10 +812,11 @@ impl ServerSession {
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, %name, %value, "Environment");
-        let _ = self.send_command(RCCommand::Channel(
+        self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestEnv(name, value),
-        ));
+        ))
+        .await?;
         Ok(())
     }
 
@@ -848,7 +855,8 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestShell,
-        )).await?;
+        ))
+        .await?;
 
         self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
             .await;
@@ -874,7 +882,8 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestSubsystem(name),
-        )).await?;
+        ))
+        .await?;
         Ok(())
     }
 
@@ -923,7 +932,7 @@ impl ServerSession {
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        let _ = self.send_command(RCCommand::Channel(
+        let _ = self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::ExtendedData {
                 ext: code,
@@ -1230,14 +1239,16 @@ impl ServerSession {
     pub async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
-        let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Close));
+        self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
+            .await?;
         Ok(())
     }
 
     pub async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
-        let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
+        self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Eof))
+            .await?;
         Ok(())
     }
 
@@ -1261,18 +1272,23 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::Signal(signal),
-        )).await?;
+        ))
+        .await?;
         Ok(())
     }
 
     fn send_command(&mut self, command: RCCommand) -> Result<(), RCCommand> {
-        self.rc_tx.send((command, oneshot::channel().0)).map_err(|e| e.0.0)
+        self.rc_tx
+            .send((command, oneshot::channel().0))
+            .map_err(|e| e.0 .0)
     }
 
-    async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<()> {
+    async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
         let (tx, rx) = oneshot::channel();
-        self.rc_tx.send((command, tx)).context("disconnected")?;
-        rx.await?
+        self.rc_tx
+            .send((command, tx))
+            .map_err(|_| SshClientError::MpscError)?;
+        rx.await.map_err(|_| SshClientError::MpscError)?
     }
 
     pub async fn _disconnect(&mut self) {
