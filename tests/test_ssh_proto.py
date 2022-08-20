@@ -21,7 +21,7 @@ def wg_port(processes, ssh_port, password_123_hash):
             -   name: ssh
                 allow_roles: [role]
                 ssh:
-                    host: localhost
+                    host: 127.0.0.1
                     port: {ssh_port}
             -   name: ssh-bad-domain
                 allow_roles: [role]
@@ -69,7 +69,7 @@ class Test:
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = ssh_client.communicate()
+        stdout, stderr = ssh_client.communicate(timeout=10)
         assert b'stdout' == stdout
         assert stderr.endswith(b'stderr')
 

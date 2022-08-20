@@ -40,17 +40,17 @@ impl russh::server::Handler for ServerHandler {
         async { Ok((self, s)) }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureBool {
         async move {
-            {
+            let allowed = {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
                     ._channel_open_session(ServerChannelId(channel), &mut session)
                     .instrument(span)
-                    .await?;
-            }
-            Ok((self, session))
+                    .await?
+            };
+            Ok((self, session, allowed))
         }
         .boxed()
     }
@@ -358,11 +358,11 @@ impl russh::server::Handler for ServerHandler {
         originator_address: &str,
         originator_port: u32,
         mut session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Self::FutureBool {
         let host_to_connect = host_to_connect.to_string();
         let originator_address = originator_address.to_string();
         async move {
-            {
+            let allowed = {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
@@ -377,9 +377,9 @@ impl russh::server::Handler for ServerHandler {
                         &mut session,
                     )
                     .instrument(span)
-                    .await?;
-            }
-            Ok((self, session))
+                    .await?
+            };
+            Ok((self, session, allowed))
         }
         .boxed()
     }

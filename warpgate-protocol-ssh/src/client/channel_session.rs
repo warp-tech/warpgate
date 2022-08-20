@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use russh::client::Channel;
+use russh::client::Msg;
+use russh::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
 
 pub struct SessionChannel {
-    client_channel: Channel,
+    client_channel: Channel<Msg>,
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
@@ -19,7 +20,7 @@ pub struct SessionChannel {
 
 impl SessionChannel {
     pub fn new(
-        client_channel: Channel,
+        client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
@@ -102,6 +103,7 @@ impl SessionChannel {
                     match channel_event {
                         Some(russh::ChannelMsg::Data { data }) => {
                             let bytes: &[u8] = &data;
+                            debug!("channel data: {bytes:?}");
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
                                 Bytes::from(BytesMut::from(bytes)),
@@ -137,7 +139,10 @@ impl SessionChannel {
                                 ext,
                             }).map_err(|_| SshClientError::MpscError)?;
                         }
-                        None => {
+                        Some(msg) => {
+                            debug!("unhandled channel message: {:?}", msg);
+                        }
+                            None => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break
                         },

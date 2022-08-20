@@ -17,7 +17,7 @@ use russh::client::Handle;
 use russh::{Preferred, Sig};
 use russh_keys::key::{self, PublicKey};
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -84,17 +84,21 @@ pub enum RCEvent {
         ext: u32,
     },
     ConnectionError(ConnectionError),
-    HostKeyReceived(PublicKey),
-    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
 }
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
+#[derive(Debug)]
+pub enum SshClientConnectionEvent {
+    HostKeyReceived(PublicKey),
+    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+}
+
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(TargetSSHOptions),
+    Connect(TargetSSHOptions, mpsc::Sender<SshClientConnectionEvent>),
     Channel(Uuid, ChannelOperation),
     // ForwardTCPIP(String, u32),
     // CancelTCPIPForward(String, u32),
@@ -304,26 +308,28 @@ impl RemoteClient {
 
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
         match cmd {
-            RCCommand::Connect(options) => match self.connect(options).await {
-                Ok(_) => {
-                    self.set_state(RCState::Connected)
-                        .map_err(SshClientError::other)?;
-                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
-                    for (id, op) in ops {
-                        self.apply_channel_op(id, op).await?;
+            RCCommand::Connect(options, event_sender) => {
+                match self.connect(options, event_sender).await {
+                    Ok(_) => {
+                        self.set_state(RCState::Connected)
+                            .map_err(SshClientError::other)?;
+                        let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                        for (id, op) in ops {
+                            self.apply_channel_op(id, op).await?;
+                        }
+                        // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                        // for (address, port) in forwards {
+                        //     self.tcpip_forward(address, port).await?;
+                        // }
                     }
-                    // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
-                    // for (address, port) in forwards {
-                    //     self.tcpip_forward(address, port).await?;
-                    // }
+                    Err(e) => {
+                        debug!("Connect error: {}", e);
+                        let _ = self.tx.send(RCEvent::ConnectionError(e));
+                        self.set_disconnected();
+                        return Ok(true);
+                    }
                 }
-                Err(e) => {
-                    debug!("Connect error: {}", e);
-                    let _ = self.tx.send(RCEvent::ConnectionError(e));
-                    self.set_disconnected();
-                    return Ok(true);
-                }
-            },
+            }
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op).await?;
             }
@@ -335,7 +341,11 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
+    async fn connect(
+        &mut self,
+        ssh_options: TargetSSHOptions,
+        event_sender: mpsc::Sender<SshClientConnectionEvent>,
+    ) -> Result<(), ConnectionError> {
         let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
         let address = match address_str
             .to_socket_addrs()
@@ -381,10 +391,10 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).map_err(|_| ConnectionError::Internal)?;
+                            event_sender.send(SshClientConnectionEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).map_err(|_| ConnectionError::Internal)?;
+                            event_sender.send(SshClientConnectionEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }

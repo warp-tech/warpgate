@@ -13,7 +13,7 @@ use russh::server::Session;
 use russh::{CryptoVec, MethodSet, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
@@ -34,7 +34,8 @@ use crate::compat::ContextExt;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, X11Request,
+    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientConnectionEvent, SshClientError,
+    X11Request,
 };
 
 #[derive(Clone)]
@@ -309,11 +310,28 @@ impl ServerSession {
             TargetSelection::Found(target, ssh_options) => {
                 if self.rc_state == RCState::NotInitialized {
                     self.rc_state = RCState::Connecting;
-                    self.send_command(RCCommand::Connect(ssh_options))
+                    let (tx, mut rx) = mpsc::channel(10);
+                    self.send_command(RCCommand::Connect(ssh_options, tx))
                         .map_err(|_| anyhow::anyhow!("cannot send command"))?;
                     self.service_output.show_progress();
                     self.emit_service_message(&format!("Selected target: {}", target.name))
                         .await?;
+
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            SshClientConnectionEvent::HostKeyReceived(key) => {
+                                self.emit_service_message(&format!(
+                                    "Host key ({}): {}",
+                                    key.name(),
+                                    key.public_key_base64()
+                                ))
+                                .await?;
+                            }
+                            SshClientConnectionEvent::HostKeyUnknown(key, reply) => {
+                                self.handle_unknown_host_key(key, reply).await?;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -521,17 +539,6 @@ impl ServerSession {
                 })
                 .await?;
             }
-            RCEvent::HostKeyReceived(key) => {
-                self.emit_service_message(&format!(
-                    "Host key ({}): {}",
-                    key.name(),
-                    key.public_key_base64()
-                ))
-                .await?;
-            }
-            RCEvent::HostKeyUnknown(key, reply) => {
-                self.handle_unknown_host_key(key, reply).await?;
-            }
         }
         Ok(())
     }
@@ -623,16 +630,23 @@ impl ServerSession {
         &mut self,
         server_channel_id: ServerChannelId,
         session: &mut Session,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let channel = Uuid::new_v4();
         self.channel_map.insert(server_channel_id, channel);
 
         info!(%channel, "Opening session channel");
-        self.all_channels.push(channel);
         self.session_handle = Some(session.handle());
-        self.send_command_and_wait(RCCommand::Channel(channel, ChannelOperation::OpenShell))
-            .await?;
-        Ok(())
+        match self
+            .send_command_and_wait(RCCommand::Channel(channel, ChannelOperation::OpenShell))
+            .await
+        {
+            Ok(()) => {
+                self.all_channels.push(channel);
+                Ok(true)
+            }
+            Err(SshClientError::ChannelFailure) => Ok(false),
+            Err(x) => Err(x.into()),
+        }
     }
 
     pub async fn _channel_open_direct_tcpip(
@@ -640,37 +654,45 @@ impl ServerSession {
         channel: ServerChannelId,
         params: DirectTCPIPParams,
         session: &mut Session,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let uuid = Uuid::new_v4();
         self.channel_map.insert(channel, uuid);
 
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
 
-        let recorder = self
-            .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
-            .await;
-        if let Some(recorder) = recorder {
-            #[allow(clippy::unwrap_used)]
-            let mut recorder = recorder.connection(TrafficConnectionParams {
-                dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
-                dst_port: params.port_to_connect as u16,
-                src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
-                src_port: params.originator_port as u16,
-            });
-            if let Err(error) = recorder.write_connection_setup().await {
-                error!(%channel, ?error, "Failed to record connection setup");
-            }
-            self.traffic_connection_recorders.insert(uuid, recorder);
-        }
-
-        self.all_channels.push(uuid);
         self.session_handle = Some(session.handle());
-        self.send_command_and_wait(RCCommand::Channel(
-            uuid,
-            ChannelOperation::OpenDirectTCPIP(params),
-        ))
-        .await?;
-        Ok(())
+        match self
+            .send_command_and_wait(RCCommand::Channel(
+                uuid,
+                ChannelOperation::OpenDirectTCPIP(params.clone()),
+            ))
+            .await
+        {
+            Ok(()) => {
+                self.all_channels.push(uuid);
+
+                let recorder = self
+                    .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
+                    .await;
+                if let Some(recorder) = recorder {
+                    #[allow(clippy::unwrap_used)]
+                    let mut recorder = recorder.connection(TrafficConnectionParams {
+                        dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
+                        dst_port: params.port_to_connect as u16,
+                        src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
+                        src_port: params.originator_port as u16,
+                    });
+                    if let Err(error) = recorder.write_connection_setup().await {
+                        error!(%channel, ?error, "Failed to record connection setup");
+                    }
+                    self.traffic_connection_recorders.insert(uuid, recorder);
+                }
+
+                Ok(true)
+            }
+            Err(SshClientError::ChannelFailure) => Ok(false),
+            Err(x) => Err(x.into()),
+        }
     }
 
     pub async fn _channel_pty_request(

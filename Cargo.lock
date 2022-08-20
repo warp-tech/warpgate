@@ -650,6 +650,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "chacha20"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7fc89c7c5b9e7a02dfe45cd2367bae382f9ed31c61ca8debe5f827c420a2f08"
+dependencies = [
+ "cfg-if",
+ "cipher 0.4.3",
+ "cpufeatures",
+]
+
+[[package]]
 name = "checked_int_cast"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2444,9 +2455,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.20.0+1.1.1o"
+version = "111.22.0+1.1.1q"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92892c4f87d56e376e469ace79f1128fdaded07646ddf73aa0be4706ff712dec"
+checksum = "8f31f0d509d1c1ae9cada2f9539ff8f37933831fd5098879e482aa687d659853"
 dependencies = [
  "cc",
 ]
@@ -2819,6 +2830,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "poly1305"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8159bd90725d2df49889a078b54f4f79e87f1f8a8444194cdca81d38f5393abf"
+dependencies = [
+ "cpufeatures",
+ "opaque-debug",
+ "universal-hash 0.5.0",
+]
+
+[[package]]
 name = "polyval"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3166,14 +3188,15 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.34.0-beta.8"
+version = "0.34.0-beta.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccd8be93ee0b54a8a6b74c77ecef946185f0acbfb5234ea66666887621381e85"
+checksum = "cc91dececaa1d3d96b81bc9b471cf95d32136d1bceb4233ecbe70523175ba219"
 dependencies = [
  "aes 0.8.1",
  "aes-gcm 0.10.1",
  "bitflags",
  "byteorder",
+ "chacha20",
  "ctr 0.9.1",
  "digest 0.10.3",
  "flate2",
@@ -3185,6 +3208,7 @@ dependencies = [
  "num-bigint",
  "once_cell",
  "openssl",
+ "poly1305",
  "rand",
  "russh-cryptovec",
  "russh-keys",
@@ -3208,9 +3232,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0-beta.4"
+version = "0.22.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "727c26a99d90f1b43ed80d42256c7788ccfe0ce4524634298f9bdbb1d5ceb7c6"
+checksum = "8859858504ed8ae1064d20c5989201f993969c401149976267b832ab2842e52f"
 dependencies = [
  "aes 0.8.1",
  "bcrypt-pbkdf",
@@ -4589,7 +4613,6 @@ dependencies = [
  "dialoguer",
  "futures",
  "notify",
- "openssl",
  "qrcode",
  "rcgen",
  "sd-notify",

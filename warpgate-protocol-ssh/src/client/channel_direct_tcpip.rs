@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use russh::client::Channel;
+use russh::client::Msg;
+use russh::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
 
 pub struct DirectTCPIPChannel {
-    client_channel: Channel,
+    client_channel: Channel<Msg>,
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
@@ -19,7 +20,7 @@ pub struct DirectTCPIPChannel {
 
 impl DirectTCPIPChannel {
     pub fn new(
-        client_channel: Channel,
+        client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,

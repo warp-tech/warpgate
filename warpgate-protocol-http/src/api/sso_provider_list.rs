@@ -120,7 +120,8 @@ impl Api {
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
-        let state_arc = get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+        let state_arc =
+            get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
 
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;
