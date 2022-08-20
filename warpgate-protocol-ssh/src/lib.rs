@@ -16,6 +16,7 @@ pub use common::*;
 pub use keys::*;
 use russh_keys::PublicKeyBase64;
 pub use server::run_server;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 use warpgate_common::{
     ProtocolName, ProtocolServer, Services, SshHostKeyVerificationMode, Target, TargetOptions,
@@ -55,7 +56,7 @@ impl ProtocolServer for SSHProtocolServer {
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), self.services.clone());
 
-        let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
+        let _ = handles.command_tx.send((RCCommand::Connect(ssh_options), oneshot::channel().0));
 
         while let Some(event) = handles.event_rx.recv().await {
             match event {

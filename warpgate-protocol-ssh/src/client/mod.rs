@@ -67,6 +67,7 @@ pub enum RCEvent {
     Success(Uuid),
     Eof(Uuid),
     Close(Uuid),
+    Error(anyhow::Error),
     ExitStatus(Uuid, u32),
     ExitSignal {
         channel: Uuid,
@@ -106,7 +107,7 @@ pub enum RCState {
 
 #[derive(Debug)]
 enum InnerEvent {
-    RCCommand(RCCommand),
+    RCCommand(RCCommand, oneshot::Sender<Result<()>>),
     ClientHandlerEvent(ClientHandlerEvent),
 }
 
@@ -126,7 +127,7 @@ pub struct RemoteClient {
 
 pub struct RemoteClientHandles {
     pub event_rx: UnboundedReceiver<RCEvent>,
-    pub command_tx: UnboundedSender<RCCommand>,
+    pub command_tx: UnboundedSender<(RCCommand, oneshot::Sender<Result<()>>)>,
     pub abort_tx: UnboundedSender<()>,
 }
 
@@ -155,8 +156,8 @@ impl RemoteClient {
         tokio::spawn(
             {
                 async move {
-                    while let Some(e) = command_rx.recv().await {
-                        inner_event_tx.send(InnerEvent::RCCommand(e))?
+                    while let Some((e, response)) = command_rx.recv().await {
+                        inner_event_tx.send(InnerEvent::RCCommand(e, response))?
                     }
                     Ok::<(), anyhow::Error>(())
                 }
@@ -250,34 +251,12 @@ impl RemoteClient {
                     tokio::select! {
                         Some(event) = self.inner_event_rx.recv() => {
                             match event {
-                                InnerEvent::RCCommand(cmd) => {
-                                    match cmd {
-                                        RCCommand::Connect(options) => match self.connect(options).await {
-                                            Ok(_) => {
-                                                self.set_state(RCState::Connected)?;
-                                                let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
-                                                for (id, op) in ops {
-                                                    self.apply_channel_op(id, op).await?;
-                                                }
-                                                // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
-                                                // for (address, port) in forwards {
-                                                //     self.tcpip_forward(address, port).await?;
-                                                // }
-                                            }
-                                            Err(e) => {
-                                                debug!("Connect error: {}", e);
-                                                let _ = self.tx.send(RCEvent::ConnectionError(e));
-                                                self.set_disconnected();
-                                                break
-                                            }
-                                        },
-                                        RCCommand::Channel(ch, op) => {
-                                            self.apply_channel_op(ch, op).await?;
-                                        }
-                                        RCCommand::Disconnect => {
-                                            self.disconnect().await?;
-                                            break
-                                        }
+                                InnerEvent::RCCommand(cmd, reply) => {
+                                    let result = self.handle_command(cmd).await;
+                                    let brk = matches!(result, Ok(true));
+                                    let _ = reply.send(result.map(|_| ()));
+                                    if brk {
+                                        break
                                     }
                                 }
                                 InnerEvent::ClientHandlerEvent(client_event) => {
@@ -305,11 +284,45 @@ impl RemoteClient {
             .await
             .map_err(|error| {
                 error!(?error, "error in command loop");
-                anyhow::anyhow!("Error in command loop: {error}")
+                let err = anyhow::anyhow!("Error in command loop: {error}");
+                let _ = self.tx.send(RCEvent::Error(error));
+                err
             })?;
             debug!("No more commmands");
             Ok::<(), anyhow::Error>(())
         }.instrument(Span::current()));
+    }
+
+    async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool> {
+        match cmd {
+            RCCommand::Connect(options) => match self.connect(options).await {
+                Ok(_) => {
+                    self.set_state(RCState::Connected)?;
+                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                    for (id, op) in ops {
+                        self.apply_channel_op(id, op).await?;
+                    }
+                    // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                    // for (address, port) in forwards {
+                    //     self.tcpip_forward(address, port).await?;
+                    // }
+                }
+                Err(e) => {
+                    debug!("Connect error: {}", e);
+                    let _ = self.tx.send(RCEvent::ConnectionError(e));
+                    self.set_disconnected();
+                    return Ok(true)
+                }
+            },
+            RCCommand::Channel(ch, op) => {
+                self.apply_channel_op(ch, op).await?;
+            }
+            RCCommand::Disconnect => {
+                self.disconnect().await?;
+                return Ok(true)
+            }
+        }
+        Ok(false)
     }
 
     async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
