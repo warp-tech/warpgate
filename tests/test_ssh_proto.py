@@ -34,7 +34,7 @@ def wg_port(processes, ssh_port, password_123_hash):
                 -   type: password
                     hash: '{password_123_hash}'
                 -   type: publickey
-                    key: {open('ssh-keys/id_rsa.pub').read().strip()}
+                    key: {open('ssh-keys/id_ed25519.pub').read().strip()}
             '''
         ),
     )
@@ -205,7 +205,7 @@ class Test:
                     '-o',
                     'IdentitiesOnly=yes',
                     '-o',
-                    'IdentityFile=ssh-keys/id_rsa',
+                    'IdentityFile=ssh-keys/id_ed25519',
                     '-o',
                     'PreferredAuthentications=publickey',
                     '-o',

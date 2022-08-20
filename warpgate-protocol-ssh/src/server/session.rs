@@ -285,13 +285,13 @@ impl ServerSession {
         let channels = self.pty_channels.clone();
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
-            self.maybe_with_session(|session| async {
+            let _ = self.maybe_with_session(|session| async {
                 session
                     .data(channel.0, CryptoVec::from_slice(data))
                     .await
                     .map_err(|_| anyhow::anyhow!("Could not send data"))
             })
-            .await?;
+            .await;
         }
         Ok(())
     }
@@ -466,13 +466,13 @@ impl ServerSession {
             }
             RCEvent::Close(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                self.maybe_with_session(|handle| async move {
+                let _ = self.maybe_with_session(|handle| async move {
                     handle
                         .close(server_channel_id.0)
                         .await
                         .context("failed to close ch")
                 })
-                .await?;
+                .await;
             }
             RCEvent::Eof(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
