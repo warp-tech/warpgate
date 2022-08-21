@@ -181,11 +181,8 @@ class Test:
             '-o',
             'PreferredAuthentications=password',
             password='123',
-            stderr=subprocess.PIPE,
         )
 
-        stdout = ssh_client.communicate()[0]
-        assert b'Selected target: ssh-bad-domain' in stdout
         assert ssh_client.returncode != 0
 
     def test_sftp(
