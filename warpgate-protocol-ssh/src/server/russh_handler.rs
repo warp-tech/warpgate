@@ -336,14 +336,27 @@ impl russh::server::Handler for ServerHandler {
     fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
+            let reply = {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_exec_request_begin(ServerChannelId(channel), data.freeze())
+                    .instrument(span)
+                    .await?
+            };
+
+            // Break in ownership to allow event handling while session is started
+            reply.await?;
+
             {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
-                    ._channel_exec_request(ServerChannelId(channel), data.freeze())
+                    ._channel_exec_request_finish(ServerChannelId(channel))
                     .instrument(span)
-                    .await?;
-            }
+                    .await?
+            };
+
             Ok((self, session))
         }
         .boxed()

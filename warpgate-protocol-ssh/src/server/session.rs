@@ -152,7 +152,6 @@ impl ServerSession {
                         {
                             break;
                         }
-                        info!("sent service output");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(_) => (),
@@ -762,11 +761,11 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_exec_request(
+    pub async fn _channel_exec_request_begin(
         &mut self,
         server_channel_id: ServerChannelId,
         data: Bytes,
-    ) -> Result<()> {
+    ) -> Result<PendingCommand> {
         let channel_id = self.map_channel(&server_channel_id)?;
         match std::str::from_utf8(&data) {
             Err(e) => {
@@ -776,19 +775,21 @@ impl ServerSession {
             Ok::<&str, _>(command) => {
                 debug!(channel=%channel_id, %command, "Requested exec");
                 let _ = self.maybe_connect_remote().await;
-                self.send_command_and_wait(RCCommand::Channel(
+                Ok(self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestExec(command.to_string()),
-                ))
-                .await?;
-
-                self.start_terminal_recording(
-                    channel_id,
-                    format!("exec-channel-{}", server_channel_id.0),
-                )
-                .await;
+                )))
             }
         }
+    }
+
+    pub async fn _channel_exec_request_finish(
+        &mut self,
+        server_channel_id: ServerChannelId,
+    ) -> Result<()> {
+        let channel_id = self.map_channel(&server_channel_id)?;
+        self.start_terminal_recording(channel_id, format!("exec-channel-{}", server_channel_id.0))
+            .await;
         Ok(())
     }
 
