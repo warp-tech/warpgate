@@ -180,8 +180,6 @@ class Test:
             '/dev/null',
             '-o',
             'PreferredAuthentications=password',
-            'echo',
-            'hello',
             password='123',
             stderr=subprocess.PIPE,
         )
