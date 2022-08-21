@@ -16,7 +16,6 @@ pub use common::*;
 pub use keys::*;
 use russh_keys::PublicKeyBase64;
 pub use server::run_server;
-use tokio::sync::{oneshot, mpsc};
 use uuid::Uuid;
 use warpgate_common::{
     ProtocolName, ProtocolServer, Services, SshHostKeyVerificationMode, Target, TargetOptions,
@@ -56,14 +55,13 @@ impl ProtocolServer for SSHProtocolServer {
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), self.services.clone());
 
-        let (tx, mut rx) = mpsc::channel(10);
         let _ = handles
             .command_tx
-            .send((RCCommand::Connect(ssh_options, tx), oneshot::channel().0));
+            .send((RCCommand::Connect(ssh_options), None));
 
-        while let Some(event) = rx.recv().await {
+        while let Some(event) = handles.event_rx.recv().await {
             match event {
-                SshClientConnectionEvent::HostKeyUnknown(key, reply) => {
+                RCEvent::HostKeyUnknown(key, reply) => {
                     println!("\nHost key ({}): {}", key.name(), key.public_key_base64());
                     println!("There is no trusted {} key for this host.", key.name());
 
@@ -94,12 +92,7 @@ impl ProtocolServer for SSHProtocolServer {
                         }
                     }
                 }
-                SshClientConnectionEvent::HostKeyReceived(_) => (),
-            }
-        }
-
-        while let Some(event) = handles.event_rx.recv().await {
-            match event {
+                RCEvent::HostKeyReceived(_) => (),
                 RCEvent::ConnectionError(err) => {
                     if let ConnectionError::HostKeyMismatch {
                         ref received_key_type,

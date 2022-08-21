@@ -17,7 +17,7 @@ use russh::client::Handle;
 use russh::{Preferred, Sig};
 use russh_keys::key::{self, PublicKey};
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -86,19 +86,15 @@ pub enum RCEvent {
     ConnectionError(ConnectionError),
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-}
-
-pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
-
-#[derive(Debug)]
-pub enum SshClientConnectionEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
 }
 
+pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
+
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(TargetSSHOptions, mpsc::Sender<SshClientConnectionEvent>),
+    Connect(TargetSSHOptions),
     Channel(Uuid, ChannelOperation),
     // ForwardTCPIP(String, u32),
     // CancelTCPIPForward(String, u32),
@@ -115,7 +111,7 @@ pub enum RCState {
 
 #[derive(Debug)]
 enum InnerEvent {
-    RCCommand(RCCommand, RCCommandReply),
+    RCCommand(RCCommand, Option<RCCommandReply>),
     ClientHandlerEvent(ClientHandlerEvent),
 }
 
@@ -135,7 +131,7 @@ pub struct RemoteClient {
 
 pub struct RemoteClientHandles {
     pub event_rx: UnboundedReceiver<RCEvent>,
-    pub command_tx: UnboundedSender<(RCCommand, RCCommandReply)>,
+    pub command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     pub abort_tx: UnboundedSender<()>,
 }
 
@@ -265,7 +261,9 @@ impl RemoteClient {
                                     InnerEvent::RCCommand(cmd, reply) => {
                                         let result = self.handle_command(cmd).await;
                                         let brk = matches!(result, Ok(true));
-                                        let _ = reply.send(result.map(|_| ()));
+                                        if let Some(reply) = reply {
+                                            let _ = reply.send(result.map(|_| ()));
+                                        }
                                         if brk {
                                             break
                                         }
@@ -308,8 +306,8 @@ impl RemoteClient {
 
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
         match cmd {
-            RCCommand::Connect(options, event_sender) => {
-                match self.connect(options, event_sender).await {
+            RCCommand::Connect(options) => {
+                match self.connect(options).await {
                     Ok(_) => {
                         self.set_state(RCState::Connected)
                             .map_err(SshClientError::other)?;
@@ -341,11 +339,7 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn connect(
-        &mut self,
-        ssh_options: TargetSSHOptions,
-        event_sender: mpsc::Sender<SshClientConnectionEvent>,
-    ) -> Result<(), ConnectionError> {
+    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
         let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
         let address = match address_str
             .to_socket_addrs()
@@ -391,10 +385,10 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            event_sender.send(SshClientConnectionEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key)).map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            event_sender.send(SshClientConnectionEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }

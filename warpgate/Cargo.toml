@@ -38,3 +38,4 @@ sd-notify = "0.4"
 [features]
 dhat-ad-hoc = ["dhat"]
 dhat-heap = ["dhat"]
+tokio-console = ["dep:console-subscriber", "tokio/tracing"]

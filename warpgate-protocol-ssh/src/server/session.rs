@@ -2,18 +2,21 @@ use std::borrow::Cow;
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::Poll;
 
 use ansi_term::Colour;
 use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::{Bytes, BytesMut};
+use futures::Future;
 use russh::server::Session;
 use russh::{CryptoVec, MethodSet, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
@@ -34,8 +37,7 @@ use crate::compat::ContextExt;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientConnectionEvent, SshClientError,
-    X11Request,
+    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, X11Request,
 };
 
 #[derive(Clone)]
@@ -69,7 +71,7 @@ pub struct ServerSession {
     channel_recorders: HashMap<Uuid, TerminalRecorder>,
     channel_map: BiMap<ServerChannelId, Uuid>,
     channel_pty_size_map: HashMap<Uuid, PtyRequest>,
-    rc_tx: UnboundedSender<(RCCommand, RCCommandReply)>,
+    rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
     remote_address: SocketAddr,
@@ -112,20 +114,6 @@ impl ServerSession {
         let (hub, event_sender) = EventHub::setup();
         let mut event_sub = hub.subscribe(|_| true).await;
 
-        let (so_tx, mut so_rx) = tokio::sync::mpsc::unbounded_channel();
-        let so_sender = event_sender.clone();
-        tokio::spawn(async move {
-            while let Some(data) = so_rx.recv().await {
-                if so_sender
-                    .send_once(Event::ServiceOutput(data))
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
         let this = Self {
             id,
             username: None,
@@ -146,12 +134,31 @@ impl ServerSession {
             traffic_connection_recorders: HashMap::new(),
             hub,
             event_sender: event_sender.clone(),
-            service_output: ServiceOutput::new(Box::new(move |data| {
-                so_tx.send(BytesMut::from(data).freeze()).context("x")
-            })),
+            service_output: ServiceOutput::new(),
             auth_state: None,
             keyboard_interactive_state: KeyboardInteractiveState::None,
         };
+
+        let mut so_rx = this.service_output.subscribe();
+        let so_sender = event_sender.clone();
+        tokio::spawn(async move {
+            loop {
+                match so_rx.recv().await {
+                    Ok(data) => {
+                        if so_sender
+                            .send_once(Event::ServiceOutput(data))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        info!("sent service output");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => (),
+                }
+            }
+        });
 
         let this = Arc::new(Mutex::new(this));
 
@@ -285,13 +292,11 @@ impl ServerSession {
         let channels = self.pty_channels.clone();
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
-            let _ = self.maybe_with_session(|session| async {
-                session
-                    .data(channel.0, CryptoVec::from_slice(data))
-                    .await
-                    .map_err(|_| anyhow::anyhow!("Could not send data"))
-            })
-            .await;
+            if let Some(mut session) = self.session_handle.clone() {
+                // .data() will hang and deadlock us if the mpsc capacity is exhausted
+                let data = CryptoVec::from_slice(data);
+                tokio::spawn(async move { session.data(channel.0, data).await });
+            }
         }
         Ok(())
     }
@@ -309,32 +314,25 @@ impl ServerSession {
             }
             TargetSelection::Found(target, ssh_options) => {
                 if self.rc_state == RCState::NotInitialized {
-                    self.rc_state = RCState::Connecting;
-                    let (tx, mut rx) = mpsc::channel(10);
-                    self.send_command(RCCommand::Connect(ssh_options, tx))
-                        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
-                    self.service_output.show_progress();
-                    self.emit_service_message(&format!("Selected target: {}", target.name))
-                        .await?;
-
-                    while let Some(event) = rx.recv().await {
-                        match event {
-                            SshClientConnectionEvent::HostKeyReceived(key) => {
-                                self.emit_service_message(&format!(
-                                    "Host key ({}): {}",
-                                    key.name(),
-                                    key.public_key_base64()
-                                ))
-                                .await?;
-                            }
-                            SshClientConnectionEvent::HostKeyUnknown(key, reply) => {
-                                self.handle_unknown_host_key(key, reply).await?;
-                            }
-                        }
-                    }
+                    self.connect_remote(target, ssh_options).await?;
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn connect_remote(
+        &mut self,
+        target: Target,
+        ssh_options: TargetSSHOptions,
+    ) -> Result<()> {
+        self.rc_state = RCState::Connecting;
+        self.send_command(RCCommand::Connect(ssh_options))
+            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.service_output.show_progress();
+        self.emit_service_message(&format!("Selected target: {}", target.name))
+            .await?;
+
         Ok(())
     }
 
@@ -466,13 +464,14 @@ impl ServerSession {
             }
             RCEvent::Close(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                let _ = self.maybe_with_session(|handle| async move {
-                    handle
-                        .close(server_channel_id.0)
-                        .await
-                        .context("failed to close ch")
-                })
-                .await;
+                let _ = self
+                    .maybe_with_session(|handle| async move {
+                        handle
+                            .close(server_channel_id.0)
+                            .await
+                            .context("failed to close ch")
+                    })
+                    .await;
             }
             RCEvent::Eof(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
@@ -538,6 +537,17 @@ impl ServerSession {
                     Ok(())
                 })
                 .await?;
+            }
+            RCEvent::HostKeyReceived(key) => {
+                self.emit_service_message(&format!(
+                    "Host key ({}): {}",
+                    key.name(),
+                    key.public_key_base64()
+                ))
+                .await?;
+            }
+            RCEvent::HostKeyUnknown(key, reply) => {
+                self.handle_unknown_host_key(key, reply).await?;
             }
         }
         Ok(())
@@ -868,28 +878,59 @@ impl ServerSession {
         self.traffic_recorders.get_mut(&(host, port))
     }
 
-    pub async fn _channel_shell_request(
+    pub async fn _channel_shell_request_nowait(
         &mut self,
         server_channel_id: ServerChannelId,
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::Channel(
+
+        let _ = self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestShell,
-        ))
-        .await?;
+        ));
 
         self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
             .await;
 
         info!(%channel_id, "Opening shell");
+
         let _ = self
             .session_handle
             .as_mut()
             .context("Invalid session state")?
             .channel_success(server_channel_id.0)
             .await;
+
+        Ok(())
+    }
+
+    pub async fn _channel_shell_request_begin(
+        &mut self,
+        server_channel_id: ServerChannelId,
+    ) -> Result<PendingCommand> {
+        let channel_id = self.map_channel(&server_channel_id)?;
+        let _ = self.maybe_connect_remote().await;
+        Ok(self.send_command_and_wait(RCCommand::Channel(
+            channel_id,
+            ChannelOperation::RequestShell,
+        )))
+    }
+
+    pub async fn _channel_shell_request_finish(
+        &mut self,
+        server_channel_id: ServerChannelId,
+    ) -> Result<()> {
+        let channel_id = self.map_channel(&server_channel_id)?;
+        self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
+            .await;
+
+        info!(%channel_id, "Opening shell");
+        let mut session = self
+            .session_handle
+            .clone()
+            .context("Invalid session state")?;
+        tokio::spawn(async move { session.channel_success(server_channel_id.0).await });
         Ok(())
     }
 
@@ -1300,17 +1341,15 @@ impl ServerSession {
     }
 
     fn send_command(&mut self, command: RCCommand) -> Result<(), RCCommand> {
-        self.rc_tx
-            .send((command, oneshot::channel().0))
-            .map_err(|e| e.0 .0)
+        self.rc_tx.send((command, None)).map_err(|e| e.0 .0)
     }
 
-    async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
+    fn send_command_and_wait(&mut self, command: RCCommand) -> PendingCommand {
         let (tx, rx) = oneshot::channel();
-        self.rc_tx
-            .send((command, tx))
-            .map_err(|_| SshClientError::MpscError)?;
-        rx.await.map_err(|_| SshClientError::MpscError)?
+        match self.rc_tx.send((command, Some(tx))) {
+            Ok(_) => PendingCommand::Waiting(rx),
+            Err(_) => PendingCommand::Failed,
+        }
     }
 
     pub async fn _disconnect(&mut self) {
@@ -1350,5 +1389,26 @@ impl Drop for ServerSession {
     fn drop(&mut self) {
         info!("Closed connection");
         debug!("Dropped");
+    }
+}
+
+pub enum PendingCommand {
+    Waiting(oneshot::Receiver<Result<(), SshClientError>>),
+    Failed,
+}
+
+impl Future for PendingCommand {
+    type Output = Result<(), SshClientError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.get_mut() {
+            PendingCommand::Waiting(ref mut rx) => match Pin::new(rx).poll(cx) {
+                Poll::Ready(result) => {
+                    Poll::Ready(result.unwrap_or(Err(SshClientError::MpscError)))
+                }
+                Poll::Pending => Poll::Pending,
+            },
+            PendingCommand::Failed => Poll::Ready(Err(SshClientError::MpscError)),
+        }
     }
 }

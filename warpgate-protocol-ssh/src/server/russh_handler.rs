@@ -123,10 +123,32 @@ impl russh::server::Handler for ServerHandler {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
-                    ._channel_shell_request(ServerChannelId(channel))
+                    ._channel_shell_request_nowait(ServerChannelId(channel))
                     .instrument(span)
                     .await?;
-            }
+            };
+
+            // let reply = {
+            //     let mut this_session = self.session.lock().await;
+            //     let span = this_session.make_logging_span();
+            //     let r = this_session
+            //         ._channel_shell_request_begin(ServerChannelId(channel))
+            //         .instrument(span)
+            //         .await?;
+            //     r
+            // };
+
+            // // Break in ownership to allow event handling while session is started
+            // reply.await?;
+
+            // {
+            //     let mut this_session = self.session.lock().await;
+            //     let span = this_session.make_logging_span();
+            //     this_session
+            //         ._channel_shell_request_finish(ServerChannelId(channel))
+            //         .instrument(span)
+            //         .await?;
+            // }
             Ok((self, session))
         }
         .boxed()
