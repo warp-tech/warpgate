@@ -389,7 +389,12 @@ impl ServerSession {
                 };
             }
 
-            ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
+            ServerHandlerEvent::SubsystemRequest(server_channel_id, name, _) => {
+                self._channel_subsystem_request(server_channel_id, name)
+                    .await?;
+            }
+
+            ServerHandlerEvent::PtyRequest(server_channel_id, request, _) => {
                 let channel_id = self.map_channel(&server_channel_id)?;
                 self.channel_pty_size_map
                     .insert(channel_id, request.clone());
@@ -414,10 +419,9 @@ impl ServerSession {
                     .channel_success(server_channel_id.0)
                     .await;
                 self.pty_channels.push(channel_id);
-                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
+            ServerHandlerEvent::ShellRequest(server_channel_id, _) => {
                 let channel_id = self.map_channel(&server_channel_id)?;
                 let _ = self.maybe_connect_remote().await;
 
@@ -440,7 +444,6 @@ impl ServerSession {
                     .context("Invalid session state")?
                     .channel_success(server_channel_id.0)
                     .await;
-                let _ = reply.send(());
             }
 
             ServerHandlerEvent::AuthPublicKey(username, key, reply) => {
@@ -455,14 +458,20 @@ impl ServerSession {
                 let _ = reply.send(self._auth_keyboard_interactive(username, response).await);
             }
 
-            ServerHandlerEvent::Data(channel, data, reply) => {
+            ServerHandlerEvent::Data(channel, data, _) => {
                 self._data(channel, data).await?;
-                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ExtendedData(channel, data, code, reply) => {
+            ServerHandlerEvent::ExtendedData(channel, data, code, _) => {
                 self._extended_data(channel, code, data).await?;
-                let _ = reply.send(());
+            }
+
+            ServerHandlerEvent::ChannelClose(channel, _) => {
+                self._channel_close(channel).await?;
+            }
+
+            ServerHandlerEvent::ChannelEof(channel, _) => {
+                self._channel_eof(channel).await?;
             }
 
             ServerHandlerEvent::Disconnect => (),
@@ -970,7 +979,7 @@ impl ServerSession {
         self.traffic_recorders.get_mut(&(host, port))
     }
 
-    pub async fn _channel_subsystem_request(
+    async fn _channel_subsystem_request(
         &mut self,
         server_channel_id: ServerChannelId,
         name: String,
@@ -1332,7 +1341,7 @@ impl ServerSession {
         self.target = TargetSelection::Found(target, ssh_options);
     }
 
-    pub async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+    async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
@@ -1340,7 +1349,7 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+    async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Eof))

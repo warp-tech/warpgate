@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use bytes::{BytesMut, Bytes};
+use bytes::{Bytes, BytesMut};
 use futures::FutureExt;
 use russh::server::{Auth, Handle, Session};
 use russh::{ChannelId, Pty};
@@ -28,6 +28,7 @@ impl Debug for HandleWrapper {
 pub enum ServerHandlerEvent {
     Authenticated(HandleWrapper),
     ChannelOpenSession(ServerChannelId, oneshot::Sender<bool>),
+    SubsystemRequest(ServerChannelId, String, oneshot::Sender<()>),
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     ShellRequest(ServerChannelId, oneshot::Sender<()>),
     AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
@@ -39,6 +40,8 @@ pub enum ServerHandlerEvent {
     ),
     Data(ServerChannelId, Bytes, oneshot::Sender<()>),
     ExtendedData(ServerChannelId, Bytes, u32, oneshot::Sender<()>),
+    ChannelClose(ServerChannelId, oneshot::Sender<()>),
+    ChannelEof(ServerChannelId, oneshot::Sender<()>),
     Disconnect,
 }
 
@@ -111,14 +114,17 @@ impl russh::server::Handler for ServerHandler {
     ) -> Self::FutureUnit {
         let name = name.to_string();
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_subsystem_request(ServerChannelId(channel), name)
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::SubsystemRequest(
+                    ServerChannelId(channel),
+                    name,
+                    tx,
+                ))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
@@ -284,15 +290,15 @@ impl russh::server::Handler for ServerHandler {
     }
 
     fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        let channel = ServerChannelId(channel);
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_close(ServerChannelId(channel))
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::ChannelClose(channel, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
@@ -332,15 +338,15 @@ impl russh::server::Handler for ServerHandler {
     }
 
     fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        let channel = ServerChannelId(channel);
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_eof(ServerChannelId(channel))
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::ChannelEof(channel, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
