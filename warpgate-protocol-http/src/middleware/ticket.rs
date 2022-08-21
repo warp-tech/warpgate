@@ -5,7 +5,7 @@ use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use warpgate_common::{authorize_ticket, Secret, Services};
 
-use crate::common::{SessionExt};
+use crate::common::SessionExt;
 
 pub struct TicketMiddleware {}
 

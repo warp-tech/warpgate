@@ -2,28 +2,29 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use ansi_term::Colour;
-use anyhow::Result;
-use tokio::sync::{mpsc, Mutex};
+use bytes::{Bytes, BytesMut};
+use tokio::sync::{broadcast, mpsc};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
-
-pub type Callback = dyn Fn(&[u8]) -> Result<()> + Send + 'static;
+pub const ERASE_PROGRESS_SPINNER_BUF: Bytes = Bytes::from_static(ERASE_PROGRESS_SPINNER.as_bytes());
+pub const LINEBREAK: Bytes = Bytes::from_static("\n".as_bytes());
 
 #[derive(Clone)]
 pub struct ServiceOutput {
     progress_visible: Arc<AtomicBool>,
-    callback: Arc<Mutex<Box<Callback>>>,
     abort_tx: mpsc::Sender<()>,
+    output_tx: broadcast::Sender<Bytes>,
 }
 
 impl ServiceOutput {
-    pub fn new(callback: Box<Callback>) -> Self {
-        let callback = Arc::new(Mutex::new(callback));
+    pub fn new() -> Self {
         let progress_visible = Arc::new(AtomicBool::new(false));
         let (abort_tx, mut abort_rx) = mpsc::channel(1);
+        let output_tx = broadcast::channel(32).0;
+
         tokio::spawn({
+            let output_tx = output_tx.clone();
             let progress_visible = progress_visible.clone();
-            let callback = callback.clone();
             let ticks = "⠁⠁⠉⠙⠚⠒⠂⠂⠒⠲⠴⠤⠄⠄⠤⠠⠠⠤⠦⠖⠒⠐⠐⠒⠓⠋⠉⠈⠈".chars().collect::<Vec<_>>();
             let mut tick_index = 0;
             async move {
@@ -37,21 +38,19 @@ impl ServiceOutput {
                                 tick_index = (tick_index + 1) % ticks.len();
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
-                                let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick));
-                                let output = format!("{ERASE_PROGRESS_SPINNER}{badge}");
-                                if callback.lock().await(output.as_bytes()).is_err() {
-                                    return;
-                                }
+                                let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick)).to_string();
+                                let _ = output_tx.send(BytesMut::from([&ERASE_PROGRESS_SPINNER_BUF[..], badge.as_bytes()].concat().as_slice()).freeze());
                             }
                         }
                     }
                 }
             }
         });
+
         ServiceOutput {
             progress_visible,
-            callback,
             abort_tx,
+            output_tx,
         }
     }
 
@@ -63,9 +62,16 @@ impl ServiceOutput {
     pub async fn hide_progress(&mut self) {
         self.progress_visible
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        let cb = self.callback.lock().await;
-        let _ = cb(ERASE_PROGRESS_SPINNER.as_bytes());
-        let _ = cb("\n".as_bytes());
+        self.emit_output(ERASE_PROGRESS_SPINNER_BUF);
+        self.emit_output(LINEBREAK);
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
+        self.output_tx.subscribe()
+    }
+
+    fn emit_output(&mut self, output: Bytes) {
+        let _ = self.output_tx.send(output);
     }
 }
 

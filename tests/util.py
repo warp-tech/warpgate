@@ -10,9 +10,11 @@ import time
 last_port = 1234
 
 mysql_client_ssl_opt = '--ssl'
+mysql_client_opts = []
 if 'GITHUB_ACTION' in os.environ:
     # Github uses MySQL instead of MariaDB
     mysql_client_ssl_opt = '--ssl-mode=REQUIRED'
+    mysql_client_opts = ['--enable-cleartext-plugin']
 
 
 def alloc_port():

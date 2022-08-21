@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use russh::MethodSet;
+use russh::{MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -26,7 +26,16 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             connection_timeout: Some(std::time::Duration::from_secs(300)),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
-            ..Default::default()
+            preferred: Preferred {
+                key: &[
+                    russh_keys::key::ED25519,
+                    russh_keys::key::RSA_SHA2_256,
+                    russh_keys::key::RSA_SHA2_512,
+                    russh_keys::key::SSH_RSA,
+                ],
+                ..<_>::default()
+            },
+            ..<_>::default()
         }
     };
 
@@ -80,8 +89,9 @@ async fn _run_stream<R>(
     handler: ServerHandler,
 ) -> Result<()>
 where
-    R: AsyncRead + AsyncWrite + Unpin + Debug,
+    R: AsyncRead + AsyncWrite + Unpin + Debug + Send + 'static,
 {
-    russh::server::run_stream(config, socket, handler).await?;
+    let session = russh::server::run_stream(config, socket, handler).await?;
+    session.await?;
     Ok(())
 }

@@ -40,17 +40,17 @@ impl russh::server::Handler for ServerHandler {
         async { Ok((self, s)) }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureBool {
         async move {
-            {
+            let allowed = {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
                     ._channel_open_session(ServerChannelId(channel), &mut session)
                     .instrument(span)
-                    .await?;
-            }
-            Ok((self, session))
+                    .await?
+            };
+            Ok((self, session, allowed))
         }
         .boxed()
     }
@@ -123,10 +123,32 @@ impl russh::server::Handler for ServerHandler {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
-                    ._channel_shell_request(ServerChannelId(channel))
+                    ._channel_shell_request_nowait(ServerChannelId(channel))
                     .instrument(span)
                     .await?;
-            }
+            };
+
+            // let reply = {
+            //     let mut this_session = self.session.lock().await;
+            //     let span = this_session.make_logging_span();
+            //     let r = this_session
+            //         ._channel_shell_request_begin(ServerChannelId(channel))
+            //         .instrument(span)
+            //         .await?;
+            //     r
+            // };
+
+            // // Break in ownership to allow event handling while session is started
+            // reply.await?;
+
+            // {
+            //     let mut this_session = self.session.lock().await;
+            //     let span = this_session.make_logging_span();
+            //     this_session
+            //         ._channel_shell_request_finish(ServerChannelId(channel))
+            //         .instrument(span)
+            //         .await?;
+            // }
             Ok((self, session))
         }
         .boxed()
@@ -314,14 +336,27 @@ impl russh::server::Handler for ServerHandler {
     fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         let data = BytesMut::from(data);
         async move {
+            let reply = {
+                let mut this_session = self.session.lock().await;
+                let span = this_session.make_logging_span();
+                this_session
+                    ._channel_exec_request_begin(ServerChannelId(channel), data.freeze())
+                    .instrument(span)
+                    .await?
+            };
+
+            // Break in ownership to allow event handling while session is started
+            reply.await?;
+
             {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
-                    ._channel_exec_request(ServerChannelId(channel), data.freeze())
+                    ._channel_exec_request_finish(ServerChannelId(channel))
                     .instrument(span)
-                    .await?;
-            }
+                    .await?
+            };
+
             Ok((self, session))
         }
         .boxed()
@@ -358,11 +393,11 @@ impl russh::server::Handler for ServerHandler {
         originator_address: &str,
         originator_port: u32,
         mut session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Self::FutureBool {
         let host_to_connect = host_to_connect.to_string();
         let originator_address = originator_address.to_string();
         async move {
-            {
+            let allowed = {
                 let mut this_session = self.session.lock().await;
                 let span = this_session.make_logging_span();
                 this_session
@@ -377,9 +412,9 @@ impl russh::server::Handler for ServerHandler {
                         &mut session,
                     )
                     .instrument(span)
-                    .await?;
-            }
-            Ok((self, session))
+                    .await?
+            };
+            Ok((self, session, allowed))
         }
         .boxed()
     }

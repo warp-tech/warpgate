@@ -1,15 +1,17 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use russh::client::Channel;
+use russh::client::Msg;
+use russh::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::SessionId;
 
+use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
 
 pub struct SessionChannel {
-    client_channel: Channel,
+    client_channel: Channel<Msg>,
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
@@ -18,7 +20,7 @@ pub struct SessionChannel {
 
 impl SessionChannel {
     pub fn new(
-        client_channel: Channel,
+        client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
@@ -33,16 +35,16 @@ impl SessionChannel {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> Result<(), SshClientError> {
         loop {
             tokio::select! {
                 incoming_data = self.ops_rx.recv() => {
                     match incoming_data {
                         Some(ChannelOperation::Data(data)) => {
-                            self.client_channel.data(&*data).await.context("data")?;
+                            self.client_channel.data(&*data).await?;
                         }
                         Some(ChannelOperation::ExtendedData { ext, data }) => {
-                            self.client_channel.extended_data(ext, &*data).await.context("extended data")?;
+                            self.client_channel.extended_data(ext, &*data).await?;
                         }
                         Some(ChannelOperation::RequestPty(request)) => {
                             self.client_channel.request_pty(
@@ -53,7 +55,7 @@ impl SessionChannel {
                                 request.pix_width,
                                 request.pix_height,
                                 &request.modes,
-                            ).await.context("request_pty")?;
+                            ).await?;
                         }
                         Some(ChannelOperation::ResizePty(request)) => {
                             self.client_channel.window_change(
@@ -61,25 +63,25 @@ impl SessionChannel {
                                 request.row_height,
                                 request.pix_width,
                                 request.pix_height,
-                            ).await.context("resize_pty")?;
+                            ).await?;
                         },
                         Some(ChannelOperation::RequestShell) => {
-                            self.client_channel.request_shell(true).await.context("request_shell")?;
+                            self.client_channel.request_shell(true).await?;
                         },
                         Some(ChannelOperation::RequestEnv(name, value)) => {
-                            self.client_channel.set_env(true, name, value).await.context("request_env")?;
+                            self.client_channel.set_env(false, name, value).await?;
                         },
                         Some(ChannelOperation::RequestExec(command)) => {
-                            self.client_channel.exec(true, command).await.context("request_exec")?;
+                            self.client_channel.exec(false, command).await?;
                         },
                         Some(ChannelOperation::RequestSubsystem(name)) => {
-                            self.client_channel.request_subsystem(true, &name).await.context("request_subsystem")?;
+                            self.client_channel.request_subsystem(false, &name).await?;
                         },
                         Some(ChannelOperation::Eof) => {
-                            self.client_channel.eof().await.context("eof")?;
+                            self.client_channel.eof().await?;
                         },
                         Some(ChannelOperation::Signal(signal)) => {
-                            self.client_channel.signal(signal).await.context("signal")?;
+                            self.client_channel.signal(signal).await?;
                         },
                         Some(ChannelOperation::OpenShell) => unreachable!(),
                         Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
@@ -91,7 +93,7 @@ impl SessionChannel {
                                 request.x11_auth_protocol,
                                 request.x11_auth_cookie,
                                 request.x11_screen_number,
-                            ).await.context("data")?;
+                            ).await?;
                         }
                         Some(ChannelOperation::Close) => break,
                         None => break,
@@ -101,22 +103,26 @@ impl SessionChannel {
                     match channel_event {
                         Some(russh::ChannelMsg::Data { data }) => {
                             let bytes: &[u8] = &data;
+                            debug!("channel data: {bytes:?}");
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
                                 Bytes::from(BytesMut::from(bytes)),
-                            ))?;
+                            )).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id))?;
+                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Success) => {
-                            self.events_tx.send(RCEvent::Success(self.channel_id))?;
+                            self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                        },
+                        Some(russh::ChannelMsg::Failure) => {
+                            self.events_tx.send(RCEvent::ChannelFailure(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Eof) => {
-                            self.events_tx.send(RCEvent::Eof(self.channel_id))?;
+                            self.events_tx.send(RCEvent::Eof(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
-                            self.events_tx.send(RCEvent::ExitStatus(self.channel_id, exit_status))?;
+                            self.events_tx.send(RCEvent::ExitStatus(self.channel_id, exit_status)).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::WindowAdjusted { .. }) => { },
                         Some(russh::ChannelMsg::ExitSignal {
@@ -124,7 +130,7 @@ impl SessionChannel {
                         }) => {
                             self.events_tx.send(RCEvent::ExitSignal {
                                 channel: self.channel_id, core_dumped, error_message, lang_tag, signal_name
-                            })?;
+                            }).map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::XonXoff { client_can_do: _ }) => {
                         }
@@ -134,17 +140,20 @@ impl SessionChannel {
                                 channel: self.channel_id,
                                 data: Bytes::from(BytesMut::from(data)),
                                 ext,
-                            })?;
+                            }).map_err(|_| SshClientError::MpscError)?;
                         }
-                        None => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id))?;
+                        Some(msg) => {
+                            warn!("unhandled channel message: {:?}", msg);
+                        }
+                            None => {
+                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break
                         },
                     }
                 }
             }
         }
-        Ok::<(), anyhow::Error>(())
+        Ok(())
     }
 }
 

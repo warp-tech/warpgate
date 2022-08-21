@@ -35,7 +35,9 @@ use warpgate_common::{
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE, SESSION_COOKIE_NAME};
+use crate::common::{
+    endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE, SESSION_COOKIE_NAME,
+};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
