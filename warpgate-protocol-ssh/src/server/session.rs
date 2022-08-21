@@ -461,6 +461,16 @@ impl ServerSession {
                 })
                 .await?;
             }
+            RCEvent::ChannelFailure(channel) => {
+                let server_channel_id = self.map_channel_reverse(&channel)?;
+                self.maybe_with_session(|handle| async move {
+                    handle
+                        .channel_failure(server_channel_id.0)
+                        .await
+                        .context("failed to send data")
+                })
+                .await?;
+            }
             RCEvent::Close(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 let _ = self

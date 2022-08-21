@@ -67,6 +67,7 @@ pub enum RCEvent {
     State(RCState),
     Output(Uuid, Bytes),
     Success(Uuid),
+    ChannelFailure(Uuid),
     Eof(Uuid),
     Close(Uuid),
     Error(anyhow::Error),

@@ -69,13 +69,13 @@ impl SessionChannel {
                             self.client_channel.request_shell(true).await?;
                         },
                         Some(ChannelOperation::RequestEnv(name, value)) => {
-                            self.client_channel.set_env(true, name, value).await?;
+                            self.client_channel.set_env(false, name, value).await?;
                         },
                         Some(ChannelOperation::RequestExec(command)) => {
-                            self.client_channel.exec(true, command).await?;
+                            self.client_channel.exec(false, command).await?;
                         },
                         Some(ChannelOperation::RequestSubsystem(name)) => {
-                            self.client_channel.request_subsystem(true, &name).await?;
+                            self.client_channel.request_subsystem(false, &name).await?;
                         },
                         Some(ChannelOperation::Eof) => {
                             self.client_channel.eof().await?;
@@ -115,6 +115,9 @@ impl SessionChannel {
                         Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                         },
+                        Some(russh::ChannelMsg::Failure) => {
+                            self.events_tx.send(RCEvent::ChannelFailure(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                        },
                         Some(russh::ChannelMsg::Eof) => {
                             self.events_tx.send(RCEvent::Eof(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                         }
@@ -140,7 +143,7 @@ impl SessionChannel {
                             }).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(msg) => {
-                            debug!("unhandled channel message: {:?}", msg);
+                            warn!("unhandled channel message: {:?}", msg);
                         }
                             None => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
