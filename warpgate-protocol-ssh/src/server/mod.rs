@@ -12,6 +12,7 @@ pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::{Services, SessionStateInit};
 
@@ -63,8 +64,10 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let id = server_handle.lock().await.id();
 
+        let (event_tx, event_rx) = unbounded_channel();
+
         let session =
-            match ServerSession::new(remote_address, &services, server_handle, session_handle_rx)
+            match ServerSession::new(remote_address, &services, server_handle, session_handle_rx, event_rx)
                 .await
             {
                 Ok(session) => session,
@@ -74,7 +77,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
                 }
             };
 
-        let handler = ServerHandler { id, session };
+        let handler = ServerHandler { id, session, event_tx };
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} protocol"))

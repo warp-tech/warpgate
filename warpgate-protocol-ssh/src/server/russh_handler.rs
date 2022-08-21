@@ -2,11 +2,13 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use bytes::BytesMut;
+use bytes::{BytesMut, Bytes};
 use futures::FutureExt;
-use russh::server::{Auth, Session};
+use russh::server::{Auth, Handle, Session};
 use russh::{ChannelId, Pty};
-use tokio::sync::Mutex;
+use russh_keys::key::PublicKey;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{oneshot, Mutex};
 use tracing::*;
 use warpgate_common::{Secret, SessionId};
 
@@ -14,9 +16,42 @@ use super::session::ServerSession;
 use crate::common::{PtyRequest, ServerChannelId};
 use crate::{DirectTCPIPParams, X11Request};
 
+pub struct HandleWrapper(pub Handle);
+
+impl Debug for HandleWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HandleWrapper")
+    }
+}
+
+#[derive(Debug)]
+pub enum ServerHandlerEvent {
+    Authenticated(HandleWrapper),
+    ChannelOpenSession(ServerChannelId, oneshot::Sender<bool>),
+    PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
+    ShellRequest(ServerChannelId, oneshot::Sender<()>),
+    AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
+    AuthPassword(Secret<String>, Secret<String>, oneshot::Sender<Auth>),
+    AuthKeyboardInteractive(
+        Secret<String>,
+        Option<Secret<String>>,
+        oneshot::Sender<Auth>,
+    ),
+    Data(ServerChannelId, Bytes, oneshot::Sender<()>),
+    ExtendedData(ServerChannelId, Bytes, u32, oneshot::Sender<()>),
+    Disconnect,
+}
+
 pub struct ServerHandler {
     pub id: SessionId,
     pub session: Arc<Mutex<ServerSession>>,
+    pub event_tx: UnboundedSender<ServerHandlerEvent>,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ServerHandlerError {
+    #[error("channel disconnected")]
+    ChannelSend,
 }
 
 impl russh::server::Handler for ServerHandler {
@@ -40,16 +75,29 @@ impl russh::server::Handler for ServerHandler {
         async { Ok((self, s)) }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, mut session: Session) -> Self::FutureBool {
+    fn auth_succeeded(self, session: Session) -> Self::FutureUnit {
+        let handle = session.handle();
+        async {
+            self.event_tx
+                .send(ServerHandlerEvent::Authenticated(HandleWrapper(handle)))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
         async move {
-            let allowed = {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_open_session(ServerChannelId(channel), &mut session)
-                    .instrument(span)
-                    .await?
-            };
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::ChannelOpenSession(
+                    ServerChannelId(channel),
+                    tx,
+                ))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let allowed = rx.await.unwrap_or(false);
             Ok((self, session, allowed))
         }
         .boxed()
@@ -93,25 +141,26 @@ impl russh::server::Handler for ServerHandler {
             .take_while(|x| (x.0 as u8) > 0 && (x.0 as u8) < 160)
             .map(Clone::clone)
             .collect();
+
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_pty_request(
-                        ServerChannelId(channel),
-                        PtyRequest {
-                            term,
-                            col_width,
-                            row_height,
-                            pix_width,
-                            pix_height,
-                            modes,
-                        },
-                    )
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::PtyRequest(
+                    ServerChannelId(channel),
+                    PtyRequest {
+                        term,
+                        col_width,
+                        row_height,
+                        pix_width,
+                        pix_height,
+                        modes,
+                    },
+                    tx,
+                ))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
@@ -119,70 +168,50 @@ impl russh::server::Handler for ServerHandler {
 
     fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._channel_shell_request_nowait(ServerChannelId(channel))
-                    .instrument(span)
-                    .await?;
-            };
+            let (tx, rx) = oneshot::channel();
 
-            // let reply = {
-            //     let mut this_session = self.session.lock().await;
-            //     let span = this_session.make_logging_span();
-            //     let r = this_session
-            //         ._channel_shell_request_begin(ServerChannelId(channel))
-            //         .instrument(span)
-            //         .await?;
-            //     r
-            // };
+            self.event_tx
+                .send(ServerHandlerEvent::ShellRequest(
+                    ServerChannelId(channel),
+                    tx,
+                ))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
 
-            // // Break in ownership to allow event handling while session is started
-            // reply.await?;
-
-            // {
-            //     let mut this_session = self.session.lock().await;
-            //     let span = this_session.make_logging_span();
-            //     this_session
-            //         ._channel_shell_request_finish(ServerChannelId(channel))
-            //         .instrument(span)
-            //         .await?;
-            // }
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
     }
 
     fn auth_publickey(self, user: &str, key: &russh_keys::key::PublicKey) -> Self::FutureAuth {
-        let user = user.to_string();
+        let user = Secret::new(user.to_string());
         let key = key.clone();
+
         async move {
-            let result = {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._auth_publickey(user, &key)
-                    .instrument(span)
-                    .await
-            };
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::AuthPublicKey(user, key, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let result = rx.await.unwrap_or(Auth::UnsupportedMethod);
             Ok((self, result))
         }
         .boxed()
     }
 
     fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
-        let user = user.to_string();
-        let password = password.to_string();
+        let user = Secret::new(user.to_string());
+        let password = Secret::new(password.to_string());
+
         async move {
-            let result = {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._auth_password(Secret::new(user), Secret::new(password))
-                    .instrument(span)
-                    .await
-            };
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::AuthPassword(user, password, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let result = rx.await.unwrap_or(Auth::UnsupportedMethod);
             Ok((self, result))
         }
         .boxed()
@@ -194,35 +223,39 @@ impl russh::server::Handler for ServerHandler {
         _submethods: &str,
         response: Option<russh::server::Response>,
     ) -> Self::FutureAuth {
-        let user = user.to_string();
+        let user = Secret::new(user.to_string());
         let response = response
             .and_then(|mut r| r.next())
-            .and_then(|b| String::from_utf8(b.to_vec()).ok());
+            .and_then(|b| String::from_utf8(b.to_vec()).ok())
+            .map(Secret::new);
+
         async move {
-            let result = {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._auth_keyboard_interactive(Secret::new(user), response.map(Secret::new))
-                    .instrument(span)
-                    .await
-            };
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::AuthKeyboardInteractive(
+                    user, response, tx,
+                ))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let result = rx.await.unwrap_or(Auth::UnsupportedMethod);
             Ok((self, result))
         }
         .boxed()
     }
 
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+        let channel = ServerChannelId(channel);
         let data = BytesMut::from(data).freeze();
+
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._data(ServerChannelId(channel), data)
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::Data(channel, data, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
@@ -235,16 +268,16 @@ impl russh::server::Handler for ServerHandler {
         data: &[u8],
         session: Session,
     ) -> Self::FutureUnit {
-        let data = BytesMut::from(data);
+        let channel = ServerChannelId(channel);
+        let data = BytesMut::from(data).freeze();
         async move {
-            {
-                let mut this_session = self.session.lock().await;
-                let span = this_session.make_logging_span();
-                this_session
-                    ._extended_data(ServerChannelId(channel), code, data)
-                    .instrument(span)
-                    .await?;
-            }
+            let (tx, rx) = oneshot::channel();
+
+            self.event_tx
+                .send(ServerHandlerEvent::ExtendedData(channel, data, code, tx))
+                .map_err(|_| ServerHandlerError::ChannelSend)?;
+
+            let _ = rx.await;
             Ok((self, session))
         }
         .boxed()
@@ -470,12 +503,13 @@ impl russh::server::Handler for ServerHandler {
 impl Drop for ServerHandler {
     fn drop(&mut self) {
         debug!("Dropped");
-        let client = self.session.clone();
-        tokio::task::Builder::new()
-            .name(&format!("SSH {} cleanup", self.id))
-            .spawn(async move {
-                client.lock().await._disconnect().await;
-            });
+        let _ = self.event_tx.send(ServerHandlerEvent::Disconnect);
+        // let client = self.session.clone();
+        // tokio::task::Builder::new()
+        //     .name(&format!("SSH {} cleanup", self.id))
+        //     .spawn(async move {
+        //         client.lock().await._disconnect().await;
+        //     });
     }
 }
 
