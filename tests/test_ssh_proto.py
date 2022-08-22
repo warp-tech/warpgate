@@ -88,7 +88,7 @@ class Test:
             password='123',
         )
 
-        output = ssh_client.communicate()[0]
+        output = ssh_client.communicate(timeout=10)[0]
         assert b'Warpgate' in output
         assert b'Selected target:' in output
         assert b'hello\r\n' in output

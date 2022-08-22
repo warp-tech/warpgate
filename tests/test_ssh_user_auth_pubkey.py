@@ -43,6 +43,7 @@ class Test:
             'IdentityFile=ssh-keys/id_ed25519',
             '-o',
             'PreferredAuthentications=publickey',
+            # 'sh', '-c', '"ls /bin/sh;sleep 1"',
             'ls',
             '/bin/sh',
         )

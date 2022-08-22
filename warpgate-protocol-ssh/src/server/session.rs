@@ -116,7 +116,9 @@ impl ServerSession {
         let mut rc_handles = RemoteClient::create(id, services.clone());
 
         let (hub, event_sender) = EventHub::setup();
-        let mut event_sub = hub.subscribe(|_| true).await;
+        let mut event_sub = hub
+            .subscribe(|e| !matches!(e, Event::ConsoleInput(_)))
+            .await;
 
         let mut this = Self {
             id,
@@ -201,38 +203,11 @@ impl ServerSession {
         });
 
         Ok(async move {
-            loop {
-                match event_sub.recv().await {
-                    Some(Event::Client(RCEvent::Done)) => break,
-                    Some(Event::Client(e)) => {
-                        debug!(event=?e, "Event");
-                        let span = this.make_logging_span();
-                        if let Err(err) = this.handle_remote_event(e).instrument(span).await {
-                            error!("Event handler error: {:?}", err);
-                            break;
-                        }
-                    }
-                    Some(Event::ServerHandler(ServerHandlerEvent::Disconnect)) => break,
-                    Some(Event::ServerHandler(e)) => {
-                        let span = this.make_logging_span();
-                        if let Err(err) = this.handle_server_handler_event(e).instrument(span).await
-                        {
-                            error!("Event handler error: {:?}", err);
-                            break;
-                        }
-                    }
-                    Some(Event::Command(command)) => {
-                        debug!(?command, "Session control");
-                        if let Err(err) = this.handle_session_control(command).await {
-                            error!("Event handler error: {:?}", err);
-                            break;
-                        }
-                    }
-                    Some(Event::ServiceOutput(data)) => {
-                        let _ = this.emit_pty_output(&data).await;
-                    }
-                    Some(Event::ConsoleInput(_)) => (),
-                    None => break,
+            while let Some(event) = event_sub.recv().await {
+                match event {
+                    Event::Client(RCEvent::Done) => break,
+                    Event::ServerHandler(ServerHandlerEvent::Disconnect) => break,
+                    event => this.handle_event(event).await?,
                 }
             }
             debug!("No more events");
@@ -337,6 +312,38 @@ impl ServerSession {
         self.emit_service_message(&format!("Selected target: {}", target.name))
             .await?;
 
+        Ok(())
+    }
+
+    async fn handle_event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Client(e) => {
+                debug!(event=?e, "Event");
+                let span = self.make_logging_span();
+                if let Err(err) = self.handle_remote_event(e).instrument(span).await {
+                    error!("Event handler error: {:?}", err);
+                    // break;
+                }
+            }
+            Event::ServerHandler(e) => {
+                let span = self.make_logging_span();
+                if let Err(err) = self.handle_server_handler_event(e).instrument(span).await {
+                    error!("Event handler error: {:?}", err);
+                    // break;
+                }
+            }
+            Event::Command(command) => {
+                debug!(?command, "Session control");
+                if let Err(err) = self.handle_session_control(command).await {
+                    error!("Event handler error: {:?}", err);
+                    // break;
+                }
+            }
+            Event::ServiceOutput(data) => {
+                let _ = self.emit_pty_output(&data).await;
+            }
+            Event::ConsoleInput(_) => (),
+        }
         Ok(())
     }
 
@@ -582,12 +589,10 @@ impl ServerSession {
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                if let Some(session) = self.session_handle.clone() {
-                    self.channel_writer.write(
-                        session,
-                        server_channel_id.0,
-                        CryptoVec::from_slice(&data),
-                    );
+                if let Some(session) = self.session_handle.as_mut() {
+                    let _ = session
+                        .data(server_channel_id.0, CryptoVec::from_slice(&data))
+                        .await;
                 }
             }
             RCEvent::Success(channel) => {
@@ -867,13 +872,12 @@ impl ServerSession {
             Ok::<&str, _>(command) => {
                 debug!(channel=%channel_id, %command, "Requested exec");
                 let _ = self.maybe_connect_remote().await;
-                self.send_command_and_wait(RCCommand::Channel(
+                let _ = self.send_command(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestExec(command.to_string()),
-                ))
+                ));
             }
         }
-        .await?;
 
         self.start_terminal_recording(channel_id, format!("exec-channel-{}", server_channel_id.0))
             .await;
@@ -1079,7 +1083,7 @@ impl ServerSession {
         password: Secret<String>,
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
-        info!("Password key auth as {:?}", selector);
+        info!("Password auth as {:?}", selector);
 
         match self
             .try_auth(&selector, Some(AuthCredential::Password(password)))

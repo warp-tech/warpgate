@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Bytes};
 use futures::FutureExt;
 use russh::server::{Auth, Handle, Session};
 use russh::{ChannelId, Pty, Sig};
