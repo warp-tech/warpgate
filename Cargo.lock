@@ -3439,9 +3439,9 @@ checksum = "2fde85c94a50dc789df8ca7b39f6b8b1eaa6cd320cc729e9ce1e1e1104292719"
 
 [[package]]
 name = "sea-orm"
-version = "0.9.0"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5c5d89fda14e96ff6b70ae79e9100032a874349200cd5806ee077ae72058003"
+checksum = "089dcca5d2c8393f5f21c7f7b0d84062839c3264ba62dcc0043eb207862e13a1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3481,9 +3481,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "0.9.0"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe38784b5be00c4d81c35f1648f5ee9dde4805ce18a39a15436a1b43673a6cc7"
+checksum = "08d9708f945febe8625ccb0334654b97d1a1a0bffa0473d86e6108ad13f79bd5"
 dependencies = [
  "bae",
  "heck 0.3.3",
@@ -3510,9 +3510,9 @@ dependencies = [
 
 [[package]]
 name = "sea-query"
-version = "0.26.0"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbf31602a02459bdc23bba113c61161f6536b26c1e9099865273d44b3937832"
+checksum = "a6a1de9d0334895f7eb51bd1603c3c9f6737413f905a134001f1e198f43bfd70"
 dependencies = [
  "chrono",
  "postgres-types",
