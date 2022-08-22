@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
@@ -93,7 +93,7 @@ impl TerminalRecorder {
         self.write_item(&TerminalRecordingItem::Data {
             time: self.get_time(),
             stream,
-            data: BytesMut::from(data).freeze(),
+            data: Bytes::from(data.to_vec()),
         })
         .await
     }

@@ -2,7 +2,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use ansi_term::Colour;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
@@ -39,7 +39,7 @@ impl ServiceOutput {
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
                                 let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick)).to_string();
-                                let _ = output_tx.send(BytesMut::from([&ERASE_PROGRESS_SPINNER_BUF[..], badge.as_bytes()].concat().as_slice()).freeze());
+                                let _ = output_tx.send(Bytes::from([&ERASE_PROGRESS_SPINNER_BUF[..], badge.as_bytes()].concat()));
                             }
                         }
                     }
@@ -70,7 +70,7 @@ impl ServiceOutput {
         self.output_tx.subscribe()
     }
 
-    fn emit_output(&mut self, output: Bytes) {
+    pub fn emit_output(&mut self, output: Bytes) {
         let _ = self.output_tx.send(output);
     }
 }

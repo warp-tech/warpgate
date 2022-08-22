@@ -59,7 +59,7 @@ impl DirectTCPIPChannel {
                             let bytes: &[u8] = &data;
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
-                                Bytes::from(BytesMut::from(bytes)),
+                                Bytes::from(bytes.to_vec()),
                             )).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {

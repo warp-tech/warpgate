@@ -1,3 +1,4 @@
+mod channel_writer;
 mod russh_handler;
 mod service_output;
 mod session;
@@ -66,18 +67,27 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let (event_tx, event_rx) = unbounded_channel();
 
-        let session =
-            match ServerSession::new(remote_address, &services, server_handle, session_handle_rx, event_rx)
-                .await
-            {
-                Ok(session) => session,
-                Err(error) => {
-                    error!(%error, "Error setting up session");
-                    continue;
-                }
-            };
+        let handler = ServerHandler { id, event_tx };
 
-        let handler = ServerHandler { id, session, event_tx };
+        let session = match ServerSession::new(
+            remote_address,
+            &services,
+            server_handle,
+            session_handle_rx,
+            event_rx,
+        )
+        .await
+        {
+            Ok(session) => session,
+            Err(error) => {
+                error!(%error, "Error setting up session");
+                continue;
+            }
+        };
+
+        tokio::task::Builder::new()
+            .name(&format!("SSH {id} session"))
+            .spawn(session);
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} protocol"))

@@ -102,7 +102,7 @@ impl RecordingWriter {
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {
-        let data = BytesMut::from(data).freeze();
+        let data = Bytes::from(data.to_vec());
         self.sender
             .send(data.clone())
             .await

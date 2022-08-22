@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::Bytes;
 use futures::Future;
-use russh::server::Session;
 use russh::{CryptoVec, MethodSet, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
@@ -31,6 +30,7 @@ use warpgate_common::{
     TargetOptions, TargetSSHOptions, WarpgateServerHandle,
 };
 
+use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
@@ -85,6 +85,7 @@ pub struct ServerSession {
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
     service_output: ServiceOutput,
+    channel_writer: ChannelWriter,
     auth_state: Option<Arc<Mutex<AuthState>>>,
     keyboard_interactive_state: KeyboardInteractiveState,
 }
@@ -106,7 +107,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
-    ) -> Result<Arc<Mutex<Self>>> {
+    ) -> Result<impl Future<Output = Result<()>>> {
         let id = server_handle.lock().await.id();
 
         let _span = info_span!("SSH", session=%id);
@@ -117,7 +118,7 @@ impl ServerSession {
         let (hub, event_sender) = EventHub::setup();
         let mut event_sub = hub.subscribe(|_| true).await;
 
-        let this = Self {
+        let mut this = Self {
             id,
             username: None,
             session_handle: None,
@@ -138,6 +139,7 @@ impl ServerSession {
             hub,
             event_sender: event_sender.clone(),
             service_output: ServiceOutput::new(),
+            channel_writer: ChannelWriter::new(),
             auth_state: None,
             keyboard_interactive_state: KeyboardInteractiveState::None,
         };
@@ -161,8 +163,6 @@ impl ServerSession {
                 }
             }
         });
-
-        let this = Arc::new(Mutex::new(this));
 
         let name = format!("SSH {} session control", id);
         tokio::task::Builder::new().name(&name).spawn({
@@ -200,62 +200,44 @@ impl ServerSession {
             }
         });
 
-        let name = format!("SSH {} events", id);
-        tokio::task::Builder::new().name(&name).spawn({
-            let this = Arc::downgrade(&this);
-            async move {
-                loop {
-                    match event_sub.recv().await {
-                        Some(Event::Client(RCEvent::Done)) => break,
-                        Some(Event::Client(e)) => {
-                            debug!(event=?e, "Event");
-                            let Some(this) = this.upgrade() else {
-                                break;
-                            };
-                            let this = &mut this.lock().await;
-                            if let Err(err) = this.handle_remote_event(e).await {
-                                error!("Event handler error: {:?}", err);
-                                break;
-                            }
+        Ok(async move {
+            loop {
+                match event_sub.recv().await {
+                    Some(Event::Client(RCEvent::Done)) => break,
+                    Some(Event::Client(e)) => {
+                        debug!(event=?e, "Event");
+                        let span = this.make_logging_span();
+                        if let Err(err) = this.handle_remote_event(e).instrument(span).await {
+                            error!("Event handler error: {:?}", err);
+                            break;
                         }
-                        Some(Event::ServerHandler(ServerHandlerEvent::Disconnect)) => break,
-                        Some(Event::ServerHandler(e)) => {
-                            let Some(this) = this.upgrade() else {
-                                break;
-                            };
-                            let this = &mut this.lock().await;
-                            if let Err(err) = this.handle_server_handler_event(e).await {
-                                error!("Event handler error: {:?}", err);
-                                break;
-                            }
-                        }
-                        Some(Event::Command(command)) => {
-                            debug!(?command, "Session control");
-                            let Some(this) = this.upgrade() else {
-                                break;
-                            };
-                            let this = &mut this.lock().await;
-                            if let Err(err) = this.handle_session_control(command).await {
-                                error!("Event handler error: {:?}", err);
-                                break;
-                            }
-                        }
-                        Some(Event::ServiceOutput(data)) => {
-                            let Some(this) = this.upgrade() else {
-                                break;
-                            };
-                            let this = &mut this.lock().await;
-                            let _ = this.emit_pty_output(&data).await;
-                        }
-                        Some(Event::ConsoleInput(_)) => (),
-                        None => break,
                     }
+                    Some(Event::ServerHandler(ServerHandlerEvent::Disconnect)) => break,
+                    Some(Event::ServerHandler(e)) => {
+                        let span = this.make_logging_span();
+                        if let Err(err) = this.handle_server_handler_event(e).instrument(span).await
+                        {
+                            error!("Event handler error: {:?}", err);
+                            break;
+                        }
+                    }
+                    Some(Event::Command(command)) => {
+                        debug!(?command, "Session control");
+                        if let Err(err) = this.handle_session_control(command).await {
+                            error!("Event handler error: {:?}", err);
+                            break;
+                        }
+                    }
+                    Some(Event::ServiceOutput(data)) => {
+                        let _ = this.emit_pty_output(&data).await;
+                    }
+                    Some(Event::ConsoleInput(_)) => (),
+                    None => break,
                 }
-                debug!("No more events");
             }
-        });
-
-        Ok(this)
+            debug!("No more events");
+            Ok::<_, anyhow::Error>(())
+        })
     }
 
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
@@ -301,26 +283,23 @@ impl ServerSession {
     pub async fn emit_service_message(&mut self, msg: &str) -> Result<()> {
         debug!("Service message: {}", msg);
 
-        self.emit_pty_output(
-            format!(
-                "{}{} {}\r\n",
-                ERASE_PROGRESS_SPINNER,
-                Colour::Black.on(Colour::White).paint(" Warpgate "),
-                msg.replace('\n', "\r\n"),
-            )
-            .as_bytes(),
-        )
-        .await
+        self.service_output.emit_output(Bytes::from(format!(
+            "{}{} {}\r\n",
+            ERASE_PROGRESS_SPINNER,
+            Colour::Black.on(Colour::White).paint(" Warpgate "),
+            msg.replace('\n', "\r\n"),
+        )));
+
+        Ok(())
     }
 
     pub async fn emit_pty_output(&mut self, data: &[u8]) -> Result<()> {
         let channels = self.pty_channels.clone();
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
-            if let Some(mut session) = self.session_handle.clone() {
-                // .data() will hang and deadlock us if the mpsc capacity is exhausted
-                let data = CryptoVec::from_slice(data);
-                tokio::spawn(async move { session.data(channel.0, data).await });
+            if let Some(session) = self.session_handle.clone() {
+                self.channel_writer
+                    .write(session, channel.0, CryptoVec::from_slice(data));
             }
         }
         Ok(())
@@ -474,6 +453,30 @@ impl ServerSession {
                 self._channel_eof(channel).await?;
             }
 
+            ServerHandlerEvent::WindowChangeRequest(channel, request, _) => {
+                self._window_change_request(channel, request).await?;
+            }
+
+            ServerHandlerEvent::Signal(channel, signal, _) => {
+                self._channel_signal(channel, signal).await?;
+            }
+
+            ServerHandlerEvent::ExecRequest(channel, data, _) => {
+                self._channel_exec_request(channel, data).await?;
+            }
+
+            ServerHandlerEvent::ChannelOpenDirectTcpIp(channel, params, reply) => {
+                let _ = reply.send(self._channel_open_direct_tcpip(channel, params).await?);
+            }
+
+            ServerHandlerEvent::EnvRequest(channel, name, value, _) => {
+                self._channel_env_request(channel, name, value).await?;
+            }
+
+            ServerHandlerEvent::X11Request(channel, request, _) => {
+                self._channel_x11_request(channel, request).await?;
+            }
+
             ServerHandlerEvent::Disconnect => (),
         }
 
@@ -499,17 +502,13 @@ impl ServerSession {
                 match &self.rc_state {
                     RCState::Connected => {
                         self.service_output.hide_progress().await;
-                        self.emit_pty_output(
-                            format!(
-                                "{}{}\r\n",
-                                ERASE_PROGRESS_SPINNER,
-                                Colour::Black
-                                    .on(Colour::Green)
-                                    .paint(" ✓ Warpgate connected ")
-                            )
-                            .as_bytes(),
-                        )
-                        .await?;
+                        self.service_output.emit_output(Bytes::from(format!(
+                            "{}{}\r\n",
+                            ERASE_PROGRESS_SPINNER,
+                            Colour::Black
+                                .on(Colour::Green)
+                                .paint(" ✓ Warpgate connected ")
+                        )));
                     }
                     RCState::Disconnected => {
                         self.service_output.hide_progress().await;
@@ -550,16 +549,12 @@ impl ServerSession {
                     .await?;
                     }
                     error => {
-                        self.emit_pty_output(
-                            format!(
-                                "{}{} {}\r\n",
-                                ERASE_PROGRESS_SPINNER,
-                                Colour::Black.on(Colour::Red).paint(" Connection failed "),
-                                error
-                            )
-                            .as_bytes(),
-                        )
-                        .await?;
+                        self.service_output.emit_output(Bytes::from(format!(
+                            "{}{} {}\r\n",
+                            ERASE_PROGRESS_SPINNER,
+                            Colour::Black.on(Colour::Red).paint(" Connection failed "),
+                            error
+                        )));
                     }
                 }
             }
@@ -587,14 +582,13 @@ impl ServerSession {
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                self.maybe_with_session(|handle| async move {
-                    handle
-                        .data(server_channel_id.0, CryptoVec::from_slice(&data))
-                        .await
-                        .map_err(|_| ())
-                        .context("failed to send data")
-                })
-                .await?;
+                if let Some(session) = self.session_handle.clone() {
+                    self.channel_writer.write(
+                        session,
+                        server_channel_id.0,
+                        CryptoVec::from_slice(&data),
+                    );
+                }
             }
             RCEvent::Success(channel) => {
                 let server_channel_id = self.map_channel_reverse(&channel)?;
@@ -790,18 +784,16 @@ impl ServerSession {
         Ok(None)
     }
 
-    pub async fn _channel_open_direct_tcpip(
+    async fn _channel_open_direct_tcpip(
         &mut self,
         channel: ServerChannelId,
         params: DirectTCPIPParams,
-        session: &mut Session,
     ) -> Result<bool> {
         let uuid = Uuid::new_v4();
         self.channel_map.insert(channel, uuid);
 
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
 
-        self.session_handle = Some(session.handle());
         match self
             .send_command_and_wait(RCCommand::Channel(
                 uuid,
@@ -836,7 +828,7 @@ impl ServerSession {
         }
     }
 
-    pub async fn _window_change_request(
+    async fn _window_change_request(
         &mut self,
         server_channel_id: ServerChannelId,
         request: PtyRequest,
@@ -861,11 +853,11 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_exec_request_begin(
+    async fn _channel_exec_request(
         &mut self,
         server_channel_id: ServerChannelId,
         data: Bytes,
-    ) -> Result<PendingCommand> {
+    ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         match std::str::from_utf8(&data) {
             Err(e) => {
@@ -875,19 +867,14 @@ impl ServerSession {
             Ok::<&str, _>(command) => {
                 debug!(channel=%channel_id, %command, "Requested exec");
                 let _ = self.maybe_connect_remote().await;
-                Ok(self.send_command_and_wait(RCCommand::Channel(
+                self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestExec(command.to_string()),
-                )))
+                ))
             }
         }
-    }
+        .await?;
 
-    pub async fn _channel_exec_request_finish(
-        &mut self,
-        server_channel_id: ServerChannelId,
-    ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
         self.start_terminal_recording(channel_id, format!("exec-channel-{}", server_channel_id.0))
             .await;
         Ok(())
@@ -921,7 +908,7 @@ impl ServerSession {
         }
     }
 
-    pub async fn _channel_x11_request(
+    async fn _channel_x11_request(
         &mut self,
         server_channel_id: ServerChannelId,
         request: X11Request,
@@ -937,7 +924,7 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_env_request(
+    async fn _channel_env_request(
         &mut self,
         server_channel_id: ServerChannelId,
         name: String,
