@@ -291,7 +291,7 @@ impl ServerSession {
         let channels = self.pty_channels.clone();
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
-            if let Some(mut session) = self.session_handle.clone() {
+            if let Some(session) = self.session_handle.clone() {
                 // .data() will hang and deadlock us if the mpsc capacity is exhausted
                 let data = CryptoVec::from_slice(data);
                 tokio::spawn(async move { session.data(channel.0, data).await });
@@ -937,7 +937,7 @@ impl ServerSession {
             .await;
 
         info!(%channel_id, "Opening shell");
-        let mut session = self
+        let session = self
             .session_handle
             .clone()
             .context("Invalid session state")?;
