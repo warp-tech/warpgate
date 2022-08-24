@@ -7,6 +7,10 @@ name = "Inflector"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
 
 [[package]]
 name = "addr2line"
@@ -2770,9 +2774,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi"
-version = "2.0.10"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d4d9252b377035ab2ef8d88020d0484f80892ec6325028af9e4c5839a0656b7"
+checksum = "6410fb35798b39e6f4d31dbe208b32238f35a3e322b44a1b58770d4c4b974f3a"
 dependencies = [
  "base64 0.13.0",
  "bytes 1.2.1",
@@ -2787,7 +2791,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_yaml 0.9.10",
+ "serde_yaml",
  "thiserror",
  "tokio",
  "uuid",
@@ -2795,10 +2799,11 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi-derive"
-version = "2.0.10"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5a965be0296fa454602ca8f7a5422e91f5b24d42bfadc1117b17e132892cd7f"
+checksum = "585839bf881890f4051727168dfec9286e900679957de36aff9cb32ea55f9d12"
 dependencies = [
+ "Inflector",
  "darling",
  "http",
  "indexmap",
@@ -3690,19 +3695,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml"
-version = "0.9.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a09f551ccc8210268ef848f0bab37b306e87b85b2e017b899e7fb815f5aed62"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "sha-1"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4508,12 +4500,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unsafe-libyaml"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "931179334a56395bcf64ba5e0ff56781381c1a5832178280c7d7f91d1679aeb0"
-
-[[package]]
 name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4630,7 +4616,7 @@ dependencies = [
  "qrcode",
  "rcgen",
  "sd-notify",
- "serde_yaml 0.8.25",
+ "serde_yaml",
  "time 0.3.11",
  "tokio",
  "tracing",
