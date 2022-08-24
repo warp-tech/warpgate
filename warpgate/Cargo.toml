@@ -18,7 +18,7 @@ data-encoding = "2.3"
 dhat = {version = "0.3", optional = true}
 dialoguer = "0.10"
 futures = "0.3"
-notify = "^5.0.0-beta.1"
+notify = "^5.0.0-pre.16"
 qrcode = "0.12"
 rcgen = {version = "0.9", features = ["zeroize"]}
 serde_yaml = "0.8.23"
