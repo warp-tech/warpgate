@@ -39,28 +39,37 @@ jobs:
           just openapi
           just yarn build
 
-      - name: Build
+      - name: Build (x86_64)
         uses: actions-rs/cargo@v1
         with:
           command: build
           use-cross: true
           args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
 
+      - name: Build (aarch64)
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          use-cross: true
+          args: --release --target aarch64-unknown-linux-gnu -Ztarget-applies-to-host
+
       - name: Rename
         run: |
           mkdir dist
           mv target/x86_64-unknown-linux-gnu/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
+          mv target/aarch64-unknown-linux-gnu/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
 
       - uses: actions/upload-artifact@master
-        name: Upload artifacts
+        name: Upload artifacts (x86_64)
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
           path: dist/warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
 
-      # - name: 🔎 Test
-      #   uses: actions-rs/cargo@v1
-      #   with:
-      #     command: test
+      - uses: actions/upload-artifact@master
+        name: Upload artifacts (aarch64)
+        with:
+          name: warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
+          path: dist/warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
 
       - name: Upload
         uses: softprops/action-gh-release@v1
