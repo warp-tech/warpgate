@@ -13,7 +13,7 @@ use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
-use warpgate_common::{try_block, TargetHTTPOptions, TlsMode};
+use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
 use warpgate_web::lookup_built_file;
 
 use crate::logging::log_request_result;
@@ -217,7 +217,7 @@ pub async fn proxy_normal_request(
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
-    let uri = construct_uri(req, &options, false)?.to_string();
+    let uri = construct_uri(req, &options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -234,12 +234,18 @@ pub async fn proxy_normal_request(
 
     let client = client.build().context("Could not build request")?;
 
-    let mut client_request = client.request(req.method().into(), uri.clone());
+    let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(&req, client_request);
     client_request = inject_forwarding_headers(&req, client_request)?;
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    client_request = client_request.header(
+        http::header::HOST,
+        uri.authority()
+            .ok_or(WarpgateError::NoHostInUrl)?
+            .to_string(),
+    );
 
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
@@ -340,6 +346,12 @@ async fn proxy_ws_inner(
         .header(
             http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
+        )
+        .header(
+            http::header::HOST,
+            uri.authority()
+                .ok_or(WarpgateError::NoHostInUrl)?
+                .to_string(),
         );
 
     client_request = copy_server_request(&req, client_request);
