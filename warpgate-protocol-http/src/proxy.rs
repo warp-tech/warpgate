@@ -70,6 +70,7 @@ lazy_static::lazy_static! {
         s.insert(http::header::SEC_WEBSOCKET_KEY);
         s.insert(http::header::SEC_WEBSOCKET_VERSION);
         s.insert(http::header::UPGRADE);
+        s.insert(http::header::HOST);
         s.insert(http::header::CONNECTION);
         s.insert(http::header::STRICT_TRANSPORT_SECURITY);
         s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
