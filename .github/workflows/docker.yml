@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
 
       - name: Log into registry ${{ env.REGISTRY }}
         if: github.event_name != 'pull_request'

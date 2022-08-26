@@ -1,3 +1,4 @@
+import shellEscape from 'shell-escape'
 import type { Info } from 'gateway/lib/api'
 
 export interface ConnectionOptions {
@@ -16,7 +17,7 @@ export function makeSSHUsername (opt: ConnectionOptions): string {
 }
 
 export function makeExampleSSHCommand (opt: ConnectionOptions): string {
-    return `ssh ${makeSSHUsername(opt)}@${opt.serverInfo?.externalHost ?? 'warpgate-host'} -p ${opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port'}`
+    return shellEscape(['ssh', `${makeSSHUsername(opt)}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}`, '-p', (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString()])
 }
 
 export function makeMySQLUsername (opt: ConnectionOptions): string {
@@ -27,7 +28,7 @@ export function makeMySQLUsername (opt: ConnectionOptions): string {
 }
 
 export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
-    let cmd = `mysql -u ${makeMySQLUsername(opt)} --host ${opt.serverInfo?.externalHost ?? 'warpgate-host'} --port ${opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port'} --ssl`
+    let cmd = shellEscape(['mysql', '-u', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port').toString(), '--ssl'])
     if (!opt.ticketSecret) {
         cmd += ' -p'
     }

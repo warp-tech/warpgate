@@ -21,7 +21,7 @@ def wg_port(processes, ssh_port, password_123_hash):
             -   name: ssh
                 allow_roles: [role]
                 ssh:
-                    host: localhost
+                    host: 127.0.0.1
                     port: {ssh_port}
             -   name: ssh-bad-domain
                 allow_roles: [role]
@@ -34,7 +34,7 @@ def wg_port(processes, ssh_port, password_123_hash):
                 -   type: password
                     hash: '{password_123_hash}'
                 -   type: publickey
-                    key: {open('ssh-keys/id_rsa.pub').read().strip()}
+                    key: {open('ssh-keys/id_ed25519.pub').read().strip()}
             '''
         ),
     )
@@ -69,7 +69,7 @@ class Test:
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = ssh_client.communicate()
+        stdout, stderr = ssh_client.communicate(timeout=10)
         assert b'stdout' == stdout
         assert stderr.endswith(b'stderr')
 
@@ -180,14 +180,9 @@ class Test:
             '/dev/null',
             '-o',
             'PreferredAuthentications=password',
-            'echo',
-            'hello',
             password='123',
-            stderr=subprocess.PIPE,
         )
 
-        stdout = ssh_client.communicate()[0]
-        assert b'Selected target: ssh-bad-domain' in stdout
         assert ssh_client.returncode != 0
 
     def test_sftp(
@@ -205,7 +200,7 @@ class Test:
                     '-o',
                     'IdentitiesOnly=yes',
                     '-o',
-                    'IdentityFile=ssh-keys/id_rsa',
+                    'IdentityFile=ssh-keys/id_ed25519',
                     '-o',
                     'PreferredAuthentications=publickey',
                     '-o',

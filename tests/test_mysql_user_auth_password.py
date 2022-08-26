@@ -2,7 +2,7 @@ import subprocess
 from textwrap import dedent
 
 from .conftest import ProcessManager
-from .util import wait_port, wait_mysql_port, mysql_client_ssl_opt
+from .util import wait_port, wait_mysql_port, mysql_client_ssl_opt, mysql_client_opts
 
 
 class Test:
@@ -43,7 +43,7 @@ class Test:
                 '127.0.0.1',
                 '--port',
                 str(wg_ports["mysql"]),
-                '--enable-cleartext-plugin',
+                *mysql_client_opts,
                 mysql_client_ssl_opt,
                 'db',
             ],
@@ -63,7 +63,7 @@ class Test:
                 '127.0.0.1',
                 '--port',
                 str(wg_ports["mysql"]),
-                '--enable-cleartext-plugin',
+                *mysql_client_opts,
                 mysql_client_ssl_opt,
                 'db',
             ],

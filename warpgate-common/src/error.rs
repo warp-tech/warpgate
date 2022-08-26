@@ -15,12 +15,14 @@ pub enum WarpgateError {
     Other(Box<dyn Error + Send + Sync>),
     #[error("user not found")]
     UserNotFound,
-    #[error("failed to parse url: {0}")]
+    #[error("failed to parse URL: {0}")]
     UrlParse(#[from] url::ParseError),
     #[error("deserialization failed: {0}")]
     DeserializeJson(#[from] serde_json::Error),
     #[error("external_url config option is not set")]
     ExternalHostNotSet,
+    #[error("URL contains no host")]
+    NoHostInUrl,
 }
 
 impl ResponseError for WarpgateError {

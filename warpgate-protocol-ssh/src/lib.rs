@@ -53,30 +53,12 @@ impl ProtocolServer for SSHProtocolServer {
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), self.services.clone());
 
-        let _ = handles.command_tx.send(RCCommand::Connect(ssh_options));
+        let _ = handles
+            .command_tx
+            .send((RCCommand::Connect(ssh_options), None));
 
         while let Some(event) = handles.event_rx.recv().await {
             match event {
-                RCEvent::ConnectionError(err) => {
-                    if let ConnectionError::HostKeyMismatch {
-                        ref received_key_type,
-                        ref received_key_base64,
-                        ref known_key_type,
-                        ref known_key_base64,
-                    } = err
-                    {
-                        println!("\n");
-                        println!("Stored key   ({}): {}", known_key_type, known_key_base64);
-                        println!(
-                            "Received key ({}): {}",
-                            received_key_type, received_key_base64
-                        );
-                        println!("Host key doesn't match the stored one.");
-                        println!("If you know that the key is correct (e.g. it has been changed),");
-                        println!("you can remove the old key in the Warpgate management UI and try again");
-                    }
-                    return Err(TargetTestError::ConnectionError(format!("{:?}", err)));
-                }
                 RCEvent::HostKeyUnknown(key, reply) => {
                     println!("\nHost key ({}): {}", key.name(), key.public_key_base64());
                     println!("There is no trusted {} key for this host.", key.name());
@@ -107,6 +89,27 @@ impl ProtocolServer for SSHProtocolServer {
                             }
                         }
                     }
+                }
+                RCEvent::HostKeyReceived(_) => (),
+                RCEvent::ConnectionError(err) => {
+                    if let ConnectionError::HostKeyMismatch {
+                        ref received_key_type,
+                        ref received_key_base64,
+                        ref known_key_type,
+                        ref known_key_base64,
+                    } = err
+                    {
+                        println!("\n");
+                        println!("Stored key   ({}): {}", known_key_type, known_key_base64);
+                        println!(
+                            "Received key ({}): {}",
+                            received_key_type, received_key_base64
+                        );
+                        println!("Host key doesn't match the stored one.");
+                        println!("If you know that the key is correct (e.g. it has been changed),");
+                        println!("you can remove the old key in the Warpgate management UI and try again");
+                    }
+                    return Err(TargetTestError::ConnectionError(format!("{:?}", err)));
                 }
                 RCEvent::State(state) => match state {
                     RCState::Connected => {

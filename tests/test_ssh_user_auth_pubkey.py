@@ -94,16 +94,18 @@ class Test:
 
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
+            '-v',
             '-p',
             str(wg_ports['ssh']),
             '-o',
             'IdentityFile=ssh-keys/id_rsa',
             '-o',
             'PreferredAuthentications=publickey',
+            '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
             'ls',
             '/bin/sh',
         )
-        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=10)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
         ssh_client = processes.start_ssh_client(
@@ -114,8 +116,9 @@ class Test:
             'IdentityFile=ssh-keys/id_ed25519',
             '-o',
             'PreferredAuthentications=publickey',
+            '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
             'ls',
             '/bin/sh',
         )
-        assert ssh_client.communicate()[0] == b''
+        assert ssh_client.communicate(timeout=10)[0] == b''
         assert ssh_client.returncode != 0
