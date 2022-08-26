@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-import { api, Target, TargetKind } from 'gateway/lib/api'
+import { api, TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
 import { Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
@@ -9,14 +9,14 @@ import { serverInfo } from './lib/store'
 
 const dispatch = createEventDispatcher()
 
-let targets: Target[]|undefined
-let selectedTarget: Target|undefined
+let targets: TargetSnapshot[]|undefined
+let selectedTarget: TargetSnapshot|undefined
 
 async function init () {
     targets = await api.getTargets()
 }
 
-function selectTarget (target: Target) {
+function selectTarget (target: TargetSnapshot) {
     if (target.kind === TargetKind.Http) {
         loadURL(`/?warpgate-target=${target.name}`)
     } else if (target.kind === TargetKind.WebAdmin) {

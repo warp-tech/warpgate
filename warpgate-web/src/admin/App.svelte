@@ -42,11 +42,11 @@ const routes = {
     '/targets': wrap({
         asyncComponent: () => import('./Targets.svelte'),
     }),
-    '/targets/:id': wrap({
-        asyncComponent: () => import('./Target.svelte'),
-    }),
     '/targets/create': wrap({
         asyncComponent: () => import('./CreateTarget.svelte'),
+    }),
+    '/targets/:id': wrap({
+        asyncComponent: () => import('./Target.svelte'),
     }),
     '/ssh': wrap({
         asyncComponent: () => import('./SSH.svelte'),

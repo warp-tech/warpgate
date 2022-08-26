@@ -1,17 +1,47 @@
 <script lang="ts">
-import { api, UserSnapshot } from 'admin/lib/api'
+import { api, Target, UserSnapshot } from 'admin/lib/api'
+import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
+import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup, Spinner } from 'sveltestrap'
 
 export let params: { id: string }
 
+let error: Error|undefined
 let selectedUser: UserSnapshot|undefined
+let target: Target
+
+async function load () {
+    try {
+        target = await api.getTarget({ id: params.id })
+    } catch (err) {
+        error = err
+    }
+}
+
+async function update () {
+    try {
+        target = await api.updateTarget({
+            id: params.id,
+            targetDataRequest: target,
+        })
+    } catch (err) {
+        error = err
+    }
+}
+
+async function remove () {
+    if (confirm(`Delete target ${target.name}?`)) {
+        await api.deleteTarget(target)
+        replace('/targets')
+    }
+}
 </script>
 
-{#await api.getTarget({ id: params.id })}
+{#await load()}
     <Spinner />
-{:then target}
+{:then}
     <div class="page-summary-bar">
         <div>
             <h1>{target.name}</h1>
@@ -35,7 +65,7 @@ let selectedUser: UserSnapshot|undefined
         </a> -->
     </div>
 
-    <h3>Access instructions</h3>
+    <h4>Access instructions</h4>
 
     {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql'}
         {#await api.getUsers()}
@@ -66,6 +96,35 @@ let selectedUser: UserSnapshot|undefined
         }[target.options.kind ?? '']}
         targetExternalHost={target.options['externalHost']}
     />
-{:catch error}
-    <Alert color="danger">{error}</Alert>
+
+    <h4 class="mt-4">Configuration</h4>
+
+    <FormGroup floating label="Name">
+        <input class="form-control" bind:value={target.name} />
+    </FormGroup>
+
+    {#if target.options.kind === 'Http'}
+        <FormGroup floating label="Target URL">
+            <input class="form-control" bind:value={target.options.url} />
+        </FormGroup>
+    {/if}
 {/await}
+
+{#if error}
+    <Alert color="danger">{error}</Alert>
+{/if}
+
+<div class="d-flex">
+    <AsyncButton
+        class="ms-auto"
+        outline
+        click={update}
+    >Update configuration</AsyncButton>
+
+    <AsyncButton
+        class="ms-2"
+        outline
+        color="danger"
+        click={remove}
+    >Remove</AsyncButton>
+</div>

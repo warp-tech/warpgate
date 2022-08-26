@@ -1,36 +1,48 @@
 <script lang="ts">
-import { api } from 'admin/lib/api'
+import { api, TargetOptions, TlsMode } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { push } from 'svelte-spa-router'
 import { Alert, FormGroup } from 'sveltestrap'
 
 let error: Error|null = null
 let name = ''
-
-async function load () {
-}
-
-load().catch(e => {
-    error = e
-})
+let type: 'Ssh'|'MySql'|'Http' = 'Ssh'
 
 async function create () {
-    if (!name) {
+    if (!name || !type) {
         return
     }
     try {
-        const target = await api.createTarget({
-            createTargetRequest: {
-                name,
-                options: {
-                    kind: 'Ssh',
-                    host: '192.168.0.1',
-                    port: 22,
-                    username: 'root',
-                    auth: {
-                        kind: 'PublicKey',
-                    },
+        const options: TargetOptions|undefined = {
+            Ssh: {
+                kind: 'Ssh',
+                host: '192.168.0.1',
+                port: 22,
+                username: 'root',
+                auth: {
+                    kind: 'PublicKey',
                 },
+            } as TargetOptions,
+            Http: {
+                kind: 'Http',
+                url: 'http://192.168.0.1',
+                tls: {
+                    mode: TlsMode.Preferred,
+                    verify: true,
+                },
+            } as TargetOptions,
+            MySql: {
+                kind: 'MySql',
+                host: '192.168.0.1',
+            } as TargetOptions,
+        }[type]
+        if (!options) {
+            return
+        }
+        const target = await api.createTarget({
+            targetDataRequest: {
+                name,
+                options,
             },
         })
         console.log(target)
@@ -53,6 +65,14 @@ async function create () {
 
 <FormGroup floating label="Name">
     <input class="form-control" bind:value={name} />
+</FormGroup>
+
+<FormGroup floating label="Type">
+    <select bind:value={type} class="form-control">
+        <option value={'Ssh'}>SSH</option>
+        <option value={'Http'}>HTTP</option>
+        <option value={'MySql'}>MySQL</option>
+    </select>
 </FormGroup>
 
 <AsyncButton

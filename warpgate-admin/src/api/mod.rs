@@ -8,11 +8,10 @@ pub mod recordings_detail;
 pub mod sessions_detail;
 pub mod sessions_list;
 pub mod ssh_keys;
-pub mod targets_list;
+pub mod targets;
 pub mod tickets_detail;
 pub mod tickets_list;
 pub mod users_list;
-mod targets_detail;
 
 pub fn get() -> impl OpenApi {
     (
@@ -20,8 +19,8 @@ pub fn get() -> impl OpenApi {
         sessions_detail::Api,
         recordings_detail::Api,
         users_list::Api,
-        targets_list::Api,
-        targets_detail::Api,
+        targets::ListApi,
+        targets::DetailApi,
         tickets_list::Api,
         tickets_detail::Api,
         known_hosts_list::Api,

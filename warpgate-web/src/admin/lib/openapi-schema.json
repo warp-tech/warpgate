@@ -241,7 +241,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateTargetRequest"
+                "$ref": "#/components/schemas/TargetDataRequest"
               }
             }
           },
@@ -302,6 +302,72 @@
           }
         },
         "operationId": "get_target"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Target"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "update_target"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_target"
       }
     },
     "/tickets": {
@@ -482,21 +548,6 @@
   },
   "components": {
     "schemas": {
-      "CreateTargetRequest": {
-        "type": "object",
-        "required": [
-          "name",
-          "options"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "options": {
-            "$ref": "#/components/schemas/TargetOptions"
-          }
-        }
-      },
       "CreateTicketRequest": {
         "type": "object",
         "required": [
@@ -805,6 +856,21 @@
             "items": {
               "type": "string"
             }
+          },
+          "options": {
+            "$ref": "#/components/schemas/TargetOptions"
+          }
+        }
+      },
+      "TargetDataRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "options"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           },
           "options": {
             "$ref": "#/components/schemas/TargetOptions"
