@@ -34,6 +34,13 @@ async function create () {
             MySql: {
                 kind: 'MySql',
                 host: '192.168.0.1',
+                port: 3306,
+                tls: {
+                    mode: TlsMode.Preferred,
+                    verify: true,
+                },
+                username: 'root',
+                password: '',
             } as TargetOptions,
         }[type]
         if (!options) {

@@ -16,7 +16,6 @@ import { Alert, Spinner } from 'sveltestrap'
             Add a target
         </a>
     </div>
-    <Alert color="info" fade={false}>Add or remove targets in the config file.</Alert>
     <div class="list-group list-group-flush">
         {#each targets as target}
             <!-- svelte-ignore a11y-missing-attribute -->

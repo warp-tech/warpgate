@@ -1,10 +1,14 @@
 <script lang="ts">
+import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
 import { api, Target, UserSnapshot } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
+import { serverInfo } from 'gateway/lib/store'
+import Fa from 'svelte-fa';
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Spinner } from 'sveltestrap'
+import { Alert, Button, FormGroup, Input, Spinner } from 'sveltestrap'
+import TlsConfiguration from './TlsConfiguration.svelte'
 
 export let params: { id: string }
 
@@ -22,6 +26,10 @@ async function load () {
 
 async function update () {
     try {
+        if (target.options.kind === 'Http') {
+            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+            target.options.externalHost = target.options.externalHost || undefined
+        }
         target = await api.updateTarget({
             id: params.id,
             targetDataRequest: target,
@@ -51,6 +59,9 @@ async function remove () {
                 {/if}
                 {#if target.options.kind === 'Ssh'}
                     SSH target
+                {/if}
+                {#if target.options.kind === 'Http'}
+                    HTTP target
                 {/if}
                 {#if target.options.kind === 'WebAdmin'}
                     This web admin interface
@@ -103,10 +114,89 @@ async function remove () {
         <input class="form-control" bind:value={target.name} />
     </FormGroup>
 
+    {#if target.options.kind === 'Ssh'}
+        <div class="row">
+            <div class="col-8">
+                <FormGroup floating label="Target host">
+                    <input class="form-control" bind:value={target.options.host} />
+                </FormGroup>
+            </div>
+            <div class="col-4">
+                <FormGroup floating label="Target port">
+                    <input class="form-control" type="number" bind:value={target.options.port} min="1" max="65535" step="1" />
+                </FormGroup>
+            </div>
+        </div>
+
+        <FormGroup floating label="Username">
+            <input class="form-control" bind:value={target.options.username} />
+        </FormGroup>
+
+        <div class="d-flex">
+            <FormGroup floating label="Authentication" class="w-100">
+                <select bind:value={target.options.auth.kind} class="form-control">
+                    <option value={'PublicKey'}>Warpgate's private keys</option>
+                    <option value={'Password'}>Password</option>
+                </select>
+            </FormGroup>
+            {#if target.options.auth.kind === 'PublicKey'}
+                <a
+                    class="btn btn-link mb-3 d-flex align-items-center"
+                    href="/@warpgate/admin#/ssh"
+                    target="_blank">
+                    <Fa fw icon={faExternalLink} />
+                </a>
+            {/if}
+            {#if target.options.auth.kind === 'Password'}
+                <FormGroup floating label="Password" class="w-100 ms-3">
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth.password} />
+                </FormGroup>
+            {/if}
+        </div>
+    {/if}
+
     {#if target.options.kind === 'Http'}
         <FormGroup floating label="Target URL">
             <input class="form-control" bind:value={target.options.url} />
         </FormGroup>
+
+        <TlsConfiguration bind:value={target.options.tls} />
+
+        {#if $serverInfo?.externalHost}
+            <FormGroup floating label="Bind to a domain">
+                <Input type="text" placeholder={'foo.' + $serverInfo.externalHost} bind:value={target.options.externalHost} />
+            </FormGroup>
+        {/if}
+    {/if}
+
+    {#if target.options.kind === 'MySql'}
+        <div class="row">
+            <div class="col-8">
+                <FormGroup floating label="Target host">
+                    <input class="form-control" bind:value={target.options.host} />
+                </FormGroup>
+            </div>
+            <div class="col-4">
+                <FormGroup floating label="Target port">
+                    <input class="form-control" type="number" bind:value={target.options.port} min="1" max="65535" step="1" />
+                </FormGroup>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col">
+                <FormGroup floating label="Username">
+                    <input class="form-control" bind:value={target.options.username} />
+                </FormGroup>
+            </div>
+            <div class="col">
+                <FormGroup floating label="Password">
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.password} />
+                </FormGroup>
+            </div>
+        </div>
+
+        <TlsConfiguration bind:value={target.options.tls} />
     {/if}
 {/await}
 
