@@ -1,7 +1,7 @@
 #![feature(let_else, drain_filter, duration_constants)]
+pub mod consts;
 mod data;
 mod state;
-pub mod consts;
 pub use data::*;
 pub use state::{SessionState, SessionStateInit, State};
 mod config_providers;

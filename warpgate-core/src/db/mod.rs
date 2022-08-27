@@ -84,8 +84,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<(), WarpgateErro
         .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
         .all(db)
         .await?
-        .iter()
-        .next()
+        .first()
     {
         Some(x) => x.to_owned(),
         None => {
@@ -101,8 +100,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<(), WarpgateErro
         .filter(Target::Column::Kind.eq(TargetKind::WebAdmin))
         .all(db)
         .await?
-        .iter()
-        .next()
+        .first()
     {
         Some(x) => x.to_owned(),
         None => {

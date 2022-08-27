@@ -14,8 +14,8 @@ use warpgate_common::{
     HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Target, TargetOptions,
     TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
 };
-use warpgate_core::Services;
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
+use warpgate_core::Services;
 
 use crate::config::load_config;
 

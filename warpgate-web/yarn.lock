@@ -237,6 +237,11 @@
   dependencies:
     "@types/node" "*"
 
+"@types/shell-escape@^0.2.1":
+  version "0.2.1"
+  resolved "https://registry.yarnpkg.com/@types/shell-escape/-/shell-escape-0.2.1.tgz#34631545340aa61bbabb672b906f1b910cd42757"
+  integrity sha512-95hZXmBvwtvsLMPefKT9xquUSAJXsVDUaipyUiYoYi3ZdLhZ3w30w230Ugs96IdoJQb5ECvj0D82Jj/op00qWQ==
+
 "@typescript-eslint/eslint-plugin@^5.28.0":
   version "5.28.0"
   resolved "https://registry.yarnpkg.com/@typescript-eslint/eslint-plugin/-/eslint-plugin-5.28.0.tgz#6204ac33bdd05ab27c7f77960f1023951115d403"
