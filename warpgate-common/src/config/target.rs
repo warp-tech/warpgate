@@ -34,8 +34,7 @@ pub struct SshTargetPasswordAuth {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
-pub struct SshTargetPublicKeyAuth {
-}
+pub struct SshTargetPublicKeyAuth {}
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {

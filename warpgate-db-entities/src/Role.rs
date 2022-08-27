@@ -20,8 +20,6 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for Role {
     fn from(model: Model) -> Self {
-        Self {
-            name: model.name,
-        }
+        Self { name: model.name }
     }
 }

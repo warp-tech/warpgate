@@ -8,7 +8,7 @@ use warpgate_common::{ConfigProviderKind, WarpgateConfig};
 
 use crate::db::{connect_to_db, sanitize_db};
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProvider, FileConfigProvider, State, DatabaseConfigProvider};
+use crate::{AuthStateStore, ConfigProvider, DatabaseConfigProvider, FileConfigProvider, State};
 
 type ConfigProviderArc = Arc<Mutex<dyn ConfigProvider + Send + 'static>>;
 
@@ -39,7 +39,8 @@ impl Services {
                 Arc::new(Mutex::new(FileConfigProvider::new(&config).await)) as ConfigProviderArc
             }
             ConfigProviderKind::Database => {
-                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db, &config).await)) as ConfigProviderArc
+                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db, &config).await))
+                    as ConfigProviderArc
             }
         };
 

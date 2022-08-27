@@ -5,9 +5,9 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
 import { serverInfo } from 'gateway/lib/store'
-import Fa from 'svelte-fa';
+import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, Button, FormGroup, Input, Spinner } from 'sveltestrap'
+import { Alert, FormGroup, Input, Spinner } from 'sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 
 export let params: { id: string }
