@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
-import { api, Target, UserSnapshot } from 'admin/lib/api'
+import { api, Role, Target, UserSnapshot } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
@@ -15,6 +15,8 @@ export let params: { id: string }
 let error: Error|undefined
 let selectedUser: UserSnapshot|undefined
 let target: Target
+let allRoles: Role[] = []
+let roleIsAllowed = {}
 
 async function load () {
     try {
@@ -22,6 +24,12 @@ async function load () {
     } catch (err) {
         error = err
     }
+}
+
+async function loadRoles () {
+    allRoles = await api.getRoles()
+    const allowedRoles = await api.getTargetRoles(target)
+    roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
 }
 
 async function update () {
@@ -42,7 +50,23 @@ async function update () {
 async function remove () {
     if (confirm(`Delete target ${target.name}?`)) {
         await api.deleteTarget(target)
-        replace('/targets')
+        replace('/config')
+    }
+}
+
+async function toggleRole (role: Role) {
+    if (roleIsAllowed[role.id]) {
+        await api.deleteTargetRole({
+            id: target.id,
+            roleId: role.id,
+        })
+        roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
+    } else {
+        await api.addTargetRole({
+            id: target.id,
+            roleId: role.id,
+        })
+        roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
     }
 }
 </script>
@@ -68,12 +92,6 @@ async function remove () {
                 {/if}
             </div>
         </div>
-        <!-- <a
-            class="btn btn-outline-secondary ms-auto"
-            href="/targets/create"
-            use:link>
-            Add a target
-        </a> -->
     </div>
 
     <h4>Access instructions</h4>
@@ -198,6 +216,24 @@ async function remove () {
 
         <TlsConfiguration bind:value={target.options.tls} />
     {/if}
+
+    <h4 class="mt-4">Allow access for roles</h4>
+    {#await loadRoles() then}
+        <div class="list-group list-group-flush mb-3">
+            {#each allRoles as role}
+                <div
+                    class="list-group-item list-group-item-action d-flex align-items-center"
+                    on:click={() => toggleRole(role)}
+                >
+                    <Input
+                        class="mb-0 me-2"
+                        type="switch"
+                        checked={roleIsAllowed[role.id]} />
+                    <div>{role.name}</div>
+                </div>
+            {/each}
+        </div>
+    {/await}
 {/await}
 
 {#if error}

@@ -13,6 +13,8 @@ use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
 use warpgate_db_migrations::migrate_database;
 
+use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
+
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
     if url.scheme() == "sqlite" {
@@ -79,7 +81,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<(), WarpgateErro
         .map_err(WarpgateError::from)?;
 
     let admin_role = match Role::Entity::find()
-        .filter(Role::Column::Name.eq("warpgate:admin"))
+        .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
         .all(db)
         .await?
         .iter()
@@ -89,7 +91,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<(), WarpgateErro
         None => {
             let values = Role::ActiveModel {
                 id: Set(Uuid::new_v4()),
-                name: Set("warpgate:admin".to_owned()),
+                name: Set(BUILTIN_ADMIN_ROLE_NAME.to_owned()),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
         }
@@ -106,7 +108,7 @@ pub async fn sanitize_db(db: &mut DatabaseConnection) -> Result<(), WarpgateErro
         None => {
             let values = Target::ActiveModel {
                 id: Set(Uuid::new_v4()),
-                name: Set("warpgate:admin".to_owned()),
+                name: Set(BUILTIN_ADMIN_TARGET_NAME.to_owned()),
                 kind: Set(TargetKind::WebAdmin),
                 options: Set(serde_json::to_value(TargetOptions::WebAdmin(
                     TargetWebAdminOptions {},

@@ -39,14 +39,20 @@ const routes = {
     '/tickets/create': wrap({
         asyncComponent: () => import('./CreateTicket.svelte'),
     }),
-    '/targets': wrap({
-        asyncComponent: () => import('./Targets.svelte'),
+    '/config': wrap({
+        asyncComponent: () => import('./Config.svelte'),
     }),
     '/targets/create': wrap({
         asyncComponent: () => import('./CreateTarget.svelte'),
     }),
     '/targets/:id': wrap({
         asyncComponent: () => import('./Target.svelte'),
+    }),
+    '/roles/create': wrap({
+        asyncComponent: () => import('./CreateRole.svelte'),
+    }),
+    '/roles/:id': wrap({
+        asyncComponent: () => import('./Role.svelte'),
     }),
     '/ssh': wrap({
         asyncComponent: () => import('./SSH.svelte'),
@@ -69,7 +75,7 @@ const routes = {
             </a>
             {#if $serverInfo?.username}
                 <a use:link use:active href="/">Sessions</a>
-                <a use:link use:active href="/targets">Targets</a>
+                <a use:link use:active href="/config">Config</a>
                 <a use:link use:active href="/tickets">Tickets</a>
                 <a use:link use:active href="/ssh">SSH</a>
                 <a use:link use:active href="/log">Log</a>

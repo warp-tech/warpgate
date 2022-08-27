@@ -15,6 +15,7 @@ use warpgate_common::{
     TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
 };
 use warpgate_core::Services;
+use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 
 use crate::config::load_config;
 
@@ -74,7 +75,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let theme = ColorfulTheme::default();
     let mut store = WarpgateConfigStore {
         roles: vec![Role {
-            name: "warpgate:admin".to_owned(),
+            id: Uuid::new_v4(),
+            name: BUILTIN_ADMIN_ROLE_NAME.to_owned(),
         }],
         http: HTTPConfig {
             enable: true,
@@ -160,7 +162,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         store.targets.push(Target {
             id: Uuid::new_v4(),
             name: "Web admin".to_owned(),
-            allow_roles: vec!["warpgate:admin".to_owned()],
+            allow_roles: vec![BUILTIN_ADMIN_ROLE_NAME.to_owned()],
             options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),
         });
     }
@@ -208,7 +210,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             hash: Secret::new(hash_password(&password)),
         }],
         require: None,
-        roles: vec!["warpgate:admin".into()],
+        roles: vec![BUILTIN_ADMIN_ROLE_NAME.into()],
     });
 
     // ---

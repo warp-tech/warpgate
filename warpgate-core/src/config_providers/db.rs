@@ -55,21 +55,13 @@ impl ConfigProvider for DatabaseConfigProvider {
     async fn list_targets(&mut self) -> Result<Vec<TargetConfig>, WarpgateError> {
         let db = self.db.lock().await;
 
-        let targets_and_roles = Target::Entity::find()
-            .order_by_desc(Target::Column::Name)
-            .find_with_related(Role::Entity)
+        let targets = Target::Entity::find()
+            .order_by_asc(Target::Column::Name)
             .all(&*db)
             .await?;
 
-        let targets: Result<Vec<TargetConfig>, _> = targets_and_roles
-            .into_iter()
-            .map(|(t, r)| {
-                t.try_into().map(|mut x: TargetConfig| {
-                    x.allow_roles = r.into_iter().map(|x| x.name.clone()).collect();
-                    x
-                })
-            })
-            .collect();
+        let targets: Result<Vec<TargetConfig>, _> =
+            targets.into_iter().map(|t| t.try_into()).collect();
 
         Ok(targets?)
     }
@@ -286,25 +278,23 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(false);
         };
 
-        let target_roles: HashSet<RoleConfig> = target_model
+        let target_roles: HashSet<String> = target_model
             .find_related(Role::Entity)
             .all(&*db)
             .await?
             .into_iter()
-            .map(Into::into)
+            .map(Into::<RoleConfig>::into)
+            .map(|x| x.name)
             .collect();
 
         let user_roles = user
             .roles
             .iter()
             .map(|x| config.store.roles.iter().find(|y| &y.name == x))
-            .filter_map(|x| x.to_owned())
+            .filter_map(|x| x.to_owned().map(|x| x.name.clone()))
             .collect::<HashSet<_>>();
 
-        let intersect = user_roles
-            .intersection(&target_roles.iter().collect())
-            .count()
-            > 0;
+        let intersect = user_roles.intersection(&target_roles).count() > 0;
 
         Ok(intersect)
     }

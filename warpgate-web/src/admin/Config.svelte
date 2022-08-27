@@ -4,18 +4,19 @@ import { link } from 'svelte-spa-router'
 import { Alert, Spinner } from 'sveltestrap'
 </script>
 
+<div class="page-summary-bar">
+    <h1>Targets</h1>
+    <a
+        class="btn btn-outline-secondary ms-auto"
+        href="/targets/create"
+        use:link>
+        Add a target
+    </a>
+</div>
+
 {#await api.getTargets()}
     <Spinner />
 {:then targets}
-    <div class="page-summary-bar">
-        <h1>Targets</h1>
-        <a
-            class="btn btn-outline-secondary ms-auto"
-            href="/targets/create"
-            use:link>
-            Add a target
-        </a>
-    </div>
     <div class="list-group list-group-flush">
         {#each targets as target}
             <!-- svelte-ignore a11y-missing-attribute -->
@@ -40,6 +41,36 @@ import { Alert, Spinner } from 'sveltestrap'
                         This web admin interface
                     {/if}
                 </small>
+            </a>
+        {/each}
+    </div>
+{:catch error}
+    <Alert color="danger">{error}</Alert>
+{/await}
+
+<div class="page-summary-bar mt-4">
+    <h1>Roles</h1>
+    <a
+        class="btn btn-outline-secondary ms-auto"
+        href="/roles/create"
+        use:link>
+        Add a role
+    </a>
+</div>
+
+{#await api.getRoles()}
+    <Spinner />
+{:then roles}
+    <div class="list-group list-group-flush">
+        {#each roles as role}
+            <!-- svelte-ignore a11y-missing-attribute -->
+            <a
+                class="list-group-item list-group-item-action"
+                href="/roles/{role.id}"
+                use:link>
+                <strong class="me-auto">
+                    {role.name}
+                </strong>
             </a>
         {/each}
     </div>

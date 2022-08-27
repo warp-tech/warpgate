@@ -77,7 +77,7 @@
     {/if}
 </div>
 
-<ItemList load={loadSessions}  pageSize={100}>
+<ItemList load={loadSessions} pageSize={100}>
     <div slot="header" class="d-flex align-items-center mb-1">
         <div class="ms-auto"></div>
         <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />

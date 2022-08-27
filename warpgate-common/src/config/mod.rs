@@ -5,9 +5,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
+use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use url::Url;
+use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
 
 use crate::auth::CredentialKind;
@@ -63,8 +65,10 @@ pub struct User {
     pub roles: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
+    #[serde(default)]
+    pub id: Uuid,
     pub name: String,
 }
 

@@ -1,17 +1,18 @@
 use poem_openapi::OpenApi;
 
-pub mod known_hosts_detail;
-pub mod known_hosts_list;
-pub mod logs;
+mod known_hosts_detail;
+mod known_hosts_list;
+mod logs;
 mod pagination;
 pub mod recordings_detail;
-pub mod sessions_detail;
+mod roles;
+mod sessions_detail;
 pub mod sessions_list;
-pub mod ssh_keys;
-pub mod targets;
-pub mod tickets_detail;
-pub mod tickets_list;
-pub mod users_list;
+mod ssh_keys;
+mod targets;
+mod tickets_detail;
+mod tickets_list;
+mod users_list;
 
 pub fn get() -> impl OpenApi {
     (
@@ -19,8 +20,11 @@ pub fn get() -> impl OpenApi {
         sessions_detail::Api,
         recordings_detail::Api,
         users_list::Api,
+        roles::ListApi,
+        roles::DetailApi,
         targets::ListApi,
         targets::DetailApi,
+        targets::RolesApi,
         tickets_list::Api,
         tickets_detail::Api,
         known_hosts_list::Api,
