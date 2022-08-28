@@ -39,8 +39,7 @@ impl Services {
                 Arc::new(Mutex::new(FileConfigProvider::new(&config).await)) as ConfigProviderArc
             }
             ConfigProviderKind::Database => {
-                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db, &config).await))
-                    as ConfigProviderArc
+                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).await)) as ConfigProviderArc
             }
         };
 

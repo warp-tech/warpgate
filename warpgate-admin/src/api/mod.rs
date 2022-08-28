@@ -12,19 +12,17 @@ mod ssh_keys;
 mod targets;
 mod tickets_detail;
 mod tickets_list;
-mod users_list;
+mod users;
 
 pub fn get() -> impl OpenApi {
     (
         sessions_list::Api,
         sessions_detail::Api,
         recordings_detail::Api,
-        users_list::Api,
         roles::ListApi,
         roles::DetailApi,
-        targets::ListApi,
-        targets::DetailApi,
-        targets::RolesApi,
+        (targets::ListApi, targets::DetailApi, targets::RolesApi),
+        (users::ListApi, users::DetailApi, users::RolesApi),
         tickets_list::Api,
         tickets_detail::Api,
         known_hosts_list::Api,

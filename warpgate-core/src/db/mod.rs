@@ -1,17 +1,20 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::*;
+
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
     QueryFilter, TransactionTrait,
 };
+use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{
+    LogEntry, Role, Target, TargetRoleAssignment, User, UserRoleAssignment,
+};
 use warpgate_db_migrations::migrate_database;
 
 use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
@@ -158,7 +161,6 @@ async fn migrate_config_into_db(
     info!("Migrating config file into the database");
 
     let mut role_lookup = HashMap::new();
-    let mut target_lookup = HashMap::new();
 
     for role_config in config.store.roles.iter() {
         let role = match Role::Entity::find()
@@ -206,7 +208,6 @@ async fn migrate_config_into_db(
                 values.insert(&*db).await.map_err(WarpgateError::from)?
             }
         };
-        target_lookup.insert(target_config.name.clone(), target.id);
 
         for role_name in target_config.allow_roles.iter() {
             if let Some(role_id) = role_lookup.get(role_name) {
@@ -228,6 +229,50 @@ async fn migrate_config_into_db(
         }
     }
     config.store.targets = vec![];
+
+    for user_config in config.store.users.iter() {
+        let user = match User::Entity::find()
+            .filter(User::Column::Username.eq(user_config.username.clone()))
+            .all(db)
+            .await?
+            .first()
+        {
+            Some(x) => x.to_owned(),
+            None => {
+                let values = User::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    username: Set(user_config.username.clone()),
+                    credentials: Set(serde_json::to_value(user_config.credentials.clone())
+                        .map_err(WarpgateError::from)?),
+                    credential_policy: Set(serde_json::to_value(user_config.require.clone())
+                        .map_err(WarpgateError::from)?),
+                };
+
+                info!("Migrating user {}", user_config.username);
+                values.insert(&*db).await.map_err(WarpgateError::from)?
+            }
+        };
+
+        for role_name in user_config.roles.iter() {
+            if let Some(role_id) = role_lookup.get(role_name) {
+                if UserRoleAssignment::Entity::find()
+                    .filter(UserRoleAssignment::Column::UserId.eq(user.id))
+                    .filter(UserRoleAssignment::Column::RoleId.eq(*role_id))
+                    .all(db)
+                    .await?
+                    .is_empty()
+                {
+                    let values = UserRoleAssignment::ActiveModel {
+                        user_id: Set(user.id),
+                        role_id: Set(*role_id),
+                        ..Default::default()
+                    };
+                    values.insert(&*db).await.map_err(WarpgateError::from)?;
+                }
+            }
+        }
+    }
+    config.store.users = vec![];
 
     Ok(())
 }

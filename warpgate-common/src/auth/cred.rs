@@ -1,9 +1,10 @@
 use bytes::Bytes;
+use poem_openapi::Enum;
 use serde::{Deserialize, Serialize};
 
 use crate::Secret;
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash, Enum)]
 pub enum CredentialKind {
     #[serde(rename = "password")]
     Password,

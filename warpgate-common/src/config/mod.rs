@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
-use poem_openapi::Object;
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use url::Url;
@@ -16,37 +16,51 @@ use crate::auth::CredentialKind;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
 #[serde(tag = "type")]
+#[oai(discriminator_name = "kind", one_of)]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
-    Password { hash: Secret<String> },
+    Password(UserPasswordCredential),
     #[serde(rename = "publickey")]
-    PublicKey { key: Secret<String> },
+    PublicKey(UserPublicKeyCredential),
     #[serde(rename = "otp")]
-    Totp {
-        #[serde(with = "crate::helpers::serde_base64_secret")]
-        key: OtpSecretKey,
-    },
+    Totp(UserTotpCredential),
     #[serde(rename = "sso")]
-    Sso {
-        provider: Option<String>,
-        email: String,
-    },
+    Sso(UserSsoCredential),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserPasswordCredential {
+    pub hash: Secret<String>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserPublicKeyCredential {
+    pub key: Secret<String>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserTotpCredential {
+    #[serde(with = "crate::helpers::serde_base64_secret")]
+    pub key: OtpSecretKey,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserSsoCredential {
+    pub provider: Option<String>,
+    pub email: String,
 }
 
 impl UserAuthCredential {
     pub fn kind(&self) -> CredentialKind {
         match self {
-            Self::Password { .. } => CredentialKind::Password,
-            Self::PublicKey { .. } => CredentialKind::PublicKey,
-            Self::Totp { .. } => CredentialKind::Otp,
-            Self::Sso { .. } => CredentialKind::Sso,
+            Self::Password(_)=> CredentialKind::Password,
+            Self::PublicKey(_)=> CredentialKind::PublicKey,
+            Self::Totp(_)=> CredentialKind::Otp,
+            Self::Sso(_)=> CredentialKind::Sso,
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Vec<CredentialKind>>,
@@ -56,8 +70,10 @@ pub struct UserRequireCredentialsPolicy {
     pub mysql: Option<Vec<CredentialKind>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct User {
+    #[serde(default)]
+    pub id: Uuid,
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
     #[serde(skip_serializing_if = "Option::is_none")]

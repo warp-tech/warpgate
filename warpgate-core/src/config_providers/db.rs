@@ -13,43 +13,37 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Role as RoleConfig, Target as TargetConfig, User, UserAuthCredential, WarpgateConfig,
+    Role as RoleConfig, Target as TargetConfig, User as UserConfig, UserAuthCredential,
+    UserPasswordCredential, UserPublicKeyCredential, UserSsoCredential, UserTotpCredential,
     WarpgateError,
 };
-use warpgate_db_entities::{Role, Target};
+use warpgate_db_entities::{Role, Target, User};
 
 use super::ConfigProvider;
-use crate::UserSnapshot;
 
 pub struct DatabaseConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
-    config: Arc<Mutex<WarpgateConfig>>,
 }
 
 impl DatabaseConfigProvider {
-    pub async fn new(
-        db: &Arc<Mutex<DatabaseConnection>>,
-        config: &Arc<Mutex<WarpgateConfig>>,
-    ) -> Self {
-        Self {
-            db: db.clone(),
-            config: config.clone(),
-        }
+    pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+        Self { db: db.clone() }
     }
 }
 
 #[async_trait]
 impl ConfigProvider for DatabaseConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>, WarpgateError> {
-        Ok(self
-            .config
-            .lock()
-            .await
-            .store
-            .users
-            .iter()
-            .map(UserSnapshot::new)
-            .collect::<Vec<_>>())
+    async fn list_users(&mut self) -> Result<Vec<UserConfig>, WarpgateError> {
+        let db = self.db.lock().await;
+
+        let users = User::Entity::find()
+            .order_by_asc(User::Column::Username)
+            .all(&*db)
+            .await?;
+
+        let users: Result<Vec<UserConfig>, _> = users.into_iter().map(|t| t.try_into()).collect();
+
+        Ok(users?)
     }
 
     async fn list_targets(&mut self) -> Result<Vec<TargetConfig>, WarpgateError> {
@@ -70,20 +64,19 @@ impl ConfigProvider for DatabaseConfigProvider {
         &mut self,
         username: &str,
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
-        let user = {
-            self.config
-                .lock()
-                .await
-                .store
-                .users
-                .iter()
-                .find(|x| x.username == username)
-                .map(User::to_owned)
-        };
-        let Some(user) = user else {
+        let db = self.db.lock().await;
+
+        let user_model = User::Entity::find()
+            .filter(User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
             error!("Selected user not found: {}", username);
             return Ok(None);
         };
+
+        let user: UserConfig = user_model.try_into()?;
 
         let supported_credential_types: HashSet<CredentialKind> =
             user.credentials.iter().map(|x| x.kind()).collect();
@@ -142,15 +135,12 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         Ok(self
-            .config
-            .lock()
-            .await
-            .store
-            .users
+            .list_users()
+            .await?
             .iter()
             .find(|x| {
                 for cred in x.credentials.iter() {
-                    if let UserAuthCredential::Sso { provider, email } = cred {
+                    if let UserAuthCredential::Sso(UserSsoCredential { provider, email }) = cred {
                         if provider.as_ref().unwrap_or(client_provider) == client_provider
                             && email == client_email
                         {
@@ -168,20 +158,19 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         client_credential: &AuthCredential,
     ) -> Result<bool, WarpgateError> {
-        let user = {
-            self.config
-                .lock()
-                .await
-                .store
-                .users
-                .iter()
-                .find(|x| x.username == username)
-                .map(User::to_owned)
-        };
-        let Some(user) = user else {
-            error!("Selected user not found: {}", username);
-            return Ok(false);
-        };
+        let db = self.db.lock().await;
+
+        let user_model = User::Entity::find()
+            .filter(User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
+                error!("Selected user not found: {}", username);
+                return Ok(false);
+            };
+
+        let user: UserConfig = user_model.try_into()?;
 
         match client_credential {
             AuthCredential::PublicKey {
@@ -194,17 +183,17 @@ impl ConfigProvider for DatabaseConfigProvider {
                 debug!(username = &user.username[..], "Client key: {}", client_key);
 
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::PublicKey { key: ref user_key } => {
-                        &client_key == user_key.expose_secret()
-                    }
+                    UserAuthCredential::PublicKey(UserPublicKeyCredential {
+                        key: ref user_key,
+                    }) => &client_key == user_key.expose_secret(),
                     _ => false,
                 }));
             }
             AuthCredential::Password(client_password) => {
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Password {
+                    UserAuthCredential::Password(UserPasswordCredential {
                         hash: ref user_password_hash,
-                    } => verify_password_hash(
+                    }) => verify_password_hash(
                         client_password.expose_secret(),
                         user_password_hash.expose_secret(),
                     )
@@ -220,9 +209,9 @@ impl ConfigProvider for DatabaseConfigProvider {
             }
             AuthCredential::Otp(client_otp) => {
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Totp {
+                    UserAuthCredential::Totp(UserTotpCredential {
                         key: ref user_otp_key,
-                    } => verify_totp(client_otp.expose_secret(), user_otp_key),
+                    }) => verify_totp(client_otp.expose_secret(), user_otp_key),
                     _ => false,
                 }))
             }
@@ -231,10 +220,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                 email: client_email,
             } => {
                 for credential in user.credentials.iter() {
-                    if let UserAuthCredential::Sso {
+                    if let UserAuthCredential::Sso(UserSsoCredential {
                         ref provider,
                         ref email,
-                    } = credential
+                    }) = credential
                     {
                         if provider.as_ref().unwrap_or(client_provider) == client_provider {
                             return Ok(email == client_email);
@@ -252,23 +241,19 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let config = self.config.lock().await;
-        let user = config
-            .store
-            .users
-            .iter()
-            .find(|x| x.username == username)
-            .map(User::to_owned);
-
         let db = self.db.lock().await;
 
         let target_model: Option<Target::Model> = Target::Entity::find()
-            .order_by_desc(Target::Column::Name)
             .filter(Target::Column::Name.eq(target_name))
             .one(&*db)
             .await?;
 
-        let Some(user) = user else {
+        let user_model = User::Entity::find()
+            .filter(User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
             error!("Selected user not found: {}", username);
             return Ok(false);
         };
@@ -287,8 +272,8 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_roles: HashSet<String> = Role::Entity::find()
-            .filter(Role::Column::Name.is_in(user.roles))
+        let user_roles: HashSet<String> = user_model
+            .find_related(Role::Entity)
             .all(&*db)
             .await?
             .into_iter()

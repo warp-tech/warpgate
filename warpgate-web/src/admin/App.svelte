@@ -54,6 +54,12 @@ const routes = {
     '/roles/:id': wrap({
         asyncComponent: () => import('./Role.svelte'),
     }),
+    '/users/create': wrap({
+        asyncComponent: () => import('./CreateUser.svelte'),
+    }),
+    // '/users/:id': wrap({
+    //     asyncComponent: () => import('./User.svelte'),
+    // }),
     '/ssh': wrap({
         asyncComponent: () => import('./SSH.svelte'),
     }),

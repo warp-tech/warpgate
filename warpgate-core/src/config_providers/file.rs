@@ -11,10 +11,12 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
-use warpgate_common::{Target, User, UserAuthCredential, WarpgateConfig, WarpgateError};
+use warpgate_common::{
+    Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
+    UserSsoCredential, UserTotpCredential, WarpgateConfig, WarpgateError,
+};
 
 use super::ConfigProvider;
-use crate::UserSnapshot;
 
 pub struct FileConfigProvider {
     config: Arc<Mutex<WarpgateConfig>>,
@@ -30,7 +32,7 @@ impl FileConfigProvider {
 
 #[async_trait]
 impl ConfigProvider for FileConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>, WarpgateError> {
+    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
         Ok(self
             .config
             .lock()
@@ -38,7 +40,7 @@ impl ConfigProvider for FileConfigProvider {
             .store
             .users
             .iter()
-            .map(UserSnapshot::new)
+            .map(Clone::clone)
             .collect::<Vec<_>>())
     }
 
@@ -138,7 +140,7 @@ impl ConfigProvider for FileConfigProvider {
             .iter()
             .find(|x| {
                 for cred in x.credentials.iter() {
-                    if let UserAuthCredential::Sso { provider, email } = cred {
+                    if let UserAuthCredential::Sso(UserSsoCredential { provider, email }) = cred {
                         if provider.as_ref().unwrap_or(client_provider) == client_provider
                             && email == client_email
                         {
@@ -182,17 +184,17 @@ impl ConfigProvider for FileConfigProvider {
                 debug!(username = &user.username[..], "Client key: {}", client_key);
 
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::PublicKey { key: ref user_key } => {
-                        &client_key == user_key.expose_secret()
-                    }
+                    UserAuthCredential::PublicKey(UserPublicKeyCredential {
+                        key: ref user_key,
+                    }) => &client_key == user_key.expose_secret(),
                     _ => false,
                 }));
             }
             AuthCredential::Password(client_password) => {
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Password {
+                    UserAuthCredential::Password(UserPasswordCredential {
                         hash: ref user_password_hash,
-                    } => verify_password_hash(
+                    }) => verify_password_hash(
                         client_password.expose_secret(),
                         user_password_hash.expose_secret(),
                     )
@@ -208,9 +210,9 @@ impl ConfigProvider for FileConfigProvider {
             }
             AuthCredential::Otp(client_otp) => {
                 return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Totp {
+                    UserAuthCredential::Totp(UserTotpCredential {
                         key: ref user_otp_key,
-                    } => verify_totp(client_otp.expose_secret(), user_otp_key),
+                    }) => verify_totp(client_otp.expose_secret(), user_otp_key),
                     _ => false,
                 }))
             }
@@ -219,10 +221,10 @@ impl ConfigProvider for FileConfigProvider {
                 email: client_email,
             } => {
                 for credential in user.credentials.iter() {
-                    if let UserAuthCredential::Sso {
+                    if let UserAuthCredential::Sso(UserSsoCredential {
                         ref provider,
                         ref email,
-                    } = credential
+                    }) = credential
                     {
                         if provider.as_ref().unwrap_or(client_provider) == client_provider {
                             return Ok(email == client_email);

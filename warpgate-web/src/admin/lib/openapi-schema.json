@@ -197,26 +197,6 @@
         "operationId": "get_recording"
       }
     },
-    "/users": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserSnapshot"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_users"
-      }
-    },
     "/roles": {
       "get": {
         "responses": {
@@ -635,6 +615,262 @@
         "operationId": "delete_target_role"
       }
     },
+    "/users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_users"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_user"
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_user"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "update_user"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_user"
+      }
+    },
+    "/users/{id}/roles": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_user_roles"
+      }
+    },
+    "/users/{id}/roles/{role_id}": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "operationId": "add_user_role"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_user_role"
+      }
+    },
     "/tickets": {
       "get": {
         "responses": {
@@ -827,6 +1063,16 @@
             "type": "string"
           }
         }
+      },
+      "CredentialKind": {
+        "type": "string",
+        "enum": [
+          "Password",
+          "PublicKey",
+          "Otp",
+          "Sso",
+          "WebUserApproval"
+        ]
       },
       "GetLogsRequest": {
         "type": "object",
@@ -1420,14 +1666,233 @@
           "Required"
         ]
       },
-      "UserSnapshot": {
+      "User": {
         "type": "object",
         "required": [
-          "username"
+          "id",
+          "username",
+          "credentials",
+          "roles"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserAuthCredential"
+            }
+          },
+          "require": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UserAuthCredential": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserPasswordCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserTotpCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserSsoCredential"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/UserAuthCredential_UserPasswordCredential",
+            "PublicKey": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential",
+            "Totp": "#/components/schemas/UserAuthCredential_UserTotpCredential",
+            "Sso": "#/components/schemas/UserAuthCredential_UserSsoCredential"
+          }
+        }
+      },
+      "UserAuthCredential_UserPasswordCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserPasswordCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserPublicKeyCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "PublicKey"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserPublicKeyCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserSsoCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Sso"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserSsoCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserTotpCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "example": "Totp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserTotpCredential"
+          }
+        ]
+      },
+      "UserDataRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "credentials"
         ],
         "properties": {
           "username": {
             "type": "string"
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserAuthCredential"
+            }
+          },
+          "credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          }
+        }
+      },
+      "UserPasswordCredential": {
+        "type": "object",
+        "required": [
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          }
+        }
+      },
+      "UserPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRequireCredentialsPolicy": {
+        "type": "object",
+        "properties": {
+          "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "ssh": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mysql": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      },
+      "UserSsoCredential": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "UserTotpCredential": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
           }
         }
       }

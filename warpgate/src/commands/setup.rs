@@ -11,8 +11,8 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Target, TargetOptions,
-    TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
+    HTTPConfig, ListenEndpoint, MySQLConfig, SSHConfig, Secret, User, UserAuthCredential,
+    WarpgateConfigStore, UserPasswordCredential,
 };
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_core::Services;
@@ -74,10 +74,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let theme = ColorfulTheme::default();
     let mut store = WarpgateConfigStore {
-        roles: vec![Role {
-            id: Uuid::new_v4(),
-            name: BUILTIN_ADMIN_ROLE_NAME.to_owned(),
-        }],
         http: HTTPConfig {
             enable: true,
             ..Default::default()
@@ -158,15 +154,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     }
 
-    if store.http.enable {
-        store.targets.push(Target {
-            id: Uuid::new_v4(),
-            name: "Web admin".to_owned(),
-            allow_roles: vec![BUILTIN_ADMIN_ROLE_NAME.to_owned()],
-            options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),
-        });
-    }
-
     store.http.certificate = PathBuf::from(&data_path)
         .join("tls.certificate.pem")
         .to_string_lossy()
@@ -205,10 +192,11 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         .interact()?;
 
     store.users.push(User {
+        id: Uuid::new_v4(),
         username: "admin".into(),
-        credentials: vec![UserAuthCredential::Password {
+        credentials: vec![UserAuthCredential::Password(UserPasswordCredential {
             hash: Secret::new(hash_password(&password)),
-        }],
+        })],
         require: None,
         roles: vec![BUILTIN_ADMIN_ROLE_NAME.into()],
     });

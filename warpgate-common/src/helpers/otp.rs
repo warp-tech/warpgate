@@ -1,17 +1,16 @@
 use std::time::SystemTime;
 
-use bytes::Bytes;
 use rand::Rng;
 use totp_rs::{Algorithm, TOTP};
 
 use super::rng::get_crypto_rng;
 use crate::types::Secret;
 
-pub type OtpExposedSecretKey = Bytes;
+pub type OtpExposedSecretKey = Vec<u8>;
 pub type OtpSecretKey = Secret<OtpExposedSecretKey>;
 
 pub fn generate_key() -> OtpSecretKey {
-    Secret::new(Bytes::from_iter(get_crypto_rng().gen::<[u8; 32]>()))
+    Secret::new(get_crypto_rng().gen::<[u8; 32]>().into())
 }
 
 pub fn generate_setup_url(key: &OtpSecretKey, label: &str) -> Secret<String> {

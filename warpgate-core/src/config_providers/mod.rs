@@ -11,14 +11,12 @@ use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, CredentialPolicy};
-use warpgate_common::{Secret, Target, WarpgateError};
+use warpgate_common::{Secret, Target, WarpgateError, User};
 use warpgate_db_entities::Ticket;
-
-use crate::UserSnapshot;
 
 #[async_trait]
 pub trait ConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserSnapshot>, WarpgateError>;
+    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError>;
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
 

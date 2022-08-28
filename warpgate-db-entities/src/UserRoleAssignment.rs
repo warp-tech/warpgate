@@ -4,27 +4,27 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
-#[sea_orm(table_name = "target_roles")]
-#[oai(rename = "TargetRoleAssignment")]
+#[sea_orm(table_name = "user_roles")]
+#[oai(rename = "UserRoleAssignment")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: u32,
-    pub target_id: Uuid,
+    pub user_id: Uuid,
     pub role_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Target,
+    User,
     Role,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Target => Entity::belongs_to(super::Target::Entity)
-                .from(Column::TargetId)
-                .to(super::Target::Column::Id)
+            Self::User => Entity::belongs_to(super::User::Entity)
+                .from(Column::UserId)
+                .to(super::User::Column::Id)
                 .into(),
             Self::Role => Entity::belongs_to(super::Role::Entity)
                 .from(Column::RoleId)

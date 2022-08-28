@@ -9,6 +9,7 @@ mod m00004_create_known_host;
 mod m00005_create_log_entry;
 mod m00006_add_session_protocol;
 mod m00007_targets_and_roles;
+mod m00008_users;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00005_create_log_entry::Migration),
             Box::new(m00006_add_session_protocol::Migration),
             Box::new(m00007_targets_and_roles::Migration),
+            Box::new(m00008_users::Migration),
         ]
     }
 }

@@ -94,6 +94,7 @@ impl<T: poem_openapi::types::Type> poem_openapi::types::Type for Secret<T> {
     }
 }
 
+
 impl<T: ParseFromJSON> ParseFromJSON for Secret<T> {
     fn parse_from_json(value: Option<serde_json::Value>) -> poem_openapi::types::ParseResult<Self> {
         T::parse_from_json(value)
