@@ -287,12 +287,14 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_roles = user
-            .roles
-            .iter()
-            .map(|x| config.store.roles.iter().find(|y| &y.name == x))
-            .filter_map(|x| x.to_owned().map(|x| x.name.clone()))
-            .collect::<HashSet<_>>();
+        let user_roles: HashSet<String> = Role::Entity::find()
+            .filter(Role::Column::Name.is_in(user.roles))
+            .all(&*db)
+            .await?
+            .into_iter()
+            .map(Into::<RoleConfig>::into)
+            .map(|x| x.name)
+            .collect();
 
         let intersect = user_roles.intersection(&target_roles).count() > 0;
 

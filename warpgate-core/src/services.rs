@@ -6,7 +6,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use warpgate_common::{ConfigProviderKind, WarpgateConfig};
 
-use crate::db::{connect_to_db, sanitize_db};
+use crate::db::{connect_to_db, populate_db};
 use crate::recordings::SessionRecordings;
 use crate::{AuthStateStore, ConfigProvider, DatabaseConfigProvider, FileConfigProvider, State};
 
@@ -23,9 +23,9 @@ pub struct Services {
 }
 
 impl Services {
-    pub async fn new(config: WarpgateConfig) -> Result<Self> {
+    pub async fn new(mut config: WarpgateConfig) -> Result<Self> {
         let mut db = connect_to_db(&config).await?;
-        sanitize_db(&mut db).await?;
+        populate_db(&mut db, &mut config).await?;
         let db = Arc::new(Mutex::new(db));
 
         let recordings = SessionRecordings::new(db.clone(), &config)?;

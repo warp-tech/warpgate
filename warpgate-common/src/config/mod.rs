@@ -208,8 +208,13 @@ pub enum ConfigProviderKind {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateConfigStore {
+    #[serde(default)]
     pub targets: Vec<Target>,
+
+    #[serde(default)]
     pub users: Vec<User>,
+
+    #[serde(default)]
     pub roles: Vec<Role>,
 
     #[serde(default)]

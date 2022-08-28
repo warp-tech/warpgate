@@ -24,6 +24,7 @@ use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState,
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
+    WarpgateError,
 };
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
@@ -1246,7 +1247,7 @@ impl ServerSession {
                             );
                             return Ok(AuthResult::Rejected);
                         }
-                        self._auth_accept(&username, target_name).await;
+                        self._auth_accept(&username, target_name).await?;
                         Ok(AuthResult::Accepted { username })
                     }
                     x => Ok(x),
@@ -1257,7 +1258,7 @@ impl ServerSession {
                     Some(ticket) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(&ticket.username, &ticket.target).await;
+                        self._auth_accept(&ticket.username, &ticket.target).await?;
                         Ok(AuthResult::Accepted {
                             username: ticket.username.clone(),
                         })
@@ -1268,7 +1269,11 @@ impl ServerSession {
         }
     }
 
-    async fn _auth_accept(&mut self, username: &str, target_name: &str) {
+    async fn _auth_accept(
+        &mut self,
+        username: &str,
+        target_name: &str,
+    ) -> Result<(), WarpgateError> {
         info!(%username, "Authenticated");
 
         let _ = self
@@ -1281,11 +1286,11 @@ impl ServerSession {
 
         let target = {
             self.services
-                .config
+                .config_provider
                 .lock()
                 .await
-                .store
-                .targets
+                .list_targets()
+                .await?
                 .iter()
                 .filter_map(|t| match t.options {
                     TargetOptions::Ssh(ref options) => Some((t, options)),
@@ -1298,11 +1303,12 @@ impl ServerSession {
         let Some((target, ssh_options)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
             warn!("Selected target not found");
-            return;
+            return Ok(());
         };
 
         let _ = self.server_handle.lock().await.set_target(&target).await;
         self.target = TargetSelection::Found(target, ssh_options);
+        Ok(())
     }
 
     pub async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {

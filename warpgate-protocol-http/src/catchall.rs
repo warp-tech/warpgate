@@ -69,11 +69,11 @@ async fn get_target_for_request(
 
     let host_based_target_name = if let Some(host) = req.original_uri().host() {
         services
-            .config
+            .config_provider
             .lock()
             .await
-            .store
-            .targets
+            .list_targets()
+            .await?
             .iter()
             .filter_map(|t| match t.options {
                 TargetOptions::Http(ref options) => Some((t, options)),
@@ -106,11 +106,11 @@ async fn get_target_for_request(
     if let Some(target_name) = selected_target_name {
         let target = {
             services
-                .config
+                .config_provider
                 .lock()
                 .await
-                .store
-                .targets
+                .list_targets()
+                .await?
                 .iter()
                 .filter(|t| t.name == target_name)
                 .filter_map(|t| match t.options {

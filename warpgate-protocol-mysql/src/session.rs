@@ -269,11 +269,11 @@ impl MySqlSession {
 
         let target = {
             self.services
-                .config
+                .config_provider
                 .lock()
                 .await
-                .store
-                .targets
+                .list_targets()
+                .await?
                 .iter()
                 .filter_map(|t| match t.options {
                     TargetOptions::MySql(ref options) => Some((t, options)),
