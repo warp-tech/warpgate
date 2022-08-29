@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, CredentialPolicy};
-use warpgate_common::{Secret, Target, WarpgateError, User};
+use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities::Ticket;
 
 #[async_trait]

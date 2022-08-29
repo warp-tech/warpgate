@@ -12,7 +12,7 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
     HTTPConfig, ListenEndpoint, MySQLConfig, SSHConfig, Secret, User, UserAuthCredential,
-    WarpgateConfigStore, UserPasswordCredential,
+    UserPasswordCredential, WarpgateConfigStore,
 };
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_core::Services;

@@ -16,7 +16,7 @@
     import { Subject, switchMap, map, Observable, distinctUntilChanged, share } from 'rxjs'
     import Pagination from './Pagination.svelte'
     import { observe } from 'svelte-observable'
-    import { Spinner } from 'sveltestrap'
+    import DelayedSpinner from './DelayedSpinner.svelte'
 
     // eslint-disable-next-line @typescript-eslint/no-type-alias
     type T = $$Generic
@@ -50,7 +50,7 @@
 </script>
 
 {#await $items}
-    <Spinner />
+    <DelayedSpinner />
 {:then items}
     {#if items}
         <slot name="header" items={items} />
@@ -61,7 +61,7 @@
         </div>
         <slot name="footer" items={items} />
     {:else}
-        <Spinner />
+        <DelayedSpinner />
     {/if}
 {/await}
 

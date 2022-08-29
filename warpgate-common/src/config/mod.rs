@@ -52,10 +52,10 @@ pub struct UserSsoCredential {
 impl UserAuthCredential {
     pub fn kind(&self) -> CredentialKind {
         match self {
-            Self::Password(_)=> CredentialKind::Password,
-            Self::PublicKey(_)=> CredentialKind::PublicKey,
-            Self::Totp(_)=> CredentialKind::Otp,
-            Self::Sso(_)=> CredentialKind::Sso,
+            Self::Password(_) => CredentialKind::Password,
+            Self::PublicKey(_) => CredentialKind::PublicKey,
+            Self::Totp(_) => CredentialKind::Otp,
+            Self::Sso(_) => CredentialKind::Sso,
         }
     }
 }

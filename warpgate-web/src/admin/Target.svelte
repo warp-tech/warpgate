@@ -1,19 +1,20 @@
 <script lang="ts">
 import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
-import { api, Role, Target, UserSnapshot } from 'admin/lib/api'
+import { api, Role, Target, User } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { TargetKind } from 'gateway/lib/api'
 import { serverInfo } from 'gateway/lib/store'
 import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Input, Spinner } from 'sveltestrap'
+import { Alert, FormGroup, Input } from 'sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 
 export let params: { id: string }
 
 let error: Error|undefined
-let selectedUser: UserSnapshot|undefined
+let selectedUser: User|undefined
 let target: Target
 let allRoles: Role[] = []
 let roleIsAllowed = {}
@@ -72,7 +73,7 @@ async function toggleRole (role: Role) {
 </script>
 
 {#await load()}
-    <Spinner />
+    <DelayedSpinner />
 {:then}
     <div class="page-summary-bar">
         <div>
@@ -98,7 +99,7 @@ async function toggleRole (role: Role) {
 
     {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql'}
         {#await api.getUsers()}
-            <Spinner/>
+            <DelayedSpinner/>
         {:then users}
             <FormGroup floating label="Select a user">
                 <select bind:value={selectedUser} class="form-control">

@@ -1,7 +1,8 @@
 <script lang="ts">
 import { api } from 'admin/lib/api'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { link } from 'svelte-spa-router'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 </script>
 
 <div class="row">
@@ -17,7 +18,7 @@ import { Alert, Spinner } from 'sveltestrap'
         </div>
 
         {#await api.getTargets()}
-            <Spinner />
+            <DelayedSpinner />
         {:then targets}
             <div class="list-group list-group-flush">
                 {#each targets as target}
@@ -63,7 +64,7 @@ import { Alert, Spinner } from 'sveltestrap'
         </div>
 
         {#await api.getUsers()}
-            <Spinner />
+            <DelayedSpinner />
         {:then users}
             <div class="list-group list-group-flush">
                 {#each users as user}
@@ -93,7 +94,7 @@ import { Alert, Spinner } from 'sveltestrap'
         </div>
 
         {#await api.getRoles()}
-            <Spinner />
+            <DelayedSpinner />
         {:then roles}
             <div class="list-group list-group-flush">
                 {#each roles as role}

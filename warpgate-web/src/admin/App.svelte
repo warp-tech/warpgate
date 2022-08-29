@@ -7,9 +7,9 @@ import Fa from 'svelte-fa'
 import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
-import { Spinner } from 'sveltestrap'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Logo from 'common/Logo.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
 async function init () {
     await reloadServerInfo()
@@ -57,9 +57,9 @@ const routes = {
     '/users/create': wrap({
         asyncComponent: () => import('./CreateUser.svelte'),
     }),
-    // '/users/:id': wrap({
-    //     asyncComponent: () => import('./User.svelte'),
-    // }),
+    '/users/:id': wrap({
+        asyncComponent: () => import('./User.svelte'),
+    }),
     '/ssh': wrap({
         asyncComponent: () => import('./SSH.svelte'),
     }),
@@ -70,7 +70,7 @@ const routes = {
 </script>
 
 {#await init()}
-    <Spinner />
+    <DelayedSpinner />
 {:then}
     <div class="app container">
         <header>

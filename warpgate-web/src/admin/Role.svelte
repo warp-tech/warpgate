@@ -1,8 +1,9 @@
 <script lang="ts">
 import { api, Role } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Spinner } from 'sveltestrap'
+import { Alert, FormGroup } from 'sveltestrap'
 
 export let params: { id: string }
 
@@ -37,7 +38,7 @@ async function remove () {
 </script>
 
 {#await load()}
-    <Spinner />
+    <DelayedSpinner />
 {:then}
     <div class="page-summary-bar">
         <div>

@@ -102,8 +102,6 @@ enum GetUserResponse {
 enum UpdateUserResponse {
     #[oai(status = 200)]
     Ok(Json<UserConfig>),
-    #[oai(status = 400)]
-    BadRequest,
     #[oai(status = 404)]
     NotFound,
 }
@@ -298,14 +296,14 @@ impl RolesApi {
     ) -> poem::Result<DeleteUserRoleResponse> {
         let db = db.lock().await;
 
-        let Some(user) = User::Entity::find_by_id(id.0)
+        let Some(_user) = User::Entity::find_by_id(id.0)
             .one(&*db)
             .await
             .map_err(poem::error::InternalServerError)? else {
                 return Ok(DeleteUserRoleResponse::NotFound);
             };
 
-        let Some(role) = Role::Entity::find_by_id(role_id.0)
+        let Some(_role) = Role::Entity::find_by_id(role_id.0)
             .one(&*db)
             .await
             .map_err(poem::error::InternalServerError)? else {

@@ -1,10 +1,11 @@
 <script lang="ts">
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { api, TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
-import { Modal, ModalBody, ModalHeader, Spinner } from 'sveltestrap'
+import { Modal, ModalBody, ModalHeader } from 'sveltestrap'
 import { serverInfo } from './lib/store'
 
 const dispatch = createEventDispatcher()
@@ -92,7 +93,7 @@ init()
     {/each}
 </div>
 {:else}
-    <Spinner />
+    <DelayedSpinner />
 {/if}
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
