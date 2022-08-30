@@ -1,13 +1,14 @@
 <script lang="ts">
-import { api } from 'gateway/lib/api'
 import { onMount } from 'svelte'
 import { Alert, Button, FormGroup, Input, Modal, ModalBody, ModalFooter, ModalHeader } from 'sveltestrap'
 import QRCode from 'qrcode'
 import { KeyEncodings, TOTP, TOTPOptions } from '@otplib/core'
-import { createDigest, createRandomBytes } from '@otplib/plugin-crypto-js'
-import { keyDecoder, keyEncoder } from '@otplib/plugin-base32-enc-dec'
+import { createDigest } from '@otplib/plugin-crypto-js'
+import { faRefresh } from '@fortawesome/free-solid-svg-icons'
+import Fa from 'svelte-fa'
 import base32Encode from 'base32-encode'
 
+import { api } from 'gateway/lib/api'
 import type { UserAuthCredential } from './lib/api'
 
 export let credential: UserAuthCredential
@@ -34,6 +35,12 @@ function _save () {
     save()
 }
 
+function generateNewTotpKey () {
+    if (credential.kind === 'Totp') {
+        credential.key = Array.from({ length: 32 }, () => Math.floor(Math.random() * 255))
+    }
+}
+
 function _cancel () {
     visible = false
     cancel()
@@ -47,16 +54,11 @@ onMount(() => {
 
 $: {
     if (credential.kind === 'Totp') {
-        let key = ''
         if (!credential.key.length) {
-            key = createRandomBytes(32, KeyEncodings.ASCII)
-            credential.key = Array.from(key).map(x => x.charCodeAt(0))
-        } else {
-            key = credential.key.map(x => String.fromCharCode(x)).join('')
+            generateNewTotpKey()
         }
 
         const uri = totp.keyuri(username, 'Warpgate', base32Encode(new Uint8Array(credential.key), 'RFC4648'))
-        console.log(uri)
 
         QRCode.toDataURL(uri, (err, imageUrl) => {
             if (err) {
@@ -133,7 +135,17 @@ $: {
         {/if}
 
         {#if credential.kind === 'Totp'}
-            <img bind:this={qrImage} />
+            <div class="row">
+                <div class="col-12 col-md-6">
+                    <img class="qr" bind:this={qrImage} alt="OTP QR code" />
+                </div>
+                <div class="col-12 col-md-6">
+                    <Button outline class="d-flex align-items-center" color="primary" on:click={generateNewTotpKey}>
+                        <Fa class="me-2" fw icon={faRefresh} />
+                        Reset secret key
+                    </Button>
+                </div>
+            </div>
         {/if}
     </ModalBody>
     <ModalFooter>
@@ -153,3 +165,14 @@ $: {
         </div>
     </ModalFooter>
 </Modal>
+
+<style lang="scss">
+    .qr {
+        width: 15rem;
+        max-width: 100%;
+        margin: auto;
+        border-radius: .5rem;
+        background: white;
+        opacity: .8;
+    }
+</style>
