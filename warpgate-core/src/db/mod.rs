@@ -10,7 +10,9 @@ use sea_orm::{
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError};
+use warpgate_common::{
+    ConfigProviderKind, TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError,
+};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{
     LogEntry, Role, Target, TargetRoleAssignment, User, UserRoleAssignment,
@@ -142,7 +144,7 @@ pub async fn populate_db(
         values.insert(&*db).await.map_err(WarpgateError::from)?;
     }
 
-    if db_was_empty {
+    if db_was_empty && config.store.config_provider == ConfigProviderKind::Database {
         migrate_config_into_db(db, config).await?;
     } else if !config.store.targets.is_empty() {
         warn!("Warpgate is now using the database for its configuration, but you still have leftover configuration in the config file.");
@@ -244,8 +246,10 @@ async fn migrate_config_into_db(
                     username: Set(user_config.username.clone()),
                     credentials: Set(serde_json::to_value(user_config.credentials.clone())
                         .map_err(WarpgateError::from)?),
-                    credential_policy: Set(serde_json::to_value(user_config.credential_policy.clone())
-                        .map_err(WarpgateError::from)?),
+                    credential_policy: Set(serde_json::to_value(
+                        user_config.credential_policy.clone(),
+                    )
+                    .map_err(WarpgateError::from)?),
                 };
 
                 info!("Migrating user {}", user_config.username);

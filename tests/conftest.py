@@ -167,6 +167,7 @@ class ProcessManager:
                 roles:
                 - name: role
                 - name: admin
+                - name: warpgate:admin
                 '''
             ) + config
         )

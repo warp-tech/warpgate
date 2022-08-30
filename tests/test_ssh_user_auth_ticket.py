@@ -22,7 +22,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                -   name: admin
+                -   name: warpgate:admin
                     allow_roles: [admin]
                     web_admin: {{}}
                 users:
@@ -32,7 +32,7 @@ class Test:
                     -   type: password
                         hash: '{password_123_hash}'
                 -   username: admin
-                    roles: [admin]
+                    roles: [warpgate:admin]
                     credentials:
                     -   type: password
                         hash: '{password_123_hash}'

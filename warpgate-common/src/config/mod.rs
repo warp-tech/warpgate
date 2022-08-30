@@ -216,9 +216,9 @@ impl Default for LogConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
 pub enum ConfigProviderKind {
     #[serde(rename = "file")]
-    #[default]
     File,
     #[serde(rename = "database")]
+    #[default]
     Database,
 }
 
