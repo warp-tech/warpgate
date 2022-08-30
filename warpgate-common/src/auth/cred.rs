@@ -11,7 +11,7 @@ pub enum CredentialKind {
     #[serde(rename = "publickey")]
     PublicKey,
     #[serde(rename = "otp")]
-    Otp,
+    Totp,
     #[serde(rename = "sso")]
     Sso,
     #[serde(rename = "web")]
@@ -38,7 +38,7 @@ impl AuthCredential {
         match self {
             Self::Password { .. } => CredentialKind::Password,
             Self::PublicKey { .. } => CredentialKind::PublicKey,
-            Self::Otp { .. } => CredentialKind::Otp,
+            Self::Otp { .. } => CredentialKind::Totp,
             Self::Sso { .. } => CredentialKind::Sso,
             Self::WebUserApproval => CredentialKind::WebUserApproval,
         }

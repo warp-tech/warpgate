@@ -83,7 +83,7 @@ impl From<AuthResult> for ApiAuthState {
             AuthResult::Rejected => ApiAuthState::Failed,
             AuthResult::Need(kinds) => match kinds.iter().next() {
                 Some(CredentialKind::Password) => ApiAuthState::PasswordNeeded,
-                Some(CredentialKind::Otp) => ApiAuthState::OtpNeeded,
+                Some(CredentialKind::Totp) => ApiAuthState::OtpNeeded,
                 Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
                 Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
                 Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,

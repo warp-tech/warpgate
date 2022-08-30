@@ -54,7 +54,7 @@ impl UserAuthCredential {
         match self {
             Self::Password(_) => CredentialKind::Password,
             Self::PublicKey(_) => CredentialKind::PublicKey,
-            Self::Totp(_) => CredentialKind::Otp,
+            Self::Totp(_) => CredentialKind::Totp,
             Self::Sso(_) => CredentialKind::Sso,
         }
     }
@@ -76,8 +76,8 @@ pub struct User {
     pub id: Uuid,
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub require: Option<UserRequireCredentialsPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none", rename="require")]
+    pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub roles: Vec<String>,
 }
 

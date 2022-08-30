@@ -42,7 +42,7 @@ impl TryFrom<Model> for User {
             username: model.username,
             roles: vec![],
             credentials,
-            require: credential_policy,
+            credential_policy,
         })
     }
 }

@@ -244,7 +244,7 @@ async fn migrate_config_into_db(
                     username: Set(user_config.username.clone()),
                     credentials: Set(serde_json::to_value(user_config.credentials.clone())
                         .map_err(WarpgateError::from)?),
-                    credential_policy: Set(serde_json::to_value(user_config.require.clone())
+                    credential_policy: Set(serde_json::to_value(user_config.credential_policy.clone())
                         .map_err(WarpgateError::from)?),
                 };
 

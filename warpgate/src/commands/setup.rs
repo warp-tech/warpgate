@@ -197,7 +197,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         credentials: vec![UserAuthCredential::Password(UserPasswordCredential {
             hash: Secret::new(hash_password(&password)),
         })],
-        require: None,
+        credential_policy: None,
         roles: vec![BUILTIN_ADMIN_ROLE_NAME.into()],
     });
 

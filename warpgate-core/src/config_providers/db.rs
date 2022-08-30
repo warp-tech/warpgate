@@ -84,7 +84,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             supported_credential_types: supported_credential_types.clone(),
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
-        if let Some(req) = user.require {
+        if let Some(req) = user.credential_policy {
             let mut policy = PerProtocolCredentialPolicy {
                 default: default_policy,
                 protocols: HashMap::new(),

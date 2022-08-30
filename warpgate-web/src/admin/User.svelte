@@ -1,11 +1,12 @@
 <script lang="ts">
-import { faIdBadge, faKey, faKeyboard, faMobileScreen, faPhone, faPhoneAlt } from '@fortawesome/free-solid-svg-icons'
-import { api, User, UserAuthCredential } from 'admin/lib/api'
+import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
+import { api, User, UserAuthCredential, UserRequireCredentialsPolicy } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import Fa from 'svelte-fa'
-import { push, replace } from 'svelte-spa-router'
+import { replace } from 'svelte-spa-router'
 import { Alert, Button, FormGroup, Input } from 'sveltestrap'
+import AuthPolicyEditor from './AuthPolicyEditor.svelte'
 import UserCredentialModal from './UserCredentialModal.svelte'
 
 export let params: { id: string }
@@ -13,17 +14,22 @@ export let params: { id: string }
 let error: Error|undefined
 let user: User
 let editingCredential: UserAuthCredential|undefined
+let policy: UserRequireCredentialsPolicy
+
+const policyProtocols = [
+    { id: 'ssh', name: 'SSH' },
+    { id: 'http', name: 'HTTP' },
+    { id: 'mysql', name: 'MySQL' },
+]
 
 async function load () {
     try {
         user = await api.getUser({ id: params.id })
+        policy = user.credentialPolicy ?? {}
+        user.credentialPolicy = policy
     } catch (err) {
         error = err
     }
-}
-
-function editCredential (credential: UserAuthCredential) {
-
 }
 
 function deleteCredential (credential) {
@@ -131,6 +137,23 @@ async function remove () {
             </div>
         {/each}
     </div>
+
+    <h4>Auth policy</h4>
+    <div class="list-group list-group-flush mb-3">
+        {#each policyProtocols as protocol}
+            <div class="list-group-item">
+                <div>
+                    <strong>{protocol.name}</strong>
+                </div>
+                <AuthPolicyEditor
+                    user={user}
+                    bind:value={policy}
+                    protocolId={protocol.id}
+                />
+            </div>
+        {/each}
+    </div>
+
 {/await}
 
 {#if error}

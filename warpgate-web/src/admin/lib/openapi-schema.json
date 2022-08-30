@@ -735,9 +735,6 @@
               }
             }
           },
-          "400": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1688,7 +1685,7 @@
               "$ref": "#/components/schemas/UserAuthCredential"
             }
           },
-          "require": {
+          "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "roles": {

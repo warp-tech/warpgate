@@ -1115,7 +1115,7 @@ impl ServerSession {
                 proceed_with_methods: None,
             },
             Ok(AuthResult::Need(kinds)) => {
-                if kinds.contains(&CredentialKind::Otp) {
+                if kinds.contains(&CredentialKind::Totp) {
                     self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
                     russh::server::Auth::Partial {
                         name: Cow::Borrowed("Two-factor authentication"),
@@ -1187,7 +1187,7 @@ impl ServerSession {
         for kind in kinds {
             match kind {
                 CredentialKind::Password => m.insert(MethodSet::PASSWORD),
-                CredentialKind::Otp => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
+                CredentialKind::Totp => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
                 CredentialKind::WebUserApproval => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
                 CredentialKind::PublicKey => m.insert(MethodSet::PUBLICKEY),
                 CredentialKind::Sso => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
