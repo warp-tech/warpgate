@@ -2,7 +2,7 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert } from 'sveltestrap'
 import Fa from 'svelte-fa'
-import Router, { push } from 'svelte-spa-router'
+import Router, { push, RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
 import { api } from 'gateway/lib/api'
@@ -29,7 +29,7 @@ function onPageResume () {
     init()
 }
 
-async function requireLogin (detail) {
+async function requireLogin (detail: RouteDetail) {
     await serverInfoPromise
     if (!get(serverInfo)?.username) {
         let url = detail.location

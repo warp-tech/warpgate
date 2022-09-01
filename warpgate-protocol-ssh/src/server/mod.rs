@@ -69,7 +69,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let handler = ServerHandler { id, event_tx };
 
-        let session = match ServerSession::new(
+        let session = match ServerSession::start(
             remote_address,
             &services,
             server_handle,

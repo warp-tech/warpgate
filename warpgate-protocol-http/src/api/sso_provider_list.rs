@@ -54,7 +54,7 @@ impl Api {
         services: Data<&Services>,
     ) -> poem::Result<GetSsoProvidersResponse> {
         let mut providers = services.config.lock().await.store.sso_providers.clone();
-        providers.sort_by(|a, b| a.label().cmp(&b.label()));
+        providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
                 .into_iter()
@@ -130,12 +130,9 @@ impl Api {
             state.add_valid_credential(cred);
         }
 
-        match state.verify() {
-            AuthResult::Accepted { username } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, username).await?;
-            }
-            _ => (),
+        if let AuthResult::Accepted { username } = state.verify() {
+            auth_state_store.complete(state.id()).await;
+            authorize_session(req, username).await?;
         }
 
         Ok(Response::new(ReturnToSsoResponse::Ok).header(

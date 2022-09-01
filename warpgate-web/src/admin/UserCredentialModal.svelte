@@ -2,7 +2,7 @@
 import { onMount } from 'svelte'
 import { Alert, Button, FormGroup, Input, Modal, ModalBody, ModalFooter, ModalHeader } from 'sveltestrap'
 import QRCode from 'qrcode'
-import { KeyEncodings, TOTP, TOTPOptions } from '@otplib/core'
+import { TOTP, TOTPOptions } from '@otplib/core'
 import { createDigest } from '@otplib/plugin-crypto-js'
 import { faRefresh } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
@@ -60,9 +60,8 @@ $: {
 
         const uri = totp.keyuri(username, 'Warpgate', base32Encode(new Uint8Array(credential.key), 'RFC4648'))
 
-        QRCode.toDataURL(uri, (err, imageUrl) => {
+        QRCode.toDataURL(uri, (err: Error, imageUrl: string) => {
             if (err) {
-                console.log('Error with QR')
                 return
             }
             if (qrImage) {

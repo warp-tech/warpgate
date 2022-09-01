@@ -262,8 +262,8 @@ impl RolesApi {
         let db = db.lock().await;
 
         if !UserRoleAssignment::Entity::find()
-            .filter(UserRoleAssignment::Column::UserId.eq(id.0.clone()))
-            .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0.clone()))
+            .filter(UserRoleAssignment::Column::UserId.eq(id.0))
+            .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
             .all(&*db)
             .await
             .map_err(WarpgateError::from)?

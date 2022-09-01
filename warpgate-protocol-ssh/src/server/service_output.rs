@@ -6,8 +6,8 @@ use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
-pub const ERASE_PROGRESS_SPINNER_BUF: Bytes = Bytes::from_static(ERASE_PROGRESS_SPINNER.as_bytes());
-pub const LINEBREAK: Bytes = Bytes::from_static("\n".as_bytes());
+pub const ERASE_PROGRESS_SPINNER_BUF: &[u8] = ERASE_PROGRESS_SPINNER.as_bytes();
+pub const LINEBREAK: &[u8] = "\n".as_bytes();
 
 #[derive(Clone)]
 pub struct ServiceOutput {
@@ -62,8 +62,8 @@ impl ServiceOutput {
     pub async fn hide_progress(&mut self) {
         self.progress_visible
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.emit_output(ERASE_PROGRESS_SPINNER_BUF);
-        self.emit_output(LINEBREAK);
+        self.emit_output(Bytes::from_static(ERASE_PROGRESS_SPINNER_BUF));
+        self.emit_output(Bytes::from_static(LINEBREAK));
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {

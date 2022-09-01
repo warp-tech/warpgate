@@ -229,7 +229,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc).await
@@ -247,7 +247,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -258,7 +258,7 @@ impl Api {
         };
 
         if let AuthResult::Accepted { .. } = auth_result {
-            services.auth_state_store.lock().await.complete(&*id).await;
+            services.auth_state_store.lock().await.complete(&id).await;
         }
         serialize_auth_state_inner(state_arc).await
     }
@@ -275,11 +275,11 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        services.auth_state_store.lock().await.complete(&*id).await;
+        services.auth_state_store.lock().await.complete(&id).await;
         serialize_auth_state_inner(state_arc).await
     }
 }
@@ -299,7 +299,7 @@ async fn get_auth_state(
         return None;
     };
 
-    let Some(state_arc) = store.get(&*id) else {
+    let Some(state_arc) = store.get(&id) else {
         return None;
     };
 

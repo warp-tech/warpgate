@@ -186,7 +186,7 @@ impl ProtocolServer for HTTPProtocolServer {
         crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
             .await
             .map_err(|e| {
-                return TargetTestError::ConnectionError(format!("{e}"));
+                TargetTestError::ConnectionError(format!("{e}"))
             })?;
         Ok(())
     }

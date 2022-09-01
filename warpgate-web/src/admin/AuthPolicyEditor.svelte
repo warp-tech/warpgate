@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Input } from 'sveltestrap'
 
-import type { User, UserRequireCredentialsPolicy } from './lib/api'
+import type { CredentialKind, User, UserRequireCredentialsPolicy } from './lib/api'
 
 export let user: User
 export let value: UserRequireCredentialsPolicy
@@ -39,7 +39,7 @@ function updateAny () {
 
 function toggle (type: string) {
     if (value[protocolId].includes(type)) {
-        value[protocolId] = value[protocolId].filter(x => x !== type)
+        value[protocolId] = value[protocolId].filter((x: CredentialKind) => x !== type)
     } else {
         value[protocolId].push(type)
     }

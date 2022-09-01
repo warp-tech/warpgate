@@ -51,13 +51,13 @@ impl Api {
                         SessionAuthorization::Ticket { target_name, .. } => target_name == name,
                         SessionAuthorization::User(_) => {
                             let mut config_provider = services.config_provider.lock().await;
-                            match config_provider
-                                .authorize_target(auth.username(), &name)
-                                .await
-                            {
-                                Ok(true) => true,
-                                _ => false,
-                            }
+
+                            matches!(
+                                config_provider
+                                    .authorize_target(auth.username(), &name)
+                                    .await,
+                                Ok(true)
+                            )
                         }
                     }
                 }

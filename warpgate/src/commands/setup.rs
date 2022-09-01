@@ -216,7 +216,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             .await?
             .into_iter()
             .next()
-            .ok_or(anyhow::anyhow!("Database inconsistent: no admin role"))?;
+            .ok_or_else(|| anyhow::anyhow!("Database inconsistent: no admin role"))?;
 
         let admin_user = match User::Entity::find()
             .filter(User::Column::Username.eq(BUILTIN_ADMIN_USERNAME))

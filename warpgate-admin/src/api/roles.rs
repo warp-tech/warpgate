@@ -146,7 +146,7 @@ impl DetailApi {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
-        if &role.name == BUILTIN_ADMIN_ROLE_NAME {
+        if role.name == BUILTIN_ADMIN_ROLE_NAME {
             return Ok(UpdateRoleResponse::Forbidden);
         }
 
@@ -175,7 +175,7 @@ impl DetailApi {
             return Ok(DeleteRoleResponse::NotFound);
         };
 
-        if &role.name == BUILTIN_ADMIN_ROLE_NAME {
+        if role.name == BUILTIN_ADMIN_ROLE_NAME {
             return Ok(DeleteRoleResponse::Forbidden);
         }
 

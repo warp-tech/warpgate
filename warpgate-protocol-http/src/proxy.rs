@@ -62,7 +62,9 @@ impl SomeRequestBuilder for http::request::Builder {
 }
 
 lazy_static::lazy_static! {
+    #[allow(clippy::mutable_key_type)]
     static ref DONT_FORWARD_HEADERS: HashSet<HeaderName> = {
+        #[allow(clippy::mutable_key_type)]
         let mut s = HashSet::new();
         s.insert(http::header::ACCEPT_ENCODING);
         s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
@@ -78,9 +80,9 @@ lazy_static::lazy_static! {
     };
 }
 
-const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-const X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
-const X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
+static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
+static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
@@ -90,7 +92,7 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
         .authority()
         .context("No authority in the URL")?
         .to_string();
-    let authority = authority.split("@").last().context("Authority is empty")?;
+    let authority = authority.split('@').last().context("Authority is empty")?;
     let authority: Authority = authority.try_into()?;
     let mut uri = http::uri::Builder::new()
         .authority(authority)
@@ -221,7 +223,7 @@ pub async fn proxy_normal_request(
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
-    let uri = construct_uri(req, &options, false)?;
+    let uri = construct_uri(req, options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -257,8 +259,8 @@ pub async fn proxy_normal_request(
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(&req, client_request);
-    client_request = inject_forwarding_headers(&req, client_request)?;
+    client_request = copy_server_request(req, client_request);
+    client_request = inject_forwarding_headers(req, client_request)?;
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
     client_request = client_request.header(
@@ -273,7 +275,7 @@ pub async fn proxy_normal_request(
         .execute(client_request)
         .await
         .map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?;
-    let status = client_response.status().clone();
+    let status = client_response.status();
 
     let mut response: Response = "".into();
 
@@ -313,7 +315,7 @@ async fn copy_client_body_and_embed(
         r#"<script type="module" src="/@warpgate/{}"></script>"#,
         script_manifest.file
     );
-    for css_file in script_manifest.css.unwrap_or(vec![]) {
+    for css_file in script_manifest.css.unwrap_or_default() {
         inject += &format!(
             r#"<link rel="stylesheet" href="/@warpgate/{}" />"#,
             css_file
@@ -344,7 +346,7 @@ pub async fn proxy_websocket_request(
     ws: WebSocket,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
-    let uri = construct_uri(req, &options, true)?;
+    let uri = construct_uri(req, options, true)?;
     proxy_ws_inner(req, ws, uri.clone(), options)
         .await
         .map_err(|error| {
@@ -375,8 +377,8 @@ async fn proxy_ws_inner(
                 .to_string(),
         );
 
-    client_request = copy_server_request(&req, client_request);
-    client_request = inject_forwarding_headers(&req, client_request)?;
+    client_request = copy_server_request(req, client_request);
+    client_request = inject_forwarding_headers(req, client_request)?;
     client_request = rewrite_request(client_request, options)?;
 
     let (client, client_response) = connect_async_with_config(

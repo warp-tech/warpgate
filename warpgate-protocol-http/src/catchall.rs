@@ -79,8 +79,7 @@ async fn get_target_for_request(
                 TargetOptions::Http(ref options) => Some((t, options)),
                 _ => None,
             })
-            .filter(|(_, o)| o.external_host.as_deref() == Some(host))
-            .next()
+            .find(|(_, o)| o.external_host.as_deref() == Some(host))
             .map(|(t, _)| t.name.clone())
     } else {
         None
@@ -127,7 +126,7 @@ async fn get_target_for_request(
                     .config_provider
                     .lock()
                     .await
-                    .authorize_target(&auth.username(), &target.0.name)
+                    .authorize_target(auth.username(), &target.0.name)
                     .await?
             {
                 return Ok(None);
@@ -137,5 +136,5 @@ async fn get_target_for_request(
         }
     }
 
-    return Ok(None);
+    Ok(None)
 }

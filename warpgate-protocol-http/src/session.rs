@@ -97,16 +97,16 @@ impl SessionStore {
         &mut self,
         req: &Request,
     ) -> poem::Result<WarpgateServerHandleFromRequest> {
-        let session: &Session = <_>::from_request_without_body(&req).await?;
+        let session: &Session = <_>::from_request_without_body(req).await?;
 
         if let Some(handle) = self.handle_for(session) {
             return Ok(handle.into());
         }
 
-        let services = Data::<&Services>::from_request_without_body(&req).await?;
-        let remote_address: &RemoteAddr = <_>::from_request_without_body(&req).await?;
+        let services = Data::<&Services>::from_request_without_body(req).await?;
+        let remote_address: &RemoteAddr = <_>::from_request_without_body(req).await?;
         let session_storage =
-            Data::<&SharedSessionStorage>::from_request_without_body(&req).await?;
+            Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 
@@ -134,13 +134,12 @@ impl SessionStore {
         tokio::spawn({
             let session_storage = (*session_storage).clone();
             let poem_session_id: Option<String> = session.get(POEM_SESSION_ID_SESSION_KEY);
-            let id = id.clone();
             async move {
                 while let Some(command) = session_handle_rx.recv().await {
                     match command {
                         SessionHandleCommand::Close => {
                             if let Some(ref poem_session_id) = poem_session_id {
-                                let _ = session_storage.remove_session(&poem_session_id).await;
+                                let _ = session_storage.remove_session(poem_session_id).await;
                             }
                             info!(%id, "Removed HTTP session");
                             let mut that = this.lock().await;

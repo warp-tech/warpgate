@@ -102,7 +102,7 @@ impl std::fmt::Debug for ServerSession {
 }
 
 impl ServerSession {
-    pub async fn new(
+    pub async fn start(
         remote_address: SocketAddr,
         services: &Services,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,

@@ -32,11 +32,11 @@ async function load () {
     }
 }
 
-function deleteCredential (credential) {
+function deleteCredential (credential: UserAuthCredential) {
     user.credentials = user.credentials.filter(c => c !== credential)
 }
 
-function abbreviatePublicKey (key) {
+function abbreviatePublicKey (key: string) {
     return key.slice(0, 16) + '...' + key.slice(-8)
 }
 

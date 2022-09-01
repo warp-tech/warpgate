@@ -23,6 +23,8 @@ pub enum WarpgateError {
     ExternalHostNotSet,
     #[error("URL contains no host")]
     NoHostInUrl,
+    #[error("Inconsistent state error")]
+    InconsistentState,
 }
 
 impl ResponseError for WarpgateError {

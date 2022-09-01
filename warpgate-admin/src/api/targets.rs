@@ -281,8 +281,8 @@ impl RolesApi {
         let db = db.lock().await;
 
         if !TargetRoleAssignment::Entity::find()
-            .filter(TargetRoleAssignment::Column::TargetId.eq(id.0.clone()))
-            .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0.clone()))
+            .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
+            .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
             .all(&*db)
             .await
             .map_err(WarpgateError::from)?
@@ -329,7 +329,7 @@ impl RolesApi {
                 return Ok(DeleteTargetRoleResponse::NotFound);
             };
 
-        if &role.name == BUILTIN_ADMIN_ROLE_NAME && target.kind == TargetKind::WebAdmin {
+        if role.name == BUILTIN_ADMIN_ROLE_NAME && target.kind == TargetKind::WebAdmin {
             return Ok(DeleteTargetRoleResponse::Forbidden);
         }
 
