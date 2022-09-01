@@ -41,6 +41,7 @@ jobs:
       - name: Install deps
         working-directory: tests
         run: |
+          sudo apt install -y gnome-keyring
           pip3 install poetry
           poetry install
 
