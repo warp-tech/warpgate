@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -102,7 +102,7 @@ impl RecordingWriter {
     }
 
     pub async fn write(&mut self, data: &[u8]) -> Result<()> {
-        let data = BytesMut::from(data).freeze();
+        let data = Bytes::from(data.to_vec());
         self.sender
             .send(data.clone())
             .await
