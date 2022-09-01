@@ -101,7 +101,11 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
                 .clone(),
         );
 
-    let scheme = target_uri.scheme().context("No scheme in the URL")?;
+    let scheme = match options.tls.mode {
+        TlsMode::Disabled => &Scheme::HTTP,
+        TlsMode::Preferred => target_uri.scheme().context("No scheme in the URL")?,
+        TlsMode::Required => &Scheme::HTTPS,
+    };
     uri = uri.scheme(scheme.clone());
 
     #[allow(clippy::unwrap_used)]
@@ -228,6 +232,23 @@ pub async fn proxy_normal_request(
     if let TlsMode::Required = options.tls.mode {
         client = client.https_only(true);
     }
+
+    client = client.redirect(reqwest::redirect::Policy::custom({
+        let tls_mode = options.tls.mode.clone();
+        let uri = uri.clone();
+        move |attempt| {
+            if tls_mode == TlsMode::Preferred
+                && uri.scheme() == Some(&Scheme::HTTP)
+                && attempt.url().scheme() == "https"
+            {
+                debug!("Following HTTP->HTTPS redirect");
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }
+    }));
+
     if !options.tls.verify {
         client = client.danger_accept_invalid_certs(true);
     }

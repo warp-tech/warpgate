@@ -170,7 +170,7 @@ impl Default for MySQLConfig {
     fn default() -> Self {
         MySQLConfig {
             enable: false,
-            listen: _default_http_listen(),
+            listen: _default_mysql_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -225,12 +225,15 @@ pub enum ConfigProviderKind {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateConfigStore {
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<Target>,
 
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub users: Vec<User>,
 
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<Role>,
 
     #[serde(default)]
