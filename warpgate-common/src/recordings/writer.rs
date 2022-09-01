@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bytes::{Bytes};
+use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};

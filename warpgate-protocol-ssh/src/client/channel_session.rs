@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bytes::{Bytes};
+use bytes::Bytes;
 use russh::client::Msg;
 use russh::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
