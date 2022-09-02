@@ -24,7 +24,7 @@ class Test:
         proc.wait(timeout=timeout)
         assert proc.returncode == 0
 
-    def test_fail_no_connection(self, processes):
+    def test_fail_no_connection(self, processes, timeout):
         proc, _ = processes.start_wg(
             config=dedent(
                 '''\

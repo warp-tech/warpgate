@@ -7,7 +7,7 @@ from .util import wait_port
 
 class Test:
     def test(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash, timeout
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -48,7 +48,7 @@ class Test:
             '/bin/sh',
             password='123',
         )
-        assert ssh_client.communicate(timeout=30)[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
         ssh_client = processes.start_ssh_client(
@@ -63,5 +63,5 @@ class Test:
             '/bin/sh',
             password='321',
         )
-        ssh_client.communicate(timeout=30)
+        ssh_client.communicate(timeout=timeout)
         assert ssh_client.returncode != 0

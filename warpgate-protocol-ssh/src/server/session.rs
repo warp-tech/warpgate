@@ -1400,8 +1400,7 @@ impl ServerSession {
     async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
-        self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Eof))
-            .await?;
+        let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
         Ok(())
     }
 
