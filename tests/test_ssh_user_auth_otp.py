@@ -49,7 +49,7 @@ class Test:
 
         script = dedent(
             f'''
-            set timeout 10
+            set timeout 5
 
             spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
