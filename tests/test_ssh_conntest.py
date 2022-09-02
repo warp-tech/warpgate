@@ -7,7 +7,7 @@ from .util import alloc_port, wait_port
 
 class Test:
     def test_success(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, timeout
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -27,10 +27,10 @@ class Test:
             ),
             args=['test-target', 'ssh'],
         )
-        proc.wait(timeout=5)
+        proc.wait(timeout=timeout)
         assert proc.returncode == 0
 
-    def test_fail(self, processes: ProcessManager):
+    def test_fail(self, processes: ProcessManager, timeout):
         ssh_port = alloc_port()
         proc, _ = processes.start_wg(
             config=dedent(
@@ -46,5 +46,5 @@ class Test:
             ),
             args=['test-target', 'ssh'],
         )
-        proc.wait(timeout=5)
+        proc.wait(timeout=timeout)
         assert proc.returncode != 0

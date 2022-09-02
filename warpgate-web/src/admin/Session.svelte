@@ -2,10 +2,11 @@
 import { api, SessionSnapshot, Recording, TargetSSHOptions, TargetHTTPOptions, TargetMySqlOptions } from 'admin/lib/api'
 import { timeAgo } from 'admin/lib/time'
 import AsyncButton from 'common/AsyncButton.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import moment from 'moment'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
 
@@ -55,7 +56,7 @@ onDestroy(() => clearInterval(interval))
 </script>
 
 {#if !session && !error}
-    <Spinner />
+    <DelayedSpinner />
 {/if}
 
 {#if error}

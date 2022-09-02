@@ -1,14 +1,15 @@
 <script lang="ts">
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 import Fa from 'svelte-fa'
-import Router, { push } from 'svelte-spa-router'
+import Router, { push, RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
 import { api } from 'gateway/lib/api'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Logo from 'common/Logo.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
 let redirecting = false
 let serverInfoPromise = reloadServerInfo()
@@ -28,7 +29,7 @@ function onPageResume () {
     init()
 }
 
-async function requireLogin (detail) {
+async function requireLogin (detail: RouteDetail) {
     await serverInfoPromise
     if (!get(serverInfo)?.username) {
         let url = detail.location
@@ -65,10 +66,10 @@ init()
 
 <div class="container">
 {#await init()}
-    <Spinner />
+    <DelayedSpinner />
 {:then _}
     {#if redirecting}
-        <Spinner />
+        <DelayedSpinner />
     {:else}
         <div class="d-flex align-items-center mt-5 mb-5">
             <a class="logo" href="/@warpgate">

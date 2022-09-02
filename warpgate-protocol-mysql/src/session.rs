@@ -7,12 +7,10 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthSelector};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{
-    authorize_ticket, AuthResult, Secret, Services, TargetMySqlOptions, TargetOptions,
-    WarpgateServerHandle,
-};
+use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
@@ -237,11 +235,7 @@ impl MySqlSession {
                 {
                     Some(ticket) => {
                         info!("Authorized for {} with a ticket", ticket.target);
-                        self.services
-                            .config_provider
-                            .lock()
-                            .await
-                            .consume_ticket(&ticket.id)
+                        consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(MySqlError::other)?;
 
@@ -275,11 +269,11 @@ impl MySqlSession {
 
         let target = {
             self.services
-                .config
+                .config_provider
                 .lock()
                 .await
-                .store
-                .targets
+                .list_targets()
+                .await?
                 .iter()
                 .filter_map(|t| match t.options {
                     TargetOptions::MySql(ref options) => Some((t, options)),

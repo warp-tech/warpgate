@@ -32,12 +32,7 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
         paths_relative_to: path.parent().context("FS root reached")?.to_path_buf(),
     };
 
-    info!(
-        "Using config: {path:?} (users: {}, targets: {}, roles: {})",
-        config.store.users.len(),
-        config.store.targets.len(),
-        config.store.roles.len(),
-    );
+    info!("Using config: {path:?}");
     Ok(config)
 }
 

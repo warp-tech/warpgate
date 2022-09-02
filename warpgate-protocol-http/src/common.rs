@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, AuthStateStore};
-use warpgate_common::{ProtocolName, Services, TargetOptions, WarpgateError};
+use warpgate_common::auth::AuthState;
+use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
+use warpgate_core::{AuthStateStore, Services};
 
 use crate::session::SessionStore;
 
@@ -52,7 +53,7 @@ impl SessionExt for Session {
     }
 
     fn get_username(&self) -> Option<String> {
-        return self.get_auth().map(|x| x.username().to_owned());
+        self.get_auth().map(|x| x.username().to_owned())
     }
 
     fn get_auth(&self) -> Option<SessionAuthorization> {
@@ -90,7 +91,7 @@ impl SessionAuthorization {
 }
 
 async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Result<bool> {
-    let services: Data<&Services> = <_>::from_request_without_body(&req).await?;
+    let services: Data<&Services> = <_>::from_request_without_body(req).await?;
 
     let SessionAuthorization::User(username) = auth else {
         return Ok(false)
@@ -101,7 +102,7 @@ async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Resu
     for target in targets {
         if matches!(target.options, TargetOptions::WebAdmin(_))
             && config_provider
-                .authorize_target(&username, &target.name)
+                .authorize_target(username, &target.name)
                 .await?
         {
             drop(config_provider);
@@ -168,7 +169,7 @@ pub fn gateway_redirect(req: &Request) -> Response {
         .original_uri()
         .path_and_query()
         .map(|p| p.to_string())
-        .unwrap_or("".into());
+        .unwrap_or_else(|| "".into());
 
     let path = format!(
         "/@warpgate#/login?next={}",
@@ -183,20 +184,17 @@ pub async fn get_auth_state_for_request(
     session: &Session,
     store: &mut AuthStateStore,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    match session.get_auth_state_id() {
-        Some(id) => {
-            if !store.contains_key(&id.0) {
-                session.remove(AUTH_STATE_ID_SESSION_KEY)
-            }
+    if let Some(id) = session.get_auth_state_id() {
+        if !store.contains_key(&id.0) {
+            session.remove(AUTH_STATE_ID_SESSION_KEY)
         }
-        None => (),
-    };
+    }
 
     match session.get_auth_state_id() {
-        Some(id) => Ok(store.get(&id.0).unwrap()),
+        Some(id) => Ok(store.get(&id.0).ok_or(WarpgateError::InconsistentState)?),
         None => {
             let (id, state) = store
-                .create(&username, crate::common::PROTOCOL_NAME)
+                .create(username, crate::common::PROTOCOL_NAME)
                 .await?;
             session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
             Ok(state)
@@ -206,13 +204,13 @@ pub async fn get_auth_state_for_request(
 
 pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {
     let session_middleware: Data<&Arc<Mutex<SessionStore>>> =
-        <_>::from_request_without_body(&req).await?;
-    let session: &Session = <_>::from_request_without_body(&req).await?;
+        <_>::from_request_without_body(req).await?;
+    let session: &Session = <_>::from_request_without_body(req).await?;
 
     let server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(&req)
+        .create_handle_for(req)
         .await?;
     server_handle
         .lock()

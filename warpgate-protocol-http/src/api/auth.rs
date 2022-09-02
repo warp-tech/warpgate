@@ -9,8 +9,9 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthState, CredentialKind};
-use warpgate_common::{AuthResult, Secret, Services, WarpgateError};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::{Secret, WarpgateError};
+use warpgate_core::Services;
 
 use crate::common::{
     authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,
@@ -82,7 +83,7 @@ impl From<AuthResult> for ApiAuthState {
             AuthResult::Rejected => ApiAuthState::Failed,
             AuthResult::Need(kinds) => match kinds.iter().next() {
                 Some(CredentialKind::Password) => ApiAuthState::PasswordNeeded,
-                Some(CredentialKind::Otp) => ApiAuthState::OtpNeeded,
+                Some(CredentialKind::Totp) => ApiAuthState::OtpNeeded,
                 Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
                 Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
                 Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,
@@ -228,7 +229,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc).await
@@ -246,7 +247,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -257,7 +258,7 @@ impl Api {
         };
 
         if let AuthResult::Accepted { .. } = auth_result {
-            services.auth_state_store.lock().await.complete(&*id).await;
+            services.auth_state_store.lock().await.complete(&id).await;
         }
         serialize_auth_state_inner(state_arc).await
     }
@@ -274,11 +275,11 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&*id, *services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        services.auth_state_store.lock().await.complete(&*id).await;
+        services.auth_state_store.lock().await.complete(&id).await;
         serialize_auth_state_inner(state_arc).await
     }
 }
@@ -298,7 +299,7 @@ async fn get_auth_state(
         return None;
     };
 
-    let Some(state_arc) = store.get(&*id) else {
+    let Some(state_arc) = store.get(&id) else {
         return None;
     };
 

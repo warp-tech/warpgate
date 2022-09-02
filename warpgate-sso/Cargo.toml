@@ -5,12 +5,10 @@ name = "warpgate-sso"
 version = "0.5.0"
 
 [dependencies]
-async-trait = "0.1"
 bytes = "1.2"
 thiserror = "1.0"
 tokio = { version = "1.20", features = ["tracing", "macros"] }
 tracing = "0.1"
-uuid = { version = "1.0", features = ["v4"] }
 openidconnect = { version = "2.3", features = ["reqwest", "rustls-tls"] }
 serde = "1.0"
 serde_json = "1.0"

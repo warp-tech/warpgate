@@ -167,6 +167,7 @@ class ProcessManager:
                 roles:
                 - name: role
                 - name: admin
+                - name: warpgate:admin
                 '''
             ) + config
         )
@@ -218,6 +219,12 @@ class ProcessManager:
         p = subprocess.Popen(args, **kwargs)
         self.children.append(Child(process=p, stop_signal=stop_signal, stop_timeout=stop_timeout))
         return p
+
+
+@pytest.fixture(scope='session')
+def timeout():
+    t = os.getenv('TIMEOUT', '10')
+    return int(t)
 
 
 @pytest.fixture(scope='session')

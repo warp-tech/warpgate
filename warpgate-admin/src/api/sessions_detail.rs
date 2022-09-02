@@ -7,7 +7,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{SessionSnapshot, State};
+use warpgate_core::{SessionSnapshot, State};
 use warpgate_db_entities::{Recording, Session};
 
 pub struct Api;

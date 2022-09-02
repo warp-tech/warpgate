@@ -57,6 +57,7 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         ssh_client = processes.start_ssh_client(
             '-p',
@@ -69,7 +70,7 @@ class Test:
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = ssh_client.communicate(timeout=10)
+        stdout, stderr = ssh_client.communicate(timeout=timeout)
         assert b'stdout' == stdout
         assert stderr.endswith(b'stderr')
 
@@ -77,6 +78,7 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         ssh_client = processes.start_ssh_client(
             '-p',
@@ -88,7 +90,7 @@ class Test:
             password='123',
         )
 
-        output = ssh_client.communicate()[0]
+        output = ssh_client.communicate(timeout=timeout)[0]
         assert b'Warpgate' in output
         assert b'Selected target:' in output
         assert b'hello\r\n' in output
@@ -134,10 +136,11 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         script = dedent(
             f'''
-            set timeout 10
+            set timeout {timeout - 5}
 
             spawn ssh -tt user:ssh@localhost -p {wg_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password
 
@@ -163,7 +166,7 @@ class Test:
             ['expect', '-d'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode())[0]
+        output = ssh_client.communicate(script.encode(), timeout=timeout)[0]
         assert ssh_client.returncode == 0, output
 
     def test_connection_error(

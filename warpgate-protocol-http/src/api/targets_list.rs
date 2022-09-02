@@ -1,33 +1,27 @@
 use futures::{stream, StreamExt};
 use poem::web::Data;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
-use warpgate_common::{Services, TargetOptions};
+use warpgate_common::TargetOptions;
+use warpgate_core::Services;
+use warpgate_db_entities::Target;
 
 use crate::common::{endpoint_auth, SessionAuthorization};
 
 pub struct Api;
 
-#[derive(Debug, Serialize, Clone, Enum)]
-pub enum TargetKind {
-    Http,
-    MySql,
-    Ssh,
-    WebAdmin,
-}
-
 #[derive(Debug, Serialize, Clone, Object)]
-pub struct Target {
+pub struct TargetSnapshot {
     pub name: String,
-    pub kind: TargetKind,
+    pub kind: Target::TargetKind,
     pub external_host: Option<String>,
 }
 
 #[derive(ApiResponse)]
 enum GetTargetsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<Target>>),
+    Ok(Json<Vec<TargetSnapshot>>),
 }
 
 #[OpenApi]
@@ -57,13 +51,13 @@ impl Api {
                         SessionAuthorization::Ticket { target_name, .. } => target_name == name,
                         SessionAuthorization::User(_) => {
                             let mut config_provider = services.config_provider.lock().await;
-                            match config_provider
-                                .authorize_target(auth.username(), &name)
-                                .await
-                            {
-                                Ok(true) => true,
-                                _ => false,
-                            }
+
+                            matches!(
+                                config_provider
+                                    .authorize_target(auth.username(), &name)
+                                    .await,
+                                Ok(true)
+                            )
                         }
                     }
                 }
@@ -75,13 +69,13 @@ impl Api {
         Ok(GetTargetsResponse::Ok(Json(
             targets
                 .into_iter()
-                .map(|t| Target {
+                .map(|t| TargetSnapshot {
                     name: t.name.clone(),
                     kind: match t.options {
-                        TargetOptions::Ssh(_) => TargetKind::Ssh,
-                        TargetOptions::Http(_) => TargetKind::Http,
-                        TargetOptions::MySql(_) => TargetKind::MySql,
-                        TargetOptions::WebAdmin(_) => TargetKind::WebAdmin,
+                        TargetOptions::Ssh(_) => Target::TargetKind::Ssh,
+                        TargetOptions::Http(_) => Target::TargetKind::Http,
+                        TargetOptions::MySql(_) => Target::TargetKind::MySql,
+                        TargetOptions::WebAdmin(_) => Target::TargetKind::WebAdmin,
                     },
                     external_host: match t.options {
                         TargetOptions::Http(ref opt) => opt.external_host.clone(),

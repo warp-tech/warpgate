@@ -7,7 +7,7 @@ from .util import create_ticket, wait_port
 
 class Test:
     def test(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash, timeout
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -22,7 +22,7 @@ class Test:
                     ssh:
                         host: localhost
                         port: {ssh_port}
-                -   name: admin
+                -   name: warpgate:admin
                     allow_roles: [admin]
                     web_admin: {{}}
                 users:
@@ -32,7 +32,7 @@ class Test:
                     -   type: password
                         hash: '{password_123_hash}'
                 -   username: admin
-                    roles: [admin]
+                    roles: [warpgate:admin]
                     credentials:
                     -   type: password
                         hash: '{password_123_hash}'
@@ -59,5 +59,5 @@ class Test:
             '/bin/sh',
             password='123',
         )
-        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0

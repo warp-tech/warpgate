@@ -5,8 +5,8 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::{Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use tracing::*;
-use warpgate_common::auth::AuthCredential;
-use warpgate_common::{AuthResult, Services};
+use warpgate_common::auth::{AuthCredential, AuthResult};
+use warpgate_core::Services;
 use warpgate_sso::SsoInternalProviderConfig;
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
@@ -54,7 +54,7 @@ impl Api {
         services: Data<&Services>,
     ) -> poem::Result<GetSsoProvidersResponse> {
         let mut providers = services.config.lock().await.store.sso_providers.clone();
-        providers.sort_by(|a, b| a.label().cmp(&b.label()));
+        providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
                 .into_iter()
@@ -130,12 +130,9 @@ impl Api {
             state.add_valid_credential(cred);
         }
 
-        match state.verify() {
-            AuthResult::Accepted { username } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, username).await?;
-            }
-            _ => (),
+        if let AuthResult::Accepted { username } = state.verify() {
+            auth_state_store.complete(state.id()).await;
+            authorize_session(req, username).await?;
         }
 
         Ok(Response::new(ReturnToSsoResponse::Ok).header(

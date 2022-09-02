@@ -4796,13 +4796,18 @@ dependencies = [
  "qrcode",
  "rcgen",
  "sd-notify",
+ "sea-orm",
+ "serde_json",
  "serde_yaml",
  "time 0.3.11",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "warpgate-admin",
  "warpgate-common",
+ "warpgate-core",
+ "warpgate-db-entities",
  "warpgate-protocol-http",
  "warpgate-protocol-mysql",
  "warpgate-protocol-ssh",
@@ -4832,12 +4837,51 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
 ]
 
 [[package]]
 name = "warpgate-common"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "bytes 1.2.1",
+ "chrono",
+ "data-encoding",
+ "delegate",
+ "futures",
+ "humantime-serde",
+ "lazy_static",
+ "once_cell",
+ "packet",
+ "password-hash 0.4.1",
+ "poem",
+ "poem-openapi",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.3",
+ "rustls",
+ "rustls-pemfile",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "totp-rs",
+ "tracing",
+ "tracing-core",
+ "url",
+ "uuid",
+ "warpgate-sso",
+ "webpki",
+]
+
+[[package]]
+name = "warpgate-core"
 version = "0.5.0"
 dependencies = [
  "anyhow",
@@ -4870,6 +4914,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "warpgate-common",
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-sso",
@@ -4899,6 +4944,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "warpgate-common",
 ]
 
 [[package]]
@@ -4909,6 +4955,7 @@ dependencies = [
  "chrono",
  "sea-orm",
  "sea-orm-migration",
+ "serde_json",
  "uuid",
 ]
 
@@ -4938,6 +4985,7 @@ dependencies = [
  "uuid",
  "warpgate-admin",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "warpgate-sso",
  "warpgate-web",
@@ -4964,6 +5012,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-database-protocols",
  "warpgate-db-entities",
  "webpki",
@@ -4989,6 +5038,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-core",
  "warpgate-db-entities",
  "zeroize",
 ]
@@ -4997,7 +5047,6 @@ dependencies = [
 name = "warpgate-sso"
 version = "0.5.0"
 dependencies = [
- "async-trait",
  "bytes 1.2.1",
  "once_cell",
  "openidconnect",
@@ -5006,7 +5055,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]

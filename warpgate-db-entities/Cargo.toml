@@ -11,3 +11,4 @@ sea-orm = {version = "^0.9", features = ["macros", "with-chrono", "with-uuid", "
 serde = "1.0"
 serde_json = "1.0"
 uuid = {version = "1.0", features = ["v4", "serde"]}
+warpgate-common = { version = "*", path = "../warpgate-common" }

@@ -15,7 +15,7 @@
     let [showActiveOnly, showActiveOnly$] = autosave('sessions-list:show-active-only', false)
     let [showLoggedInOnly, showLoggedInOnly$] = autosave('sessions-list:show-logged-in-only', true)
 
-    let activeSessionCount = 0
+    let activeSessionCount: number|undefined
 
     let socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/sessions/changes`)
     let sessionChanges$ = fromEvent(socket, 'message')
@@ -64,6 +64,7 @@
 
 </script>
 
+{#if activeSessionCount !== undefined}
 <div class="page-summary-bar">
     {#if activeSessionCount }
         <h1>Sessions right now: {activeSessionCount}</h1>
@@ -76,8 +77,9 @@
         <h1>No active sessions</h1>
     {/if}
 </div>
+{/if}
 
-<ItemList load={loadSessions}  pageSize={100}>
+<ItemList load={loadSessions} pageSize={100}>
     <div slot="header" class="d-flex align-items-center mb-1">
         <div class="ms-auto"></div>
         <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />

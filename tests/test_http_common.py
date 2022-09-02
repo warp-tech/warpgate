@@ -19,12 +19,12 @@ def http_common_wg_port(processes, echo_server_port, password_123_hash, otp_key_
                 allow_roles: [role]
                 http:
                     url: http://localhostfoobar
-            -   name: admin
+            -   name: warpgate:admin
                 allow_roles: [admin]
                 web_admin: {{}}
             users:
             -   username: admin
-                roles: [admin]
+                roles: [admin, warpgate:admin]
                 credentials:
                 -   type: password
                     hash: '{password_123_hash}'

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, UserSnapshot, Target, TicketAndSecret } from 'admin/lib/api'
+import { api, User, Target, TicketAndSecret } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
@@ -9,9 +9,9 @@ import { firstBy } from 'thenby'
 
 let error: Error|null = null
 let targets: Target[]|undefined
-let users: UserSnapshot[]|undefined
+let users: User[]|undefined
 let selectedTarget: Target|undefined
-let selectedUser: UserSnapshot|undefined
+let selectedUser: User|undefined
 let result: TicketAndSecret|undefined
 
 async function load () {

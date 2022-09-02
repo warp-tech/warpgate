@@ -1,7 +1,7 @@
 <script lang="ts">
 import { get } from 'svelte/store'
 import { querystring, replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Spinner } from 'sveltestrap'
+import { Alert, FormGroup } from 'sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
@@ -9,6 +9,7 @@ import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-ico
 import { api, ApiAuthState, LoginFailureResponseFromJSON, SsoProviderDescription, SsoProviderKind } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
 export let params: { stateId?: string } = {}
 
@@ -125,7 +126,7 @@ async function startSSO (provider: SsoProviderDescription) {
 </script>
 
 {#await init()}
-    <Spinner />
+    <DelayedSpinner />
 {:then}
     <form class="mt-5" autocomplete="on">
         <div class="page-summary-bar">

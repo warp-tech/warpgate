@@ -22,7 +22,8 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::{SSHTargetAuth, Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
+use warpgate_core::Services;
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -415,15 +416,15 @@ impl RemoteClient {
 
                     let mut auth_result = false;
                     match ssh_options.auth {
-                        SSHTargetAuth::Password { password } => {
+                        SSHTargetAuth::Password(auth) => {
                             auth_result = session
-                                .authenticate_password(ssh_options.username.clone(), password.expose_secret())
+                                .authenticate_password(ssh_options.username.clone(), auth.password.expose_secret())
                                 .await?;
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
-                        SSHTargetAuth::PublicKey => {
+                        SSHTargetAuth::PublicKey(_) => {
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {

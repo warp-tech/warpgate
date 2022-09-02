@@ -1,7 +1,15 @@
+use std::collections::HashSet;
+
 use uuid::Uuid;
 
-use super::{AuthCredential, CredentialPolicy, CredentialPolicyResponse};
-use crate::AuthResult;
+use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
+
+#[derive(Debug, Clone)]
+pub enum AuthResult {
+    Accepted { username: String },
+    Need(HashSet<CredentialKind>),
+    Rejected,
+}
 
 pub struct AuthState {
     id: Uuid,
@@ -13,7 +21,7 @@ pub struct AuthState {
 }
 
 impl AuthState {
-    pub(crate) fn new(
+    pub fn new(
         id: Uuid,
         username: String,
         protocol: String,

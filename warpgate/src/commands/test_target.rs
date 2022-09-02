@@ -1,23 +1,26 @@
 use anyhow::Result;
 use tracing::*;
-use warpgate_common::{ProtocolServer, Services, Target, TargetOptions, TargetTestError};
+use warpgate_common::{Target, TargetOptions};
+use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
 use crate::config::load_config;
 
 pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {
     let config = load_config(&cli.config, true)?;
+    let services = Services::new(config.clone()).await?;
 
-    let Some(target) = config
-        .store
-        .targets
+    let Some(target) = services
+        .config_provider
+        .lock()
+        .await
+        .list_targets()
+        .await?
         .iter()
         .find(|x| &x.name == target_name)
         .map(Target::clone) else {
         error!("Target not found: {}", target_name);
         return Ok(());
     };
-
-    let services = Services::new(config.clone()).await?;
 
     let s: Box<dyn ProtocolServer> = match target.options {
         TargetOptions::Ssh(_) => {

@@ -34,7 +34,10 @@ def wait_port(port, recv=True):
             try:
                 s = socket.create_connection(('localhost', port), timeout=5)
                 if recv:
-                    data = s.recv(100)
+                    while True:
+                        data = s.recv(100)
+                        if data:
+                            break
                 else:
                     data = b''
                 s.close()
