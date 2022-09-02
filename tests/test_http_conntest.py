@@ -6,6 +6,7 @@ class Test:
         self,
         processes,
         echo_server_port,
+        timeout,
     ):
         proc, _ = processes.start_wg(
             config=dedent(
@@ -20,7 +21,7 @@ class Test:
             ),
             args=['test-target', 'target'],
         )
-        proc.wait(timeout=5)
+        proc.wait(timeout=timeout)
         assert proc.returncode == 0
 
     def test_fail_no_connection(self, processes):
@@ -37,5 +38,5 @@ class Test:
             ),
             args=['test-target', 'target'],
         )
-        proc.wait(timeout=5)
+        proc.wait(timeout=timeout)
         assert proc.returncode != 0

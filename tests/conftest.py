@@ -222,6 +222,12 @@ class ProcessManager:
 
 
 @pytest.fixture(scope='session')
+def timeout():
+    t = os.getenv('TIMEOUT', '10')
+    return int(t)
+
+
+@pytest.fixture(scope='session')
 def ctx():
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx = Context(tmpdir=Path(tmpdir))

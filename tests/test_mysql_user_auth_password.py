@@ -6,7 +6,7 @@ from .util import wait_port, wait_mysql_port, mysql_client_ssl_opt, mysql_client
 
 
 class Test:
-    def test(self, processes: ProcessManager, password_123_hash):
+    def test(self, processes: ProcessManager, password_123_hash, timeout):
         db_port = processes.start_mysql_server()
 
         _, wg_ports = processes.start_wg(
@@ -50,7 +50,7 @@ class Test:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
-        assert b'\ndb\n' in client.communicate(b'show schemas;', timeout=30)[0]
+        assert b'\ndb\n' in client.communicate(b'show schemas;', timeout=timeout)[0]
         assert client.returncode == 0
 
         client = processes.start(
@@ -70,5 +70,5 @@ class Test:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
-        client.communicate(b'show schemas;', timeout=30)
+        client.communicate(b'show schemas;', timeout=timeout)
         assert client.returncode != 0

@@ -7,7 +7,7 @@ from .util import create_ticket, wait_port
 
 class Test:
     def test(
-        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash
+        self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, password_123_hash, timeout
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -59,5 +59,5 @@ class Test:
             '/bin/sh',
             password='123',
         )
-        assert ssh_client.communicate(timeout=30)[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0

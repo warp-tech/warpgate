@@ -37,6 +37,7 @@ class Test:
 
         ssh_client = processes.start_ssh_client(
             'user:ssh@localhost',
+            '-v',
             '-p',
             str(wg_ports['ssh']),
             '-i',
