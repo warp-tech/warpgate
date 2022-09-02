@@ -57,6 +57,19 @@ impl russh::client::Handler for ClientHandler {
         async move { Ok((self, session)) }.boxed()
     }
 
+    fn channel_open_forwarded_tcpip(
+        self,
+        channel: russh::ChannelId,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        println!("{channel:?} {originator_address} {connected_address}");
+        async move { Ok((self, session)) }.boxed()
+    }
+
     fn check_server_key(self, server_public_key: &PublicKey) -> Self::FutureBool {
         let mut known_hosts = KnownHosts::new(&self.services.db);
         let server_public_key = server_public_key.clone();

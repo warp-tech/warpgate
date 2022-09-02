@@ -98,8 +98,8 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 pub enum RCCommand {
     Connect(TargetSSHOptions),
     Channel(Uuid, ChannelOperation),
-    // ForwardTCPIP(String, u32),
-    // CancelTCPIPForward(String, u32),
+    ForwardTCPIP(String, u32),
+    CancelTCPIPForward(String, u32),
     Disconnect,
 }
 
@@ -123,6 +123,7 @@ pub struct RemoteClient {
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
+    pending_forwards: Vec<(String, u32)>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
@@ -151,6 +152,7 @@ impl RemoteClient {
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
             pending_ops: vec![],
+            pending_forwards: vec![],
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -259,6 +261,7 @@ impl RemoteClient {
                     loop {
                         tokio::select! {
                             Some(event) = self.inner_event_rx.recv() => {
+                                debug!(event=?event, "event");
                                 match event {
                                     InnerEvent::RCCommand(cmd, reply) => {
                                         let result = self.handle_command(cmd).await;
@@ -308,30 +311,34 @@ impl RemoteClient {
 
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
         match cmd {
-            RCCommand::Connect(options) => {
-                match self.connect(options).await {
-                    Ok(_) => {
-                        self.set_state(RCState::Connected)
-                            .map_err(SshClientError::other)?;
-                        let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
-                        for (id, op) in ops {
-                            self.apply_channel_op(id, op).await?;
-                        }
-                        // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
-                        // for (address, port) in forwards {
-                        //     self.tcpip_forward(address, port).await?;
-                        // }
+            RCCommand::Connect(options) => match self.connect(options).await {
+                Ok(_) => {
+                    self.set_state(RCState::Connected)
+                        .map_err(SshClientError::other)?;
+                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                    for (id, op) in ops {
+                        self.apply_channel_op(id, op).await?;
                     }
-                    Err(e) => {
-                        debug!("Connect error: {}", e);
-                        let _ = self.tx.send(RCEvent::ConnectionError(e));
-                        self.set_disconnected();
-                        return Ok(true);
+                    let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                    for (address, port) in forwards {
+                        self.tcpip_forward(address, port).await?;
                     }
                 }
-            }
+                Err(e) => {
+                    debug!("Connect error: {}", e);
+                    let _ = self.tx.send(RCEvent::ConnectionError(e));
+                    self.set_disconnected();
+                    return Ok(true);
+                }
+            },
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op).await?;
+            }
+            RCCommand::ForwardTCPIP(address, port) => {
+                self.tcpip_forward(address, port).await?;
+            }
+            RCCommand::CancelTCPIPForward(address, port) => {
+                self.cancel_tcpip_forward(address, port).await?;
             }
             RCCommand::Disconnect => {
                 self.disconnect().await;
@@ -515,6 +522,31 @@ impl RemoteClient {
             );
         }
         Ok(())
+    }
+
+    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<bool, SshClientError> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+
+            Ok(session.tcpip_forward(address, port).await?)
+        } else {
+            self.pending_forwards.push((address, port));
+            Ok(true)
+        }
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        address: String,
+        port: u32,
+    ) -> Result<bool, SshClientError> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+            Ok(session.cancel_tcpip_forward(address, port).await?)
+        } else {
+            self.pending_forwards.retain(|x| x.0 != address || x.1 != port);
+            Ok(true)
+        }
     }
 
     async fn disconnect(&mut self) {

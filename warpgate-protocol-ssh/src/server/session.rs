@@ -485,6 +485,14 @@ impl ServerSession {
                 self._channel_x11_request(channel, request).await?;
             }
 
+            ServerHandlerEvent::TcpIpForward(address, port, reply) => {
+                let _ = reply.send(self._tcpip_forward(address, port).await?);
+            }
+
+            ServerHandlerEvent::CancelTcpIpForward(address, port, reply) => {
+                let _ = reply.send(self._cancel_tcpip_forward(address, port).await?);
+            }
+
             ServerHandlerEvent::Disconnect => (),
         }
 
@@ -1095,6 +1103,20 @@ impl ServerSession {
         Ok(())
     }
 
+    async fn _tcpip_forward(&mut self, address: String, port: u32) -> Result<bool> {
+        info!(%address, %port, "Remote port forwarding requested");
+        self.send_command_and_wait(RCCommand::ForwardTCPIP(address, port))
+            .await?;
+        Ok(true)
+    }
+
+    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> Result<bool> {
+        info!(%address, %port, "Remote port forwarding cancelled");
+        self.send_command_and_wait(RCCommand::CancelTCPIPForward(address, port))
+            .await?;
+        Ok(true)
+    }
+
     async fn _auth_publickey(
         &mut self,
         ssh_username: Secret<String>,
@@ -1403,16 +1425,6 @@ impl ServerSession {
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
         Ok(())
     }
-
-    // pub async fn _tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(%address, %port, "Remote port forwarding requested");
-    //     self.send_command(RCCommand::ForwardTCPIP(address, port));
-    // }
-
-    // pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(%address, %port, "Remote port forwarding cancelled");
-    //     self.send_command(RCCommand::CancelTCPIPForward(address, port));
-    // }
 
     pub async fn _channel_signal(
         &mut self,
