@@ -17,7 +17,7 @@ uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.2"
 mysql_common = "0.29"
 rand = "0.8"
-sha1 = "0.10.1"
+sha1 = "0.10.2"
 password-hash = { version = "0.2", features = ["std"] }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0"
