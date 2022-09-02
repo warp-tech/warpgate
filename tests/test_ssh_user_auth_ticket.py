@@ -59,5 +59,5 @@ class Test:
             '/bin/sh',
             password='123',
         )
-        assert ssh_client.communicate(timeout=10)[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=30)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0

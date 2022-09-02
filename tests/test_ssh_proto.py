@@ -69,7 +69,7 @@ class Test:
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = ssh_client.communicate(timeout=10)
+        stdout, stderr = ssh_client.communicate(timeout=30)
         assert b'stdout' == stdout
         assert stderr.endswith(b'stderr')
 
@@ -88,7 +88,7 @@ class Test:
             password='123',
         )
 
-        output = ssh_client.communicate(timeout=10)[0]
+        output = ssh_client.communicate(timeout=30)[0]
         assert b'Warpgate' in output
         assert b'Selected target:' in output
         assert b'hello\r\n' in output
@@ -163,7 +163,7 @@ class Test:
             ['expect', '-d'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode(), timeout=10)[0]
+        output = ssh_client.communicate(script.encode(), timeout=30)[0]
         assert ssh_client.returncode == 0, output
 
     def test_connection_error(

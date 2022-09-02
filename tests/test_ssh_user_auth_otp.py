@@ -49,7 +49,7 @@ class Test:
 
         script = dedent(
             f'''
-            set timeout 5
+            set timeout 25
 
             spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
@@ -68,7 +68,7 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        output, stderr = ssh_client.communicate(script.encode(), timeout=10)
+        output, stderr = ssh_client.communicate(script.encode(), timeout=30)
         assert ssh_client.returncode == 0, output + stderr
 
         script = dedent(
@@ -93,5 +93,5 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode(), timeout=10)[0]
+        output = ssh_client.communicate(script.encode(), timeout=30)[0]
         assert ssh_client.returncode != 0, output
