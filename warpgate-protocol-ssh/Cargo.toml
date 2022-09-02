@@ -23,7 +23,7 @@ sea-orm = { version = "^0.9", features = [
 ], default-features = false }
 thiserror = "1.0"
 time = "0.3"
-tokio = { version = "1.20", features = ["tracing", "signal"] }
+tokio = { version = "1.21", features = ["tracing", "signal"] }
 tracing = "0.1"
 uuid = { version = "1.0", features = ["v4"] }
 warpgate-common = { version = "*", path = "../warpgate-common" }
