@@ -47,7 +47,7 @@ class Test:
             '/bin/sh',
             password='123',
         )
-        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=10)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
         ssh_client = processes.start_ssh_client(
@@ -62,5 +62,5 @@ class Test:
             '/bin/sh',
             password='321',
         )
-        ssh_client.communicate()
+        ssh_client.communicate(timeout=10)
         assert ssh_client.returncode != 0

@@ -68,7 +68,7 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        output, stderr = ssh_client.communicate(script.encode())
+        output, stderr = ssh_client.communicate(script.encode(), timeout=10)
         assert ssh_client.returncode == 0, output + stderr
 
         script = dedent(
@@ -93,5 +93,5 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode())[0]
+        output = ssh_client.communicate(script.encode(), timeout=10)[0]
         assert ssh_client.returncode != 0, output

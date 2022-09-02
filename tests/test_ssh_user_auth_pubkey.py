@@ -47,7 +47,7 @@ class Test:
             'ls',
             '/bin/sh',
         )
-        assert ssh_client.communicate()[0] == b'/bin/sh\n'
+        assert ssh_client.communicate(timeout=10)[0] == b'/bin/sh\n'
         assert ssh_client.returncode == 0
 
         ssh_client = processes.start_ssh_client(
@@ -61,7 +61,7 @@ class Test:
             'ls',
             '/bin/sh',
         )
-        assert ssh_client.communicate()[0] == b''
+        assert ssh_client.communicate(timeout=10)[0] == b''
         assert ssh_client.returncode != 0
 
     def test_rsa(

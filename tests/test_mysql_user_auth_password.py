@@ -50,7 +50,7 @@ class Test:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
-        assert b'\ndb\n' in client.communicate(b'show schemas;')[0]
+        assert b'\ndb\n' in client.communicate(b'show schemas;', timeout=10)[0]
         assert client.returncode == 0
 
         client = processes.start(
@@ -70,5 +70,5 @@ class Test:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
-        client.communicate(b'show schemas;')
+        client.communicate(b'show schemas;', timeout=10)
         assert client.returncode != 0
