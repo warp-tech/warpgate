@@ -105,8 +105,7 @@ impl SessionStore {
 
         let services = Data::<&Services>::from_request_without_body(req).await?;
         let remote_address: &RemoteAddr = <_>::from_request_without_body(req).await?;
-        let session_storage =
-            Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
+        let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 

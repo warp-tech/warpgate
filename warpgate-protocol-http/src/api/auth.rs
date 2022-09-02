@@ -299,7 +299,7 @@ async fn get_auth_state(
         return None;
     };
 
-    let Some(state_arc) = store.get(&id) else {
+    let Some(state_arc) = store.get(id) else {
         return None;
     };
 

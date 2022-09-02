@@ -39,7 +39,7 @@ impl ServiceOutput {
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
                                 let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick)).to_string();
-                                let _ = output_tx.send(Bytes::from([&ERASE_PROGRESS_SPINNER_BUF[..], badge.as_bytes()].concat()));
+                                let _ = output_tx.send(Bytes::from([ERASE_PROGRESS_SPINNER_BUF, badge.as_bytes()].concat()));
                             }
                         }
                     }

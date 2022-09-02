@@ -185,9 +185,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let request = poem::Request::builder().uri_str("http://host/").finish();
         crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
             .await
-            .map_err(|e| {
-                TargetTestError::ConnectionError(format!("{e}"))
-            })?;
+            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 }
