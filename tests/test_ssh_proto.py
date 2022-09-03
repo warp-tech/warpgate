@@ -130,9 +130,17 @@ class Test:
             password='123',
         )
 
-        time.sleep(3)
         wait_port(local_port, recv=False)
-        response = requests.get(f'http://localhost:{local_port}')
+        for _ in range(15):
+            time.sleep(1)
+            try:
+                response = requests.get(f'http://localhost:{local_port}', timeout=5)
+            except Exception:
+                continue
+            if response.status_code == 200:
+                break
+
+        response = requests.get(f'http://localhost:{local_port}', timeout=5)
         print(response.text)
         assert response.status_code == 200
         ssh_client.kill()
