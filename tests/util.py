@@ -23,7 +23,7 @@ def alloc_port():
     return last_port
 
 
-def wait_port(port, recv=True):
+def wait_port(port, recv=True, timeout=5):
     logging.debug(f'Waiting for port {port}')
 
     data = b''
@@ -49,7 +49,7 @@ def wait_port(port, recv=True):
 
     t = threading.Thread(target=wait, daemon=True)
     t.start()
-    t.join(timeout=5)
+    t.join(timeout=timeout)
     if t.is_alive():
         raise Exception(f'Port {port} is not up')
     return data

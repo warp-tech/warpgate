@@ -118,6 +118,7 @@ class Test:
         wg_port,
     ):
         local_port = alloc_port()
+        wait_port(wg_port)
         ssh_client = processes.start_ssh_client(
             '-p',
             str(wg_port),
@@ -128,7 +129,7 @@ class Test:
             password='123',
         )
 
-        data = wait_port(local_port)
+        data = wait_port(local_port, timeout=30)
         assert b'SSH-2.0' in data
         ssh_client.kill()
 

@@ -1,8 +1,8 @@
 use std::pin::Pin;
 
 use futures::FutureExt;
-use russh::{ChannelId, Channel};
-use russh::client::{Session, Msg};
+use russh::client::{Msg, Session};
+use russh::Channel;
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
@@ -151,8 +151,6 @@ impl russh::client::Handler for ClientHandler {
         }
         .boxed()
     }
-
-
 }
 
 impl Drop for ClientHandler {
