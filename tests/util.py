@@ -23,7 +23,7 @@ def alloc_port():
     return last_port
 
 
-def wait_port(port, recv=True, timeout=5):
+def wait_port(port, recv=True, timeout=60):
     logging.debug(f'Waiting for port {port}')
 
     data = b''

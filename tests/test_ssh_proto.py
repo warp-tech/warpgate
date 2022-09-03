@@ -118,6 +118,7 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         local_port = alloc_port()
         wait_port(wg_port)
@@ -134,13 +135,13 @@ class Test:
         for _ in range(15):
             time.sleep(1)
             try:
-                response = requests.get(f'http://localhost:{local_port}', timeout=5)
+                response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
             except Exception:
                 continue
             if response.status_code == 200:
                 break
 
-        response = requests.get(f'http://localhost:{local_port}', timeout=5)
+        response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
         print(response.text)
         assert response.status_code == 200
         ssh_client.kill()
