@@ -229,7 +229,8 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
+        let state_arc = get_auth_state(&id, &services, auth.map(|x| x.0)).await;
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc).await

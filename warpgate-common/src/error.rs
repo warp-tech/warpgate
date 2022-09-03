@@ -25,6 +25,9 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state error")]
     InconsistentState,
+
+    #[error("Session end")]
+    SessionEnd,
 }
 
 impl ResponseError for WarpgateError {
