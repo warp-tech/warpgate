@@ -836,6 +836,8 @@ impl ServerSession {
 
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
 
+        let _ = self.maybe_connect_remote().await;
+
         match self
             .send_command_and_wait(RCCommand::Channel(
                 uuid,
