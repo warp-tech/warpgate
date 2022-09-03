@@ -486,11 +486,21 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::TcpIpForward(address, port, reply) => {
-                let _ = reply.send(self._tcpip_forward(address, port).await?);
+                let cmd = self._tcpip_forward(address, port).await;
+                tokio::spawn(async move {
+                    if let Ok(_) = cmd.await {
+                        let _ = reply.send(true);
+                    }
+                });
             }
 
             ServerHandlerEvent::CancelTcpIpForward(address, port, reply) => {
-                let _ = reply.send(self._cancel_tcpip_forward(address, port).await?);
+                let cmd = self._cancel_tcpip_forward(address, port).await;
+                tokio::spawn(async move {
+                    if let Ok(_) = cmd.await {
+                        let _ = reply.send(true);
+                    }
+                });
             }
 
             ServerHandlerEvent::Disconnect => (),
@@ -1121,19 +1131,15 @@ impl ServerSession {
         Ok(())
     }
 
-    async fn _tcpip_forward(&mut self, address: String, port: u32) -> Result<bool> {
+    async fn _tcpip_forward(&mut self, address: String, port: u32) -> PendingCommand {
         info!(%address, %port, "Remote port forwarding requested");
         let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::ForwardTCPIP(address, port))
-            .await?;
-        Ok(true)
     }
 
-    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> Result<bool> {
+    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> PendingCommand {
         info!(%address, %port, "Remote port forwarding cancelled");
         self.send_command_and_wait(RCCommand::CancelTCPIPForward(address, port))
-            .await?;
-        Ok(true)
     }
 
     async fn _auth_publickey(
