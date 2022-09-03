@@ -145,7 +145,7 @@ impl SessionChannel {
                         Some(msg) => {
                             warn!("unhandled channel message: {:?}", msg);
                         }
-                            None => {
+                        None => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break
                         },

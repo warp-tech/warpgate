@@ -1,7 +1,8 @@
 use std::pin::Pin;
 
 use futures::FutureExt;
-use russh::client::Session;
+use russh::{ChannelId, Channel};
+use russh::client::{Session, Msg};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
@@ -11,13 +12,13 @@ use warpgate_common::{SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::ConnectionError;
+use crate::{ConnectionError, ForwardedTcpIpParams};
 
 #[derive(Debug)]
 pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
-    // ForwardedTCPIP(ChannelId, DirectTCPIPParams),
+    ForwardedTcpIp(Channel<Msg>, ForwardedTcpIpParams),
     Disconnect,
 }
 
@@ -54,19 +55,6 @@ impl russh::client::Handler for ClientHandler {
     }
 
     fn finished(self, session: Session) -> Self::FutureUnit {
-        async move { Ok((self, session)) }.boxed()
-    }
-
-    fn channel_open_forwarded_tcpip(
-        self,
-        channel: russh::ChannelId,
-        connected_address: &str,
-        connected_port: u32,
-        originator_address: &str,
-        originator_port: u32,
-        session: Session,
-    ) -> Self::FutureUnit {
-        println!("{channel:?} {originator_address} {connected_address}");
         async move { Ok((self, session)) }.boxed()
     }
 
@@ -137,6 +125,34 @@ impl russh::client::Handler for ClientHandler {
         }
         .boxed()
     }
+
+    fn channel_open_forwarded_tcpip(
+        self,
+        channel: Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let connected_address = connected_address.to_string();
+        let originator_address = originator_address.to_string();
+        async move {
+            let _ = self.event_tx.send(ClientHandlerEvent::ForwardedTcpIp(
+                channel,
+                ForwardedTcpIpParams {
+                    connected_address,
+                    connected_port,
+                    originator_address,
+                    originator_port,
+                },
+            ));
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+
 }
 
 impl Drop for ClientHandler {

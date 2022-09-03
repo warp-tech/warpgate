@@ -711,6 +711,24 @@ impl ServerSession {
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
+            RCEvent::ForwardedTcpIp(id, params) => {
+                println!("{:?} {:?}", id, params);
+
+                if let Some(session) = &mut self.session_handle {
+                    let server_channel = session
+                        .channel_open_forwarded_tcpip(
+                            params.connected_address,
+                            params.connected_port,
+                            params.originator_address,
+                            params.originator_port,
+                        )
+                        .await?;
+
+                    self.channel_map
+                        .insert(ServerChannelId(server_channel.id()), id);
+                    self.all_channels.push(id);
+                }
+            }
         }
         Ok(())
     }
