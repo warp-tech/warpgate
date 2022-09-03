@@ -144,18 +144,29 @@ class Test:
         timeout,
     ):
         wait_port(wg_port)
-        ssh_client = processes.start_ssh_client(
+        pf_client = processes.start_ssh_client(
             '-p',
             str(wg_port),
             '-v',
             *common_args,
             '-R', '1234:neverssl.com:80',
-            'sh', '-c',
-            '"curl localhost:1234"',
+            '-N',
+            password='123',
+        )
+        time.sleep(5)
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            'curl', '-v', 'http://localhost:1234',
             password='123',
         )
         output = ssh_client.communicate(timeout=timeout)[0]
-        assert b'Warpgate' in output
+        print(output)
+        assert ssh_client.returncode == 0
+        assert b'<html>' in output
+        pf_client.kill()
 
     def test_shell(
         self,
