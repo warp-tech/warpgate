@@ -128,6 +128,7 @@ class Test:
             '-v',
             *common_args,
             '-L', f'{local_port}:neverssl.com:80',
+            '-N',
             password='123',
         )
 

@@ -19,6 +19,7 @@ pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Channel<Msg>, ForwardedTcpIpParams),
+    X11(Channel<Msg>, String, u32),
     Disconnect,
 }
 
@@ -126,7 +127,7 @@ impl russh::client::Handler for ClientHandler {
         .boxed()
     }
 
-    fn channel_open_forwarded_tcpip(
+    fn server_channel_open_forwarded_tcpip(
         self,
         channel: Channel<Msg>,
         connected_address: &str,
@@ -146,6 +147,25 @@ impl russh::client::Handler for ClientHandler {
                     originator_address,
                     originator_port,
                 },
+            ));
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn server_channel_open_x11(
+        self,
+        channel: Channel<Msg>,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let originator_address = originator_address.to_string();
+        async move {
+            let _ = self.event_tx.send(ClientHandlerEvent::X11(
+                channel,
+                originator_address,
+                originator_port,
             ));
             Ok((self, session))
         }

@@ -92,6 +92,7 @@ pub enum RCEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
+    X11(Uuid, String, u32),
 }
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
@@ -309,20 +310,15 @@ impl RemoteClient {
                     }
                     ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
                         info!("New forwarded connection: {params:?}");
-                        let id = Uuid::new_v4();
-
-                        let (tx, rx) = unbounded_channel();
-                        self.channel_pipes.lock().await.insert(id, tx);
-
-                        let session_channel =
-                            SessionChannel::new(channel, id, rx, self.tx.clone(), self.id);
-                        self.child_tasks.push(
-                            tokio::task::Builder::new()
-                                .name(&format!("SSH {} {:?} ops", self.id, id))
-                                .spawn(session_channel.run()),
-                        );
-
+                        let id = self.setup_server_initiated_channel(channel).await;
                         let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
+                    }
+                    ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
+                        info!("New X11 connection from {originator_address}:{originator_port:?}");
+                        let id = self.setup_server_initiated_channel(channel).await;
+                        let _ = self
+                            .tx
+                            .send(RCEvent::X11(id, originator_address, originator_port));
                     }
                     event => {
                         error!(?event, "Unhandled client handler event");
@@ -331,6 +327,23 @@ impl RemoteClient {
             }
         }
         Ok(false)
+    }
+
+    async fn setup_server_initiated_channel(&mut self, channel: russh::Channel<russh::client::Msg>) -> Uuid {
+        let id = Uuid::new_v4();
+
+        let (tx, rx) = unbounded_channel();
+        self.channel_pipes.lock().await.insert(id, tx);
+
+        let session_channel = SessionChannel::new(channel, id, rx, self.tx.clone(), self.id);
+
+        self.child_tasks.push(
+            tokio::task::Builder::new()
+                .name(&format!("SSH {} {:?} ops", self.id, id))
+                .spawn(session_channel.run()),
+        );
+
+        id
     }
 
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
