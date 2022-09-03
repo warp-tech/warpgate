@@ -467,7 +467,12 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn cancel_tcpip_forward(self, address: &str, port: u32, mut session: Session) -> Self::FutureBool {
+    fn cancel_tcpip_forward(
+        self,
+        address: &str,
+        port: u32,
+        mut session: Session,
+    ) -> Self::FutureBool {
         let address = address.to_string();
         async move {
             let (tx, rx) = oneshot::channel();

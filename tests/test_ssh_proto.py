@@ -1,5 +1,7 @@
+import requests
 import subprocess
 import tempfile
+import time
 import pytest
 from textwrap import dedent
 
@@ -124,14 +126,36 @@ class Test:
             str(wg_port),
             '-v',
             *common_args,
-            '-L', f'{local_port}:localhost:22',
-            'sleep', '15',
+            '-L', f'{local_port}:neverssl.com:80',
             password='123',
         )
 
-        data = wait_port(local_port, timeout=30)
-        assert b'SSH-2.0' in data
+        time.sleep(3)
+        wait_port(local_port, recv=False)
+        response = requests.get(f'http://localhost:{local_port}')
+        print(response.text)
+        assert response.status_code == 200
         ssh_client.kill()
+
+    def test_tcpip_forward(
+        self,
+        processes: ProcessManager,
+        wg_port,
+        timeout,
+    ):
+        wait_port(wg_port)
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            '-R', '1234:neverssl.com:80',
+            'sh', '-c',
+            '"curl localhost:1234"',
+            password='123',
+        )
+        output = ssh_client.communicate(timeout=timeout)[0]
+        assert b'Warpgate' in output
 
     def test_shell(
         self,

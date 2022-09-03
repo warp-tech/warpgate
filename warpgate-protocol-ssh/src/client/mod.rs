@@ -284,7 +284,7 @@ impl RemoteClient {
                     let _ = self.tx.send(RCEvent::Error(error));
                     err
                 })?;
-                debug!("No more commmands");
+                info!("Client session closed");
                 Ok::<(), anyhow::Error>(())
             }
             .instrument(Span::current()),
@@ -310,7 +310,6 @@ impl RemoteClient {
                     ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
                         info!("New forwarded connection: {params:?}");
                         let id = Uuid::new_v4();
-                        let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
 
                         let (tx, rx) = unbounded_channel();
                         self.channel_pipes.lock().await.insert(id, tx);
@@ -322,6 +321,8 @@ impl RemoteClient {
                                 .name(&format!("SSH {} {:?} ops", self.id, id))
                                 .spawn(session_channel.run()),
                         );
+
+                        let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
                     }
                     event => {
                         error!(?event, "Unhandled client handler event");

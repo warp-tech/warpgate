@@ -1123,6 +1123,7 @@ impl ServerSession {
 
     async fn _tcpip_forward(&mut self, address: String, port: u32) -> Result<bool> {
         info!(%address, %port, "Remote port forwarding requested");
+        let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::ForwardTCPIP(address, port))
             .await?;
         Ok(true)
@@ -1500,13 +1501,15 @@ impl ServerSession {
                 Ok(())
             })
             .await;
-        drop(self.session_handle.take());
+
+        self.session_handle = None;
     }
 }
 
 impl Drop for ServerSession {
     fn drop(&mut self) {
-        info!("Closed connection");
+        let _ = self.rc_abort_tx.send(());
+        info!("Closed session");
         debug!("Dropped");
     }
 }

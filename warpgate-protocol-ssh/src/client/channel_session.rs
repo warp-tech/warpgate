@@ -111,6 +111,7 @@ impl SessionChannel {
                         }
                         Some(russh::ChannelMsg::Close) => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            break;
                         },
                         Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
