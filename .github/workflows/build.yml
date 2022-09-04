@@ -4,7 +4,25 @@ on: [push, pull_request]
 
 jobs:
   Build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64-linux
+            rust_arch: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - arch: arm64-linux
+            rust_arch: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - arch: x86_64-macos
+            target: x86_64-apple-darwin
+            os: macos-latest
+          - arch: arm64-macos
+            target: aarch64-apple-darwin
+            os: macos-latest
+      fail-fast: false
+
+    runs-on: ${{matrix.os}}
+
     steps:
       - uses: actions/checkout@v2
         with:
@@ -14,7 +32,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1
         with:
-          target: x86_64-unknown-linux-gnu
+          target: ${{ matrix.target }}
           override: true
 
       - uses: Swatinem/rust-cache@v2
@@ -34,39 +52,20 @@ jobs:
           just openapi
           just yarn build
 
-      - name: Build (x86_64)
+      - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           use-cross: true
-          args: --release --target x86_64-unknown-linux-gnu -Ztarget-applies-to-host
+          args: --release --target ${{ matrix.target }} -Ztarget-applies-to-host
 
-      - name: Build (aarch64)
-        uses: actions-rs/cargo@v1
+      - name: Upload artifacts
+        uses: actions/upload-artifact@master
         with:
-          command: build
-          use-cross: true
-          args: --release --target aarch64-unknown-linux-gnu -Ztarget-applies-to-host
+          name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/warpgate
 
-      - name: Rename
-        run: |
-          mkdir dist
-          mv target/x86_64-unknown-linux-gnu/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
-          mv target/aarch64-unknown-linux-gnu/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
-
-      - uses: actions/upload-artifact@master
-        name: Upload artifacts (x86_64)
-        with:
-          name: warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
-          path: dist/warpgate-${{ env.GITHUB_REF_SLUG }}-x86_64-linux
-
-      - uses: actions/upload-artifact@master
-        name: Upload artifacts (aarch64)
-        with:
-          name: warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
-          path: dist/warpgate-${{ env.GITHUB_REF_SLUG }}-aarch64-linux
-
-      - name: Upload
+      - name: Upload release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')
         with:
