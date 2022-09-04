@@ -1,5 +1,7 @@
+import requests
 import subprocess
 import tempfile
+import time
 import pytest
 from textwrap import dedent
 
@@ -57,6 +59,7 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         ssh_client = processes.start_ssh_client(
             '-p',
@@ -69,7 +72,7 @@ class Test:
             stderr=subprocess.PIPE,
         )
 
-        stdout, stderr = ssh_client.communicate(timeout=10)
+        stdout, stderr = ssh_client.communicate(timeout=timeout)
         assert b'stdout' == stdout
         assert stderr.endswith(b'stderr')
 
@@ -77,6 +80,7 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         ssh_client = processes.start_ssh_client(
             '-p',
@@ -88,7 +92,7 @@ class Test:
             password='123',
         )
 
-        output = ssh_client.communicate()[0]
+        output = ssh_client.communicate(timeout=timeout)[0]
         assert b'Warpgate' in output
         assert b'Selected target:' in output
         assert b'hello\r\n' in output
@@ -114,30 +118,75 @@ class Test:
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         local_port = alloc_port()
+        wait_port(wg_port)
         ssh_client = processes.start_ssh_client(
             '-p',
             str(wg_port),
             '-v',
             *common_args,
-            '-L', f'{local_port}:localhost:22',
-            'sleep', '15',
+            '-L', f'{local_port}:neverssl.com:80',
+            '-N',
             password='123',
         )
 
-        data = wait_port(local_port)
-        assert b'SSH-2.0' in data
+        wait_port(local_port, recv=False)
+        for _ in range(15):
+            time.sleep(1)
+            try:
+                response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
+            except Exception:
+                continue
+            if response.status_code == 200:
+                break
+
+        response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
+        print(response.text)
+        assert response.status_code == 200
         ssh_client.kill()
+
+    def test_tcpip_forward(
+        self,
+        processes: ProcessManager,
+        wg_port,
+        timeout,
+    ):
+        wait_port(wg_port)
+        pf_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            '-R', '1234:neverssl.com:80',
+            '-N',
+            password='123',
+        )
+        time.sleep(5)
+        ssh_client = processes.start_ssh_client(
+            '-p',
+            str(wg_port),
+            '-v',
+            *common_args,
+            'curl', '-v', 'http://localhost:1234',
+            password='123',
+        )
+        output = ssh_client.communicate(timeout=timeout)[0]
+        print(output)
+        assert ssh_client.returncode == 0
+        assert b'<html>' in output
+        pf_client.kill()
 
     def test_shell(
         self,
         processes: ProcessManager,
         wg_port,
+        timeout,
     ):
         script = dedent(
             f'''
-            set timeout 10
+            set timeout {timeout - 5}
 
             spawn ssh -tt user:ssh@localhost -p {wg_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password
 
@@ -163,7 +212,7 @@ class Test:
             ['expect', '-d'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode())[0]
+        output = ssh_client.communicate(script.encode(), timeout=timeout)[0]
         assert ssh_client.returncode == 0, output
 
     def test_connection_error(

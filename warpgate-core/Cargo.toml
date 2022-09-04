@@ -1,0 +1,52 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-core"
+version = "0.5.0"
+
+[dependencies]
+warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
+warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
+
+anyhow = "1.0"
+argon2 = "0.4"
+async-trait = "0.1"
+bytes = "1.2"
+chrono = { version = "0.4", features = ["serde"] }
+data-encoding = "2.3"
+humantime-serde = "1.1"
+lazy_static = "1.4"
+futures = "0.3"
+once_cell = "1.14"
+packet = "0.1"
+password-hash = "0.4"
+poem = { version = "^1.3.37", features = ["rustls"] }
+poem-openapi = { version = "^2.0.6", features = [
+    "swagger-ui",
+    "chrono",
+    "uuid",
+    "static-files",
+] }
+rand = "0.8"
+rand_chacha = "0.3"
+rand_core = { version = "0.6", features = ["std"] }
+sea-orm = { version = "^0.9", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-native-tls",
+    "macros",
+], default-features = false }
+serde = "1.0"
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.20", features = ["tracing"] }
+totp-rs = { version = "3.0", features = ["otpauth"] }
+tracing = "0.1"
+tracing-core = "0.1"
+tracing-subscriber = "0.3"
+url = "2.2"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+warpgate-sso = { version = "*", path = "../warpgate-sso" }
+rustls = { version = "0.20", features = ["dangerous_configuration"] }
+rustls-pemfile = "1.0"
+webpki = "0.22"

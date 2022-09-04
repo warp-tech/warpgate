@@ -6,13 +6,18 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HTTPConfig, ListenEndpoint, MySQLConfig, Role, SSHConfig, Secret, Services, Target,
-    TargetOptions, TargetWebAdminOptions, User, UserAuthCredential, WarpgateConfigStore,
+    HTTPConfig, ListenEndpoint, MySQLConfig, SSHConfig, Secret, UserAuthCredential,
+    UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
 };
+use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
+use warpgate_core::Services;
+use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use crate::config::load_config;
 
@@ -71,9 +76,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let theme = ColorfulTheme::default();
     let mut store = WarpgateConfigStore {
-        roles: vec![Role {
-            name: "warpgate:admin".to_owned(),
-        }],
         http: HTTPConfig {
             enable: true,
             ..Default::default()
@@ -154,14 +156,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     }
 
-    if store.http.enable {
-        store.targets.push(Target {
-            name: "Web admin".to_owned(),
-            allow_roles: vec!["warpgate:admin".to_owned()],
-            options: TargetOptions::WebAdmin(TargetWebAdminOptions {}),
-        });
-    }
-
     store.http.certificate = PathBuf::from(&data_path)
         .join("tls.certificate.pem")
         .to_string_lossy()
@@ -195,18 +189,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    let password = dialoguer::Password::with_theme(&theme)
+    let admin_password = dialoguer::Password::with_theme(&theme)
         .with_prompt("Set a password for the Warpgate admin user")
         .interact()?;
-
-    store.users.push(User {
-        username: "admin".into(),
-        credentials: vec![UserAuthCredential::Password {
-            hash: Secret::new(hash_password(&password)),
-        }],
-        require: None,
-        roles: vec!["warpgate:admin".into()],
-    });
 
     // ---
 
@@ -218,9 +203,60 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("Saved into {}", cli.config.display());
 
     let config = load_config(&cli.config, true)?;
-    Services::new(config.clone()).await?;
+    let services = Services::new(config.clone()).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
+
+    {
+        let db = services.db.lock().await;
+
+        let admin_role = Role::Entity::find()
+            .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
+            .all(&*db)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Database inconsistent: no admin role"))?;
+
+        let admin_user = match User::Entity::find()
+            .filter(User::Column::Username.eq(BUILTIN_ADMIN_USERNAME))
+            .all(&*db)
+            .await?
+            .first()
+        {
+            Some(x) => x.to_owned(),
+            None => {
+                let values = User::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
+                    credentials: Set(serde_json::to_value(vec![UserAuthCredential::Password(
+                        UserPasswordCredential {
+                            hash: Secret::new(hash_password(&admin_password)),
+                        },
+                    )])?),
+                    credential_policy: Set(serde_json::to_value(
+                        None::<UserRequireCredentialsPolicy>,
+                    )?),
+                };
+                values.insert(&*db).await.map_err(WarpgateError::from)?
+            }
+        };
+
+        if UserRoleAssignment::Entity::find()
+            .filter(UserRoleAssignment::Column::UserId.eq(admin_user.id))
+            .filter(UserRoleAssignment::Column::RoleId.eq(admin_role.id))
+            .all(&*db)
+            .await?
+            .is_empty()
+        {
+            let values = UserRoleAssignment::ActiveModel {
+                user_id: Set(admin_user.id),
+                role_id: Set(admin_role.id),
+                ..Default::default()
+            };
+            values.insert(&*db).await.map_err(WarpgateError::from)?;
+        }
+    }
 
     {
         info!("Generating a TLS certificate");

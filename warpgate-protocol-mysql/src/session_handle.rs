@@ -1,5 +1,5 @@
 use tokio::sync::mpsc;
-use warpgate_common::SessionHandle;
+use warpgate_core::SessionHandle;
 
 pub struct MySqlSessionHandle {
     abort_tx: mpsc::UnboundedSender<()>,

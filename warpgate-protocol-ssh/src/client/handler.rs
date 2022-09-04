@@ -1,22 +1,25 @@
 use std::pin::Pin;
 
 use futures::FutureExt;
-use russh::client::Session;
+use russh::client::{Msg, Session};
+use russh::Channel;
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SessionId, TargetSSHOptions};
+use warpgate_core::Services;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::ConnectionError;
+use crate::{ConnectionError, ForwardedTcpIpParams};
 
 #[derive(Debug)]
 pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
-    // ForwardedTCPIP(ChannelId, DirectTCPIPParams),
+    ForwardedTcpIp(Channel<Msg>, ForwardedTcpIpParams),
+    X11(Channel<Msg>, String, u32),
     Disconnect,
 }
 
@@ -120,6 +123,51 @@ impl russh::client::Handler for ClientHandler {
                     Err(ClientHandlerError::Internal)
                 }
             }
+        }
+        .boxed()
+    }
+
+    fn server_channel_open_forwarded_tcpip(
+        self,
+        channel: Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let connected_address = connected_address.to_string();
+        let originator_address = originator_address.to_string();
+        async move {
+            let _ = self.event_tx.send(ClientHandlerEvent::ForwardedTcpIp(
+                channel,
+                ForwardedTcpIpParams {
+                    connected_address,
+                    connected_port,
+                    originator_address,
+                    originator_port,
+                },
+            ));
+            Ok((self, session))
+        }
+        .boxed()
+    }
+
+    fn server_channel_open_x11(
+        self,
+        channel: Channel<Msg>,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        let originator_address = originator_address.to_string();
+        async move {
+            let _ = self.event_tx.send(ClientHandlerEvent::X11(
+                channel,
+                originator_address,
+                originator_port,
+            ));
+            Ok((self, session))
         }
         .boxed()
     }

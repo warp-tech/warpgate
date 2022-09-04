@@ -17,14 +17,9 @@ jobs:
           target: x86_64-unknown-linux-gnu
           override: true
 
-      - name: Cache
-        uses: actions/cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: "test"
 
       - name: Install just
         run: |

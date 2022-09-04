@@ -1,7 +1,8 @@
 <script lang="ts">
 import { api, Recording } from 'admin/lib/api'
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
 export let params = { id: '' }
 
@@ -28,7 +29,7 @@ load().catch(e => {
 </div>
 
 {#if !recording && !error}
-<Spinner />
+    <DelayedSpinner />
 {/if}
 
 {#if error}

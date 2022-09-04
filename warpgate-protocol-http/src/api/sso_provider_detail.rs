@@ -5,7 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use warpgate_common::Services;
+use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
 pub struct Api;

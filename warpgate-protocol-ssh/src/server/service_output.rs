@@ -2,12 +2,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use ansi_term::Colour;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
-pub const ERASE_PROGRESS_SPINNER_BUF: Bytes = Bytes::from_static(ERASE_PROGRESS_SPINNER.as_bytes());
-pub const LINEBREAK: Bytes = Bytes::from_static("\n".as_bytes());
+pub const ERASE_PROGRESS_SPINNER_BUF: &[u8] = ERASE_PROGRESS_SPINNER.as_bytes();
+pub const LINEBREAK: &[u8] = "\n".as_bytes();
 
 #[derive(Clone)]
 pub struct ServiceOutput {
@@ -39,7 +39,7 @@ impl ServiceOutput {
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
                                 let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick)).to_string();
-                                let _ = output_tx.send(BytesMut::from([&ERASE_PROGRESS_SPINNER_BUF[..], badge.as_bytes()].concat().as_slice()).freeze());
+                                let _ = output_tx.send(Bytes::from([ERASE_PROGRESS_SPINNER_BUF, badge.as_bytes()].concat()));
                             }
                         }
                     }
@@ -62,15 +62,15 @@ impl ServiceOutput {
     pub async fn hide_progress(&mut self) {
         self.progress_visible
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.emit_output(ERASE_PROGRESS_SPINNER_BUF);
-        self.emit_output(LINEBREAK);
+        self.emit_output(Bytes::from_static(ERASE_PROGRESS_SPINNER_BUF));
+        self.emit_output(Bytes::from_static(LINEBREAK));
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
         self.output_tx.subscribe()
     }
 
-    fn emit_output(&mut self, output: Bytes) {
+    pub fn emit_output(&mut self, output: Bytes) {
         let _ = self.output_tx.send(output);
     }
 }

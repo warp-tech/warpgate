@@ -1,221 +1,66 @@
-use std::collections::HashMap;
-use std::net::ToSocketAddrs;
+mod defaults;
+mod target;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
-use poem_openapi::{Enum, Object, Union};
+use defaults::*;
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
+pub use target::*;
 use url::Url;
+use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
 
 use crate::auth::CredentialKind;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
-const fn _default_true() -> bool {
-    true
-}
-
-const fn _default_false() -> bool {
-    false
-}
-
-const fn _default_ssh_port() -> u16 {
-    22
-}
-
-const fn _default_mysql_port() -> u16 {
-    3306
-}
-
-#[inline]
-fn _default_username() -> String {
-    "root".to_owned()
-}
-
-#[inline]
-fn _default_empty_string() -> String {
-    "".to_owned()
-}
-
-#[inline]
-fn _default_recordings_path() -> String {
-    "./data/recordings".to_owned()
-}
-
-#[inline]
-fn _default_database_url() -> Secret<String> {
-    Secret::new("sqlite:data/db".to_owned())
-}
-
-#[inline]
-fn _default_http_listen() -> ListenEndpoint {
-    #[allow(clippy::unwrap_used)]
-    ListenEndpoint("0.0.0.0:8888".to_socket_addrs().unwrap().next().unwrap())
-}
-
-#[inline]
-fn _default_mysql_listen() -> ListenEndpoint {
-    #[allow(clippy::unwrap_used)]
-    ListenEndpoint("0.0.0.0:33306".to_socket_addrs().unwrap().next().unwrap())
-}
-
-#[inline]
-fn _default_retention() -> Duration {
-    Duration::SECOND * 60 * 60 * 24 * 7
-}
-
-#[inline]
-fn _default_empty_vec<T>() -> Vec<T> {
-    vec![]
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
-pub struct TargetSSHOptions {
-    pub host: String,
-    #[serde(default = "_default_ssh_port")]
-    pub port: u16,
-    #[serde(default = "_default_username")]
-    pub username: String,
-    #[serde(default)]
-    #[oai(skip)]
-    pub auth: SSHTargetAuth,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum SSHTargetAuth {
-    #[serde(rename = "password")]
-    Password { password: Secret<String> },
-    #[serde(rename = "publickey")]
-    PublicKey,
-}
-
-impl Default for SSHTargetAuth {
-    fn default() -> Self {
-        SSHTargetAuth::PublicKey
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
-pub struct TargetHTTPOptions {
-    #[serde(default = "_default_empty_string")]
-    pub url: String,
-
-    #[serde(default)]
-    pub tls: Tls,
-
-    #[serde(default)]
-    pub headers: Option<HashMap<String, String>>,
-
-    #[serde(default)]
-    pub external_host: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq, Default)]
-pub enum TlsMode {
-    #[serde(rename = "disabled")]
-    Disabled,
-    #[serde(rename = "preferred")]
-    #[default]
-    Preferred,
-    #[serde(rename = "required")]
-    Required,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
-pub struct Tls {
-    #[serde(default)]
-    pub mode: TlsMode,
-
-    #[serde(default = "_default_true")]
-    pub verify: bool,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for Tls {
-    fn default() -> Self {
-        Self {
-            mode: TlsMode::default(),
-            verify: false,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
-pub struct TargetMySqlOptions {
-    #[serde(default = "_default_empty_string")]
-    pub host: String,
-
-    #[serde(default = "_default_mysql_port")]
-    pub port: u16,
-
-    #[serde(default = "_default_username")]
-    pub username: String,
-
-    #[serde(default)]
-    pub password: Option<String>,
-
-    #[serde(default)]
-    pub tls: Tls,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct TargetWebAdminOptions {}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
-pub struct Target {
-    pub name: String,
-    #[serde(default = "_default_empty_vec")]
-    pub allow_roles: Vec<String>,
-    #[serde(flatten)]
-    pub options: TargetOptions,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Union)]
-#[oai(discriminator_name = "kind", one_of)]
-pub enum TargetOptions {
-    #[serde(rename = "ssh")]
-    Ssh(TargetSSHOptions),
-    #[serde(rename = "http")]
-    Http(TargetHTTPOptions),
-    #[serde(rename = "mysql")]
-    MySql(TargetMySqlOptions),
-    #[serde(rename = "web_admin")]
-    WebAdmin(TargetWebAdminOptions),
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
 #[serde(tag = "type")]
+#[oai(discriminator_name = "kind", one_of)]
 pub enum UserAuthCredential {
     #[serde(rename = "password")]
-    Password { hash: Secret<String> },
+    Password(UserPasswordCredential),
     #[serde(rename = "publickey")]
-    PublicKey { key: Secret<String> },
+    PublicKey(UserPublicKeyCredential),
     #[serde(rename = "otp")]
-    Totp {
-        #[serde(with = "crate::helpers::serde_base64_secret")]
-        key: OtpSecretKey,
-    },
+    Totp(UserTotpCredential),
     #[serde(rename = "sso")]
-    Sso {
-        provider: Option<String>,
-        email: String,
-    },
+    Sso(UserSsoCredential),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserPasswordCredential {
+    pub hash: Secret<String>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserPublicKeyCredential {
+    pub key: Secret<String>,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserTotpCredential {
+    #[serde(with = "crate::helpers::serde_base64_secret")]
+    pub key: OtpSecretKey,
+}
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserSsoCredential {
+    pub provider: Option<String>,
+    pub email: String,
 }
 
 impl UserAuthCredential {
     pub fn kind(&self) -> CredentialKind {
         match self {
-            Self::Password { .. } => CredentialKind::Password,
-            Self::PublicKey { .. } => CredentialKind::PublicKey,
-            Self::Totp { .. } => CredentialKind::Otp,
-            Self::Sso { .. } => CredentialKind::Sso,
+            Self::Password(_) => CredentialKind::Password,
+            Self::PublicKey(_) => CredentialKind::PublicKey,
+            Self::Totp(_) => CredentialKind::Totp,
+            Self::Sso(_) => CredentialKind::Sso,
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Vec<CredentialKind>>,
@@ -225,27 +70,22 @@ pub struct UserRequireCredentialsPolicy {
     pub mysql: Option<Vec<CredentialKind>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct User {
+    #[serde(default)]
+    pub id: Uuid,
     pub username: String,
     pub credentials: Vec<UserAuthCredential>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub require: Option<UserRequireCredentialsPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
+    pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub roles: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
+    #[serde(default)]
+    pub id: Uuid,
     pub name: String,
-}
-
-fn _default_ssh_listen() -> ListenEndpoint {
-    #[allow(clippy::unwrap_used)]
-    ListenEndpoint("0.0.0.0:2222".to_socket_addrs().unwrap().next().unwrap())
-}
-
-fn _default_ssh_keys_path() -> String {
-    "./data/keys".to_owned()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy)]
@@ -330,7 +170,7 @@ impl Default for MySQLConfig {
     fn default() -> Self {
         MySQLConfig {
             enable: false,
-            listen: _default_http_listen(),
+            listen: _default_mysql_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -373,10 +213,27 @@ impl Default for LogConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
+pub enum ConfigProviderKind {
+    #[serde(rename = "file")]
+    File,
+    #[serde(rename = "database")]
+    #[default]
+    Database,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateConfigStore {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<Target>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub users: Vec<User>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<Role>,
 
     #[serde(default)]
@@ -402,6 +259,9 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
+
+    #[serde(default)]
+    pub config_provider: ConfigProviderKind,
 }
 
 impl Default for WarpgateConfigStore {
@@ -411,13 +271,14 @@ impl Default for WarpgateConfigStore {
             users: vec![],
             roles: vec![],
             sso_providers: vec![],
-            recordings: RecordingsConfig::default(),
+            recordings: <_>::default(),
             external_host: None,
             database_url: _default_database_url(),
-            ssh: SSHConfig::default(),
-            http: HTTPConfig::default(),
-            mysql: MySQLConfig::default(),
-            log: LogConfig::default(),
+            ssh: <_>::default(),
+            http: <_>::default(),
+            mysql: <_>::default(),
+            log: <_>::default(),
+            config_provider: <_>::default(),
         }
     }
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use russh::client::Msg;
 use russh::Channel;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -106,11 +106,12 @@ impl SessionChannel {
                             debug!("channel data: {bytes:?}");
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
-                                Bytes::from(BytesMut::from(bytes)),
+                                Bytes::from(bytes.to_vec()),
                             )).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            break;
                         },
                         Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
@@ -138,14 +139,14 @@ impl SessionChannel {
                             let data: &[u8] = &data;
                             self.events_tx.send(RCEvent::ExtendedData {
                                 channel: self.channel_id,
-                                data: Bytes::from(BytesMut::from(data)),
+                                data: Bytes::from(data.to_vec()),
                                 ext,
                             }).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(msg) => {
                             warn!("unhandled channel message: {:?}", msg);
                         }
-                            None => {
+                        None => {
                             self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break
                         },

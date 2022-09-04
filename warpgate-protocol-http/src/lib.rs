@@ -30,9 +30,9 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{
-    ProtocolServer, Services, Target, TargetOptions, TargetTestError, TlsCertificateAndPrivateKey,
-    TlsCertificateBundle, TlsPrivateKey,
+    Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
+use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
 
 use crate::common::{
@@ -185,9 +185,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let request = poem::Request::builder().uri_str("http://host/").finish();
         crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
             .await
-            .map_err(|e| {
-                return TargetTestError::ConnectionError(format!("{e}"));
-            })?;
+            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 }

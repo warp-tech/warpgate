@@ -5,6 +5,7 @@ members = [
     "warpgate",
     "warpgate-admin",
     "warpgate-common",
+    "warpgate-core",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",

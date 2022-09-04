@@ -2,7 +2,7 @@ use http::StatusCode;
 use poem::IntoResponse;
 
 pub fn error_page(e: poem::Error) -> impl IntoResponse {
-    return poem::web::Html(format!(
+    poem::web::Html(format!(
         r#"<!DOCTYPE html>
         <style>
             body {{
@@ -24,5 +24,5 @@ pub fn error_page(e: poem::Error) -> impl IntoResponse {
             <p>{e}</p>
         </main>
         "#
-    )).with_status(StatusCode::BAD_GATEWAY);
+    )).with_status(StatusCode::BAD_GATEWAY)
 }

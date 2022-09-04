@@ -4,7 +4,7 @@ use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
-use warpgate_common::Services;
+use warpgate_core::Services;
 
 use crate::common::{SessionAuthorization, SessionExt};
 

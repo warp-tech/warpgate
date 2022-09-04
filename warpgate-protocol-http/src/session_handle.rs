@@ -6,11 +6,11 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::{FromRequest, Request, RequestBody};
 use tokio::sync::{mpsc, Mutex};
-use warpgate_common::{SessionHandle, WarpgateServerHandle};
+use warpgate_core::{SessionHandle, WarpgateServerHandle};
 
 use crate::session::SessionStore;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionHandleCommand {
     Close,
 }
@@ -47,7 +47,7 @@ impl std::ops::Deref for WarpgateServerHandleFromRequest {
 impl<'a> FromRequest<'a> for WarpgateServerHandleFromRequest {
     async fn from_request(req: &'a Request, _: &mut RequestBody) -> poem::Result<Self> {
         let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
-        let session: &Session = <_>::from_request_without_body(&req).await?;
+        let session: &Session = <_>::from_request_without_body(req).await?;
         Ok(sm
             .lock()
             .await

@@ -3,7 +3,8 @@ use poem::session::Session;
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
-use warpgate_common::{authorize_ticket, Secret, Services};
+use warpgate_common::Secret;
+use warpgate_core::{authorize_ticket, consume_ticket, Services};
 
 use crate::common::SessionExt;
 
@@ -64,9 +65,8 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
 
                 if let Some(ticket_model) = {
                     let ticket = Secret::new(ticket);
-                    let mut cp = services.config_provider.lock().await;
                     if let Some(res) = authorize_ticket(&services.db, &ticket).await? {
-                        cp.consume_ticket(&res.id).await?;
+                        consume_ticket(&services.db, &res.id).await?;
                         Some(res)
                     } else {
                         None

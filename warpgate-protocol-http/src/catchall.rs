@@ -7,7 +7,8 @@ use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::{Services, Target, TargetHTTPOptions, TargetOptions, WarpgateServerHandle};
+use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
+use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::common::{SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
@@ -31,7 +32,8 @@ pub async fn catchall_endpoint(
     services: Data<&Services>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
-    let Some((target, options)) = get_target_for_request(req, services.0).await? else {
+    let target_and_options = get_target_for_request(req, services.0).await?;
+    let Some((target, options)) = target_and_options else {
         return Ok(target_select_redirect());
     };
 
@@ -68,18 +70,17 @@ async fn get_target_for_request(
 
     let host_based_target_name = if let Some(host) = req.original_uri().host() {
         services
-            .config
+            .config_provider
             .lock()
             .await
-            .store
-            .targets
+            .list_targets()
+            .await?
             .iter()
             .filter_map(|t| match t.options {
                 TargetOptions::Http(ref options) => Some((t, options)),
                 _ => None,
             })
-            .filter(|(_, o)| o.external_host.as_deref() == Some(host))
-            .next()
+            .find(|(_, o)| o.external_host.as_deref() == Some(host))
             .map(|(t, _)| t.name.clone())
     } else {
         None
@@ -105,11 +106,11 @@ async fn get_target_for_request(
     if let Some(target_name) = selected_target_name {
         let target = {
             services
-                .config
+                .config_provider
                 .lock()
                 .await
-                .store
-                .targets
+                .list_targets()
+                .await?
                 .iter()
                 .filter(|t| t.name == target_name)
                 .filter_map(|t| match t.options {
@@ -126,7 +127,7 @@ async fn get_target_for_request(
                     .config_provider
                     .lock()
                     .await
-                    .authorize_target(&auth.username(), &target.0.name)
+                    .authorize_target(auth.username(), &target.0.name)
                     .await?
             {
                 return Ok(None);
@@ -136,5 +137,5 @@ async fn get_target_for_request(
         }
     }
 
-    return Ok(None);
+    Ok(None)
 }

@@ -1,8 +1,9 @@
 <script lang="ts">
-import { Alert, Spinner } from 'sveltestrap'
+import { Alert } from 'sveltestrap'
 
 import { api, ApiAuthState, AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
+import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
 export let params: { stateId: string }
 let authState: AuthStateResponseInternal
@@ -27,7 +28,7 @@ async function reject () {
 </script>
 
 {#await init()}
-    <Spinner />
+    <DelayedSpinner />
 {:then}
     <div class="page-summary-bar">
         <h1>Authorization request</h1>

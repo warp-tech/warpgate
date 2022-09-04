@@ -1,3 +1,4 @@
+mod channel_writer;
 mod russh_handler;
 mod service_output;
 mod session;
@@ -12,8 +13,9 @@ pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
-use warpgate_common::{Services, SessionStateInit};
+use warpgate_core::{Services, SessionStateInit};
 
 use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
@@ -63,18 +65,29 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let id = server_handle.lock().await.id();
 
-        let session =
-            match ServerSession::new(remote_address, &services, server_handle, session_handle_rx)
-                .await
-            {
-                Ok(session) => session,
-                Err(error) => {
-                    error!(%error, "Error setting up session");
-                    continue;
-                }
-            };
+        let (event_tx, event_rx) = unbounded_channel();
 
-        let handler = ServerHandler { id, session };
+        let handler = ServerHandler { id, event_tx };
+
+        let session = match ServerSession::start(
+            remote_address,
+            &services,
+            server_handle,
+            session_handle_rx,
+            event_rx,
+        )
+        .await
+        {
+            Ok(session) => session,
+            Err(error) => {
+                error!(%error, "Error setting up session");
+                continue;
+            }
+        };
+
+        tokio::task::Builder::new()
+            .name(&format!("SSH {id} session"))
+            .spawn(session);
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} protocol"))

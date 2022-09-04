@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;
@@ -32,12 +32,7 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
         paths_relative_to: path.parent().context("FS root reached")?.to_path_buf(),
     };
 
-    info!(
-        "Using config: {path:?} (users: {}, targets: {}, roles: {})",
-        config.store.users.len(),
-        config.store.targets.len(),
-        config.store.roles.len(),
-    );
+    info!("Using config: {path:?}");
     Ok(config)
 }
 
@@ -82,10 +77,9 @@ pub fn watch_config<P: AsRef<Path> + Send + 'static>(
     config: Arc<Mutex<WarpgateConfig>>,
 ) -> Result<broadcast::Receiver<()>> {
     let (tx, mut rx) = mpsc::channel(16);
-    let mut watcher = RecommendedWatcher::new(move |res| {
+    let mut watcher = recommended_watcher(move |res| {
         let _ = tx.blocking_send(res);
     })?;
-    watcher.configure(notify::Config::PreciseEvents(true))?;
     watcher.watch(path.as_ref(), RecursiveMode::NonRecursive)?;
 
     let path = PathBuf::from(path.as_ref());

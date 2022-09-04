@@ -17,10 +17,8 @@ pub use keys::*;
 use russh_keys::PublicKeyBase64;
 pub use server::run_server;
 use uuid::Uuid;
-use warpgate_common::{
-    ProtocolName, ProtocolServer, Services, SshHostKeyVerificationMode, Target, TargetOptions,
-    TargetTestError,
-};
+use warpgate_common::{ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions};
+use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
 use crate::client::{RCCommand, RemoteClient};
 

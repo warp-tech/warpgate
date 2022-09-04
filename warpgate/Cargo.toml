@@ -18,16 +18,21 @@ data-encoding = "2.3"
 dhat = {version = "0.3", optional = true}
 dialoguer = "0.10"
 futures = "0.3"
-notify = "^5.0.0-beta.1"
+notify = "^5.0.0"
 qrcode = "0.12"
 rcgen = {version = "0.9", features = ["zeroize"]}
+serde_json = "1.0"
 serde_yaml = "0.8.23"
+sea-orm = { version = "^0.9", default-features = false }
 time = "0.3"
 tokio = {version = "1.20", features = ["tracing", "signal", "macros"]}
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "local-time"]}
+uuid = "1.0"
 warpgate-admin = {version = "*", path = "../warpgate-admin"}
 warpgate-common = {version = "*", path = "../warpgate-common"}
+warpgate-core = {version = "*", path = "../warpgate-core"}
+warpgate-db-entities = {version = "*", path = "../warpgate-db-entities"}
 warpgate-protocol-http = {version = "*", path = "../warpgate-protocol-http"}
 warpgate-protocol-mysql = {version = "*", path = "../warpgate-protocol-mysql"}
 warpgate-protocol-ssh = {version = "*", path = "../warpgate-protocol-ssh"}

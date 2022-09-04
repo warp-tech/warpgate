@@ -8,13 +8,20 @@ export let disabled = false
 export let outline = false
 export let type = 'submit'
 let busy = false
+let spinnerVisible = false
 
 async function _click () {
     busy = true
+    setTimeout(() => {
+        if (busy) {
+            spinnerVisible = true
+        }
+    }, 500)
     try {
         await click()
     } finally {
         busy = false
+        spinnerVisible = false
     }
 }
 
@@ -29,7 +36,7 @@ async function _click () {
     disabled={disabled || busy}
 >
     <slot />
-    {#if busy}
+    {#if spinnerVisible}
         <Spinner size="sm" />
     {/if}
 </Button>

@@ -14,6 +14,7 @@ class Test:
         wg_c_ed25519_pubkey: Path,
         otp_key_base32: str,
         otp_key_base64: str,
+        timeout,
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -49,7 +50,7 @@ class Test:
 
         script = dedent(
             f'''
-            set timeout 10
+            set timeout {timeout - 5}
 
             spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
@@ -68,12 +69,12 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        output, stderr = ssh_client.communicate(script.encode())
+        output, stderr = ssh_client.communicate(script.encode(), timeout=timeout)
         assert ssh_client.returncode == 0, output + stderr
 
         script = dedent(
             f'''
-            set timeout 10
+            set timeout {timeout - 5}
 
             spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
@@ -93,5 +94,5 @@ class Test:
             ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
 
-        output = ssh_client.communicate(script.encode())[0]
+        output = ssh_client.communicate(script.encode(), timeout=timeout)[0]
         assert ssh_client.returncode != 0, output

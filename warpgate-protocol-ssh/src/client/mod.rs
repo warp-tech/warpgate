@@ -22,13 +22,15 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::{SSHTargetAuth, Services, SessionId, TargetSSHOptions};
+use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
+use warpgate_core::Services;
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
 use crate::helpers::PublicKeyAsOpenSSH;
 use crate::keys::load_client_keys;
+use crate::ForwardedTcpIpParams;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -89,6 +91,8 @@ pub enum RCEvent {
     Done,
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
+    X11(Uuid, String, u32),
 }
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
@@ -97,8 +101,8 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 pub enum RCCommand {
     Connect(TargetSSHOptions),
     Channel(Uuid, ChannelOperation),
-    // ForwardTCPIP(String, u32),
-    // CancelTCPIPForward(String, u32),
+    ForwardTCPIP(String, u32),
+    CancelTCPIPForward(String, u32),
     Disconnect,
 }
 
@@ -122,6 +126,7 @@ pub struct RemoteClient {
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
+    pending_forwards: Vec<(String, u32)>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
@@ -150,6 +155,7 @@ impl RemoteClient {
             session: None,
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
             pending_ops: vec![],
+            pending_forwards: vec![],
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -258,28 +264,9 @@ impl RemoteClient {
                     loop {
                         tokio::select! {
                             Some(event) = self.inner_event_rx.recv() => {
-                                match event {
-                                    InnerEvent::RCCommand(cmd, reply) => {
-                                        let result = self.handle_command(cmd).await;
-                                        let brk = matches!(result, Ok(true));
-                                        if let Some(reply) = reply {
-                                            let _ = reply.send(result.map(|_| ()));
-                                        }
-                                        if brk {
-                                            break
-                                        }
-                                    }
-                                    InnerEvent::ClientHandlerEvent(client_event) => {
-                                        debug!("Client handler event: {:?}", client_event);
-                                        match client_event {
-                                            ClientHandlerEvent::Disconnect => {
-                                                self._on_disconnect().await?;
-                                            }
-                                            event => {
-                                                error!(?event, "Unhandled client handler event");
-                                            },
-                                        }
-                                    }
+                                debug!(event=?event, "event");
+                                if self.handle_event(event).await? {
+                                    break
                                 }
                             }
                             Some(_) = self.abort_rx.recv() => {
@@ -298,39 +285,97 @@ impl RemoteClient {
                     let _ = self.tx.send(RCEvent::Error(error));
                     err
                 })?;
-                debug!("No more commmands");
+                info!("Client session closed");
                 Ok::<(), anyhow::Error>(())
             }
             .instrument(Span::current()),
         );
     }
 
-    async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
-        match cmd {
-            RCCommand::Connect(options) => {
-                match self.connect(options).await {
-                    Ok(_) => {
-                        self.set_state(RCState::Connected)
-                            .map_err(SshClientError::other)?;
-                        let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
-                        for (id, op) in ops {
-                            self.apply_channel_op(id, op).await?;
-                        }
-                        // let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
-                        // for (address, port) in forwards {
-                        //     self.tcpip_forward(address, port).await?;
-                        // }
+    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
+        match event {
+            InnerEvent::RCCommand(cmd, reply) => {
+                let result = self.handle_command(cmd).await;
+                let brk = matches!(result, Ok(true));
+                if let Some(reply) = reply {
+                    let _ = reply.send(result.map(|_| ()));
+                }
+                return Ok(brk);
+            }
+            InnerEvent::ClientHandlerEvent(client_event) => {
+                debug!("Client handler event: {:?}", client_event);
+                match client_event {
+                    ClientHandlerEvent::Disconnect => {
+                        self._on_disconnect().await?;
                     }
-                    Err(e) => {
-                        debug!("Connect error: {}", e);
-                        let _ = self.tx.send(RCEvent::ConnectionError(e));
-                        self.set_disconnected();
-                        return Ok(true);
+                    ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
+                        info!("New forwarded connection: {params:?}");
+                        let id = self.setup_server_initiated_channel(channel).await;
+                        let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
+                    }
+                    ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
+                        info!("New X11 connection from {originator_address}:{originator_port:?}");
+                        let id = self.setup_server_initiated_channel(channel).await;
+                        let _ = self
+                            .tx
+                            .send(RCEvent::X11(id, originator_address, originator_port));
+                    }
+                    event => {
+                        error!(?event, "Unhandled client handler event");
                     }
                 }
             }
+        }
+        Ok(false)
+    }
+
+    async fn setup_server_initiated_channel(&mut self, channel: russh::Channel<russh::client::Msg>) -> Uuid {
+        let id = Uuid::new_v4();
+
+        let (tx, rx) = unbounded_channel();
+        self.channel_pipes.lock().await.insert(id, tx);
+
+        let session_channel = SessionChannel::new(channel, id, rx, self.tx.clone(), self.id);
+
+        self.child_tasks.push(
+            tokio::task::Builder::new()
+                .name(&format!("SSH {} {:?} ops", self.id, id))
+                .spawn(session_channel.run()),
+        );
+
+        id
+    }
+
+    async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
+        match cmd {
+            RCCommand::Connect(options) => match self.connect(options).await {
+                Ok(_) => {
+                    self.set_state(RCState::Connected)
+                        .map_err(SshClientError::other)?;
+                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                    for (id, op) in ops {
+                        self.apply_channel_op(id, op).await?;
+                    }
+                    let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                    for (address, port) in forwards {
+                        self.tcpip_forward(address, port).await?;
+                    }
+                }
+                Err(e) => {
+                    debug!("Connect error: {}", e);
+                    let _ = self.tx.send(RCEvent::ConnectionError(e));
+                    self.set_disconnected();
+                    return Ok(true);
+                }
+            },
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op).await?;
+            }
+            RCCommand::ForwardTCPIP(address, port) => {
+                self.tcpip_forward(address, port).await?;
+            }
+            RCCommand::CancelTCPIPForward(address, port) => {
+                self.cancel_tcpip_forward(address, port).await?;
             }
             RCCommand::Disconnect => {
                 self.disconnect().await;
@@ -415,15 +460,15 @@ impl RemoteClient {
 
                     let mut auth_result = false;
                     match ssh_options.auth {
-                        SSHTargetAuth::Password { password } => {
+                        SSHTargetAuth::Password(auth) => {
                             auth_result = session
-                                .authenticate_password(ssh_options.username.clone(), password.expose_secret())
+                                .authenticate_password(ssh_options.username.clone(), auth.password.expose_secret())
                                 .await?;
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
                         }
-                        SSHTargetAuth::PublicKey => {
+                        SSHTargetAuth::PublicKey(_) => {
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {
@@ -514,6 +559,32 @@ impl RemoteClient {
             );
         }
         Ok(())
+    }
+
+    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<bool, SshClientError> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+
+            Ok(session.tcpip_forward(address, port).await?)
+        } else {
+            self.pending_forwards.push((address, port));
+            Ok(true)
+        }
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        address: String,
+        port: u32,
+    ) -> Result<bool, SshClientError> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+            Ok(session.cancel_tcpip_forward(address, port).await?)
+        } else {
+            self.pending_forwards
+                .retain(|x| x.0 != address || x.1 != port);
+            Ok(true)
+        }
     }
 
     async fn disconnect(&mut self) {
