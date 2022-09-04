@@ -32,7 +32,8 @@ pub async fn catchall_endpoint(
     services: Data<&Services>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
-    let Some((target, options)) = get_target_for_request(req, services.0).await? else {
+    let target_and_options = get_target_for_request(req, services.0).await?;
+    let Some((target, options)) = target_and_options else {
         return Ok(target_select_redirect());
     };
 

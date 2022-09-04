@@ -46,6 +46,8 @@ pub enum ServerHandlerEvent {
     ChannelOpenDirectTcpIp(ServerChannelId, DirectTCPIPParams, oneshot::Sender<bool>),
     EnvRequest(ServerChannelId, String, String, oneshot::Sender<()>),
     X11Request(ServerChannelId, X11Request, oneshot::Sender<()>),
+    TcpIpForward(String, u32, oneshot::Sender<bool>),
+    CancelTcpIpForward(String, u32, oneshot::Sender<bool>),
     Disconnect,
 }
 
@@ -449,18 +451,46 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
+    fn tcpip_forward(self, address: &str, port: u32, mut session: Session) -> Self::FutureBool {
+        let address = address.to_string();
+        async move {
+            let (tx, rx) = oneshot::channel();
+            self.send_event(ServerHandlerEvent::TcpIpForward(address, port, tx))?;
+            let allowed = rx.await.unwrap_or(false);
+            if allowed {
+                session.request_success()
+            } else {
+                session.request_failure()
+            }
+            Ok((self, session, allowed))
+        }
+        .boxed()
+    }
+
+    fn cancel_tcpip_forward(
+        self,
+        address: &str,
+        port: u32,
+        mut session: Session,
+    ) -> Self::FutureBool {
+        let address = address.to_string();
+        async move {
+            let (tx, rx) = oneshot::channel();
+            self.send_event(ServerHandlerEvent::CancelTcpIpForward(address, port, tx))?;
+            let allowed = rx.await.unwrap_or(false);
+            if allowed {
+                session.request_success()
+            } else {
+                session.request_failure()
+            }
+            Ok((self, session, allowed))
+        }
+        .boxed()
+    }
     // -----
 
     // fn auth_none(self, user: &str) -> Self::FutureAuth {
     //     self.finished_auth(Auth::Reject)
-    // }
-
-    // fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
-    //     self.finished_bool(false, session)
-    // }
-
-    // fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
-    //     self.finished_bool(false, session)
     // }
 }
 

@@ -91,12 +91,11 @@ impl ConnectionRecorder {
             .write(&u32::to_le_bytes(data.len() as u32))
             .await?;
         self.writer.write(&data).await?;
-        debug!("connection {:?} data {:?}", self.params, data);
         Ok(())
     }
 
     pub async fn write_rx(&mut self, data: &[u8]) -> Result<()> {
-        debug!("connection {:?} data tx {:?}", self.params, data);
+        debug!("connection {:?} data rx {:?}", self.params, data);
         let seq_rx = self.seq_rx;
         self.seq_rx = self.seq_rx.wrapping_add(data.len() as u32);
         self.write_packet(

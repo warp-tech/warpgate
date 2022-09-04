@@ -11,7 +11,7 @@ use ansi_term::Colour;
 use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::Bytes;
-use futures::Future;
+use futures::{Future, FutureExt};
 use russh::{CryptoVec, MethodSet, Sig};
 use russh_keys::key::PublicKey;
 use russh_keys::PublicKeyBase64;
@@ -20,7 +20,7 @@ use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
-use warpgate_common::eventhub::{EventHub, EventSender};
+use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
     WarpgateError,
@@ -85,6 +85,7 @@ pub struct ServerSession {
     traffic_connection_recorders: HashMap<Uuid, ConnectionRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
+    main_event_subscription: EventSubscription<Event>,
     service_output: ServiceOutput,
     channel_writer: ChannelWriter,
     auth_state: Option<Arc<Mutex<AuthState>>>,
@@ -117,7 +118,7 @@ impl ServerSession {
         let mut rc_handles = RemoteClient::create(id, services.clone());
 
         let (hub, event_sender) = EventHub::setup();
-        let mut event_sub = hub
+        let main_event_subscription = hub
             .subscribe(|e| !matches!(e, Event::ConsoleInput(_)))
             .await;
 
@@ -141,6 +142,7 @@ impl ServerSession {
             traffic_connection_recorders: HashMap::new(),
             hub,
             event_sender: event_sender.clone(),
+            main_event_subscription,
             service_output: ServiceOutput::new(),
             channel_writer: ChannelWriter::new(),
             auth_state: None,
@@ -204,16 +206,16 @@ impl ServerSession {
         });
 
         Ok(async move {
-            while let Some(event) = event_sub.recv().await {
-                match event {
-                    Event::Client(RCEvent::Done) => break,
-                    Event::ServerHandler(ServerHandlerEvent::Disconnect) => break,
-                    event => this.handle_event(event).await?,
-                }
+            while let Some(event) = this.get_next_event().await {
+                this.handle_event(event).await?;
             }
             debug!("No more events");
             Ok::<_, anyhow::Error>(())
         })
+    }
+
+    async fn get_next_event(&mut self) -> Option<Event> {
+        self.main_event_subscription.recv().await
     }
 
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
@@ -316,36 +318,45 @@ impl ServerSession {
         Ok(())
     }
 
-    async fn handle_event(&mut self, event: Event) -> Result<()> {
-        match event {
-            Event::Client(e) => {
-                debug!(event=?e, "Event");
-                let span = self.make_logging_span();
-                if let Err(err) = self.handle_remote_event(e).instrument(span).await {
-                    error!("Event handler error: {:?}", err);
-                    // break;
+    fn handle_event<'a>(
+        &'a mut self,
+        event: Event,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WarpgateError>> + Send + 'a>> {
+        async move {
+            match event {
+                Event::Client(RCEvent::Done) => Err(WarpgateError::SessionEnd)?,
+                Event::ServerHandler(ServerHandlerEvent::Disconnect) => {
+                    Err(WarpgateError::SessionEnd)?
                 }
-            }
-            Event::ServerHandler(e) => {
-                let span = self.make_logging_span();
-                if let Err(err) = self.handle_server_handler_event(e).instrument(span).await {
-                    error!("Event handler error: {:?}", err);
-                    // break;
+                Event::Client(e) => {
+                    debug!(event=?e, "Event");
+                    let span = self.make_logging_span();
+                    if let Err(err) = self.handle_remote_event(e).instrument(span).await {
+                        error!("Event handler error: {:?}", err);
+                        // break;
+                    }
                 }
-            }
-            Event::Command(command) => {
-                debug!(?command, "Session control");
-                if let Err(err) = self.handle_session_control(command).await {
-                    error!("Event handler error: {:?}", err);
-                    // break;
+                Event::ServerHandler(e) => {
+                    let span = self.make_logging_span();
+                    if let Err(err) = self.handle_server_handler_event(e).instrument(span).await {
+                        error!("Event handler error: {:?}", err);
+                        // break;
+                    }
                 }
+                Event::Command(command) => {
+                    debug!(?command, "Session control");
+                    if let Err(err) = self.handle_session_control(command).await {
+                        error!("Event handler error: {:?}", err);
+                        // break;
+                    }
+                }
+                Event::ServiceOutput(data) => {
+                    let _ = self.emit_pty_output(&data).await;
+                }
+                Event::ConsoleInput(_) => (),
             }
-            Event::ServiceOutput(data) => {
-                let _ = self.emit_pty_output(&data).await;
-            }
-            Event::ConsoleInput(_) => (),
-        }
-        Ok(())
+            Ok(())
+        }.boxed()
     }
 
     async fn handle_server_handler_event(&mut self, event: ServerHandlerEvent) -> Result<()> {
@@ -483,6 +494,16 @@ impl ServerSession {
 
             ServerHandlerEvent::X11Request(channel, request, _) => {
                 self._channel_x11_request(channel, request).await?;
+            }
+
+            ServerHandlerEvent::TcpIpForward(address, port, reply) => {
+                self._tcpip_forward(address, port).await?;
+                let _ = reply.send(true);
+            }
+
+            ServerHandlerEvent::CancelTcpIpForward(address, port, reply) => {
+                self._cancel_tcpip_forward(address, port).await?;
+                let _ = reply.send(true);
             }
 
             ServerHandlerEvent::Disconnect => (),
@@ -703,6 +724,36 @@ impl ServerSession {
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
+            RCEvent::ForwardedTcpIp(id, params) => {
+                if let Some(session) = &mut self.session_handle {
+                    let server_channel = session
+                        .channel_open_forwarded_tcpip(
+                            params.connected_address,
+                            params.connected_port,
+                            params.originator_address,
+                            params.originator_port,
+                        )
+                        .await?;
+
+                    self.channel_map
+                        .insert(ServerChannelId(server_channel.id()), id);
+                    self.all_channels.push(id);
+                }
+            }
+            RCEvent::X11(id, originator_address, originator_port) =>{
+                if let Some(session) = &mut self.session_handle {
+                    let server_channel = session
+                        .channel_open_x11(
+                            originator_address,
+                            originator_port,
+                        )
+                        .await?;
+
+                    self.channel_map
+                        .insert(ServerChannelId(server_channel.id()), id);
+                    self.all_channels.push(id);
+                }
+            }
         }
         Ok(())
     }
@@ -799,6 +850,8 @@ impl ServerSession {
         self.channel_map.insert(channel, uuid);
 
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
+
+        let _ = self.maybe_connect_remote().await;
 
         match self
             .send_command_and_wait(RCCommand::Channel(
@@ -1001,13 +1054,15 @@ impl ServerSession {
     pub async fn _channel_shell_request_begin(
         &mut self,
         server_channel_id: ServerChannelId,
-    ) -> Result<PendingCommand> {
+    ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         let _ = self.maybe_connect_remote().await;
-        Ok(self.send_command_and_wait(RCCommand::Channel(
+        self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestShell,
-        )))
+        ))
+        .await
+        .map_err(anyhow::Error::from)
     }
 
     pub async fn _channel_shell_request_finish(
@@ -1093,6 +1148,21 @@ impl ServerSession {
             ChannelOperation::ExtendedData { ext: code, data },
         ));
         Ok(())
+    }
+
+    async fn _tcpip_forward(&mut self, address: String, port: u32) -> Result<()> {
+        info!(%address, %port, "Remote port forwarding requested");
+        let _ = self.maybe_connect_remote().await;
+        self.send_command_and_wait(RCCommand::ForwardTCPIP(address, port))
+            .await
+            .map_err(anyhow::Error::from)
+    }
+
+    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> Result<()> {
+        info!(%address, %port, "Remote port forwarding cancelled");
+        self.send_command_and_wait(RCCommand::CancelTCPIPForward(address, port))
+            .await
+            .map_err(anyhow::Error::from)
     }
 
     async fn _auth_publickey(
@@ -1404,16 +1474,6 @@ impl ServerSession {
         Ok(())
     }
 
-    // pub async fn _tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(%address, %port, "Remote port forwarding requested");
-    //     self.send_command(RCCommand::ForwardTCPIP(address, port));
-    // }
-
-    // pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) {
-    //     info!(%address, %port, "Remote port forwarding cancelled");
-    //     self.send_command(RCCommand::CancelTCPIPForward(address, port));
-    // }
-
     pub async fn _channel_signal(
         &mut self,
         server_channel_id: ServerChannelId,
@@ -1433,11 +1493,27 @@ impl ServerSession {
         self.rc_tx.send((command, None)).map_err(|e| e.0 .0)
     }
 
-    fn send_command_and_wait(&mut self, command: RCCommand) -> PendingCommand {
+    async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
         let (tx, rx) = oneshot::channel();
-        match self.rc_tx.send((command, Some(tx))) {
+        let mut cmd = match self.rc_tx.send((command, Some(tx))) {
             Ok(_) => PendingCommand::Waiting(rx),
             Err(_) => PendingCommand::Failed,
+        };
+
+        loop {
+            tokio::select! {
+                result = &mut cmd => {
+                    return result
+                }
+                event = self.get_next_event() => {
+                    match event {
+                        Some(event) => {
+                            self.handle_event(event).await.map_err(SshClientError::from)?
+                        }
+                        None => {Err(SshClientError::MpscError)?}
+                    };
+                }
+            }
         }
     }
 
@@ -1470,13 +1546,15 @@ impl ServerSession {
                 Ok(())
             })
             .await;
-        drop(self.session_handle.take());
+
+        self.session_handle = None;
     }
 }
 
 impl Drop for ServerSession {
     fn drop(&mut self) {
-        info!("Closed connection");
+        let _ = self.rc_abort_tx.send(());
+        info!("Closed session");
         debug!("Dropped");
     }
 }

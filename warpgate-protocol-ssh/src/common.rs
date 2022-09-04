@@ -31,6 +31,14 @@ pub struct DirectTCPIPParams {
 }
 
 #[derive(Clone, Debug)]
+pub struct ForwardedTcpIpParams {
+    pub connected_address: String,
+    pub connected_port: u32,
+    pub originator_address: String,
+    pub originator_port: u32,
+}
+
+#[derive(Clone, Debug)]
 pub struct X11Request {
     pub single_conection: bool,
     pub x11_auth_protocol: String,

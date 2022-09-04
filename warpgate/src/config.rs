@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File};
-use notify::{RecursiveMode, Watcher, recommended_watcher};
+use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;

@@ -53,11 +53,13 @@ impl AuthStateStore {
         protocol: &str,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
-        let Some(policy) = self.config_provider
-        .lock()
-        .await
-        .get_credential_policy(username)
-        .await? else {
+        let policy = self
+            .config_provider
+            .lock()
+            .await
+            .get_credential_policy(username)
+            .await?;
+        let Some(policy) = policy else {
             return Err(WarpgateError::UserNotFound)
         };
 

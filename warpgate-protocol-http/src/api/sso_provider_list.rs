@@ -115,7 +115,13 @@ impl Api {
             email: email.clone(),
         };
 
-        let Some(username) = services.config_provider.lock().await.username_for_sso_credential(&cred).await? else {
+        let username = services
+            .config_provider
+            .lock()
+            .await
+            .username_for_sso_credential(&cred)
+            .await?;
+        let Some(username) = username else {
             return make_err_response(&format!("No user matching {email}"));
         };
 
