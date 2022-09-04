@@ -8,10 +8,10 @@ jobs:
       matrix:
         include:
           - arch: x86_64-linux
-            rust_arch: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - arch: arm64-linux
-            rust_arch: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
           - arch: x86_64-macos
             target: x86_64-apple-darwin
@@ -21,7 +21,8 @@ jobs:
             os: macos-latest
       fail-fast: false
 
-    runs-on: ${{matrix.os}}
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v2

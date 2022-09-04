@@ -94,11 +94,16 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
+    #[cfg(target_os = "linux")]
+    let default_data_path = "/var/lib/warpgate".to_string();
+    #[cfg(target_os = "macos")]
+    let default_data_path = "/usr/local/var/lib/warpgate".to_string();
+
     let data_path: String = if is_docker {
         "/data".to_owned()
     } else {
         dialoguer::Input::with_theme(&theme)
-            .default("/var/lib/warpgate".into())
+            .default(default_data_path)
             .with_prompt("Directory to store app data (up to a few MB) in")
             .interact_text()?
     };
