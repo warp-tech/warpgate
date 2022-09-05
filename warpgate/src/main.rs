@@ -18,12 +18,15 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[derive(clap::Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
-struct Cli {
+pub struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
     #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set)]
     config: PathBuf,
+
+    #[clap(long, short, action=ArgAction::Count)]
+    debug: u8,
 }
 
 #[derive(clap::Subcommand)]
@@ -35,33 +38,27 @@ enum Commands {
     /// Run Warpgate
     Run,
     /// Create a password hash for use in the config file
-    Hash,
-    /// Validate config file
     Check,
     /// Test the connection to a target host
     TestTarget {
         #[clap(action=ArgAction::Set)]
         target_name: String,
     },
-    /// Generate a new 2FA (TOTP) enrollment key
-    GenerateOtp,
 }
 
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
 
-    init_logging(load_config(&cli.config, false).ok().as_ref()).await;
+    init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
 
     match &cli.command {
         Commands::Run => crate::commands::run::command(&cli).await,
-        Commands::Hash => crate::commands::hash::command().await,
         Commands::Check => crate::commands::check::command(&cli).await,
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await
         }
         Commands::Setup => crate::commands::setup::command(&cli).await,
         Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
-        Commands::GenerateOtp => crate::commands::otp::command().await,
     }
 }
 

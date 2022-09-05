@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use russh_keys::key::{KeyPair, SignatureHash};
 use russh_keys::{encode_pkcs8_pem, load_secret_key};
 use tracing::*;
-use warpgate_common::helpers::fs::secure_directory;
+use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::WarpgateConfig;
 
 fn get_keys_path(config: &WarpgateConfig) -> PathBuf {
@@ -23,18 +23,20 @@ pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
     if !key_path.exists() {
         info!("Generating Ed25519 host key");
         let key = KeyPair::generate_ed25519().context("Failed to generate Ed25519 host key")?;
-        let f = File::create(key_path)?;
+        let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
+    secure_file(&key_path)?;
 
     let key_path = path.join("host-rsa");
     if !key_path.exists() {
         info!("Generating RSA host key");
         let key = KeyPair::generate_rsa(4096, SignatureHash::SHA2_512)
             .context("Failed to generate RSA key")?;
-        let f = File::create(key_path)?;
+        let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
+    secure_file(&key_path)?;
 
     Ok(())
 }
@@ -61,18 +63,20 @@ pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {
     if !key_path.exists() {
         info!("Generating Ed25519 client key");
         let key = KeyPair::generate_ed25519().context("Failed to generate Ed25519 client key")?;
-        let f = File::create(key_path)?;
+        let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
+    secure_file(&key_path)?;
 
     let key_path = path.join("client-rsa");
     if !key_path.exists() {
         info!("Generating RSA client key");
         let key = KeyPair::generate_rsa(4096, SignatureHash::SHA2_512)
             .context("Failed to generate RSA client key")?;
-        let f = File::create(key_path)?;
+        let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
+    secure_file(&key_path)?;
 
     Ok(())
 }

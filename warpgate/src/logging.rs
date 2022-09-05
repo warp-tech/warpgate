@@ -9,9 +9,16 @@ use tracing_subscriber::{EnvFilter, Layer};
 use warpgate_common::WarpgateConfig;
 use warpgate_core::logging::{make_database_logger_layer, make_socket_logger_layer};
 
-pub async fn init_logging(config: Option<&WarpgateConfig>) {
+use crate::Cli;
+
+pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) {
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "warpgate=info")
+        match cli.debug {
+            0 => std::env::set_var("RUST_LOG", "warpgate=info"),
+            1 => std::env::set_var("RUST_LOG", "warpgate=debug"),
+            2 => std::env::set_var("RUST_LOG", "warpgate=debug,russh=debug"),
+            _ => std::env::set_var("RUST_LOG", "debug"),
+        }
     }
 
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
