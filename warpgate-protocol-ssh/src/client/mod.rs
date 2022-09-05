@@ -329,7 +329,10 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn setup_server_initiated_channel(&mut self, channel: russh::Channel<russh::client::Msg>) -> Uuid {
+    async fn setup_server_initiated_channel(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+    ) -> Uuid {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();

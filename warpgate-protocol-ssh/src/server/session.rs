@@ -356,7 +356,8 @@ impl ServerSession {
                 Event::ConsoleInput(_) => (),
             }
             Ok(())
-        }.boxed()
+        }
+        .boxed()
     }
 
     async fn handle_server_handler_event(&mut self, event: ServerHandlerEvent) -> Result<()> {
@@ -740,13 +741,10 @@ impl ServerSession {
                     self.all_channels.push(id);
                 }
             }
-            RCEvent::X11(id, originator_address, originator_port) =>{
+            RCEvent::X11(id, originator_address, originator_port) => {
                 if let Some(session) = &mut self.session_handle {
                     let server_channel = session
-                        .channel_open_x11(
-                            originator_address,
-                            originator_port,
-                        )
+                        .channel_open_x11(originator_address, originator_port)
                         .await?;
 
                     self.channel_map
