@@ -19,8 +19,12 @@ pub fn hash_password(password: &str) -> String {
         .to_string()
 }
 
+pub fn parse_hash(hash: &str) -> Result<PasswordHash<'_>, Error> {
+    PasswordHash::new(hash)
+}
+
 pub fn verify_password_hash(password: &str, hash: &str) -> Result<bool> {
-    let parsed_hash = PasswordHash::new(hash).map_err(|e| anyhow::anyhow!(e))?;
+    let parsed_hash = parse_hash(hash).map_err(|e| anyhow::anyhow!(e))?;
     match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
         Ok(()) => Ok(true),
         Err(Error::Password) => Ok(false),

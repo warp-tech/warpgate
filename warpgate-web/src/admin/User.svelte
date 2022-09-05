@@ -183,9 +183,8 @@ async function remove () {
         if (!editingCredential) {
             return
         }
-        if (!user.credentials.includes(editingCredential)) {
-            user.credentials.push(editingCredential)
-        }
+        user.credentials = user.credentials.filter(c => c !== editingCredential)
+        user.credentials.push(editingCredential)
         editingCredential = undefined
     }}
     cancel={() => editingCredential = undefined}

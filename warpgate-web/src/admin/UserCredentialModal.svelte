@@ -31,6 +31,12 @@ function _save () {
         }
         credential.hash = newPassword
     }
+    if (credential.kind === 'PublicKey') {
+        if (credential.key.includes(' ')) {
+            const parts = credential.key.split(' ').filter(x => x)
+            credential.key = `${parts[0]} ${parts[1]}`
+        }
+    }
     visible = false
     save()
 }
