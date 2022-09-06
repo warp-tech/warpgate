@@ -731,7 +731,7 @@ impl ServerSession {
                         .channel_open_forwarded_tcpip(
                             params.connected_address,
                             params.connected_port,
-                            params.originator_address,
+                            params.originator_address.clone(),
                             params.originator_port,
                         )
                         .await?;
@@ -739,6 +739,27 @@ impl ServerSession {
                     self.channel_map
                         .insert(ServerChannelId(server_channel.id()), id);
                     self.all_channels.push(id);
+
+                    let recorder = self
+                        .traffic_recorder_for(
+                            &params.originator_address,
+                            params.originator_port,
+                            "forwarded-tcpip",
+                        )
+                        .await;
+                    if let Some(recorder) = recorder {
+                        #[allow(clippy::unwrap_used)]
+                        let mut recorder = recorder.connection(TrafficConnectionParams {
+                            dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
+                            dst_port: params.connected_port as u16,
+                            src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
+                            src_port: params.originator_port as u16,
+                        });
+                        if let Err(error) = recorder.write_connection_setup().await {
+                            error!(channel=%id, ?error, "Failed to record connection setup");
+                        }
+                        self.traffic_connection_recorders.insert(id, recorder);
+                    }
                 }
             }
             RCEvent::X11(id, originator_address, originator_port) => {
@@ -862,7 +883,11 @@ impl ServerSession {
                 self.all_channels.push(uuid);
 
                 let recorder = self
-                    .traffic_recorder_for(&params.host_to_connect, params.port_to_connect)
+                    .traffic_recorder_for(
+                        &params.host_to_connect,
+                        params.port_to_connect,
+                        "direct-tcpip",
+                    )
                     .await;
                 if let Some(recorder) = recorder {
                     #[allow(clippy::unwrap_used)]
@@ -1000,6 +1025,7 @@ impl ServerSession {
         &mut self,
         host: &str,
         port: u32,
+        tag: &str,
     ) -> Option<&mut TrafficRecorder> {
         let host = host.to_owned();
         if let Vacant(e) = self.traffic_recorders.entry((host.clone(), port)) {
@@ -1008,7 +1034,7 @@ impl ServerSession {
                 .recordings
                 .lock()
                 .await
-                .start(&self.id, format!("direct-tcpip-{host}-{port}"))
+                .start(&self.id, format!("{tag}-{host}-{port}"))
                 .await
             {
                 Ok(recorder) => {
