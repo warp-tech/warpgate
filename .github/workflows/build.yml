@@ -67,7 +67,6 @@ jobs:
           path: target/${{ matrix.target }}/release/warpgate
 
       - name: Rename artifact
-        uses: actions/upload-artifact@master
         run: |
           mkdir dist
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
