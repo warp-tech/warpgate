@@ -1035,9 +1035,9 @@ checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
 
 [[package]]
 name = "delegate"
-version = "0.6.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35c47a31748d9cfa641f6cccb3608385fafe261ba36054f3d40d5a3ca11eb1af"
+checksum = "082a24a9967533dc5d743c602157637116fc1b52806d694a5a45e6f32567fcdd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4687,7 +4687,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4765,7 +4765,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bitflags",
  "bytes 1.2.1",
@@ -4778,7 +4778,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4791,7 +4791,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-std",
  "chrono",
@@ -4803,7 +4803,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4835,7 +4835,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4862,7 +4862,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4887,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytes 1.2.1",
  "once_cell",
@@ -4901,7 +4901,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rust-embed",
  "serde",

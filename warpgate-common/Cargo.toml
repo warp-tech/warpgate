@@ -11,7 +11,7 @@ async-trait = "0.1"
 bytes = "1.2"
 chrono = { version = "0.4", features = ["serde"] }
 data-encoding = "2.3"
-delegate = "0.6"
+delegate = "0.8"
 humantime-serde = "1.1"
 lazy_static = "1.4"
 futures = "0.3"
