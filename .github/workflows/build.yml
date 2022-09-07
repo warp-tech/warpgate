@@ -60,11 +60,17 @@ jobs:
           use-cross: true
           args: --release --target ${{ matrix.target }} -Ztarget-applies-to-host
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@master
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/warpgate
+
+      - name: Rename artifact
+        uses: actions/upload-artifact@master
+        run: |
+          mkdir dist
+          mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
 
       - name: Upload release
         uses: softprops/action-gh-release@v1
@@ -74,5 +80,3 @@ jobs:
           generate_release_notes: true
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
-        env:
-          GITHUB_REPOSITORY: my_gh_org/my_gh_repo
