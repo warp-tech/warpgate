@@ -7,10 +7,6 @@ name = "Inflector"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
-dependencies = [
- "lazy_static",
- "regex",
-]
 
 [[package]]
 name = "addr2line"
@@ -2755,9 +2751,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi"
-version = "2.0.6"
+version = "2.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6410fb35798b39e6f4d31dbe208b32238f35a3e322b44a1b58770d4c4b974f3a"
+checksum = "4d4d9252b377035ab2ef8d88020d0484f80892ec6325028af9e4c5839a0656b7"
 dependencies = [
  "base64 0.13.0",
  "bytes 1.2.1",
@@ -2772,7 +2768,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "thiserror",
  "tokio",
  "uuid",
@@ -2780,11 +2776,10 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi-derive"
-version = "2.0.6"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "585839bf881890f4051727168dfec9286e900679957de36aff9cb32ea55f9d12"
+checksum = "355883e212306f10203d9eb9046b64c890671b0013403d0893dcfa8419979cab"
 dependencies = [
- "Inflector",
  "darling",
  "http",
  "indexmap",
@@ -3680,18 +3675,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.8.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
-dependencies = [
- "indexmap",
- "ryu",
- "serde",
- "yaml-rust",
 ]
 
 [[package]]
@@ -4640,7 +4623,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4660,7 +4643,7 @@ dependencies = [
  "sd-notify",
  "sea-orm",
  "serde_json",
- "serde_yaml 0.9.11",
+ "serde_yaml",
  "time 0.3.11",
  "tokio",
  "tracing",
@@ -4677,7 +4660,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4706,7 +4689,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4743,7 +4726,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4784,7 +4767,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bitflags",
  "bytes 1.2.1",
@@ -4797,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4810,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-std",
  "chrono",
@@ -4822,7 +4805,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4854,7 +4837,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4881,7 +4864,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4906,7 +4889,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bytes 1.2.1",
  "once_cell",
@@ -4920,7 +4903,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "rust-embed",
  "serde",
