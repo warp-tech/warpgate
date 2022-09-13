@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-import { api, User, UserAuthCredential, UserRequireCredentialsPolicy } from 'admin/lib/api'
+import {api, Role, User, UserAuthCredential, UserRequireCredentialsPolicy} from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import Fa from 'svelte-fa'
@@ -15,6 +15,8 @@ let error: Error|undefined
 let user: User
 let editingCredential: UserAuthCredential|undefined
 let policy: UserRequireCredentialsPolicy
+let allRoles: Role[] = []
+let roleIsAllowed = {}
 
 const policyProtocols = [
     { id: 'ssh', name: 'SSH' },
@@ -27,6 +29,10 @@ async function load () {
         user = await api.getUser({ id: params.id })
         policy = user.credentialPolicy ?? {}
         user.credentialPolicy = policy
+
+        allRoles = await api.getRoles()
+        const allowedRoles = await api.getUserRoles(user)
+        roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
     } catch (err) {
         error = err
     }
@@ -55,6 +61,22 @@ async function remove () {
     if (confirm(`Delete user ${user.username}?`)) {
         await api.deleteUser(user)
         replace('/config')
+    }
+}
+
+async function toggleRole (role: Role) {
+    if (roleIsAllowed[role.id]) {
+        await api.deleteUserRole({
+            id: user.id,
+            roleId: role.id,
+        })
+        roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
+    } else {
+        await api.addUserRole({
+            id: user.id,
+            roleId: role.id,
+        })
+        roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
     }
 }
 </script>
@@ -150,6 +172,22 @@ async function remove () {
                     bind:value={policy}
                     protocolId={protocol.id}
                 />
+            </div>
+        {/each}
+    </div>
+
+    <h4 class="mt-4">User roles</h4>
+    <div class="list-group list-group-flush mb-3">
+        {#each allRoles as role}
+            <div
+                class="list-group-item list-group-item-action d-flex align-items-center"
+                on:click={() => toggleRole(role)}
+            >
+                <Input
+                    class="mb-0 me-2"
+                    type="switch"
+                    checked={roleIsAllowed[role.id]} />
+                <div>{role.name}</div>
             </div>
         {/each}
     </div>
