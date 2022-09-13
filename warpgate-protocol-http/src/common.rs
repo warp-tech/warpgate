@@ -146,7 +146,7 @@ pub async fn _inner_auth<E: Endpoint + 'static>(
     })
 }
 
-pub fn endpoint_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
+pub fn endpoint_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint<Output = E::Output> {
     e.around(|ep, req| async move {
         _inner_auth(ep, req)
             .await?
