@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.5.0"
+    "version": "0.6.1"
   },
   "servers": [
     {
@@ -112,7 +112,8 @@
             },
             "in": "path",
             "required": true,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -144,7 +145,8 @@
             },
             "in": "path",
             "required": true,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -176,7 +178,8 @@
             },
             "in": "path",
             "required": true,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -264,7 +267,8 @@
             },
             "in": "query",
             "required": false,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -285,7 +289,8 @@
             },
             "in": "path",
             "required": true,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           },
           {
             "name": "next",
@@ -294,7 +299,8 @@
             },
             "in": "query",
             "required": false,
-            "deprecated": false
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
