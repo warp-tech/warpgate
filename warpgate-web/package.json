@@ -61,7 +61,7 @@
     "vite": "^2.9.13",
     "vite-plugin-checker": "^0.4.6",
     "vite-tsconfig-paths": "^3.4.0",
-    "xterm": "^4.18.0",
+    "xterm": "^4.19.0",
     "xterm-addon-serialize": "^0.6.2"
   }
 }
