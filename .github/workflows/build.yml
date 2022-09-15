@@ -38,7 +38,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "test"
+          key: "build"
 
       - name: Install just
         run: |
