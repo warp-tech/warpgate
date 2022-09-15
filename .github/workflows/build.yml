@@ -9,10 +9,10 @@ jobs:
         include:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
           - arch: x86_64-macos
             target: x86_64-apple-darwin
             os: macos-latest
