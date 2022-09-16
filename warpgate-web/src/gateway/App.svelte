@@ -32,7 +32,7 @@ function onPageResume () {
 async function requireLogin (detail: RouteDetail) {
     await serverInfoPromise
     if (!get(serverInfo)?.username) {
-        let url = detail.location
+        let url = location.pathname + '#' + detail.location
         if (detail.querystring) {
             url += '?' + detail.querystring
         }
