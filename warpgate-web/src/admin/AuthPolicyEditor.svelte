@@ -19,7 +19,7 @@ let isAny = !value[protocolId]
 let validCredentials = new Set<string>()
 const possibleCredentials = {
     ssh: new Set(['Password', 'PublicKey', 'Totp', 'WebUserApproval']),
-    http: new Set(['Password', 'Totp', 'Sso', 'WebUserApproval']),
+    http: new Set(['Password', 'Totp', 'Sso']),
     mysql: new Set(['Password']),
 }[protocolId]!
 $: {
