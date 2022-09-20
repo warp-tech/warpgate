@@ -196,6 +196,12 @@ impl DetailApi {
                 return Ok(DeleteUserResponse::NotFound);
             };
 
+        UserRoleAssignment::Entity::delete_many()
+            .filter(UserRoleAssignment::Column::UserId.eq(user.id))
+            .exec(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+
         user.delete(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;

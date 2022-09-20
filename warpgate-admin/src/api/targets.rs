@@ -203,6 +203,12 @@ impl DetailApi {
             return Ok(DeleteTargetResponse::Forbidden);
         }
 
+        TargetRoleAssignment::Entity::delete_many()
+            .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
+            .exec(&*db)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+
         target
             .delete(&*db)
             .await
