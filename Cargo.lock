@@ -2716,6 +2716,7 @@ dependencies = [
  "pin-project-lite",
  "poem-derive",
  "priority-queue",
+ "quick-xml",
  "rand 0.8.5",
  "regex",
  "rfc7239",
@@ -2751,9 +2752,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi"
-version = "2.0.10"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d4d9252b377035ab2ef8d88020d0484f80892ec6325028af9e4c5839a0656b7"
+checksum = "2a48335571a3139209ab826e65790989e09d0e5e8d8070a7a0c54f626ac9886d"
 dependencies = [
  "base64 0.13.0",
  "bytes 1.2.1",
@@ -2764,6 +2765,7 @@ dependencies = [
  "num-traits",
  "poem",
  "poem-openapi-derive",
+ "quick-xml",
  "regex",
  "serde",
  "serde_json",
@@ -2969,6 +2971,16 @@ checksum = "4dfaa718ad76a44b3415e6c4d53b17c8f99160dcb3a99b10470fce8ad43f6e3e"
 dependencies = [
  "bytes 1.2.1",
  "prost",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11bafc859c6815fbaffbbbf4229ecb767ac913fecb27f9ad4343662e9ef099ea"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]
