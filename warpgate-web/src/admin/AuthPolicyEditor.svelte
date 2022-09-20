@@ -32,7 +32,11 @@ function updateAny () {
         if (isAny) {
             value[protocolId] = undefined
         } else {
-            value[protocolId] = [Array.from(validCredentials)[0]]
+            value[protocolId] = []
+            let oneCred = Array.from(validCredentials).filter(x => possibleCredentials.has(x))[0]
+            if (oneCred) {
+                value[protocolId] = [oneCred]
+            }
         }
     })
 }
