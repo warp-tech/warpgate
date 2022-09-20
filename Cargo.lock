@@ -3239,9 +3239,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0-beta.6"
+version = "0.22.0-beta.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a65c3fd68140a6c7d51156a8e55b556b643d806091746cc7ffdfab0e9cfd6da"
+checksum = "522f33fe55f03f9a13560533183553552ef12d4383019bac74101e3c9b34f358"
 dependencies = [
  "aes 0.8.1",
  "bcrypt-pbkdf",
