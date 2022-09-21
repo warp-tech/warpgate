@@ -4,13 +4,12 @@ import sveltePreprocess from 'svelte-preprocess'
 const config = {
     compilerOptions: {
         enableSourcemap: true,
+        dev: true,
     },
     preprocess: sveltePreprocess({
         sourceMap: true,
     }),
-    experimental: {
-        prebundleSvelteLibraries: true,
-    },
+    prebundleSvelteLibraries: true,
 }
 
 export default config
