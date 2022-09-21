@@ -16,7 +16,7 @@ let visibleItems: LogEntry[]|undefined
 let loading = true
 let endReached = false
 let loadOlderButton: HTMLButtonElement|undefined
-let reloadInterval: number|undefined
+let reloadInterval: any
 let lastUpdate = new Date()
 let isLive = true
 let searchQuery = ''
