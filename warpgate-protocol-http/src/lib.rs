@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
 pub use common::PROTOCOL_NAME;
+use http::HeaderValue;
 use logging::{log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
@@ -71,27 +72,46 @@ impl ProtocolServer for HTTPProtocolServer {
             SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
         let session_store = SessionStore::new();
 
+        let cache_bust = || {
+            SetHeader::new().overriding(
+                http::header::CACHE_CONTROL,
+                HeaderValue::from_static("must-revalidate,no-cache,no-store"),
+            )
+        };
+
+        let cache_static = || {
+            SetHeader::new().overriding(
+                http::header::CACHE_CONTROL,
+                HeaderValue::from_static("max-age=86400"),
+            )
+        };
+
         let app = Route::new()
             .nest(
                 "/@warpgate",
                 Route::new()
                     .nest("/api/swagger", ui)
-                    .nest("/api", api_service)
+                    .nest("/api", api_service.with(cache_bust()))
                     .nest("/api/openapi.json", spec)
-                    .nest_no_strip("/assets", EmbeddedFilesEndpoint::<Assets>::new())
+                    .nest_no_strip(
+                        "/assets",
+                        EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
+                    )
                     .nest(
                         "/admin/api",
-                        endpoint_auth(endpoint_admin_auth(admin_api_app)),
+                        endpoint_auth(endpoint_admin_auth(admin_api_app)).with(cache_bust()),
                     )
                     .at(
                         "/admin",
                         page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
                             "src/admin/index.html",
-                        ))),
+                        )))
+                        .with(cache_bust()),
                     )
                     .at(
                         "",
-                        EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html"),
+                        EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
+                            .with(cache_bust()),
                     )
                     .around(move |ep, req| async move {
                         let method = req.method().clone();
