@@ -1,10 +1,11 @@
 <script lang="ts">
 import { Input } from 'sveltestrap'
 
-import type { CredentialKind, User, UserRequireCredentialsPolicy } from './lib/api'
+import { CredentialKind, User, UserRequireCredentialsPolicy } from './lib/api'
 
 export let user: User
 export let value: UserRequireCredentialsPolicy
+export let possibleCredentials: Set<CredentialKind>
 export let protocolId: string
 
 const labels = {
@@ -15,16 +16,16 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
-let isAny = !value[protocolId]
-let validCredentials = new Set<string>()
-const possibleCredentials = {
-    ssh: new Set(['Password', 'PublicKey', 'Totp', 'WebUserApproval']),
-    http: new Set(['Password', 'Totp', 'Sso']),
-    mysql: new Set(['Password']),
-}[protocolId]!
+let isAny = false
+let validCredentials = new Set<CredentialKind>()
+
 $: {
-    validCredentials = new Set(user.credentials.map(x => x.kind))
-    validCredentials.add('WebUserApproval')
+    validCredentials = new Set(user.credentials.map(x => x.kind as CredentialKind))
+    validCredentials.add(CredentialKind.WebUserApproval)
+
+    setTimeout(() => {
+        isAny = !value[protocolId]
+    })
 }
 
 function updateAny () {

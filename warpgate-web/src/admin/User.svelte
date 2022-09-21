@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-import {api, Role, User, UserAuthCredential, UserRequireCredentialsPolicy} from 'admin/lib/api'
+import { api, CredentialKind, Role, User, UserAuthCredential, UserRequireCredentialsPolicy } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import Fa from 'svelte-fa'
@@ -23,6 +23,12 @@ const policyProtocols = [
     { id: 'http', name: 'HTTP' },
     { id: 'mysql', name: 'MySQL' },
 ]
+
+const possibleCredentials: Record<string, Set<CredentialKind>> = {
+    ssh: new Set([CredentialKind.Password, CredentialKind.PublicKey, CredentialKind.Totp, CredentialKind.WebUserApproval]),
+    http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
+    mysql: new Set([CredentialKind.Password]),
+}
 
 async function load () {
     try {
@@ -79,6 +85,35 @@ async function toggleRole (role: Role) {
         roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
     }
 }
+
+function saveCredential () {
+    if (!editingCredential) {
+        return
+    }
+    if (user.credentials.includes(editingCredential)) {
+        user.credentials = [...user.credentials]
+    } else {
+        user.credentials.push(editingCredential)
+        for (const protocol of ['http', 'ssh'] as ('http'|'ssh')[]) {
+            for (const ck of [CredentialKind.Password, CredentialKind.PublicKey]) {
+                if (
+                    editingCredential.kind === CredentialKind.Totp
+                    && !user.credentialPolicy?.[protocol]
+                    && user.credentials.some(x => x.kind === ck)
+                    && possibleCredentials[protocol].has(ck)
+                ) {
+                    user.credentialPolicy = {
+                        ...user.credentialPolicy ?? {},
+                        [protocol]: [ck, CredentialKind.Totp],
+                    }
+                    policy = user.credentialPolicy
+                }
+            }
+        }
+    }
+    editingCredential = undefined
+}
+
 </script>
 
 {#await load()}
@@ -170,6 +205,7 @@ async function toggleRole (role: Role) {
                 <AuthPolicyEditor
                     user={user}
                     bind:value={policy}
+                    possibleCredentials={possibleCredentials[protocol.id]}
                     protocolId={protocol.id}
                 />
             </div>
@@ -217,14 +253,7 @@ async function toggleRole (role: Role) {
 <UserCredentialModal
     credential={editingCredential}
     username={user.username}
-    save={() => {
-        if (!editingCredential) {
-            return
-        }
-        user.credentials = user.credentials.filter(c => c !== editingCredential)
-        user.credentials.push(editingCredential)
-        editingCredential = undefined
-    }}
+    save={saveCredential}
     cancel={() => editingCredential = undefined}
 />
 {/if}
