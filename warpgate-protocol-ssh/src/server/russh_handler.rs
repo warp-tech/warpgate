@@ -119,7 +119,7 @@ impl russh::server::Handler for ServerHandler {
         self,
         channel: ChannelId,
         name: &str,
-        session: Session,
+        mut session: Session,
     ) -> Self::FutureUnit {
         let name = name.to_string();
         async move {
@@ -132,6 +132,7 @@ impl russh::server::Handler for ServerHandler {
             ))?;
 
             let _ = rx.await;
+            session.channel_success(channel);
             Ok((self, session))
         }
         .boxed()
@@ -146,7 +147,7 @@ impl russh::server::Handler for ServerHandler {
         pix_width: u32,
         pix_height: u32,
         modes: &[(Pty, u32)],
-        session: Session,
+        mut session: Session,
     ) -> Self::FutureUnit {
         let term = term.to_string();
         let modes = modes
@@ -172,12 +173,13 @@ impl russh::server::Handler for ServerHandler {
             ))?;
 
             let _ = rx.await;
+            session.channel_success(channel);
             Ok((self, session))
         }
         .boxed()
     }
 
-    fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
         async move {
             let (tx, rx) = oneshot::channel();
 
@@ -187,6 +189,7 @@ impl russh::server::Handler for ServerHandler {
             ))?;
 
             let _ = rx.await;
+            session.channel_success(channel);
             Ok((self, session))
         }
         .boxed()
@@ -355,7 +358,12 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+    fn exec_request(
+        self,
+        channel: ChannelId,
+        data: &[u8],
+        mut session: Session,
+    ) -> Self::FutureUnit {
         let data = Bytes::from(data.to_vec());
         async move {
             let (tx, rx) = oneshot::channel();
@@ -365,6 +373,7 @@ impl russh::server::Handler for ServerHandler {
                 tx,
             ))?;
             let _ = rx.await;
+            session.channel_success(channel);
             Ok((self, session))
         }
         .boxed()
