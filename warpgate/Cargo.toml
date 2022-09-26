@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate"
-version = "0.6.3"
+version = "0.6.4"
 
 [dependencies]
 ansi_term = "0.12"
