@@ -48,7 +48,7 @@
     "sass": "^1.54.9",
     "shell-escape": "^0.2.0",
     "svelte": "^3.50.1",
-    "svelte-check": "^2.9.0",
+    "svelte-check": "^2.9.1",
     "svelte-fa": "^3.0.1",
     "svelte-intersection-observer": "^0.10.0",
     "svelte-observable": "^0.4.0",
