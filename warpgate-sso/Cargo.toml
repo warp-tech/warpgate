@@ -7,7 +7,7 @@ version = "0.6.4"
 [dependencies]
 bytes = "1.2"
 thiserror = "1.0"
-tokio = { version = "1.20", features = ["tracing", "macros"] }
+tokio = { version = "1.21", features = ["tracing", "macros"] }
 tracing = "0.1"
 openidconnect = { version = "2.3", features = ["reqwest", "rustls-tls"] }
 serde = "1.0"

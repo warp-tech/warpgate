@@ -34,7 +34,7 @@ sea-orm = { version = "^0.9", features = [
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"
-tokio = { version = "1.20", features = ["tracing"] }
+tokio = { version = "1.21", features = ["tracing"] }
 tracing = "0.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 warpgate-common = { version = "*", path = "../warpgate-common" }
