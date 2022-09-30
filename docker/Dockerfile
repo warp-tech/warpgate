@@ -20,6 +20,15 @@ RUN cd /opt/warpgate \
 FROM debian:bullseye
 LABEL maintainer=heywoodlh
 
+ENV DEBIAN_FRONTEND noninteractive
+RUN <<EOF
+  set -xe
+  apt-get -y update -qq
+  apt-get install --no-install-recommends -y \
+    ca-certificates
+  apt clean
+EOF
+
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
