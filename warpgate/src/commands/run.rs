@@ -57,7 +57,13 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 let retention = { services.config.lock().await.store.log.retention };
                 let interval = retention / 10;
                 #[allow(clippy::explicit_auto_deref)]
-                match cleanup_db(&mut *services.db.lock().await, &retention).await {
+                match cleanup_db(
+                    &mut *services.db.lock().await,
+                    &mut *services.recordings.lock().await,
+                    &retention,
+                )
+                .await
+                {
                     Err(error) => error!(?error, "Failed to cleanup the database"),
                     Ok(_) => debug!("Database cleaned up, next in {:?}", interval),
                 }

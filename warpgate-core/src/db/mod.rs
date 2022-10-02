@@ -5,7 +5,7 @@ use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    QueryFilter, TransactionTrait,
+    ModelTrait, QueryFilter, TransactionTrait,
 };
 use tracing::*;
 use uuid::Uuid;
@@ -20,6 +20,7 @@ use warpgate_db_entities::{
 use warpgate_db_migrations::migrate_database;
 
 use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
+use crate::recordings::SessionRecordings;
 
 pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
@@ -281,7 +282,11 @@ async fn migrate_config_into_db(
     Ok(())
 }
 
-pub async fn cleanup_db(db: &mut DatabaseConnection, retention: &Duration) -> Result<()> {
+pub async fn cleanup_db(
+    db: &mut DatabaseConnection,
+    recordings: &mut SessionRecordings,
+    retention: &Duration,
+) -> Result<()> {
     use warpgate_db_entities::{Recording, Session};
     let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
 
@@ -290,11 +295,21 @@ pub async fn cleanup_db(db: &mut DatabaseConnection, retention: &Duration) -> Re
         .exec(db)
         .await?;
 
-    Recording::Entity::delete_many()
+    let recordings_to_delete = Recording::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
         .filter(Expr::col(Session::Column::Ended).lt(cutoff))
-        .exec(db)
+        .all(db)
         .await?;
+
+    for recording in recordings_to_delete {
+        if let Err(error) = recordings
+            .remove(&recording.session_id, &recording.name)
+            .await
+        {
+            error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
+        }
+        recording.delete(db).await?;
+    }
 
     Session::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -104,7 +104,23 @@ impl SessionRecordings {
         live.get(id).map(|sender| sender.subscribe())
     }
 
-    pub fn path_for(&self, session_id: &SessionId, name: &dyn AsRef<std::path::Path>) -> PathBuf {
+    pub async fn remove<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> Result<()> {
+        let path = self.path_for(session_id, name);
+        tokio::fs::remove_file(&path).await?;
+        if let Some(parent) = path.parent() {
+            if tokio::fs::read_dir(parent)
+                .await?
+                .next_entry()
+                .await?
+                .is_none()
+            {
+                tokio::fs::remove_dir(parent).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn path_for<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> PathBuf {
         self.path.join(session_id.to_string()).join(&name)
     }
 }
