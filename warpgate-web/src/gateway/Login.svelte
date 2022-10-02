@@ -18,9 +18,8 @@ let username = ''
 let password = ''
 let otp = ''
 let busy = false
-
-let authState: ApiAuthState|undefined = undefined
-
+let otpInput: HTMLInputElement|undefined
+let authState: ApiAuthState|undefined
 let ssoProvidersPromise = api.getSsoProviders()
 
 const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
@@ -60,6 +59,11 @@ async function continueWithState () {
         if (providers.length === 1) {
             startSSO(providers[0])
         }
+    }
+    if (authState === ApiAuthState.OtpNeeded) {
+        setTimeout(() => {
+            otpInput?.focus()
+        })
     }
 }
 
@@ -146,6 +150,7 @@ async function startSSO (provider: SsoProviderDescription) {
                 <!-- svelte-ignore a11y-autofocus -->
                 <input
                     bind:value={otp}
+                    bind:this={otpInput}
                     on:keypress={onInputKey}
                     name="otp"
                     autofocus
