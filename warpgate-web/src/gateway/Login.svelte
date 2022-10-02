@@ -11,7 +11,7 @@ import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 
-export let params: { stateId?: string } = {}
+export const params: { stateId?: string } = {}
 
 let error: Error|null = null
 let username = ''
@@ -108,6 +108,11 @@ async function _login () {
     }
 }
 
+async function cancel () {
+    await api.cancelDefaultAuth()
+    location.reload()
+}
+
 function onInputKey (event: KeyboardEvent) {
     if (event.key === 'Enter') {
         login()
@@ -136,10 +141,6 @@ async function startSSO (provider: SsoProviderDescription) {
                 <h1>Continue login</h1>
             {/if}
         </div>
-        {#if params.stateId}
-        //todo
-        loggin in for auth state id {params.stateId}
-        {/if}
         {#if authState === ApiAuthState.OtpNeeded}
             <FormGroup floating label="One-time password">
                 <!-- svelte-ignore a11y-autofocus -->
@@ -225,4 +226,13 @@ async function startSSO (provider: SsoProviderDescription) {
             </div>
         {/if}
     {/await}
+
+    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
+        <button
+            class="btn w-100 mt-3 btn-outline-secondary"
+            on:click={cancel}
+        >
+            Cancel
+        </button>
+    {/if}
 {/await}

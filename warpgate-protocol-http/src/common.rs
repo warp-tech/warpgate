@@ -33,6 +33,7 @@ pub trait SessionExt {
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
     fn get_auth_state_id(&self) -> Option<AuthStateId>;
+    fn clear_auth_state(&self);
 }
 
 impl SessionExt for Session {
@@ -66,6 +67,10 @@ impl SessionExt for Session {
 
     fn get_auth_state_id(&self) -> Option<AuthStateId> {
         self.get(AUTH_STATE_ID_SESSION_KEY)
+    }
+
+    fn clear_auth_state(&self) {
+        self.remove(AUTH_STATE_ID_SESSION_KEY)
     }
 }
 

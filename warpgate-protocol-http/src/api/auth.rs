@@ -218,6 +218,29 @@ impl Api {
     }
 
     #[oai(
+        path = "/auth/state",
+        method = "delete",
+        operation_id = "cancelDefaultAuth"
+    )]
+    async fn api_cancel_default_auth(
+        &self,
+        session: &Session,
+        services: Data<&Services>,
+    ) -> poem::Result<AuthStateResponse> {
+        let Some(state_id) = session.get_auth_state_id() else {
+            return Ok(AuthStateResponse::NotFound)
+        };
+        let mut store = services.auth_state_store.lock().await;
+        let Some(state_arc) = store.get(&state_id.0) else {
+            return Ok(AuthStateResponse::NotFound);
+        };
+        state_arc.lock().await.reject();
+        store.complete(&state_id.0).await;
+        session.clear_auth_state();
+        serialize_auth_state_inner(state_arc).await
+    }
+
+    #[oai(
         path = "/auth/state/:id",
         method = "get",
         operation_id = "get_auth_state",

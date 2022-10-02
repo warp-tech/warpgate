@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.6.1"
+    "version": "0.6.4"
   },
   "servers": [
     {
@@ -99,6 +99,24 @@
           }
         },
         "operationId": "getDefaultAuthState"
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "cancelDefaultAuth"
       }
     },
     "/auth/state/{id}": {
