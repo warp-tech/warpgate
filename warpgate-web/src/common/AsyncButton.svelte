@@ -1,27 +1,43 @@
 <script lang="ts">
+import { faCheck } from '@fortawesome/free-solid-svg-icons'
+import Fa from 'svelte-fa'
 import { Button, Spinner } from 'sveltestrap'
 import type { ButtonColor } from 'sveltestrap/src/Button'
+
+enum State {
+    Normal = 'n',
+    Progress = 'p',
+    ProgressWithSpinner = 'ps',
+    Done = 'd'
+}
 
 export let click: CallableFunction
 export let color: ButtonColor = 'secondary'
 export let disabled = false
 export let outline = false
 export let type = 'submit'
-let busy = false
-let spinnerVisible = false
+let button: HTMLElement
+let lastWidth = 0
+let state = State.Normal
 
 async function _click () {
-    busy = true
+    lastWidth = button.offsetWidth
+    state = State.Progress
     setTimeout(() => {
-        if (busy) {
-            spinnerVisible = true
+        if (state === State.Progress) {
+            state = State.ProgressWithSpinner
         }
     }, 500)
     try {
         await click()
     } finally {
-        busy = false
-        spinnerVisible = false
+        state = State.Done
+        setTimeout(() => {
+            if (state === State.Done) {
+                state = State.Normal
+                lastWidth = 0
+            }
+        }, 1000)
     }
 }
 
@@ -29,14 +45,23 @@ async function _click () {
 
 <Button
     on:click={_click}
+    bind:inner={button}
+    style="min-width: {lastWidth}px"
     class={$$props.class}
     outline={outline}
     color={color}
     type={type}
-    disabled={disabled || busy}
+    disabled={disabled || state === State.Progress || state === State.ProgressWithSpinner}
 >
-    <slot />
-    {#if spinnerVisible}
-        <Spinner size="sm" />
+    {#if state === State.Normal || state === State.Progress}
+        <slot />
     {/if}
+    <div class="overlay">
+        {#if state === State.ProgressWithSpinner}
+            <Spinner size="sm" />
+        {/if}
+        {#if state === State.Done}
+            <Fa icon={faCheck} fw />
+        {/if}
+    </div>
 </Button>
