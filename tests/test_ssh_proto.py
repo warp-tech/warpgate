@@ -142,8 +142,10 @@ class Test:
             if response.status_code == 200:
                 break
 
-        response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
-        print(response.text)
+        s = requests.Session()
+        retries = requests.adapters.Retry(total=5, backoff_factor=1)
+        s.mount('http://', requests.adapters.HTTPAdapter(max_retries=retries))
+        response = s.get(f'http://localhost:{local_port}', timeout=timeout)
         assert response.status_code == 200
         ssh_client.kill()
 
