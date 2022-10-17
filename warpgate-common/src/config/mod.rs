@@ -60,7 +60,7 @@ impl UserAuthCredential {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Vec<CredentialKind>>,

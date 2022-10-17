@@ -19,6 +19,7 @@ use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::Services;
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
+use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
 
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
@@ -52,15 +53,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         std::process::exit(1);
     }
 
-    let is_docker = std::env::var("DOCKER").is_ok();
-
-    if !atty::is(atty::Stream::Stdin) {
-        error!("Please run this command from an interactive terminal.");
-        if is_docker {
-            info!("(have you forgotten `-it`?)");
-        }
-        std::process::exit(1);
-    }
+    assert_interactive_terminal();
 
     let mut config_dir = cli.config.parent().unwrap_or_else(|| Path::new(&"."));
     if config_dir.as_os_str().is_empty() {
@@ -85,7 +78,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    if !is_docker {
+    if !is_docker() {
         info!(
             "* Paths can be either absolute or relative to {}.",
             config_dir.canonicalize()?.display()
@@ -99,7 +92,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     #[cfg(target_os = "macos")]
     let default_data_path = "/usr/local/var/lib/warpgate".to_string();
 
-    let data_path: String = if is_docker {
+    let data_path: String = if is_docker() {
         "/data".to_owned()
     } else {
         dialoguer::Input::with_theme(&theme)
@@ -123,7 +116,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     store.database_url = Secret::new(database_url);
 
     // ---
-    if !is_docker {
+    if !is_docker() {
         store.http.listen = prompt_endpoint(
             "Endpoint to listen for HTTP connections on",
             HTTPConfig::default().listen,
@@ -286,7 +279,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("  * Password: <your password>");
     info!("");
     info!("You can now start Warpgate with:");
-    if is_docker {
+    if is_docker() {
         info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate");
     } else {
         info!(

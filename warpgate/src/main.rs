@@ -44,6 +44,11 @@ enum Commands {
         #[clap(action=ArgAction::Set)]
         target_name: String,
     },
+    /// Reset password and auth policy for a user
+    RecoverAccess {
+        #[clap(action=ArgAction::Set)]
+        username: Option<String>,
+    },
 }
 
 async fn _main() -> Result<()> {
@@ -59,6 +64,9 @@ async fn _main() -> Result<()> {
         }
         Commands::Setup => crate::commands::setup::command(&cli).await,
         Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
+        Commands::RecoverAccess { username } => {
+            crate::commands::recover_access::command(&cli, username).await
+        }
     }
 }
 
