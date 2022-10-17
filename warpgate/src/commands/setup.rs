@@ -1,6 +1,6 @@
 use std::fs::{create_dir_all, File};
 use std::io::Write;
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -21,6 +21,7 @@ use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
+use crate::Commands;
 
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     loop {
@@ -53,7 +54,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         std::process::exit(1);
     }
 
-    assert_interactive_terminal();
+    if let Commands::Setup = cli.command {
+        assert_interactive_terminal();
+    }
 
     let mut config_dir = cli.config.parent().unwrap_or_else(|| Path::new(&"."));
     if config_dir.as_os_str().is_empty() {
@@ -87,18 +90,22 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    #[cfg(target_os = "linux")]
-    let default_data_path = "/var/lib/warpgate".to_string();
-    #[cfg(target_os = "macos")]
-    let default_data_path = "/usr/local/var/lib/warpgate".to_string();
-
-    let data_path: String = if is_docker() {
-        "/data".to_owned()
+    let data_path: String = if let Commands::UnattendedSetup { data_path, .. } = &cli.command {
+        data_path.to_owned()
     } else {
-        dialoguer::Input::with_theme(&theme)
-            .default(default_data_path)
-            .with_prompt("Directory to store app data (up to a few MB) in")
-            .interact_text()?
+        #[cfg(target_os = "linux")]
+        let default_data_path = "/var/lib/warpgate".to_string();
+        #[cfg(target_os = "macos")]
+        let default_data_path = "/usr/local/var/lib/warpgate".to_string();
+
+        if is_docker() {
+            "/data".to_owned()
+        } else {
+            dialoguer::Input::with_theme(&theme)
+                .default(default_data_path)
+                .with_prompt("Directory to store app data (up to a few MB) in")
+                .interact_text()?
+        }
     };
 
     let db_path = PathBuf::from(&data_path).join("db");
@@ -115,42 +122,62 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     database_url.push_str(&db_path);
     store.database_url = Secret::new(database_url);
 
-    // ---
-    if !is_docker() {
-        store.http.listen = prompt_endpoint(
-            "Endpoint to listen for HTTP connections on",
-            HTTPConfig::default().listen,
-        );
-
-        info!("You will now choose specific protocol listeners to be enabled.");
-        info!("");
-        info!("NB: Nothing will be exposed by default -");
-        info!("    you'll set target hosts in the config file later.");
-
-        store.ssh.enable = dialoguer::Confirm::with_theme(&theme)
-            .default(true)
-            .with_prompt("Accept SSH connections?")
-            .interact()?;
-
-        if store.ssh.enable {
-            store.ssh.listen = prompt_endpoint(
-                "Endpoint to listen for SSH connections on",
-                SSHConfig::default().listen,
+    if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
+        store.http.enable = true;
+        store.http.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *http_port)));
+    } else {
+        if !is_docker() {
+            store.http.listen = prompt_endpoint(
+                "Endpoint to listen for HTTP connections on",
+                HTTPConfig::default().listen,
             );
         }
+    }
 
-        // ---
+    if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
+        if let Some(ssh_port) = ssh_port {
+            store.ssh.enable = true;
+            store.ssh.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *ssh_port)));
+        }
+    } else {
+        if !is_docker() {
+            info!("You will now choose specific protocol listeners to be enabled.");
+            info!("");
+            info!("NB: Nothing will be exposed by default -");
+            info!("    you'll set target hosts in the config file later.");
 
-        store.mysql.enable = dialoguer::Confirm::with_theme(&theme)
-            .default(true)
-            .with_prompt("Accept MySQL connections?")
-            .interact()?;
+            store.ssh.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept SSH connections?")
+                .interact()?;
 
-        if store.mysql.enable {
-            store.mysql.listen = prompt_endpoint(
-                "Endpoint to listen for MySQL connections on",
-                MySQLConfig::default().listen,
-            );
+            if store.ssh.enable {
+                store.ssh.listen = prompt_endpoint(
+                    "Endpoint to listen for SSH connections on",
+                    SSHConfig::default().listen,
+                );
+            }
+        }
+    }
+
+    if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
+        if let Some(ssh_port) = ssh_port {
+            store.ssh.enable = true;
+            store.ssh.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *ssh_port)));
+        }
+    } else {
+        if !is_docker() {
+            store.mysql.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept MySQL connections?")
+                .interact()?;
+
+            if store.mysql.enable {
+                store.mysql.listen = prompt_endpoint(
+                    "Endpoint to listen for MySQL connections on",
+                    MySQLConfig::default().listen,
+                );
+            }
         }
     }
 
@@ -176,10 +203,17 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    store.recordings.enable = dialoguer::Confirm::with_theme(&theme)
-        .default(true)
-        .with_prompt("Do you want to record user sessions?")
-        .interact()?;
+    if let Commands::UnattendedSetup {
+        record_sessions, ..
+    } = &cli.command
+    {
+        store.recordings.enable = *record_sessions;
+    } else {
+        store.recordings.enable = dialoguer::Confirm::with_theme(&theme)
+            .default(true)
+            .with_prompt("Do you want to record user sessions?")
+            .interact()?;
+    }
     store.recordings.path = PathBuf::from(&data_path)
         .join("recordings")
         .to_string_lossy()
@@ -187,9 +221,25 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    let admin_password = dialoguer::Password::with_theme(&theme)
-        .with_prompt("Set a password for the Warpgate admin user")
-        .interact()?;
+    let admin_password = if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
+        if let Some(admin_password) = admin_password {
+            admin_password.to_owned()
+        } else {
+            if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
+                admin_password
+            } else {
+                error!(
+                    "You must supply the admin password either through the --admin-password option"
+                );
+                error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        dialoguer::Password::with_theme(&theme)
+            .with_prompt("Set a password for the Warpgate admin user")
+            .interact()?
+    };
 
     // ---
 

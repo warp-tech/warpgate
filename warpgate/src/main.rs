@@ -30,9 +30,35 @@ pub struct Cli {
 }
 
 #[derive(clap::Subcommand)]
-enum Commands {
+pub(crate) enum Commands {
     /// Run first-time setup and generate a config file
     Setup,
+    /// Run first-time setup non-interactively
+    UnattendedSetup {
+        /// Directory to store data in
+        #[clap(long)]
+        data_path: String,
+
+        /// HTTP port
+        #[clap(long)]
+        http_port: u16,
+
+        /// Enable SSH and set port
+        #[clap(long)]
+        ssh_port: Option<u16>,
+
+        /// Enable MySQL and set port
+        #[clap(long)]
+        mysql_port: Option<u16>,
+
+        /// Enable session recording
+        #[clap(long)]
+        record_sessions: bool,
+
+        /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
+        #[clap(long)]
+        admin_password: Option<String>,
+    },
     /// Show Warpgate's SSH client keys
     ClientKeys,
     /// Run Warpgate
@@ -62,7 +88,9 @@ async fn _main() -> Result<()> {
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await
         }
-        Commands::Setup => crate::commands::setup::command(&cli).await,
+        Commands::Setup | Commands::UnattendedSetup { .. } => {
+            crate::commands::setup::command(&cli).await
+        }
         Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&cli, username).await
