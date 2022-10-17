@@ -1011,13 +1011,13 @@ dependencies = [
 
 [[package]]
 name = "dhat"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47003dc9f6368a88e85956c3b2573a7e6872746a3e5d762a8885da3a136a0381"
+checksum = "0684eaa19a59be283a6f99369917b679bd4d1d06604b2eb2e2f87b4bbd67668d"
 dependencies = [
  "backtrace",
  "lazy_static",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.0",
  "rustc-hash",
  "serde",
  "serde_json",
