@@ -1,18 +1,19 @@
 import requests
 
 
+from .test_http_common import *  # noqa
 from .util import wait_port
 
 
 class TestHTTPUserAuthPassword:
     def test_auth_password_success(
         self,
-        http_common_wg_port,
+        http_common_wg_port_api_based,
     ):
-        wait_port(http_common_wg_port, recv=False)
+        wait_port(http_common_wg_port_api_based, recv=False)
         session = requests.Session()
         session.verify = False
-        url = f'https://localhost:{http_common_wg_port}'
+        url = f'https://localhost:{http_common_wg_port_api_based}'
 
         response = session.get(f'{url}/?warpgate-target=echo', allow_redirects=False)
         assert response.status_code // 100 != 2
@@ -34,12 +35,12 @@ class TestHTTPUserAuthPassword:
 
     def test_auth_password_fail(
         self,
-        http_common_wg_port,
+        http_common_wg_port_api_based,
     ):
-        wait_port(http_common_wg_port, recv=False)
+        wait_port(http_common_wg_port_api_based, recv=False)
         session = requests.Session()
         session.verify = False
-        url = f'https://localhost:{http_common_wg_port}'
+        url = f'https://localhost:{http_common_wg_port_api_based}'
 
         response = session.post(
             f'{url}/@warpgate/api/auth/login',

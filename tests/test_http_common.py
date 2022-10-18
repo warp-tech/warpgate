@@ -1,50 +1,84 @@
+from base64 import b64decode
 import pytest
 import threading
 from textwrap import dedent
 
-from .util import alloc_port
+from .api_client import (
+    api_add_role_to_target,
+    api_add_role_to_user,
+    api_admin_session,
+    api_create_role,
+    api_create_target,
+    api_create_user,
+)
+from .util import alloc_port, wait_port
 
 
 @pytest.fixture(scope='session')
-def http_common_wg_port(processes, echo_server_port, password_123_hash, otp_key_base64):
-    _, wg_ports = processes.start_wg(
-        dedent(
-            f'''\
-            targets:
-            -   name: echo
-                allow_roles: [role]
-                http:
-                    url: http://localhost:{echo_server_port}
-            -   name: baddomain
-                allow_roles: [role]
-                http:
-                    url: http://localhostfoobar
-            -   name: warpgate:admin
-                allow_roles: [admin]
-                web_admin: {{}}
-            users:
-            -   username: admin
-                roles: [admin, warpgate:admin]
-                credentials:
-                -   type: password
-                    hash: '{password_123_hash}'
-            -   username: user
-                roles: [role]
-                credentials:
-                -   type: password
-                    hash: '{password_123_hash}'
-            -   username: userwithotp
-                roles: [role]
-                credentials:
-                -   type: password
-                    hash: '{password_123_hash}'
-                -   type: otp
-                    key: {otp_key_base64}
-                require:
-                    http: [password, otp]
-            '''
-        ),
-    )
+def setup_common_definitions(
+    echo_server_port,
+    otp_key_base64,
+):
+    def inner(url):
+        with api_admin_session(url) as session:
+            role = api_create_role(url, session, {'name': 'role'})
+            user = api_create_user(
+                url,
+                session,
+                {
+                    'username': 'user',
+                    'credentials': [
+                        {
+                            'kind': 'Password',
+                            'hash': '123',
+                        }
+                    ],
+                },
+            )
+            otpuser = api_create_user(
+                url,
+                session,
+                {
+                    'username': 'userwithotp',
+                    'credentials': [
+                        {'kind': 'Password', 'hash': '123'},
+                        {'kind': 'Totp', 'key': list(b64decode(otp_key_base64))},
+                    ],
+                    'credential_policy': {
+                        'http': ['Password', 'Totp'],
+                    },
+                },
+            )
+            api_add_role_to_user(url, session, user['id'], role['id'])
+            api_add_role_to_user(url, session, otpuser['id'], role['id'])
+            target = api_create_target(
+                url,
+                session,
+                {
+                    'name': 'echo',
+                    'options': {
+                        'kind': 'Http',
+                        'url': f'http://localhost:{echo_server_port}',
+                        'tls': {
+                            'mode': 'Disabled',
+                            'verify': False,
+                        },
+                    },
+                },
+            )
+            api_add_role_to_target(url, session, target['id'], role['id'])
+
+    return inner
+
+
+@pytest.fixture(scope='session')
+def http_common_wg_port_api_based(
+    processes,
+    setup_common_definitions,
+):
+    _, wg_ports = processes.start_wg('', api_based=True)
+    wait_port(wg_ports['http'], recv=False)
+    setup_common_definitions(f'https://localhost:{wg_ports["http"]}')
     yield wg_ports['http']
 
 
@@ -52,6 +86,7 @@ def http_common_wg_port(processes, echo_server_port, password_123_hash, otp_key_
 def echo_server_port():
     from flask import Flask, request, jsonify, redirect
     from flask_sock import Sock
+
     app = Flask(__name__)
     sock = Sock(app)
 
@@ -68,11 +103,13 @@ def echo_server_port():
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def echo(path):
-        return jsonify({
-            'method': request.method,
-            'args': request.args,
-            'path': request.path,
-        })
+        return jsonify(
+            {
+                'method': request.method,
+                'args': request.args,
+                'path': request.path,
+            }
+        )
 
     @sock.route('/socket')
     def ws_echo(ws):

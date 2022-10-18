@@ -1,18 +1,18 @@
 import requests
 
-
+from .test_http_common import *  # noqa
 from .util import wait_port
 
 
 class Test:
     def test(
         self,
-        http_common_wg_port,
+        http_common_wg_port_api_based,
     ):
-        wait_port(http_common_wg_port, recv=False)
+        wait_port(http_common_wg_port_api_based, recv=False)
         session = requests.Session()
         session.verify = False
-        url = f'https://localhost:{http_common_wg_port}'
+        url = f'https://localhost:{http_common_wg_port_api_based}'
 
         response = session.post(
             f'{url}/@warpgate/api/auth/login',

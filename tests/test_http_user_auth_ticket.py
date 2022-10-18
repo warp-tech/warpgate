@@ -1,17 +1,20 @@
 import requests
 
-from .util import create_ticket, wait_port
+from .api_client import api_admin_session, api_create_ticket
+from .test_http_common import *  # noqa
+from .util import wait_port
 
 
 class TestHTTPUserAuthTicket:
     def test_auth_password_success(
         self,
-        http_common_wg_port,
+        http_common_wg_port_api_based,
     ):
-        wait_port(http_common_wg_port, recv=False)
-        url = f'https://localhost:{http_common_wg_port}'
+        wait_port(http_common_wg_port_api_based, recv=False)
+        url = f'https://localhost:{http_common_wg_port_api_based}'
 
-        secret = create_ticket(url, 'user', 'echo')
+        with api_admin_session(url) as session:
+            secret = api_create_ticket(url, session, 'user', 'echo')
 
         # ---
 

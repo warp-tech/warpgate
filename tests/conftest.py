@@ -15,7 +15,7 @@ from textwrap import dedent
 from typing import List
 
 from .util import alloc_port
-from .test_http_common import http_common_wg_port, echo_server_port  # noqa
+from .test_http_common import echo_server_port  # noqa
 
 
 cargo_root = Path(os.getcwd()).parent
@@ -115,78 +115,102 @@ class ProcessManager:
     def start_mysql_server(self):
         port = alloc_port()
         self.start(
-            [
-                'docker',
-                'run',
-                '--rm',
-                '-p',
-                f'{port}:3306',
-                'warpgate-e2e-mysql-server'
-            ]
+            ['docker', 'run', '--rm', '-p', f'{port}:3306', 'warpgate-e2e-mysql-server']
         )
         return port
 
-    def start_wg(self, config='', args=None):
+    def start_wg(self, config='', args=None, api_based=False):
         ssh_port = alloc_port()
         http_port = alloc_port()
         mysql_port = alloc_port()
         data_dir = self.ctx.tmpdir / f'wg-data-{uuid.uuid4()}'
         data_dir.mkdir(parents=True)
-        keys_dir = data_dir / 'keys'
+
+        keys_dir = data_dir / 'ssh-keys'
         keys_dir.mkdir(parents=True)
         for k in [
             Path('ssh-keys/wg/client-ed25519'),
             Path('ssh-keys/wg/client-rsa'),
             Path('ssh-keys/wg/host-ed25519'),
             Path('ssh-keys/wg/host-rsa'),
+        ]:
+            shutil.copy(k, keys_dir / k.name)
+
+        for k in [
             Path('certs/tls.certificate.pem'),
             Path('certs/tls.key.pem'),
         ]:
-            shutil.copy(k, keys_dir / k.name)
+            shutil.copy(k, data_dir / k.name)
+
         config_path = data_dir / 'warpgate.yaml'
-        config_path.write_text(
-            dedent(
-                f'''\
-                ssh:
-                    enable: true
-                    listen: 0.0.0.0:{ssh_port}
-                    keys: {keys_dir}
-                    host_key_verification: auto_accept
-                http:
-                    enable: true
-                    listen: 0.0.0.0:{http_port}
-                    certificate: {keys_dir}/tls.certificate.pem
-                    key: {keys_dir}/tls.key.pem
-                mysql:
-                    enable: true
-                    listen: 0.0.0.0:{mysql_port}
-                    certificate: {keys_dir}/tls.certificate.pem
-                    key: {keys_dir}/tls.key.pem
-                recordings:
-                    enable: false
-                roles:
-                - name: role
-                - name: admin
-                - name: warpgate:admin
-                '''
-            ) + config
-        )
+        if not api_based:
+            config_path.write_text(
+                dedent(
+                    f'''\
+                    ssh:
+                        enable: true
+                        listen: 0.0.0.0:{ssh_port}
+                        keys: {keys_dir}
+                        host_key_verification: auto_accept
+                    http:
+                        enable: true
+                        listen: 0.0.0.0:{http_port}
+                        certificate: {keys_dir}/tls.certificate.pem
+                        key: {keys_dir}/tls.key.pem
+                    mysql:
+                        enable: true
+                        listen: 0.0.0.0:{mysql_port}
+                        certificate: {data_dir}/tls.certificate.pem
+                        key: {data_dir}/tls.key.pem
+                    recordings:
+                        enable: false
+                    roles:
+                    - name: role
+                    - name: admin
+                    - name: warpgate:admin
+                    '''
+                )
+                + config
+            )
+
         args = args or ['run']
-        p = self.start(
-            [
-                f'{cargo_root}/target/llvm-cov-target/debug/warpgate',
-                '--config',
-                str(config_path),
-                *args,
-            ],
-            cwd=cargo_root,
-            env={
-                **os.environ,
-                'LLVM_PROFILE_FILE': f'{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw',
-            },
-            stop_signal=signal.SIGINT,
-            stop_timeout=5,
-        )
+
+        def run(args, env={}):
+            return self.start(
+                [
+                    f'{cargo_root}/target/llvm-cov-target/debug/warpgate',
+                    '--config',
+                    str(config_path),
+                    *args,
+                ],
+                cwd=cargo_root,
+                env={
+                    **os.environ,
+                    'LLVM_PROFILE_FILE': f'{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw',
+                    **env,
+                },
+                stop_signal=signal.SIGINT,
+                stop_timeout=5,
+            )
+
+        if api_based:
+            run(
+                [
+                    'unattended-setup',
+                    '--ssh-port',
+                    str(ssh_port),
+                    '--http-port',
+                    str(http_port),
+                    '--mysql-port',
+                    str(mysql_port),
+                    '--data-path',
+                    data_dir,
+                ],
+                env={'WARPGATE_ADMIN_PASSWORD': '123'},
+            ).communicate()
+
+        subprocess.call(['find', data_dir])
+        p = run(args)
         return p, {
             'ssh': ssh_port,
             'http': http_port,
@@ -217,7 +241,9 @@ class ProcessManager:
 
     def start(self, args, stop_timeout=3, stop_signal=signal.SIGTERM, **kwargs):
         p = subprocess.Popen(args, **kwargs)
-        self.children.append(Child(process=p, stop_signal=stop_signal, stop_timeout=stop_timeout))
+        self.children.append(
+            Child(process=p, stop_signal=stop_signal, stop_timeout=stop_timeout)
+        )
         return p
 
 
@@ -246,7 +272,9 @@ def processes(ctx, report_generation):
 @pytest.fixture(scope='session', autouse=True)
 def report_generation():
     # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
-    subprocess.check_call(['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root)
+    subprocess.check_call(
+        ['cargo', 'llvm-cov', 'run', '--no-report', '--', '--version'], cwd=cargo_root
+    )
     yield
     # subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 

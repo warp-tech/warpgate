@@ -1,19 +1,20 @@
 import requests
 
+from .test_http_common import *  # noqa
 from .util import wait_port
 
 
 class TestHTTPRedirects:
     def test(
         self,
-        http_common_wg_port,
+        http_common_wg_port_api_based,
         echo_server_port,
     ):
-        wait_port(http_common_wg_port, recv=False)
+        wait_port(http_common_wg_port_api_based, recv=False)
         session = requests.Session()
         session.verify = False
-        url = f'https://localhost:{http_common_wg_port}'
-        headers = {'Host': f'localhost:{http_common_wg_port}'}
+        url = f'https://localhost:{http_common_wg_port_api_based}'
+        headers = {'Host': f'localhost:{http_common_wg_port_api_based}'}
 
         session.post(
             f'{url}/@warpgate/api/auth/login',

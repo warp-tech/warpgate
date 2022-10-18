@@ -76,9 +76,8 @@ impl ListApi {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(body.username.clone()),
-            credentials: Set(
-                serde_json::to_value(body.credentials.clone()).map_err(WarpgateError::from)?
-            ),
+            credentials: Set(serde_json::to_value(process_credentials(&body.credentials))
+                .map_err(WarpgateError::from)?),
             credential_policy: Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?),
         };
@@ -156,18 +155,10 @@ impl DetailApi {
             return Ok(UpdateUserResponse::NotFound);
         };
 
-        let mut credentials = body.credentials.clone();
-        for credential in credentials.iter_mut() {
-            if let UserAuthCredential::Password(ref mut c) = credential {
-                if parse_hash(&c.hash.expose_secret()).is_err() {
-                    c.hash = hash_password(&c.hash.expose_secret()).into();
-                }
-            }
-        }
-
         let mut model: User::ActiveModel = user.into();
         model.username = Set(body.username.clone());
-        model.credentials = Set(serde_json::to_value(credentials).map_err(WarpgateError::from)?);
+        model.credentials = Set(serde_json::to_value(process_credentials(&body.credentials))
+            .map_err(WarpgateError::from)?);
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
@@ -207,6 +198,18 @@ impl DetailApi {
             .map_err(poem::error::InternalServerError)?;
         Ok(DeleteUserResponse::Deleted)
     }
+}
+
+fn process_credentials(credentials: &Vec<UserAuthCredential>) -> Vec<UserAuthCredential> {
+    let mut credentials = credentials.clone();
+    for credential in credentials.iter_mut() {
+        if let UserAuthCredential::Password(ref mut c) = credential {
+            if parse_hash(&c.hash.expose_secret()).is_err() {
+                c.hash = hash_password(&c.hash.expose_secret()).into();
+            }
+        }
+    }
+    credentials
 }
 
 #[derive(ApiResponse)]
