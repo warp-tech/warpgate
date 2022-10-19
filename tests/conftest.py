@@ -155,7 +155,7 @@ class ProcessManager:
                     http:
                         enable: true
                         listen: 0.0.0.0:{http_port}
-                        certificate: {keys_dir}/tls.certificate.pem
+                        certificate: {data_dir}/tls.certificate.pem
                         key: {data_dir}/tls.key.pem
                     mysql:
                         enable: true
