@@ -129,16 +129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
-name = "async-attributes"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3203e79f4dd9bdda415ed03cf14dae5a2bf775c683a00f94e9cd1faf0f596e5"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
 name = "async-channel"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,7 +167,6 @@ dependencies = [
  "futures-lite",
  "num_cpus",
  "once_cell",
- "tokio",
 ]
 
 [[package]]
@@ -223,7 +212,6 @@ version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52580991739c5cdb36cde8b2a516371c0a3b70dda36d916cc08b82372916808c"
 dependencies = [
- "async-attributes",
  "async-channel",
  "async-global-executor",
  "async-io",
@@ -1080,6 +1068,12 @@ name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+
+[[package]]
+name = "dotenvy"
+version = "0.15.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03d8c417d7a8cb362e0c37e5d815f5eb7c37f79ff93707329d5a194e42e54ca0"
 
 [[package]]
 name = "ed25519"
@@ -3380,8 +3374,8 @@ dependencies = [
  "log",
  "once_cell",
  "ouroboros",
- "sea-orm-macros",
- "sea-query",
+ "sea-orm-macros 0.9.2",
+ "sea-query 0.26.3",
  "sea-strum",
  "serde",
  "serde_json",
@@ -3392,15 +3386,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-cli"
-version = "0.9.2"
+name = "sea-orm"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cefd2d8878bd7e8b7313f036725fa3d08585d101fb1bf3adca7fc13f553f906"
+checksum = "bcab4b30f6ba8dffa93ebd9ff60fe9f462b1c6729f66acf3f61600be86cfab2c"
 dependencies = [
- "async-std",
+ "async-stream",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "log",
+ "once_cell",
+ "ouroboros",
+ "sea-orm-macros 0.10.0",
+ "sea-query 0.27.1",
+ "sea-strum",
+ "serde",
+ "thiserror",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "sea-orm-cli"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "874476cb7e9550e65acdc7deb1df7aeac4bf92ad35c259da0abb5580fab55450"
+dependencies = [
  "chrono",
  "clap",
- "dotenv",
  "regex",
  "sea-schema",
  "tracing",
@@ -3422,15 +3436,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-migration"
-version = "0.9.2"
+name = "sea-orm-macros"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a28587780fbae5c414a62bf0b32405f9da2e000d94f426abf214b2b2e68631"
+checksum = "8ffc4df1f8caa12f156b57be5d3e32d21c81c8771b44a3a1171cf4f2b1d61355"
+dependencies = [
+ "bae",
+ "heck 0.3.3",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sea-orm-migration"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90d368aa1fef75f0a5b1de62f1f51028d068620c95719b181bdbba0a1e3f3345"
 dependencies = [
  "async-trait",
  "clap",
- "dotenv",
- "sea-orm",
+ "dotenvy",
+ "sea-orm 0.10.0",
  "sea-orm-cli",
  "sea-schema",
  "tracing",
@@ -3449,6 +3476,15 @@ dependencies = [
  "sea-query-driver",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "sea-query"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3497a83851c4be4d1fdc8cbc7215105b828a2a944abb64dd2e0ba233f2ce187f"
+dependencies = [
+ "sea-query-derive",
 ]
 
 [[package]]
@@ -3477,12 +3513,12 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.9.3"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94d070aba647637b533bd669a8e430bdc8f7d5249c9b53402da34347563bbfca"
+checksum = "9a1b18ed3f8bcadf93ca8b299d7204cd70b5272a52bd80550f2405112bc10db7"
 dependencies = [
  "futures",
- "sea-query",
+ "sea-query 0.27.1",
  "sea-schema-derive",
 ]
 
@@ -4577,7 +4613,7 @@ dependencies = [
  "notify",
  "rcgen",
  "sd-notify",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde_json",
  "serde_yaml 0.8.26",
  "time 0.3.15",
@@ -4610,7 +4646,7 @@ dependencies = [
  "regex",
  "russh-keys",
  "rust-embed",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4646,7 +4682,7 @@ dependencies = [
  "rand_core 0.6.3",
  "rustls",
  "rustls-pemfile",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4683,7 +4719,7 @@ dependencies = [
  "rand_core 0.6.3",
  "rustls",
  "rustls-pemfile",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4720,7 +4756,7 @@ version = "0.6.4"
 dependencies = [
  "chrono",
  "poem-openapi",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "uuid",
@@ -4733,7 +4769,7 @@ version = "0.6.4"
 dependencies = [
  "async-std",
  "chrono",
- "sea-orm",
+ "sea-orm 0.9.2",
  "sea-orm-migration",
  "serde_json",
  "uuid",
@@ -4811,7 +4847,7 @@ dependencies = [
  "futures",
  "russh",
  "russh-keys",
- "sea-orm",
+ "sea-orm 0.9.2",
  "thiserror",
  "time 0.3.15",
  "tokio",
