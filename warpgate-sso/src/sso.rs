@@ -41,6 +41,10 @@ impl SsoClient {
             )
             .set_redirect_uri(Cow::Owned(redirect_url.clone()));
 
+        for (k, v) in self.config.extra_parameters() {
+            auth_req = auth_req.add_extra_param(k, v);
+        }
+
         for scope in self.config.scopes() {
             auth_req = auth_req.add_scope(Scope::new(scope.to_string()));
         }
