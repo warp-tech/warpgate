@@ -2,7 +2,7 @@ use openidconnect::reqwest::async_http_client;
 use openidconnect::url::Url;
 use openidconnect::{
     AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeVerifier,
-    RedirectUrl, TokenResponse,
+    RedirectUrl, RequestTokenError, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,12 @@ impl SsoLoginRequest {
             .set_pkce_verifier(self.pkce_verifier)
             .request_async(async_http_client)
             .await
-            .map_err(|e| SsoError::Verification(format!("{e}")))?;
+            .map_err(|e| match e {
+                RequestTokenError::ServerResponse(response) => {
+                    SsoError::Verification(response.error().to_string())
+                }
+                e => SsoError::Verification(format!("{e}")),
+            })?;
 
         let id_token = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = id_token.claims(&client.id_token_verifier(), &self.nonce)?;
