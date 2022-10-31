@@ -92,3 +92,12 @@ input:-webkit-autofill:focus {
 .page-item.active .page-link {
     text-decoration: underline;
 }
+
+// Fix placeholder text with floating FormGroup labels
+.form-floating>.form-control::placeholder {
+    color: revert;
+}
+
+.form-floating>.form-control:not(:focus)::placeholder {
+    color: transparent;
+}
