@@ -1472,11 +1472,16 @@ impl ServerSession {
                 .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
-        let Some((target, ssh_options)) = target else {
+        let Some((target, mut ssh_options)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
             warn!("Selected target not found");
             return Ok(());
         };
+
+        // Forward username from the authenticated user to the target, if target has no username
+        if ssh_options.username.is_empty() {
+            ssh_options.username = username.to_string();
+        }
 
         let _ = self.server_handle.lock().await.set_target(&target).await;
         self.target = TargetSelection::Found(target, ssh_options);
