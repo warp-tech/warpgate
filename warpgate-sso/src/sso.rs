@@ -2,10 +2,7 @@ use std::borrow::Cow;
 
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::reqwest::async_http_client;
-use openidconnect::{
-    CsrfToken, DiscoveryError, Nonce, PkceCodeChallenge, RedirectUrl,
-    Scope,
-};
+use openidconnect::{CsrfToken, DiscoveryError, Nonce, PkceCodeChallenge, RedirectUrl, Scope};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
