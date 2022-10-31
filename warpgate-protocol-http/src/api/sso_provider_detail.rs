@@ -52,7 +52,7 @@ impl Api {
 
         let name = name.0;
 
-        let mut return_url = config.construct_external_url(req.original_uri().host())?;
+        let mut return_url = config.construct_external_url(Some(req))?;
         return_url.set_path("@warpgate/api/sso/return");
 
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name) else {

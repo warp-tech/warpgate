@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
+use poem::http;
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
@@ -292,19 +293,27 @@ pub struct WarpgateConfig {
 impl WarpgateConfig {
     pub fn construct_external_url(
         &self,
-        fallback_host: Option<&str>,
+        for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let ext_host = self.store.external_host.as_deref().or(fallback_host);
-        let Some(ext_host) = ext_host  else {
-          return Err(WarpgateError::ExternalHostNotSet);
+        let url = if let Some(value) = for_request.and_then(|x| x.header(http::header::HOST)) {
+            let value = value.to_string();
+            let mut url = Url::parse(&format!("https://{value}/"))?;
+            if let Some(value) = for_request.and_then(|x| x.header("x-forwarded-proto")) {
+                let _ = url.set_scheme(value);
+            }
+            url
+        } else {
+            let ext_host = self.store.external_host.as_deref();
+            let Some(ext_host) = ext_host  else {
+            return Err(WarpgateError::ExternalHostNotSet);
+          };
+            let mut url = Url::parse(&format!("https://{ext_host}/"))?;
+            let ext_port = self.store.http.listen.port();
+            if ext_port != 443 {
+                let _ = url.set_port(Some(ext_port));
+            }
+            url
         };
-        let ext_port = self.store.http.listen.port();
-
-        let mut url = Url::parse(&format!("https://{ext_host}/"))?;
-
-        if ext_port != 443 {
-            let _ = url.set_port(Some(ext_port));
-        }
 
         Ok(url)
     }
