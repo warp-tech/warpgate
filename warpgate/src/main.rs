@@ -35,6 +35,10 @@ pub(crate) enum Commands {
     Setup,
     /// Run first-time setup non-interactively
     UnattendedSetup {
+        /// Database URL
+        #[clap(long)]
+        database_url: Option<String>,
+
         /// Directory to store data in
         #[clap(long)]
         data_path: String,

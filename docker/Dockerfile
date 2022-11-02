@@ -16,7 +16,7 @@ RUN cd /opt/warpgate \
     && just yarn \
     && just openapi \
     && just yarn build \
-    && cargo build --release
+    && cargo build --features mysql,postgres --release
 
 FROM debian:bullseye-20221024
 LABEL maintainer=heywoodlh

@@ -78,7 +78,7 @@ mod target_role_assignment {
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "target_roles")]
     pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
+        #[sea_orm(primary_key, auto_increment = true)]
         pub id: u32,
         pub target_id: Uuid,
         pub role_id: Uuid,

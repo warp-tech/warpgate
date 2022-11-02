@@ -7,7 +7,7 @@ use uuid::Uuid;
 #[sea_orm(table_name = "target_roles")]
 #[oai(rename = "TargetRoleAssignment")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(primary_key, auto_increment = true)]
     pub id: u32,
     pub target_id: Uuid,
     pub role_id: Uuid,

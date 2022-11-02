@@ -112,15 +112,23 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     create_dir_all(&db_path)?;
     secure_directory(&db_path)?;
 
-    let mut db_path = db_path.to_string_lossy().to_string();
+    store.database_url = Secret::new(
+        if let Commands::UnattendedSetup {
+            database_url: Some(url),
+            ..
+        } = &cli.command
+        {
+            url.to_owned()
+        } else {
+            let mut db_path = db_path.to_string_lossy().to_string();
 
-    if let Some(x) = db_path.strip_suffix("./") {
-        db_path = x.to_string();
-    }
+            if let Some(x) = db_path.strip_suffix("./") {
+                db_path = x.to_string();
+            }
 
-    let mut database_url = "sqlite:".to_owned();
-    database_url.push_str(&db_path);
-    store.database_url = Secret::new(database_url);
+            format!("sqlite:{db_path}")
+        },
+    );
 
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
         store.http.enable = true;

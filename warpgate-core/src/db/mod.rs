@@ -44,7 +44,6 @@ pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection
 
         let db = Database::connect(ConnectOptions::new(url.to_string())).await?;
         db.begin().await?.commit().await?;
-        drop(db);
 
         secure_file(&abs_path)?;
     }
