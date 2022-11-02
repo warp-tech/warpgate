@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
+set -x
+pwd
 cd ..
+pwd
 rm target/llvm-cov-target/* || true
 cargo llvm-cov clean --workspace
 cargo llvm-cov --no-report --workspace --all-features -- --skip agent
