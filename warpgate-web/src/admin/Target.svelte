@@ -149,8 +149,8 @@ async function toggleRole (role: Role) {
 
         <FormGroup floating label="Username">
             <input class="form-control"
-                placeholder="Note: blank value here will forward username from warpgate authenticated user"
-                bind:value={target.options.username} 
+                placeholder="Use the currently logged in user's name"
+                bind:value={target.options.username}
             />
         </FormGroup>
 
