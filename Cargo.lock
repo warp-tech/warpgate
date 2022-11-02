@@ -129,16 +129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
-name = "async-attributes"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3203e79f4dd9bdda415ed03cf14dae5a2bf775c683a00f94e9cd1faf0f596e5"
-dependencies = [
- "quote",
- "syn",
-]
-
-[[package]]
 name = "async-channel"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,7 +167,6 @@ dependencies = [
  "futures-lite",
  "num_cpus",
  "once_cell",
- "tokio",
 ]
 
 [[package]]
@@ -223,7 +212,6 @@ version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52580991739c5cdb36cde8b2a516371c0a3b70dda36d916cc08b82372916808c"
 dependencies = [
- "async-attributes",
  "async-channel",
  "async-global-executor",
  "async-io",
@@ -3505,8 +3493,8 @@ dependencies = [
  "log",
  "once_cell",
  "ouroboros",
- "sea-orm-macros",
- "sea-query",
+ "sea-orm-macros 0.9.2",
+ "sea-query 0.26.3",
  "sea-strum",
  "serde",
  "serde_json",
@@ -3517,19 +3505,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-cli"
-version = "0.9.2"
+name = "sea-orm"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cefd2d8878bd7e8b7313f036725fa3d08585d101fb1bf3adca7fc13f553f906"
+checksum = "c347aacd6bd1b9714fd8b5a6095b7caf4c7d6d3d2fc443c5668512effc52755d"
 dependencies = [
- "async-std",
- "chrono",
- "clap",
- "dotenv",
- "regex",
- "sea-schema",
+ "async-stream",
+ "async-trait",
+ "futures",
+ "futures-util",
+ "log",
+ "once_cell",
+ "ouroboros",
+ "sea-orm-macros 0.10.1",
+ "sea-query 0.27.1",
+ "sea-strum",
+ "serde",
+ "thiserror",
  "tracing",
- "tracing-subscriber",
  "url",
 ]
 
@@ -3547,16 +3540,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-migration"
-version = "0.9.2"
+name = "sea-orm-macros"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a28587780fbae5c414a62bf0b32405f9da2e000d94f426abf214b2b2e68631"
+checksum = "51235dc3e7330b241a3ca2fcd00c315feffb3f9e3da193c18c01aca369be7ec7"
+dependencies = [
+ "bae",
+ "heck 0.3.3",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sea-orm-migration"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9cc38a41f49640e5460b806766bea5cf66729ee6da9dab8b111a9cf5f6e57b9"
 dependencies = [
  "async-trait",
- "clap",
- "dotenv",
- "sea-orm",
- "sea-orm-cli",
+ "sea-orm 0.10.1",
  "sea-schema",
  "tracing",
  "tracing-subscriber",
@@ -3574,6 +3577,15 @@ dependencies = [
  "sea-query-driver",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "sea-query"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3497a83851c4be4d1fdc8cbc7215105b828a2a944abb64dd2e0ba233f2ce187f"
+dependencies = [
+ "sea-query-derive",
 ]
 
 [[package]]
@@ -3602,12 +3614,12 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.9.3"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94d070aba647637b533bd669a8e430bdc8f7d5249c9b53402da34347563bbfca"
+checksum = "0a2e6fd7fb2c4adc28f1b8fb29944fa5e6a77968df57f32b7146c9ae10fb2f2b"
 dependencies = [
  "futures",
- "sea-query",
+ "sea-query 0.27.1",
  "sea-schema-derive",
 ]
 
@@ -4724,7 +4736,7 @@ dependencies = [
  "notify",
  "rcgen",
  "sd-notify",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde_json",
  "serde_yaml 0.8.26",
  "time 0.3.15",
@@ -4757,7 +4769,7 @@ dependencies = [
  "regex",
  "russh-keys",
  "rust-embed",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4793,7 +4805,7 @@ dependencies = [
  "rand_core 0.6.3",
  "rustls",
  "rustls-pemfile",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4830,7 +4842,7 @@ dependencies = [
  "rand_core 0.6.3",
  "rustls",
  "rustls-pemfile",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "thiserror",
@@ -4867,7 +4879,7 @@ version = "0.6.4"
 dependencies = [
  "chrono",
  "poem-openapi",
- "sea-orm",
+ "sea-orm 0.9.2",
  "serde",
  "serde_json",
  "uuid",
@@ -4880,7 +4892,7 @@ version = "0.6.4"
 dependencies = [
  "async-std",
  "chrono",
- "sea-orm",
+ "sea-orm 0.9.2",
  "sea-orm-migration",
  "serde_json",
  "uuid",
@@ -4958,7 +4970,7 @@ dependencies = [
  "futures",
  "russh",
  "russh-keys",
- "sea-orm",
+ "sea-orm 0.9.2",
  "thiserror",
  "time 0.3.15",
  "tokio",

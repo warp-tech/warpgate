@@ -17,6 +17,6 @@ sea-orm = { version = "^0.9", features = [
     "with-uuid",
     "with-json",
 ], default-features = false }
-sea-orm-migration = { version = "^0.9", default-features = false }
+sea-orm-migration = { version = "^0.10", default-features = false }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 serde_json = "1.0"
