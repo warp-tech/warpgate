@@ -14,7 +14,7 @@ data-encoding = "2.3"
 delegate = "0.6"
 humantime-serde = "1.1"
 futures = "0.3"
-once_cell = "1.14"
+once_cell = "1.16"
 password-hash = "0.4"
 poem = { version = "^1.3.42", features = ["rustls"] }
 poem-openapi = { version = "^2.0.10", features = [
