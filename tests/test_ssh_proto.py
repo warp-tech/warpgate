@@ -114,40 +114,40 @@ class Test:
 
         assert ssh_client.returncode != 0
 
-    def test_direct_tcpip(
-        self,
-        processes: ProcessManager,
-        wg_port,
-        timeout,
-    ):
-        local_port = alloc_port()
-        wait_port(wg_port)
-        ssh_client = processes.start_ssh_client(
-            '-p',
-            str(wg_port),
-            '-v',
-            *common_args,
-            '-L', f'{local_port}:neverssl.com:80',
-            '-N',
-            password='123',
-        )
+    # def test_direct_tcpip(
+    #     self,
+    #     processes: ProcessManager,
+    #     wg_port,
+    #     timeout,
+    # ):
+    #     local_port = alloc_port()
+    #     wait_port(wg_port)
+    #     ssh_client = processes.start_ssh_client(
+    #         '-p',
+    #         str(wg_port),
+    #         '-v',
+    #         *common_args,
+    #         '-L', f'{local_port}:neverssl.com:80',
+    #         '-N',
+    #         password='123',
+    #     )
 
-        wait_port(local_port, recv=False)
-        for _ in range(15):
-            time.sleep(1)
-            try:
-                response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
-            except Exception:
-                continue
-            if response.status_code == 200:
-                break
+    #     wait_port(local_port, recv=False)
+    #     for _ in range(15):
+    #         time.sleep(1)
+    #         try:
+    #             response = requests.get(f'http://localhost:{local_port}', timeout=timeout)
+    #         except Exception:
+    #             continue
+    #         if response.status_code == 200:
+    #             break
 
-        s = requests.Session()
-        retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount('http://', requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f'http://localhost:{local_port}', timeout=timeout)
-        assert response.status_code == 200
-        ssh_client.kill()
+    #     s = requests.Session()
+    #     retries = requests.adapters.Retry(total=5, backoff_factor=1)
+    #     s.mount('http://', requests.adapters.HTTPAdapter(max_retries=retries))
+    #     response = s.get(f'http://localhost:{local_port}', timeout=timeout)
+    #     assert response.status_code == 200
+    #     ssh_client.kill()
 
     def test_tcpip_forward(
         self,
