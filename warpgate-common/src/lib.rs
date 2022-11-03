@@ -1,4 +1,4 @@
-#![feature(let_else, drain_filter, duration_constants)]
+#![feature(drain_filter, duration_constants)]
 pub mod auth;
 mod config;
 pub mod consts;

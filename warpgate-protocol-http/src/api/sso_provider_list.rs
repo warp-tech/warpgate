@@ -99,7 +99,7 @@ impl Api {
         code: Query<Option<String>>,
     ) -> poem::Result<Response<ReturnToSsoResponse>> {
         let url = self
-            .api_return_to_sso_get_common(req, session, services, &*code)
+            .api_return_to_sso_get_common(req, session, services, &code)
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
 

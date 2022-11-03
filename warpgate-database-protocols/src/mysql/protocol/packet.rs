@@ -21,7 +21,7 @@ where
     ) {
         // reserve space to write the prefixed length
         let offset = buf.len();
-        buf.extend(&[0_u8; 4]);
+        buf.extend([0_u8; 4]);
 
         // encode the payload
         self.0.encode_with(buf, capabilities);

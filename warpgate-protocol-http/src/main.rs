@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait, let_else, try_blocks)]
+#![feature(type_alias_impl_trait, try_blocks)]
 use poem_openapi::OpenApiService;
 use regex::Regex;
 use warpgate_protocol_http::api;

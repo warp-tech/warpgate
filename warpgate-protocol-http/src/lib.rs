@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait, let_else, try_blocks)]
+#![feature(type_alias_impl_trait, try_blocks)]
 pub mod api;
 mod catchall;
 mod common;

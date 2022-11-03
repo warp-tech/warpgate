@@ -12,19 +12,19 @@ pub struct SslRequest {
 
 impl Encode<'_, Capabilities> for SslRequest {
     fn encode_with(&self, buf: &mut Vec<u8>, capabilities: Capabilities) {
-        buf.extend(&(capabilities.bits() as u32).to_le_bytes());
-        buf.extend(&self.max_packet_size.to_le_bytes());
+        buf.extend((capabilities.bits() as u32).to_le_bytes());
+        buf.extend(self.max_packet_size.to_le_bytes());
         buf.push(self.collation);
 
         // reserved: string<19>
-        buf.extend(&[0_u8; 19]);
+        buf.extend([0_u8; 19]);
 
         if capabilities.contains(Capabilities::MYSQL) {
             // reserved: string<4>
-            buf.extend(&[0_u8; 4]);
+            buf.extend([0_u8; 4]);
         } else {
             // extended client capabilities (MariaDB-specified): int<4>
-            buf.extend(&((capabilities.bits() >> 32) as u32).to_le_bytes());
+            buf.extend(((capabilities.bits() >> 32) as u32).to_le_bytes());
         }
     }
 }

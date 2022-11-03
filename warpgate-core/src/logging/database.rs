@@ -54,9 +54,7 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
 fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEntry::ActiveModel> {
     let session_id = (*values).remove("session");
     let username = (*values).remove("session_username");
-    let message = (*values)
-        .remove("message")
-        .unwrap_or_else(|| "".to_string());
+    let message = (*values).remove("message").unwrap_or_default();
 
     use sea_orm::ActiveValue::Set;
     let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok());

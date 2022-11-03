@@ -1,4 +1,4 @@
-#![feature(let_else, drain_filter, duration_constants)]
+#![feature(drain_filter, duration_constants, try_blocks)]
 pub mod consts;
 mod data;
 mod state;
