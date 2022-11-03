@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_else_if)]
+
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
