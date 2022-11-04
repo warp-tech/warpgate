@@ -39,7 +39,7 @@ mod user_role_assignment {
     #[sea_orm(table_name = "user_roles")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = true)]
-        pub id: u32,
+        pub id: i32,
         pub user_id: Uuid,
         pub role_id: Uuid,
     }

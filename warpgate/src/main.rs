@@ -32,7 +32,11 @@ pub struct Cli {
 #[derive(clap::Subcommand)]
 pub(crate) enum Commands {
     /// Run first-time setup and generate a config file
-    Setup,
+    Setup {
+        /// Database URL
+        #[clap(long)]
+        database_url: Option<String>,
+    },
     /// Run first-time setup non-interactively
     UnattendedSetup {
         /// Database URL
@@ -92,7 +96,7 @@ async fn _main() -> Result<()> {
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await
         }
-        Commands::Setup | Commands::UnattendedSetup { .. } => {
+        Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli).await
         }
         Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,

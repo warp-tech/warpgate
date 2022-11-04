@@ -1,25 +1,27 @@
 projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-http warpgate-core warpgate-sso"
 
+features := "sqlite,postgres,mysql"
+
 run *ARGS:
-    RUST_BACKTRACE=1 RUST_LOG=warpgate cargo run -- --config config.yaml {{ARGS}}
+    RUST_BACKTRACE=1 RUST_LOG=warpgate cargo run --features {{features}} -- --config config.yaml {{ARGS}}
 
 fmt:
-    for p in {{projects}}; do cargo fmt -p $p -v; done
+    for p in {{projects}}; do cargo fmt --features {{features}} -p $p -v; done
 
 fix *ARGS:
-    for p in {{projects}}; do cargo fix -p $p {{ARGS}}; done
+    for p in {{projects}}; do cargo fix --features {{features}} -p $p {{ARGS}}; done
 
 clippy *ARGS:
-    for p in {{projects}}; do cargo cranky -p $p {{ARGS}}; done
+    for p in {{projects}}; do cargo cranky --features {{features}} -p $p {{ARGS}}; done
 
 test:
-    for p in {{projects}}; do cargo test -p $p; done
+    for p in {{projects}}; do cargo test --features {{features}} -p $p; done
 
 yarn *ARGS:
     cd warpgate-web && yarn {{ARGS}}
 
 migrate *ARGS:
-    cargo run -p warpgate-db-migrations -- {{ARGS}}
+    cargo run --features {{features}} -p warpgate-db-migrations -- {{ARGS}}
 
 lint:
     cd warpgate-web && yarn run lint
@@ -36,4 +38,4 @@ openapi:
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
 
 udeps:
-    cargo udeps --all-targets
+    cargo udeps --features {{features}} --all-targets
