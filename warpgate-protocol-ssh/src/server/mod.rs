@@ -6,6 +6,7 @@ mod session_handle;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use russh::{MethodSet, Preferred};
@@ -24,8 +25,9 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
     let russh_config = {
         let config = services.config.lock().await;
         russh::server::Config {
-            auth_rejection_time: std::time::Duration::from_secs(1),
-            connection_timeout: Some(std::time::Duration::from_secs(300)),
+            auth_rejection_time: Duration::from_secs(1),
+            auth_rejection_time_initial: Some(Duration::from_secs(0)),
+            connection_timeout: Some(Duration::from_secs(300)),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
             preferred: Preferred {
