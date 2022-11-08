@@ -243,7 +243,7 @@ impl Api {
     #[oai(
         path = "/auth/state/:id",
         method = "get",
-        operation_id = "get_auth_state",
+        operation_id = "getAuthState",
         transform = "endpoint_auth"
     )]
     async fn api_auth_state(
@@ -262,7 +262,7 @@ impl Api {
     #[oai(
         path = "/auth/state/:id/approve",
         method = "post",
-        operation_id = "approve_auth",
+        operation_id = "approveAuth",
         transform = "endpoint_auth"
     )]
     async fn api_approve_auth(
@@ -290,7 +290,7 @@ impl Api {
     #[oai(
         path = "/auth/state/:id/reject",
         method = "post",
-        operation_id = "reject_auth",
+        operation_id = "rejectAuth",
         transform = "endpoint_auth"
     )]
     async fn api_reject_auth(
