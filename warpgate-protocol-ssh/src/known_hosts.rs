@@ -63,7 +63,7 @@ impl KnownHosts {
         let values = KnownHost::ActiveModel {
             id: Set(Uuid::new_v4()),
             host: Set(host.to_owned()),
-            port: Set(port),
+            port: Set(port.into()),
             key_type: Set(key.name().to_owned()),
             key_base64: Set(key.public_key_base64()),
         };

@@ -13,7 +13,7 @@ pub mod ticket {
         pub secret: String,
         pub username: String,
         pub target: String,
-        pub uses_left: Option<u32>,
+        pub uses_left: Option<i16>,
         pub expiry: Option<DateTimeUtc>,
         pub created: DateTimeUtc,
     }
