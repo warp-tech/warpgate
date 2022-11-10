@@ -13,7 +13,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
         wait_port(ssh_port)
-        proc, _ = processes.start_wg(
+        with processes.start_wg(
             config=dedent(
                 f'''\
                 users: []
@@ -26,13 +26,13 @@ class Test:
                 '''
             ),
             args=['test-target', 'ssh'],
-        )
-        proc.wait(timeout=timeout)
-        assert proc.returncode == 0
+        ) as (proc, _):
+            proc.wait(timeout=timeout)
+            assert proc.returncode == 0
 
     def test_fail(self, processes: ProcessManager, timeout):
         ssh_port = alloc_port()
-        proc, _ = processes.start_wg(
+        with processes.start_wg(
             config=dedent(
                 f'''\
                 users: []
@@ -45,6 +45,6 @@ class Test:
                 '''
             ),
             args=['test-target', 'ssh'],
-        )
-        proc.wait(timeout=timeout)
-        assert proc.returncode != 0
+        ) as (proc, _):
+            proc.wait(timeout=timeout)
+            assert proc.returncode != 0

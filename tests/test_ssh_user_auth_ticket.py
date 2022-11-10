@@ -13,7 +13,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_ports = processes.start_wg(
+        with processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -38,26 +38,25 @@ class Test:
                         hash: '{password_123_hash}'
                 '''
             ),
-        )
+        ) as (_, wg_ports):
+            wait_port(ssh_port)
+            wait_port(wg_ports['ssh'])
+            wait_port(wg_ports['http'], recv=False)
 
-        wait_port(ssh_port)
-        wait_port(wg_ports['ssh'])
-        wait_port(wg_ports['http'], recv=False)
+            url = f'https://localhost:{wg_ports["http"]}'
+            secret = create_ticket(url, 'user', 'ssh')
 
-        url = f'https://localhost:{wg_ports["http"]}'
-        secret = create_ticket(url, 'user', 'ssh')
-
-        ssh_client = processes.start_ssh_client(
-            f'ticket-{secret}@localhost',
-            '-p',
-            str(wg_ports['ssh']),
-            '-i',
-            '/dev/null',
-            '-o',
-            'PreferredAuthentications=password',
-            'ls',
-            '/bin/sh',
-            password='123',
-        )
-        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
-        assert ssh_client.returncode == 0
+            ssh_client = processes.start_ssh_client(
+                f'ticket-{secret}@localhost',
+                '-p',
+                str(wg_ports['ssh']),
+                '-i',
+                '/dev/null',
+                '-o',
+                'PreferredAuthentications=password',
+                'ls',
+                '/bin/sh',
+                password='123',
+            )
+            assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
+            assert ssh_client.returncode == 0

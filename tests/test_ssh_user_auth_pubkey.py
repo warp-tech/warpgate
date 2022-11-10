@@ -13,7 +13,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_ports = processes.start_wg(
+        with processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -30,39 +30,38 @@ class Test:
                         key: {open('ssh-keys/id_ed25519.pub').read().strip()}
                 '''
             ),
-        )
+        ) as (_, wg_ports):
+            wait_port(ssh_port)
+            wait_port(wg_ports['ssh'])
 
-        wait_port(ssh_port)
-        wait_port(wg_ports['ssh'])
+            ssh_client = processes.start_ssh_client(
+                'user:ssh@localhost',
+                '-p',
+                str(wg_ports['ssh']),
+                '-o',
+                'IdentityFile=ssh-keys/id_ed25519',
+                '-o',
+                'PreferredAuthentications=publickey',
+                # 'sh', '-c', '"ls /bin/sh;sleep 1"',
+                'ls',
+                '/bin/sh',
+            )
+            assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
+            assert ssh_client.returncode == 0
 
-        ssh_client = processes.start_ssh_client(
-            'user:ssh@localhost',
-            '-p',
-            str(wg_ports['ssh']),
-            '-o',
-            'IdentityFile=ssh-keys/id_ed25519',
-            '-o',
-            'PreferredAuthentications=publickey',
-            # 'sh', '-c', '"ls /bin/sh;sleep 1"',
-            'ls',
-            '/bin/sh',
-        )
-        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
-        assert ssh_client.returncode == 0
-
-        ssh_client = processes.start_ssh_client(
-            'user:ssh@localhost',
-            '-p',
-            str(wg_ports['ssh']),
-            '-o',
-            'IdentityFile=ssh-keys/id_rsa',
-            '-o',
-            'PreferredAuthentications=publickey',
-            'ls',
-            '/bin/sh',
-        )
-        assert ssh_client.communicate(timeout=timeout)[0] == b''
-        assert ssh_client.returncode != 0
+            ssh_client = processes.start_ssh_client(
+                'user:ssh@localhost',
+                '-p',
+                str(wg_ports['ssh']),
+                '-o',
+                'IdentityFile=ssh-keys/id_rsa',
+                '-o',
+                'PreferredAuthentications=publickey',
+                'ls',
+                '/bin/sh',
+            )
+            assert ssh_client.communicate(timeout=timeout)[0] == b''
+            assert ssh_client.returncode != 0
 
     def test_rsa(
         self, processes: ProcessManager, wg_c_ed25519_pubkey: Path, timeout
@@ -71,7 +70,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_ports = processes.start_wg(
+        with processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -88,38 +87,37 @@ class Test:
                         key: {open('ssh-keys/id_rsa.pub').read().strip()}
                 '''
             ),
-        )
+        ) as (_, wg_ports):
+            wait_port(ssh_port)
+            wait_port(wg_ports['ssh'])
 
-        wait_port(ssh_port)
-        wait_port(wg_ports['ssh'])
+            ssh_client = processes.start_ssh_client(
+                'user:ssh@localhost',
+                '-v',
+                '-p',
+                str(wg_ports['ssh']),
+                '-o',
+                'IdentityFile=ssh-keys/id_rsa',
+                '-o',
+                'PreferredAuthentications=publickey',
+                '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
+                'ls',
+                '/bin/sh',
+            )
+            assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
+            assert ssh_client.returncode == 0
 
-        ssh_client = processes.start_ssh_client(
-            'user:ssh@localhost',
-            '-v',
-            '-p',
-            str(wg_ports['ssh']),
-            '-o',
-            'IdentityFile=ssh-keys/id_rsa',
-            '-o',
-            'PreferredAuthentications=publickey',
-            '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
-            'ls',
-            '/bin/sh',
-        )
-        assert ssh_client.communicate(timeout=timeout)[0] == b'/bin/sh\n'
-        assert ssh_client.returncode == 0
-
-        ssh_client = processes.start_ssh_client(
-            'user:ssh@localhost',
-            '-p',
-            str(wg_ports['ssh']),
-            '-o',
-            'IdentityFile=ssh-keys/id_ed25519',
-            '-o',
-            'PreferredAuthentications=publickey',
-            '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
-            'ls',
-            '/bin/sh',
-        )
-        assert ssh_client.communicate(timeout=timeout)[0] == b''
-        assert ssh_client.returncode != 0
+            ssh_client = processes.start_ssh_client(
+                'user:ssh@localhost',
+                '-p',
+                str(wg_ports['ssh']),
+                '-o',
+                'IdentityFile=ssh-keys/id_ed25519',
+                '-o',
+                'PreferredAuthentications=publickey',
+                '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa',
+                'ls',
+                '/bin/sh',
+            )
+            assert ssh_client.communicate(timeout=timeout)[0] == b''
+            assert ssh_client.returncode != 0

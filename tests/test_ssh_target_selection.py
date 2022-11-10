@@ -13,7 +13,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_ports = processes.start_wg(
+        with processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -30,23 +30,22 @@ class Test:
                         hash: '{password_123_hash}'
                 '''
             ),
-        )
+        ) as (_, wg_ports):
+            wait_port(ssh_port)
+            wait_port(wg_ports['ssh'])
 
-        wait_port(ssh_port)
-        wait_port(wg_ports['ssh'])
+            ssh_client = processes.start_ssh_client(
+                '-t',
+                'user:badtarget@localhost',
+                '-p',
+                str(wg_ports['ssh']),
+                '-i',
+                '/dev/null',
+                '-o',
+                'PreferredAuthentications=password',
+                'echo',
+                'hello',
+                password='123',
+            )
 
-        ssh_client = processes.start_ssh_client(
-            '-t',
-            'user:badtarget@localhost',
-            '-p',
-            str(wg_ports['ssh']),
-            '-i',
-            '/dev/null',
-            '-o',
-            'PreferredAuthentications=password',
-            'echo',
-            'hello',
-            password='123',
-        )
-
-        assert ssh_client.returncode != 0
+            assert ssh_client.returncode != 0

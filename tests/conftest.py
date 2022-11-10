@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import urllib3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -119,6 +120,7 @@ class ProcessManager:
         )
         return port
 
+    @contextmanager
     def start_wg(self, config='', args=None, api_based=False):
         ssh_port = alloc_port()
         http_port = alloc_port()
@@ -211,7 +213,7 @@ class ProcessManager:
 
         subprocess.call(['find', data_dir])
         p = run(args)
-        return p, {
+        yield p, {
             'ssh': ssh_port,
             'http': http_port,
             'mysql': mysql_port,

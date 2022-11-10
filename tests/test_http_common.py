@@ -76,10 +76,10 @@ def http_common_wg_port_api_based(
     processes,
     setup_common_definitions,
 ):
-    _, wg_ports = processes.start_wg('', api_based=True)
-    wait_port(wg_ports['http'], recv=False)
-    setup_common_definitions(f'https://localhost:{wg_ports["http"]}')
-    yield wg_ports['http']
+    with processes.start_wg('', api_based=True) as (_, wg_ports):
+        wait_port(wg_ports['http'], recv=False)
+        setup_common_definitions(f'https://localhost:{wg_ports["http"]}')
+        yield wg_ports['http']
 
 
 @pytest.fixture(scope='session')

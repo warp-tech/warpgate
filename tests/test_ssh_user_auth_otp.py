@@ -20,7 +20,7 @@ class Test:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
 
-        _, wg_ports = processes.start_wg(
+        with processes.start_wg(
             dedent(
                 f'''\
                 targets:
@@ -41,58 +41,57 @@ class Test:
                         ssh: [publickey, otp]
                 '''
             ),
-        )
+        ) as (_, wg_ports):
+            wait_port(ssh_port)
+            wait_port(wg_ports['ssh'])
 
-        wait_port(ssh_port)
-        wait_port(wg_ports['ssh'])
+            totp = pyotp.TOTP(otp_key_base32)
 
-        totp = pyotp.TOTP(otp_key_base32)
+            script = dedent(
+                f'''
+                set timeout {timeout - 5}
 
-        script = dedent(
-            f'''
-            set timeout {timeout - 5}
+                spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
-            spawn ssh user:ssh@localhost -p {wg_ports['ssh']} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
+                expect "Two-factor authentication"
+                sleep 0.5
+                send "{totp.now()}\\r"
 
-            expect "Two-factor authentication"
-            sleep 0.5
-            send "{totp.now()}\\r"
+                expect {{
+                    "/bin/sh"  {{ exit 0; }}
+                    eof {{ exit 1; }}
+                }}
+                '''
+            )
 
-            expect {{
-                "/bin/sh"  {{ exit 0; }}
-                eof {{ exit 1; }}
-            }}
-            '''
-        )
+            ssh_client = processes.start(
+                ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
 
-        ssh_client = processes.start(
-            ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+            output, stderr = ssh_client.communicate(script.encode(), timeout=timeout)
+            assert ssh_client.returncode == 0, output + stderr
 
-        output, stderr = ssh_client.communicate(script.encode(), timeout=timeout)
-        assert ssh_client.returncode == 0, output + stderr
+            script = dedent(
+                f'''
+                set timeout {timeout - 5}
 
-        script = dedent(
-            f'''
-            set timeout {timeout - 5}
+                spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
 
-            spawn ssh user:ssh@localhost -p {[wg_ports['ssh']]} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null  -o IdentitiesOnly=yes -o IdentityFile=ssh-keys/id_ed25519 -o PreferredAuthentications=publickey,keyboard-interactive ls /bin/sh
+                expect "Two-factor authentication"
+                sleep 0.5
+                send "12345678\\r"
 
-            expect "Two-factor authentication"
-            sleep 0.5
-            send "12345678\\r"
+                expect {{
+                    "/bin/sh"  {{ exit 0; }}
+                    "Two-factor authentication" {{ exit 1; }}
+                    eof {{ exit 1; }}
+                }}
+                '''
+            )
 
-            expect {{
-                "/bin/sh"  {{ exit 0; }}
-                "Two-factor authentication" {{ exit 1; }}
-                eof {{ exit 1; }}
-            }}
-            '''
-        )
+            ssh_client = processes.start(
+                ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+            )
 
-        ssh_client = processes.start(
-            ['expect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE
-        )
-
-        output = ssh_client.communicate(script.encode(), timeout=timeout)[0]
-        assert ssh_client.returncode != 0, output
+            output = ssh_client.communicate(script.encode(), timeout=timeout)[0]
+            assert ssh_client.returncode != 0, output
