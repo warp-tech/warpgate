@@ -14,7 +14,6 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
 
     let ui = api_service.swagger_ui();
     let spec = api_service.spec_endpoint();
-    let db = services.db.clone();
     let config = services.config.clone();
     let config_provider = services.config_provider.clone();
     let recordings = services.recordings.clone();
@@ -40,7 +39,6 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
             "/sessions/changes",
             crate::api::sessions_list::api_get_sessions_changes_stream,
         )
-        .data(db)
         .data(config_provider)
         .data(state)
         .data(recordings)

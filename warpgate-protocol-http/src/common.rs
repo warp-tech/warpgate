@@ -1,11 +1,14 @@
+use std::any::type_name;
 use std::sync::Arc;
 use std::time::Duration;
 
 use http::StatusCode;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use poem::error::GetDataError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
-use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
+use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, RequestBody, Response};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::*;
@@ -13,6 +16,7 @@ use uuid::Uuid;
 use warpgate_common::auth::AuthState;
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, Services};
+use warpgate_db_entities::{Token, User};
 
 use crate::session::SessionStore;
 
@@ -28,8 +32,6 @@ pub trait SessionExt {
     fn has_selected_target(&self) -> bool;
     fn get_target_name(&self) -> Option<String>;
     fn set_target_name(&self, target_name: String);
-    fn is_authenticated(&self) -> bool;
-    fn get_username(&self) -> Option<String>;
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
     fn get_auth_state_id(&self) -> Option<AuthStateId>;
@@ -47,14 +49,6 @@ impl SessionExt for Session {
 
     fn set_target_name(&self, target_name: String) {
         self.set(TARGET_SESSION_KEY, target_name);
-    }
-
-    fn is_authenticated(&self) -> bool {
-        self.get_username().is_some()
-    }
-
-    fn get_username(&self) -> Option<String> {
-        self.get_auth().map(|x| x.username().to_owned())
     }
 
     fn get_auth(&self) -> Option<SessionAuthorization> {
@@ -89,18 +83,77 @@ pub enum SessionAuthorization {
 impl SessionAuthorization {
     pub fn username(&self) -> &String {
         match self {
-            SessionAuthorization::User(username) => username,
-            SessionAuthorization::Ticket { username, .. } => username,
+            Self::User(username) => username,
+            Self::Ticket { username, .. } => username,
         }
     }
 }
 
-async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Result<bool> {
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RequestAuthorization {
+    Session(SessionAuthorization),
+    Token { username: String },
+}
+
+impl RequestAuthorization {
+    pub fn username(&self) -> &String {
+        match self {
+            Self::Session(auth) => auth.username(),
+            Self::Token { username, .. } => username,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'a> FromRequest<'a> for RequestAuthorization {
+    async fn from_request(req: &'a Request, body: &mut RequestBody) -> poem::Result<Self> {
+        let session: &Session = <_>::from_request(req, body).await?;
+        if let Some(auth) = session.get_auth() {
+            return Ok(RequestAuthorization::Session(auth));
+        }
+
+        let token = req
+            .headers()
+            .get("Authorization")
+            .and_then(|x| x.to_str().ok())
+            .and_then(|x| x.strip_prefix("Bearer "))
+            .map(|x| x.to_owned());
+
+        if let Some(token) = token {
+            let db: Data<&Arc<Mutex<DatabaseConnection>>> = <_>::from_request(req, body).await?;
+            let mut db = db.lock().await;
+
+            let token = utf8_percent_encode(&token, NON_ALPHANUMERIC).to_string();
+            let token = Token::Entity::find()
+                .filter(Token::Column::Secret.eq(token))
+                .one(&mut *db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
+            if let Some(token) = token {
+                let user = token
+                    .find_related(User::Entity)
+                    .one(&mut *db)
+                    .await
+                    .map_err(poem::error::InternalServerError)?;
+                if let Some(user) = user {
+                    return Ok(RequestAuthorization::Token {
+                        username: user.username,
+                    });
+                }
+            }
+        }
+
+        Err(GetDataError(type_name::<RequestAuthorization>()).into())
+    }
+}
+
+async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
     let services: Data<&Services> = <_>::from_request_without_body(req).await?;
 
-    let SessionAuthorization::User(username) = auth else {
-        return Ok(false)
-    };
+    let username = auth.username();
+    if let RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) = auth {
+        return Ok(false);
+    }
 
     let mut config_provider = services.config_provider.lock().await;
     let targets = config_provider.list_targets().await?;
@@ -119,7 +172,7 @@ async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Resu
 
 pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(&req).await?;
+        let auth: RequestAuthorization = <_>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
         }
@@ -129,7 +182,7 @@ pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
 
 pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(&req).await?;
+        let auth: RequestAuthorization = <_>::from_request_without_body(&req).await?;
         let session: &Session = <_>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
@@ -139,33 +192,24 @@ pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     })
 }
 
-pub async fn _inner_auth<E: Endpoint + 'static>(
-    ep: Arc<E>,
-    req: Request,
-) -> poem::Result<Option<E::Output>> {
-    let session: &Session = FromRequest::from_request_without_body(&req).await?;
-
-    Ok(match session.get_auth() {
-        Some(auth) => Some(ep.data(auth).call(req).await?),
-        _ => None,
-    })
-}
-
 pub fn endpoint_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint<Output = E::Output> {
     e.around(|ep, req| async move {
-        _inner_auth(ep, req)
+        Option::<RequestAuthorization>::from_request_without_body(&req)
             .await?
-            .ok_or_else(|| poem::Error::from_status(StatusCode::UNAUTHORIZED))
+            .ok_or_else(|| poem::Error::from_status(StatusCode::UNAUTHORIZED))?;
+        ep.call(req).await
     })
 }
 
 pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let err_resp = gateway_redirect(&req).into_response();
-        Ok(_inner_auth(ep, req)
+        if Option::<RequestAuthorization>::from_request_without_body(&req)
             .await?
-            .map(IntoResponse::into_response)
-            .unwrap_or(err_resp))
+            .is_none()
+        {
+            return Ok(gateway_redirect(&req).into_response());
+        }
+        Ok(ep.call(req).await?.into_response())
     })
 }
 

@@ -8,7 +8,7 @@ import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
 import { Alert } from 'sveltestrap'
 import LogViewer from './LogViewer.svelte'
-import RelativeDate from './RelativeDate.svelte'
+import RelativeDate from '../common/RelativeDate.svelte'
 
 export let params = { id: '' }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use poem::session::Session;
 use poem::web::Data;
-use poem::Request;
+use poem::{FromRequest, Request};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -14,7 +14,8 @@ use warpgate_common::{Secret, WarpgateError};
 use warpgate_core::Services;
 
 use crate::common::{
-    authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,
+    authorize_session, endpoint_auth, get_auth_state_for_request, RequestAuthorization,
+    SessionAuthorization, SessionExt,
 };
 use crate::session::SessionStore;
 
@@ -146,7 +147,7 @@ impl Api {
         }
     }
 
-    #[oai(path = "/auth/otp", method = "post", operation_id = "otpLogin")]
+    #[oai(path = "/auth/otp", method = "post", operation_id = "otp_login")]
     async fn api_auth_otp_login(
         &self,
         req: &Request,
@@ -200,7 +201,7 @@ impl Api {
     #[oai(
         path = "/auth/state",
         method = "get",
-        operation_id = "getDefaultAuthState"
+        operation_id = "get_default_auth_state"
     )]
     async fn api_default_auth_state(
         &self,
@@ -220,7 +221,7 @@ impl Api {
     #[oai(
         path = "/auth/state",
         method = "delete",
-        operation_id = "cancelDefaultAuth"
+        operation_id = "cancel_default_auth"
     )]
     async fn api_cancel_default_auth(
         &self,
@@ -249,10 +250,11 @@ impl Api {
     async fn api_auth_state(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        req: &Request,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let state_arc = get_auth_state(&id, &services, auth.map(|x| x.0)).await;
+        let auth: Option<RequestAuthorization> = <_>::from_request_without_body(req).await.ok();
+        let state_arc = get_auth_state(&id, &services, auth.as_ref()).await;
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -268,10 +270,11 @@ impl Api {
     async fn api_approve_auth(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        req: &Request,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
+        let auth: Option<RequestAuthorization> = <_>::from_request_without_body(req).await.ok();
+        let Some(state_arc) = get_auth_state(&id, &services, auth.as_ref()).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -296,10 +299,11 @@ impl Api {
     async fn api_reject_auth(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        req: &Request,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
+        let auth: Option<RequestAuthorization> = <_>::from_request_without_body(req).await.ok();
+        let Some(state_arc) = get_auth_state(&id, &services, auth.as_ref()).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
@@ -311,7 +315,7 @@ impl Api {
 async fn get_auth_state(
     id: &Uuid,
     services: &Services,
-    auth: Option<&SessionAuthorization>,
+    auth: Option<&RequestAuthorization>,
 ) -> Option<Arc<Mutex<AuthState>>> {
     let store = services.auth_state_store.lock().await;
 
@@ -319,7 +323,7 @@ async fn get_auth_state(
         return None;
     };
 
-    let SessionAuthorization::User(username) = auth else {
+    let RequestAuthorization::Session(SessionAuthorization::User(username)) = auth else {
         return None;
     };
 

@@ -1071,6 +1071,21 @@
         },
         "operationId": "get_logs"
       }
+    },
+    "/__": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenAuth": []
+          }
+        ],
+        "operationId": "_ignore_me"
+      }
     }
   },
   "components": {
@@ -1284,7 +1299,7 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "int32"
           },
           "key_type": {
             "type": "string"
@@ -1642,7 +1657,7 @@
           },
           "uses_left": {
             "type": "integer",
-            "format": "uint32"
+            "format": "int32"
           },
           "expiry": {
             "type": "string",
@@ -1921,6 +1936,12 @@
             }
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "TokenAuth": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }

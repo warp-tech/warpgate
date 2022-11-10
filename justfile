@@ -6,13 +6,13 @@ run *ARGS:
     RUST_BACKTRACE=1 RUST_LOG=warpgate cargo run --features {{features}} -- --config config.yaml {{ARGS}}
 
 fmt:
-    for p in {{projects}}; do cargo fmt --features {{features}} -p $p -v; done
+    for p in {{projects}}; do cargo fmt -p $p -v; done
 
 fix *ARGS:
-    for p in {{projects}}; do cargo fix --features {{features}} -p $p {{ARGS}}; done
+    for p in {{projects}}; do cargo fix --all-features -p $p {{ARGS}}; done
 
 clippy *ARGS:
-    for p in {{projects}}; do cargo cranky --features {{features}} -p $p {{ARGS}}; done
+    for p in {{projects}}; do cargo cranky --all-features -p $p {{ARGS}}; done
 
 test:
     for p in {{projects}}; do cargo test --features {{features}} -p $p; done

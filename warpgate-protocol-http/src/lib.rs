@@ -65,8 +65,6 @@ impl ProtocolServer for HTTPProtocolServer {
             env!("CARGO_PKG_VERSION"),
         )
         .server("/@warpgate/api");
-        let ui = api_service.swagger_ui();
-        let spec = api_service.spec_endpoint();
 
         let session_storage =
             SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
@@ -86,13 +84,15 @@ impl ProtocolServer for HTTPProtocolServer {
             )
         };
 
+        let db = self.services.db.clone();
+
         let app = Route::new()
             .nest(
                 "/@warpgate",
                 Route::new()
-                    .nest("/api/swagger", ui)
+                    .nest("/api/swagger", api_service.swagger_ui())
+                    .nest("/api/openapi.json", api_service.spec_endpoint())
                     .nest("/api", api_service.with(cache_bust()))
-                    .nest("/api/openapi.json", spec)
                     .nest_no_strip(
                         "/assets",
                         EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
@@ -156,7 +156,8 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(CookieHostMiddleware::new())
             .data(self.services.clone())
             .data(session_store.clone())
-            .data(session_storage);
+            .data(session_storage)
+            .data(db);
 
         tokio::spawn(async move {
             loop {

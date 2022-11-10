@@ -4903,6 +4903,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest",
+ "sea-orm",
  "serde",
  "serde_json",
  "tokio",

@@ -1,10 +1,30 @@
-use poem_openapi::OpenApi;
+use poem_openapi::auth::Bearer;
+use poem_openapi::{OpenApi, SecurityScheme};
 
-pub mod auth;
-pub mod info;
-pub mod sso_provider_detail;
-pub mod sso_provider_list;
-pub mod targets_list;
+mod auth;
+mod info;
+mod sso_provider_detail;
+mod sso_provider_list;
+mod targets_list;
+mod tokens_detail;
+mod tokens_list;
+
+#[derive(SecurityScheme)]
+#[oai(type = "bearer")]
+pub(crate) struct TokenAuth(Bearer);
+
+pub struct Api;
+
+#[OpenApi]
+impl Api {
+    #[oai(path = "/__", method = "get", operation_id = "_ignore_me")]
+    async fn _hidden(
+        &self,
+        _auth: TokenAuth, // only needed once for the security schema to be included in the spec
+    ) -> poem::Result<()> {
+        Ok(())
+    }
+}
 
 pub fn get() -> impl OpenApi {
     (
@@ -13,5 +33,8 @@ pub fn get() -> impl OpenApi {
         targets_list::Api,
         sso_provider_list::Api,
         sso_provider_detail::Api,
+        tokens_list::Api,
+        tokens_detail::Api,
+        Api,
     )
 }

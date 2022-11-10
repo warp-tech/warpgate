@@ -1,7 +1,7 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
-mod user {
+pub(crate) mod user {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 

@@ -8,5 +8,6 @@ pub mod Session;
 pub mod Target;
 pub mod TargetRoleAssignment;
 pub mod Ticket;
+pub mod Token;
 pub mod User;
 pub mod UserRoleAssignment;

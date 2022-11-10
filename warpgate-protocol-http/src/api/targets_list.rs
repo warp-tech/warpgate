@@ -7,7 +7,7 @@ use warpgate_common::TargetOptions;
 use warpgate_core::Services;
 use warpgate_db_entities::Target;
 
-use crate::common::{endpoint_auth, SessionAuthorization};
+use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
 
 pub struct Api;
 
@@ -35,7 +35,7 @@ impl Api {
     async fn api_get_all_targets(
         &self,
         services: Data<&Services>,
-        auth: Data<&SessionAuthorization>,
+        auth: RequestAuthorization,
     ) -> poem::Result<GetTargetsResponse> {
         let targets = {
             let mut config_provider = services.config_provider.lock().await;
@@ -48,8 +48,11 @@ impl Api {
                 let name = t.name.clone();
                 async move {
                     match auth {
-                        SessionAuthorization::Ticket { target_name, .. } => target_name == name,
-                        SessionAuthorization::User(_) => {
+                        RequestAuthorization::Session(SessionAuthorization::Ticket {
+                            target_name,
+                            ..
+                        }) => target_name == name,
+                        _ => {
                             let mut config_provider = services.config_provider.lock().await;
 
                             matches!(

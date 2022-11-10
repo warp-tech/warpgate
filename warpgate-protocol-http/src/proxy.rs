@@ -66,6 +66,7 @@ static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
     #[allow(clippy::mutable_key_type)]
     let mut s = HashSet::new();
     s.insert(http::header::ACCEPT_ENCODING);
+    s.insert(http::header::AUTHORIZATION);
     s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
     s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
     s.insert(http::header::SEC_WEBSOCKET_KEY);

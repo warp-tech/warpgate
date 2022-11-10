@@ -6,7 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_core::Services;
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::{RequestAuthorization, SessionAuthorization, SessionExt};
 
 pub struct Api;
 
@@ -41,6 +41,7 @@ impl Api {
         req: &Request,
         session: &Session,
         services: Data<&Services>,
+        auth: Option<RequestAuthorization>,
     ) -> poem::Result<InstanceInfoResponse> {
         let config = services.config.lock().await;
         let external_host = config
@@ -51,14 +52,16 @@ impl Api {
             .or_else(|| req.original_uri().host());
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            username: session.get_username(),
+            username: auth.as_ref().map(|a| a.username().to_owned()),
             selected_target: session.get_target_name(),
             external_host: external_host.map(str::to_string),
             authorized_via_ticket: matches!(
-                session.get_auth(),
-                Some(SessionAuthorization::Ticket { .. })
+                auth,
+                Some(RequestAuthorization::Session(
+                    SessionAuthorization::Ticket { .. }
+                ))
             ),
-            ports: if session.is_authenticated() {
+            ports: if auth.is_some() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {
                         Some(config.store.ssh.listen.port())

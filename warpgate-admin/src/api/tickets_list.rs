@@ -54,10 +54,7 @@ impl Api {
             .all(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
-        let tickets = tickets
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<Ticket::Model>>();
+
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
 

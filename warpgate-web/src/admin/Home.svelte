@@ -6,7 +6,7 @@
     import { api, SessionSnapshot } from 'admin/lib/api'
     import moment from 'moment'
     import { timer, Observable, switchMap, from, combineLatest, fromEvent, merge } from 'rxjs'
-    import RelativeDate from './RelativeDate.svelte'
+    import RelativeDate from '../common/RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
     import { Input } from 'sveltestrap'

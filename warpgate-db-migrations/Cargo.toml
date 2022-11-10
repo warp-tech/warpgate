@@ -20,3 +20,8 @@ sea-orm = { version = "^0.9", features = [
 sea-orm-migration = { version = "^0.9", default-features = false }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 serde_json = "1.0"
+
+[features]
+postgres = ["sea-orm/sqlx-postgres"]
+mysql = ["sea-orm/sqlx-mysql"]
+sqlite = ["sea-orm/sqlx-sqlite"]

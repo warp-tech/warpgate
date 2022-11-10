@@ -80,16 +80,16 @@ const routes = {
                 </div>
             </a>
             {#if $serverInfo?.username}
-                <a use:link use:active href="/">Sessions</a>
-                <a use:link use:active href="/config">Config</a>
-                <a use:link use:active href="/tickets">Tickets</a>
-                <a use:link use:active href="/ssh">SSH</a>
-                <a use:link use:active href="/log">Log</a>
+                <a use:link use:active class="nav" href="/">Sessions</a>
+                <a use:link use:active class="nav" href="/config">Config</a>
+                <a use:link use:active class="nav" href="/tickets">Tickets</a>
+                <a use:link use:active class="nav" href="/ssh">SSH</a>
+                <a use:link use:active class="nav" href="/log">Log</a>
             {/if}
             {#if $serverInfo?.username}
-            <div class="username ms-auto">
+            <a href='/@warpgate#/profile' class="username ms-auto">
                 {$serverInfo?.username}
-            </div>
+            </a>
             <button class="btn btn-link" on:click={logout} title="Log out">
                 <Fa icon={faSignOut} fw />
             </button>
@@ -135,7 +135,7 @@ const routes = {
         padding: 10px 0;
         margin: 10px 0 20px;
 
-        a, .logo {
+        .nav, .logo {
             font-size: 1.5rem;
         }
 

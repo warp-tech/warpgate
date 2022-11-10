@@ -2,7 +2,7 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert } from 'sveltestrap'
 import Fa from 'svelte-fa'
-import Router, { push, RouteDetail } from 'svelte-spa-router'
+import Router, { link, push, RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
 import { api } from 'gateway/lib/api'
@@ -57,6 +57,14 @@ const routes = {
         asyncComponent: () => import('./OutOfBandAuth.svelte'),
         conditions: [requireLogin],
     }),
+    '/profile': wrap({
+        asyncComponent: () => import('./Profile.svelte'),
+        conditions: [requireLogin],
+    }),
+    '/profile/tokens': wrap({
+        asyncComponent: () => import('./Tokens.svelte'),
+        conditions: [requireLogin],
+    }),
 }
 
 init()
@@ -77,12 +85,12 @@ init()
             </a>
 
             {#if $serverInfo?.username}
-                <div class="ms-auto">
+                <a use:link href="/profile" class="ms-auto">
                     {$serverInfo.username}
                     {#if $serverInfo.authorizedViaTicket}
                         <span class="ml-2">(ticket auth)</span>
                     {/if}
-                </div>
+                </a>
                 <button class="btn btn-link" on:click={logout} title="Log out">
                     <Fa icon={faSignOut} fw />
                 </button>

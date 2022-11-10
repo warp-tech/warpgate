@@ -10,7 +10,7 @@ use tracing::*;
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::{RequestAuthorization, SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
 #[derive(Deserialize)]
@@ -63,7 +63,7 @@ async fn get_target_for_request(
 ) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
     let session: &Session = <_>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
-    let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(req).await?;
+    let auth: RequestAuthorization = <_>::from_request_without_body(req).await?;
 
     let selected_target_name;
     let need_role_auth;
@@ -86,12 +86,15 @@ async fn get_target_for_request(
         None
     };
 
-    match *auth {
-        SessionAuthorization::Ticket { target_name, .. } => {
+    match auth {
+        RequestAuthorization::Session(SessionAuthorization::Ticket {
+            ref target_name, ..
+        }) => {
             selected_target_name = Some(target_name.clone());
             need_role_auth = false;
         }
-        SessionAuthorization::User(_) => {
+        RequestAuthorization::Token { .. }
+        | RequestAuthorization::Session(SessionAuthorization::User(_)) => {
             need_role_auth = true;
 
             selected_target_name =

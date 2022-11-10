@@ -68,7 +68,7 @@
             }
           }
         },
-        "operationId": "otpLogin"
+        "operationId": "otp_login"
       }
     },
     "/auth/logout": {
@@ -98,7 +98,7 @@
             "description": ""
           }
         },
-        "operationId": "getDefaultAuthState"
+        "operationId": "get_default_auth_state"
       },
       "delete": {
         "responses": {
@@ -116,7 +116,7 @@
             "description": ""
           }
         },
-        "operationId": "cancelDefaultAuth"
+        "operationId": "cancel_default_auth"
       }
     },
     "/auth/state/{id}": {
@@ -295,6 +295,21 @@
           }
         },
         "operationId": "return_to_sso"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "return_to_sso_with_form_data"
       }
     },
     "/sso/providers/{name}/start": {
@@ -338,6 +353,92 @@
         },
         "operationId": "start_sso"
       }
+    },
+    "/tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_tokens"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenAndSecret"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_token"
+      }
+    },
+    "/tokens/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_token"
+      }
+    },
+    "/__": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenAuth": []
+          }
+        ],
+        "operationId": "_ignore_me"
+      }
     }
   },
   "components": {
@@ -367,6 +468,17 @@
           },
           "state": {
             "$ref": "#/components/schemas/ApiAuthState"
+          }
+        }
+      },
+      "CreateTokenRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -517,6 +629,57 @@
             "type": "string"
           }
         }
+      },
+      "Token": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "user_id",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TokenAndSecret": {
+        "type": "object",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "TokenAuth": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }
