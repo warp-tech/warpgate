@@ -53,7 +53,7 @@ impl Api {
             version: env!("CARGO_PKG_VERSION").to_string(),
             username: session.get_username(),
             selected_target: session.get_target_name(),
-            external_host: external_host.map(&str::to_string),
+            external_host: external_host.map(str::to_string),
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })

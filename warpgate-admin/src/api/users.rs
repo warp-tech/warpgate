@@ -155,6 +155,15 @@ impl DetailApi {
             return Ok(UpdateUserResponse::NotFound);
         };
 
+        let mut credentials = body.credentials.clone();
+        for credential in credentials.iter_mut() {
+            if let UserAuthCredential::Password(ref mut c) = credential {
+                if parse_hash(c.hash.expose_secret()).is_err() {
+                    c.hash = hash_password(c.hash.expose_secret()).into();
+                }
+            }
+        }
+
         let mut model: User::ActiveModel = user.into();
         model.username = Set(body.username.clone());
         model.credentials = Set(serde_json::to_value(process_credentials(&body.credentials))

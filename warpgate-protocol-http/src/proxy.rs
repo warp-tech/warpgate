@@ -9,6 +9,7 @@ use futures::{SinkExt, StreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::Uri;
+use once_cell::sync::Lazy;
 use poem::web::websocket::{CloseCode, Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
@@ -61,24 +62,21 @@ impl SomeRequestBuilder for http::request::Builder {
     }
 }
 
-lazy_static::lazy_static! {
+static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
     #[allow(clippy::mutable_key_type)]
-    static ref DONT_FORWARD_HEADERS: HashSet<HeaderName> = {
-        #[allow(clippy::mutable_key_type)]
-        let mut s = HashSet::new();
-        s.insert(http::header::ACCEPT_ENCODING);
-        s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
-        s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
-        s.insert(http::header::SEC_WEBSOCKET_KEY);
-        s.insert(http::header::SEC_WEBSOCKET_VERSION);
-        s.insert(http::header::UPGRADE);
-        s.insert(http::header::HOST);
-        s.insert(http::header::CONNECTION);
-        s.insert(http::header::STRICT_TRANSPORT_SECURITY);
-        s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
-        s
-    };
-}
+    let mut s = HashSet::new();
+    s.insert(http::header::ACCEPT_ENCODING);
+    s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
+    s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
+    s.insert(http::header::SEC_WEBSOCKET_KEY);
+    s.insert(http::header::SEC_WEBSOCKET_VERSION);
+    s.insert(http::header::UPGRADE);
+    s.insert(http::header::HOST);
+    s.insert(http::header::CONNECTION);
+    s.insert(http::header::STRICT_TRANSPORT_SECURITY);
+    s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
+    s
+});
 
 static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
@@ -451,7 +449,7 @@ async fn proxy_ws_inner(
                                     .send(Message::Close(data.map(|data| {
                                         (
                                             CloseCode::from(data.code),
-                                            data.reason.to_owned().to_string(),
+                                            data.reason.into_owned().to_string(),
                                         )
                                     })))
                                     .await?;

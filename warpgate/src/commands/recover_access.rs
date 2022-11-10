@@ -36,7 +36,9 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
             .iter_mut()
             .find(|x| &x.username == username)
             .ok_or_else(|| anyhow::anyhow!("User not found"))?,
-        None => {
+        None =>
+        {
+            #[allow(clippy::indexing_slicing)]
             &mut users[dialoguer::Select::with_theme(&theme)
                 .with_prompt("Select a user to recover access for")
                 .items(&usernames)
@@ -61,7 +63,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
             hash: Secret::new(hash_password(&password)),
         }));
     user.credential_policy
-        .get_or_insert_with(|| Default::default())
+        .get_or_insert_with(Default::default)
         .http = Some(vec![CredentialKind::Password]);
 
     let model = User::ActiveModel {

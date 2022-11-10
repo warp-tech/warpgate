@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_else_if)]
+
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -54,7 +56,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         std::process::exit(1);
     }
 
-    if let Commands::Setup = cli.command {
+    if let Commands::Setup { .. } = cli.command {
         assert_interactive_terminal();
     }
 
@@ -112,15 +114,25 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     create_dir_all(&db_path)?;
     secure_directory(&db_path)?;
 
-    let mut db_path = db_path.to_string_lossy().to_string();
+    store.database_url = Secret::new(match &cli.command {
+        Commands::UnattendedSetup {
+            database_url: Some(url),
+            ..
+        }
+        | Commands::Setup {
+            database_url: Some(url),
+            ..
+        } => url.to_owned(),
+        _ => {
+            let mut db_path = db_path.to_string_lossy().to_string();
 
-    if let Some(x) = db_path.strip_suffix("./") {
-        db_path = x.to_string();
-    }
+            if let Some(x) = db_path.strip_suffix("./") {
+                db_path = x.to_string();
+            }
 
-    let mut database_url = "sqlite:".to_owned();
-    database_url.push_str(&db_path);
-    store.database_url = Secret::new(database_url);
+            format!("sqlite:{db_path}")
+        }
+    });
 
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
         store.http.enable = true;

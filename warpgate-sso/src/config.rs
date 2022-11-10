@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use once_cell::sync::Lazy;
 use openidconnect::{ClientId, ClientSecret, IssuerUrl};
 use serde::{Deserialize, Serialize};
@@ -106,6 +108,20 @@ impl SsoInternalProviderConfig {
             | SsoInternalProviderConfig::Apple { .. }
             | SsoInternalProviderConfig::Azure { .. } => vec!["email".to_string()],
             SsoInternalProviderConfig::Custom { scopes, .. } => scopes.clone(),
+        }
+    }
+
+    #[inline]
+    pub fn extra_parameters(&self) -> HashMap<String, String> {
+        match self {
+            SsoInternalProviderConfig::Google { .. }
+            | SsoInternalProviderConfig::Custom { .. }
+            | SsoInternalProviderConfig::Azure { .. } => HashMap::new(),
+            SsoInternalProviderConfig::Apple { .. } => {
+                let mut map = HashMap::new();
+                map.insert("response_mode".to_string(), "form_post".to_string());
+                map
+            }
         }
     }
 }

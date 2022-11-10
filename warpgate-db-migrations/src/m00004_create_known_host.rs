@@ -11,7 +11,7 @@ pub mod known_host {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
         pub host: String,
-        pub port: u16,
+        pub port: i32,
         pub key_type: String,
         pub key_base64: String,
     }

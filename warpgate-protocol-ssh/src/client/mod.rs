@@ -397,7 +397,7 @@ impl RemoteClient {
         {
             Ok(address) => address,
             Err(error) => {
-                error!(?error, "Cannot resolve target address");
+                error!(?error, address=%address_str, "Cannot resolve target address");
                 self.set_disconnected();
                 return Err(error);
             }

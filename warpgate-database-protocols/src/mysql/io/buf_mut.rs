@@ -17,13 +17,13 @@ impl MySqlBufMutExt for Vec<u8> {
             self.push(v as u8);
         } else if v < 0x1_00_00 {
             self.push(0xfc);
-            self.extend(&(v as u16).to_le_bytes());
+            self.extend((v as u16).to_le_bytes());
         } else if v < 0x1_00_00_00 {
             self.push(0xfd);
             self.extend(&(v as u32).to_le_bytes()[..3]);
         } else {
             self.push(0xfe);
-            self.extend(&v.to_le_bytes());
+            self.extend(v.to_le_bytes());
         }
     }
 

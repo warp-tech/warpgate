@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::reqwest::async_http_client;
-use openidconnect::{CsrfToken, Nonce, PkceCodeChallenge, RedirectUrl, Scope};
+use openidconnect::{CsrfToken, DiscoveryError, Nonce, PkceCodeChallenge, RedirectUrl, Scope};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
@@ -15,7 +15,12 @@ pub struct SsoClient {
 pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
     let metadata = CoreProviderMetadata::discover_async(config.issuer_url()?, async_http_client)
         .await
-        .map_err(|e| SsoError::Discovery(format!("{e}")))?;
+        .map_err(|e| {
+            SsoError::Discovery(match e {
+                DiscoveryError::Request(inner) => format!("Request error: {}", inner),
+                e => format!("{e}"),
+            })
+        })?;
     Ok(CoreClient::from_provider_metadata(
         metadata,
         config.client_id().clone(),
@@ -40,6 +45,10 @@ impl SsoClient {
                 Nonce::new_random,
             )
             .set_redirect_uri(Cow::Owned(redirect_url.clone()));
+
+        for (k, v) in self.config.extra_parameters() {
+            auth_req = auth_req.add_extra_param(k, v);
+        }
 
         for scope in self.config.scopes() {
             auth_req = auth_req.add_scope(Scope::new(scope.to_string()));

@@ -1,9 +1,10 @@
 use poem::session::Session;
-use poem::web::Data;
+use poem::web::{Data, Form};
 use poem::Request;
 use poem_openapi::param::Query;
-use poem_openapi::payload::{Json, Response};
+use poem_openapi::payload::{Html, Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use serde::Deserialize;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_core::Services;
@@ -42,6 +43,23 @@ enum ReturnToSsoResponse {
     Ok,
 }
 
+#[allow(clippy::large_enum_variant)]
+#[derive(ApiResponse)]
+enum ReturnToSsoPostResponse {
+    #[oai(status = 200)]
+    Redirect(Html<String>),
+}
+
+#[derive(Deserialize)]
+pub struct ReturnToSsoFormData {
+    pub code: Option<String>,
+}
+
+fn make_redirect_url(err: &str) -> String {
+    error!("SSO error: {err}");
+    format!("/@warpgate?login_error={err}")
+}
+
 #[OpenApi]
 impl Api {
     #[oai(
@@ -73,25 +91,68 @@ impl Api {
     }
 
     #[oai(path = "/sso/return", method = "get", operation_id = "return_to_sso")]
-    async fn api_return_to_sso(
+    async fn api_return_to_sso_get(
         &self,
         req: &Request,
         session: &Session,
         services: Data<&Services>,
         code: Query<Option<String>>,
     ) -> poem::Result<Response<ReturnToSsoResponse>> {
-        fn make_err_response(err: &str) -> poem::Result<Response<ReturnToSsoResponse>> {
-            error!("SSO error: {err}");
-            Ok(Response::new(ReturnToSsoResponse::Ok)
-                .header("Location", format!("/@warpgate?login_error={err}")))
-        }
+        let url = self
+            .api_return_to_sso_get_common(req, session, services, &code)
+            .await?
+            .unwrap_or_else(|x| make_redirect_url(&x));
 
+        Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", url))
+    }
+
+    #[oai(
+        path = "/sso/return",
+        method = "post",
+        operation_id = "return_to_sso_with_form_data"
+    )]
+    async fn api_return_to_sso_post(
+        &self,
+        req: &Request,
+        session: &Session,
+        services: Data<&Services>,
+        data: Form<ReturnToSsoFormData>,
+    ) -> poem::Result<ReturnToSsoPostResponse> {
+        let url = self
+            .api_return_to_sso_get_common(req, session, services, &data.code)
+            .await?
+            .unwrap_or_else(|x| make_redirect_url(&x));
+        let serialized_url =
+            serde_json::to_string(&url).map_err(poem::error::InternalServerError)?;
+        Ok(ReturnToSsoPostResponse::Redirect(
+            poem_openapi::payload::Html(format!(
+                "<!doctype html>\n
+                <html>
+                    <script>
+                        location.href = {serialized_url};
+                    </script>
+                    <body>
+                        Redirecting to <a href='{url}'>{url}</a>...
+                    </body>
+                </html>
+            "
+            )),
+        ))
+    }
+
+    async fn api_return_to_sso_get_common(
+        &self,
+        req: &Request,
+        session: &Session,
+        services: Data<&Services>,
+        code: &Option<String>,
+    ) -> poem::Result<Result<String, String>> {
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
-            return make_err_response("Not in an active SSO process");
+            return Ok(Err("Not in an active SSO process".to_string()));
         };
 
         let Some(ref code) = *code else {
-            return make_err_response("No authorization code in the return URL request");
+            return Ok(Err("No authorization code in the return URL request".to_string()));
         };
 
         let response = context
@@ -101,11 +162,11 @@ impl Api {
             .map_err(poem::error::InternalServerError)?;
 
         if !response.email_verified.unwrap_or(true) {
-            return make_err_response("The SSO account's e-mail is not verified");
+            return Ok(Err("The SSO account's e-mail is not verified".to_string()));
         }
 
         let Some(email) = response.email else {
-            return make_err_response("No e-mail information in the SSO response");
+            return Ok(Err("No e-mail information in the SSO response".to_string()));
         };
 
         info!("SSO login as {email}");
@@ -122,7 +183,7 @@ impl Api {
             .username_for_sso_credential(&cred)
             .await?;
         let Some(username) = username else {
-            return make_err_response(&format!("No user matching {email}"));
+            return Ok(Err(format!("No user matching {email}")));
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
@@ -141,9 +202,10 @@ impl Api {
             authorize_session(req, username).await?;
         }
 
-        Ok(Response::new(ReturnToSsoResponse::Ok).header(
-            "Location",
-            context.next_url.as_deref().unwrap_or("/@warpgate#/login"),
-        ))
+        Ok(Ok(context
+            .next_url
+            .as_deref()
+            .unwrap_or("/@warpgate#/login")
+            .to_owned()))
     }
 }

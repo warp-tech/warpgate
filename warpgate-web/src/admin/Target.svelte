@@ -148,7 +148,10 @@ async function toggleRole (role: Role) {
         </div>
 
         <FormGroup floating label="Username">
-            <input class="form-control" bind:value={target.options.username} />
+            <input class="form-control"
+                placeholder="Use the currently logged in user's name"
+                bind:value={target.options.username}
+            />
         </FormGroup>
 
         <div class="d-flex">

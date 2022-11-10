@@ -1,4 +1,4 @@
-#![feature(decl_macro, proc_macro_hygiene, let_else)]
+#![feature(decl_macro, proc_macro_hygiene)]
 mod api;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;

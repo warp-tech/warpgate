@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait, let_else)]
+#![feature(type_alias_impl_trait)]
 mod client;
 mod common;
 mod compat;
