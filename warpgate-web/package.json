@@ -36,7 +36,7 @@
     "copy-text-to-clipboard": "^3.0.1",
     "eslint": "^8.27.0",
     "eslint-config-standard": "^16.0.3",
-    "eslint-import-resolver-typescript": "^2.7.1",
+    "eslint-import-resolver-typescript": "^3.5.2",
     "eslint-plugin-import": "^2.26.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.1.1",
