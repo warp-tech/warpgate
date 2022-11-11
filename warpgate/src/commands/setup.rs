@@ -172,10 +172,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     }
 
-    if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
-        if let Some(ssh_port) = ssh_port {
-            store.ssh.enable = true;
-            store.ssh.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *ssh_port)));
+    if let Commands::UnattendedSetup { mysql_port, .. } = &cli.command {
+        if let Some(mysql_port) = mysql_port {
+            store.mysql.enable = true;
+            store.mysql.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *mysql_port)));
         }
     } else {
         if !is_docker() {

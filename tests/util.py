@@ -9,12 +9,12 @@ import time
 
 last_port = 1234
 
-mysql_client_ssl_opt = '--ssl'
+mysql_client_ssl_opt = "--ssl"
 mysql_client_opts = []
-if 'GITHUB_ACTION' in os.environ:
+if "GITHUB_ACTION" in os.environ:
     # Github uses MySQL instead of MariaDB
-    mysql_client_ssl_opt = '--ssl-mode=REQUIRED'
-    mysql_client_opts = ['--enable-cleartext-plugin']
+    mysql_client_ssl_opt = "--ssl-mode=REQUIRED"
+    mysql_client_opts = ["--enable-cleartext-plugin"]
 
 
 def alloc_port():
@@ -23,46 +23,55 @@ def alloc_port():
     return last_port
 
 
-def wait_port(port, recv=True, timeout=60):
-    logging.debug(f'Waiting for port {port}')
+def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None):
+    logging.debug(f"Waiting for port {port}")
 
-    data = b''
+    data = b""
 
     def wait():
         nonlocal data
         while True:
             try:
-                s = socket.create_connection(('localhost', port), timeout=5)
+                s = socket.create_connection(("localhost", port), timeout=5)
                 if recv:
                     while True:
                         data = s.recv(100)
                         if data:
                             break
                 else:
-                    data = b''
+                    data = b""
                 s.close()
-                logging.debug(f'Port {port} is up')
+                logging.debug(f"Port {port} is up")
                 return data
             except socket.error:
-                time.sleep(0.1)
-                continue
+                if for_process:
+                    try:
+                        for_process.wait(timeout=0.1)
+                        raise Exception("Process exited while waiting for port")
+                    except subprocess.TimeoutExpired:
+                        continue
+                else:
+                    time.sleep(0.1)
 
     t = threading.Thread(target=wait, daemon=True)
     t.start()
     t.join(timeout=timeout)
     if t.is_alive():
-        raise Exception(f'Port {port} is not up')
+        raise Exception(f"Port {port} is not up")
     return data
 
 
 def wait_mysql_port(port):
-    logging.debug(f'Waiting for MySQL port {port}')
+    logging.debug(f"Waiting for MySQL port {port}")
 
     def wait():
         while True:
             try:
-                subprocess.check_call(f'mysql --user=root --password=123 --host=127.0.0.1 --port={port} --execute="show schemas;"', shell=True)
-                logging.debug(f'Port {port} is up')
+                subprocess.check_call(
+                    f'mysql --user=root --password=123 --host=127.0.0.1 --port={port} --execute="show schemas;"',
+                    shell=True,
+                )
+                logging.debug(f"Port {port} is up")
                 break
             except subprocess.CalledProcessError:
                 time.sleep(1)
@@ -72,26 +81,26 @@ def wait_mysql_port(port):
     t.start()
     t.join(timeout=60)
     if t.is_alive():
-        raise Exception(f'Port {port} is not up')
+        raise Exception(f"Port {port} is not up")
 
 
 def create_ticket(url, username, target_name):
     session = requests.Session()
     session.verify = False
     response = session.post(
-        f'{url}/@warpgate/api/auth/login',
+        f"{url}/@warpgate/api/auth/login",
         json={
-            'username': 'admin',
-            'password': '123',
+            "username": "admin",
+            "password": "123",
         },
     )
     assert response.status_code // 100 == 2
     response = session.post(
-        f'{url}/@warpgate/admin/api/tickets',
+        f"{url}/@warpgate/admin/api/tickets",
         json={
-            'username': username,
-            'target_name': target_name,
+            "username": username,
+            "target_name": target_name,
         },
     )
     assert response.status_code == 201
-    return response.json()['secret']
+    return response.json()["secret"]
