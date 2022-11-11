@@ -15,5 +15,5 @@ sea-orm = { version = "0.10.2", features = [
 ], default-features = false }
 serde = "1.0"
 serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.2", features = ["v4", "serde"] }
 warpgate-common = { version = "*", path = "../warpgate-common" }

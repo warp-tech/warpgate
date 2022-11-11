@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3", features = [
     "env-filter",
     "local-time",
 ] }
-uuid = "1.0"
+uuid = "1.2"
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-core = { version = "*", path = "../warpgate-core" }
