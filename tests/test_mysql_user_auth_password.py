@@ -62,6 +62,7 @@ class Test:
         time.sleep(15)
         wait_mysql_port(db_port)
         wait_port(shared_wg.mysql_port, recv=False)
+        time.sleep(15)
 
         client = processes.start(
             [
