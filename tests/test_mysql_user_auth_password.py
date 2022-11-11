@@ -1,4 +1,5 @@
 import subprocess
+import time
 from uuid import uuid4
 
 from .api_client import (
@@ -61,6 +62,7 @@ class Test:
         wait_mysql_port(db_port)
         wait_port(shared_wg.mysql_port, recv=False)
 
+        time.sleep(5)
         client = processes.start(
             [
                 "mysql",
