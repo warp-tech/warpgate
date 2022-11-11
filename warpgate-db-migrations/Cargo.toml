@@ -10,7 +10,7 @@ version = "0.6.4"
 [dependencies]
 async-std = "^1.11"
 chrono = "0.4"
-sea-orm = { version = "^0.9", features = [
+sea-orm = { version = "^0.10", features = [
     "runtime-tokio-native-tls",
     "macros",
     "with-chrono",

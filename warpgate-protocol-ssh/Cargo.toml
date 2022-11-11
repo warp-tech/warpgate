@@ -14,7 +14,7 @@ dialoguer = "0.10"
 futures = "0.3"
 russh = { version = "0.35.0-beta.1", features = ["vendored-openssl"] }
 russh-keys = { version = "0.22.0", features = ["vendored-openssl"] }
-sea-orm = { version = "^0.9", features = [
+sea-orm = { version = "^0.10", features = [
     "runtime-tokio-native-tls",
 ], default-features = false }
 thiserror = "1.0"
