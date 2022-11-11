@@ -10,13 +10,13 @@ version = "0.6.4"
 [dependencies]
 async-std = "^1.11"
 chrono = "0.4"
-sea-orm = { version = "^0.9", features = [
+sea-orm = { version = "0.10.2", features = [
     "runtime-tokio-native-tls",
     "macros",
     "with-chrono",
     "with-uuid",
     "with-json",
 ], default-features = false }
-sea-orm-migration = { version = "^0.9", default-features = false }
+sea-orm-migration = { version = "0.10.2", default-features = false }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 serde_json = "1.0"

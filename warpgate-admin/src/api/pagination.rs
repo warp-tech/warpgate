@@ -30,7 +30,7 @@ impl<T: ParseFromJSON + ToJSON + Send + Sync> PaginatedResponse<T> {
         let offset = params.offset.unwrap_or(0);
         let limit = params.limit.unwrap_or(100);
 
-        let paginator = query.clone().paginate(db, limit as usize);
+        let paginator = query.clone().paginate(db, limit);
 
         let total = paginator
             .num_items()
