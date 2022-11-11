@@ -15,7 +15,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/LoginRequest"
               }
@@ -30,7 +30,7 @@
           "401": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/LoginFailureResponse"
                 }
@@ -45,7 +45,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/OtpLoginRequest"
               }
@@ -60,7 +60,7 @@
           "401": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/LoginFailureResponse"
                 }
@@ -87,7 +87,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStateResponseInternal"
                 }
@@ -105,7 +105,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStateResponseInternal"
                 }
@@ -138,7 +138,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStateResponseInternal"
                 }
@@ -171,7 +171,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStateResponseInternal"
                 }
@@ -204,7 +204,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthStateResponseInternal"
                 }
@@ -224,7 +224,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Info"
                 }
@@ -241,7 +241,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -261,7 +261,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -295,6 +295,21 @@
           }
         },
         "operationId": "return_to_sso"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/html; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "return_to_sso_with_form_data"
       }
     },
     "/sso/providers/{name}/start": {
@@ -325,7 +340,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/StartSsoResponseParams"
                 }

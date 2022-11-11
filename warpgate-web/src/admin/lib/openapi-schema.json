@@ -61,7 +61,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/PaginatedSessionSnapshot"
                 }
@@ -99,7 +99,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionSnapshot"
                 }
@@ -132,7 +132,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -191,7 +191,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Recording"
                 }
@@ -211,7 +211,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -227,7 +227,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/RoleDataRequest"
               }
@@ -239,7 +239,7 @@
           "201": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
                 }
@@ -249,7 +249,7 @@
           "400": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "string"
                 }
@@ -279,7 +279,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
                 }
@@ -308,7 +308,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/RoleDataRequest"
               }
@@ -320,7 +320,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
                 }
@@ -370,7 +370,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -386,7 +386,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/TargetDataRequest"
               }
@@ -398,7 +398,7 @@
           "201": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Target"
                 }
@@ -408,7 +408,7 @@
           "400": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "string"
                 }
@@ -438,7 +438,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Target"
                 }
@@ -467,7 +467,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/TargetDataRequest"
               }
@@ -479,7 +479,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Target"
                 }
@@ -542,7 +542,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -640,7 +640,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -656,7 +656,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/UserDataRequest"
               }
@@ -668,7 +668,7 @@
           "201": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/User"
                 }
@@ -678,7 +678,7 @@
           "400": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "string"
                 }
@@ -708,7 +708,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/User"
                 }
@@ -737,7 +737,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/UserDataRequest"
               }
@@ -749,7 +749,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/User"
                 }
@@ -806,7 +806,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -901,7 +901,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -917,7 +917,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/CreateTicketRequest"
               }
@@ -929,7 +929,7 @@
           "201": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/TicketAndSecret"
                 }
@@ -939,7 +939,7 @@
           "400": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "string"
                 }
@@ -982,7 +982,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -1028,7 +1028,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -1046,7 +1046,7 @@
       "post": {
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/json; charset=utf-8": {
               "schema": {
                 "$ref": "#/components/schemas/GetLogsRequest"
               }
@@ -1058,7 +1058,7 @@
           "200": {
             "description": "",
             "content": {
-              "application/json": {
+              "application/json; charset=utf-8": {
                 "schema": {
                   "type": "array",
                   "items": {
@@ -1284,7 +1284,7 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "int32"
           },
           "key_type": {
             "type": "string"
@@ -1642,7 +1642,7 @@
           },
           "uses_left": {
             "type": "integer",
-            "format": "uint32"
+            "format": "int32"
           },
           "expiry": {
             "type": "string",
