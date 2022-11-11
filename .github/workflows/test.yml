@@ -43,7 +43,7 @@ jobs:
       - name: Run
         working-directory: tests
         run: |
-          RUST_LOG=debug TIMEOUT=120 poetry run ./run.sh test_http* test_mysql_user_auth_password.py test_ssh_proto* test_ssh_user_auth*
+          RUST_LOG=debug TIMEOUT=120 poetry run ./run.sh test_http* test_mysql_user_auth_password.py test_ssh*
           cargo llvm-cov --no-run --hide-instantiations --lcov > coverage.lcov
 
       - name: SonarCloud Scan
