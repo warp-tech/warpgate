@@ -59,7 +59,7 @@
     "tslib": "^2.4.1",
     "typescript": "^4.7.4",
     "vite": "^2.9.13",
-    "vite-plugin-checker": "^0.4.6",
+    "vite-plugin-checker": "^0.5.1",
     "vite-tsconfig-paths": "^3.5.2",
     "xterm": "^4.18.0",
     "xterm-addon-serialize": "^0.7.0"
