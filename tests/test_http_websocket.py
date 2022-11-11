@@ -61,7 +61,7 @@ class TestHTTPWebsocket:
         session.post(
             f"{url}/@warpgate/api/auth/login",
             json={
-                "username": user['username'],
+                "username": user["username"],
                 "password": "123",
             },
         )

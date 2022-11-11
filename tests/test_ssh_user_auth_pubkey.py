@@ -27,7 +27,7 @@ class Test:
 
         wait_port(ssh_port)
 
-        url = f'https://localhost:{shared_wg.http_port}'
+        url = f"https://localhost:{shared_wg.http_port}"
         with api_admin_session(url) as session:
             role = api_create_role(url, session, {"name": f"role-{uuid4()}"})
             user = api_create_user(
@@ -102,7 +102,7 @@ class Test:
 
         wait_port(ssh_port)
 
-        url = f'https://localhost:{shared_wg.http_port}'
+        url = f"https://localhost:{shared_wg.http_port}"
         with api_admin_session(url) as session:
             role = api_create_role(url, session, {"name": f"role-{uuid4()}"})
             user = api_create_user(

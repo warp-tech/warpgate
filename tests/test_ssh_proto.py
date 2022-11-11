@@ -32,7 +32,9 @@ common_args = [
 ]
 
 
-def setup_user_and_target(processes: ProcessManager, wg: WarpgateProcess, wg_c_ed25519_pubkey):
+def setup_user_and_target(
+    processes: ProcessManager, wg: WarpgateProcess, wg_c_ed25519_pubkey
+):
     ssh_port = processes.start_ssh_server(
         trusted_keys=[wg_c_ed25519_pubkey.read_text()]
     )
@@ -85,7 +87,9 @@ class Test:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         ssh_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
             "-p",
@@ -109,7 +113,9 @@ class Test:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         ssh_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
             "-p",
@@ -132,7 +138,9 @@ class Test:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         ssh_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
             "-p",
@@ -154,7 +162,9 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         local_port = alloc_port()
         ssh_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
@@ -186,7 +196,9 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         pf_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
             "-p",
@@ -222,7 +234,9 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         script = dedent(
             f"""
             set timeout {timeout - 5}
@@ -260,7 +274,9 @@ class Test:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         ssh_client = processes.start_ssh_client(
             f"{user['username']}:{ssh_target['name']}@localhost",
             "-p",
@@ -282,7 +298,9 @@ class Test:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        user, ssh_target = setup_user_and_target(processes, shared_wg, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
         with tempfile.TemporaryDirectory() as f:
             subprocess.check_call(
                 [
