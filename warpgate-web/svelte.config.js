@@ -9,7 +9,9 @@ const config = {
     preprocess: sveltePreprocess({
         sourceMap: true,
     }),
-    prebundleSvelteLibraries: true,
+    vitePlugin: {
+        prebundleSvelteLibraries: true,
+    },
 }
 
 export default config
