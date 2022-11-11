@@ -51,7 +51,7 @@ class Test:
                         "username": "root",
                         "password": "123",
                         "tls": {
-                            "mode": "Disabled",
+                            "mode": "Preferred",
                             "verify": False,
                         },
                     },
