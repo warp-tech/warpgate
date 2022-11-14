@@ -30,6 +30,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             connection_timeout: Some(Duration::from_secs(300)),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
+            event_buffer_size: 100,
             preferred: Preferred {
                 key: &[
                     russh_keys::key::ED25519,
