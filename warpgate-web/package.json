@@ -26,7 +26,7 @@
     "@otplib/plugin-base32-enc-dec": "^12.0.1",
     "@otplib/plugin-crypto-js": "^12.0.1",
     "@otplib/preset-browser": "^12.0.1",
-    "@sveltejs/vite-plugin-svelte": "^1.1.1",
+    "@sveltejs/vite-plugin-svelte": "^1.2.0",
     "@tsconfig/svelte": "^3.0.0",
     "@types/qrcode": "^1.5.0",
     "@types/shell-escape": "^0.2.1",
