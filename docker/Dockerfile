@@ -13,7 +13,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
 COPY . /opt/warpgate
 
 RUN cd /opt/warpgate \
-    && just yarn \
+    && just yarn --network-timeout 1000000000 \
     && just openapi \
     && just yarn build \
     && cargo build --features mysql,postgres --release

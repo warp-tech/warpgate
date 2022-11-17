@@ -24,7 +24,7 @@ jobs:
 
       - name: Build admin UI
         run: |
-          just yarn
+          just yarn --network-timeout 1000000000
           just openapi
           just yarn build
 
