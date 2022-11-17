@@ -12,8 +12,10 @@ bimap = "0.6"
 bytes = "1.2"
 dialoguer = "0.10"
 futures = "0.3"
-russh = { version = "0.35.0-beta.2", features = ["vendored-openssl"] }
-russh-keys = { version = "0.22.0", features = ["vendored-openssl"] }
+russh = { version = "0.35.0-beta.3", features = ["vendored-openssl"] }
+# russh = { version = "0.35.0-beta.3", features = ["vendored-openssl"], path = "../../russh/russh"}
+russh-keys = { version = "0.23.0-beta.1", features = ["vendored-openssl"] }
+# russh-keys = { version = "0.23.0-beta.1", features = ["vendored-openssl"], path = "../../russh/russh-keys" }
 sea-orm = { version = "0.10.2", features = [
     "runtime-tokio-native-tls",
 ], default-features = false }

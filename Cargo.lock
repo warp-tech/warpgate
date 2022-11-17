@@ -3183,9 +3183,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.35.0-beta.2"
+version = "0.35.0-beta.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aa615836d9689fa7b5e03ee5941300b15bdbd39df0af42bddbaa45695f41a73"
+checksum = "baf4bf3ae3aca5cce4ec5d5790b3504be8ee3901b9c2f9311ab5318673c7f1ad"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3218,9 +3218,9 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.7.0-beta.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89fd30a2ef98dfa621409d5bc56a2479d5810bf13a5eea3de89d859437b7e2e"
+checksum = "c3fdf036c2216b554053d19d4af45c1722d13b00ac494ea19825daf4beac034e"
 dependencies = [
  "libc",
  "winapi",
@@ -3228,9 +3228,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0"
+version = "0.23.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac7f4ec55d4cecf14e2745ca944909cb34d781515627c4c80431c2a735f2dae6"
+checksum = "583adc8a2d6a70b86abb6fb9b0564b85df58198586a7665920d46ffaf7ac383d"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
@@ -4627,7 +4627,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4664,7 +4664,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4693,7 +4693,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4729,7 +4729,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4769,7 +4769,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4782,7 +4782,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4795,7 +4795,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "async-std",
  "chrono",
@@ -4807,7 +4807,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4839,7 +4839,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4891,7 +4891,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "bytes",
  "once_cell",
@@ -4905,7 +4905,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "rust-embed",
  "serde",

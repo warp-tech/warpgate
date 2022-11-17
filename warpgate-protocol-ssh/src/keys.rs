@@ -49,7 +49,10 @@ pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh_key
     keys.push(load_secret_key(key_path, None)?);
 
     let key_path = path.join("host-rsa");
-    keys.push(load_secret_key(key_path, None)?);
+    let key = load_secret_key(key_path, None)?;
+    key.with_signature_hash(SignatureHash::SHA2_512).map(|key| keys.push(key));
+    key.with_signature_hash(SignatureHash::SHA2_256).map(|key| keys.push(key));
+    key.with_signature_hash(SignatureHash::SHA1).map(|key| keys.push(key));
 
     Ok(keys)
 }
