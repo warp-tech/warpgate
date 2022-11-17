@@ -332,21 +332,21 @@ impl ServerSession {
                     debug!(event=?e, "Event");
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_remote_event(e).instrument(span).await {
-                        error!("Event handler error: {:?}", err);
+                        error!("Client event handler error: {:?}", err);
                         // break;
                     }
                 }
                 Event::ServerHandler(e) => {
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_server_handler_event(e).instrument(span).await {
-                        error!("Event handler error: {:?}", err);
+                        error!("Server event handler error: {:?}", err);
                         // break;
                     }
                 }
                 Event::Command(command) => {
                     debug!(?command, "Session control");
                     if let Err(err) = self.handle_session_control(command).await {
-                        error!("Event handler error: {:?}", err);
+                        error!("Command handler error: {:?}", err);
                         // break;
                     }
                 }
