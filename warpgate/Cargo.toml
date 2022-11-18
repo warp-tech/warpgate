@@ -24,7 +24,7 @@ serde_json = "1.0"
 serde_yaml = "0.8.23"
 sea-orm = { version = "0.10.3", default-features = false }
 time = "0.3"
-tokio = { version = "1.20", features = ["tracing", "signal", "macros"] }
+tokio = { version = "1.22", features = ["tracing", "signal", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",
