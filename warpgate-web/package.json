@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@fontsource/work-sans": "^4.5.12",
-    "@fortawesome/free-brands-svg-icons": "^6.2.0",
+    "@fortawesome/free-brands-svg-icons": "^6.2.1",
     "@fortawesome/free-regular-svg-icons": "^6.2.1",
     "@fortawesome/free-solid-svg-icons": "^6.2.1",
     "@openapitools/openapi-generator-cli": "^2.5.1",
