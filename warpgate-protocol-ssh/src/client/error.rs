@@ -4,8 +4,6 @@ use warpgate_common::WarpgateError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SshClientError {
-    #[error("channel failure")]
-    ChannelFailure,
     #[error("mpsc error")]
     MpscError,
     #[error("russh error: {0}")]

@@ -26,9 +26,9 @@ impl Debug for HandleWrapper {
 pub enum ServerHandlerEvent {
     Authenticated(HandleWrapper),
     ChannelOpenSession(ServerChannelId, oneshot::Sender<bool>),
-    SubsystemRequest(ServerChannelId, String, oneshot::Sender<()>),
+    SubsystemRequest(ServerChannelId, String, oneshot::Sender<bool>),
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
-    ShellRequest(ServerChannelId, oneshot::Sender<()>),
+    ShellRequest(ServerChannelId, oneshot::Sender<bool>),
     AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
     AuthPassword(Secret<String>, Secret<String>, oneshot::Sender<Auth>),
     AuthKeyboardInteractive(
@@ -42,7 +42,7 @@ pub enum ServerHandlerEvent {
     ChannelEof(ServerChannelId, oneshot::Sender<()>),
     WindowChangeRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     Signal(ServerChannelId, Sig, oneshot::Sender<()>),
-    ExecRequest(ServerChannelId, Bytes, oneshot::Sender<()>),
+    ExecRequest(ServerChannelId, Bytes, oneshot::Sender<bool>),
     ChannelOpenDirectTcpIp(ServerChannelId, DirectTCPIPParams, oneshot::Sender<bool>),
     EnvRequest(ServerChannelId, String, String, oneshot::Sender<()>),
     X11Request(ServerChannelId, X11Request, oneshot::Sender<()>),
@@ -131,8 +131,12 @@ impl russh::server::Handler for ServerHandler {
                 tx,
             ))?;
 
-            let _ = rx.await;
-            session.channel_success(channel);
+            if rx.await.unwrap_or(false) {
+                session.channel_success(channel)
+            } else {
+                session.channel_failure(channel)
+            }
+
             Ok((self, session))
         }
         .boxed()
@@ -188,8 +192,12 @@ impl russh::server::Handler for ServerHandler {
                 tx,
             ))?;
 
-            let _ = rx.await;
-            session.channel_success(channel);
+            if rx.await.unwrap_or(false) {
+                session.channel_success(channel)
+            } else {
+                session.channel_failure(channel)
+            }
+
             Ok((self, session))
         }
         .boxed()
@@ -372,8 +380,13 @@ impl russh::server::Handler for ServerHandler {
                 data,
                 tx,
             ))?;
-            let _ = rx.await;
-            session.channel_success(channel);
+
+            if rx.await.unwrap_or(false) {
+                session.channel_success(channel)
+            } else {
+                session.channel_failure(channel)
+            }
+
             Ok((self, session))
         }
         .boxed()
@@ -460,8 +473,9 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn tcpip_forward(self, address: &str, port: u32, mut session: Session) -> Self::FutureBool {
+    fn tcpip_forward(self, address: &str, port: &mut u32, mut session: Session) -> Self::FutureBool {
         let address = address.to_string();
+        let port = *port;
         async move {
             let (tx, rx) = oneshot::channel();
             self.send_event(ServerHandlerEvent::TcpIpForward(address, port, tx))?;

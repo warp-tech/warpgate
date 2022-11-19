@@ -244,11 +244,11 @@ impl ServerSession {
         }
     }
 
-    fn map_channel(&self, ch: &ServerChannelId) -> Result<Uuid> {
+    fn map_channel(&self, ch: &ServerChannelId) -> Result<Uuid, WarpgateError> {
         self.channel_map
             .get_by_left(ch)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+            .ok_or_else(|| WarpgateError::InconsistentState)
     }
 
     fn map_channel_reverse(&self, ch: &Uuid) -> Result<ServerChannelId> {
@@ -380,7 +380,7 @@ impl ServerSession {
                         let _ = reply.send(true);
                         Ok(())
                     }
-                    Err(SshClientError::ChannelFailure) => {
+                    Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
                         let _ = reply.send(false);
                         Ok(())
                     }
@@ -388,9 +388,21 @@ impl ServerSession {
                 };
             }
 
-            ServerHandlerEvent::SubsystemRequest(server_channel_id, name, _) => {
-                self._channel_subsystem_request(server_channel_id, name)
-                    .await?;
+            ServerHandlerEvent::SubsystemRequest(server_channel_id, name, reply) => {
+                return match self
+                    ._channel_subsystem_request(server_channel_id, name)
+                    .await
+                {
+                    Ok(()) => {
+                        let _ = reply.send(true);
+                        Ok(())
+                    }
+                    Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
+                        let _ = reply.send(false);
+                        Ok(())
+                    }
+                    Err(x) => Err(x.into()),
+                }
             }
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, _) => {
@@ -420,7 +432,7 @@ impl ServerSession {
                 self.pty_channels.push(channel_id);
             }
 
-            ServerHandlerEvent::ShellRequest(server_channel_id, _) => {
+            ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
                 let channel_id = self.map_channel(&server_channel_id)?;
                 let _ = self.maybe_connect_remote().await;
 
@@ -443,6 +455,8 @@ impl ServerSession {
                     .context("Invalid session state")?
                     .channel_success(server_channel_id.0)
                     .await;
+
+                let _ = reply.send(true);
             }
 
             ServerHandlerEvent::AuthPublicKey(username, key, reply) => {
@@ -481,8 +495,9 @@ impl ServerSession {
                 self._channel_signal(channel, signal).await?;
             }
 
-            ServerHandlerEvent::ExecRequest(channel, data, _) => {
+            ServerHandlerEvent::ExecRequest(channel, data, reply) => {
                 self._channel_exec_request(channel, data).await?;
+                let _ = reply.send(true);
             }
 
             ServerHandlerEvent::ChannelOpenDirectTcpIp(channel, params, reply) => {
@@ -905,7 +920,7 @@ impl ServerSession {
 
                 Ok(true)
             }
-            Err(SshClientError::ChannelFailure) => Ok(false),
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
             Err(x) => Err(x.into()),
         }
     }
@@ -1110,7 +1125,7 @@ impl ServerSession {
         &mut self,
         server_channel_id: ServerChannelId,
         name: String,
-    ) -> Result<()> {
+    ) -> Result<(), SshClientError> {
         let channel_id = self.map_channel(&server_channel_id)?;
         info!(channel=%channel_id, "Requesting subsystem {}", &name);
         let _ = self.maybe_connect_remote().await;
