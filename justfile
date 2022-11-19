@@ -3,7 +3,7 @@ projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpga
 features := "sqlite,postgres,mysql"
 
 run *ARGS:
-    RUST_BACKTRACE=1 RUST_LOG=warpgate cargo run --features {{features}} -- --config config.yaml {{ARGS}}
+    RUST_BACKTRACE=1 cargo run --features {{features}} -- --config config.yaml {{ARGS}}
 
 fmt:
     for p in {{projects}}; do cargo fmt --features {{features}} -p $p -v; done
