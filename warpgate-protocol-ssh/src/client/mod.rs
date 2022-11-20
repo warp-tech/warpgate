@@ -16,7 +16,6 @@ use handler::ClientHandler;
 use russh::client::Handle;
 use russh::{Preferred, Sig};
 use russh_keys::key::{self, PublicKey};
-use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;

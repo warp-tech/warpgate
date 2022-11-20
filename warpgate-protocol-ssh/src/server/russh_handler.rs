@@ -473,7 +473,12 @@ impl russh::server::Handler for ServerHandler {
         .boxed()
     }
 
-    fn tcpip_forward(self, address: &str, port: &mut u32, mut session: Session) -> Self::FutureBool {
+    fn tcpip_forward(
+        self,
+        address: &str,
+        port: &mut u32,
+        mut session: Session,
+    ) -> Self::FutureBool {
         let address = address.to_string();
         let port = *port;
         async move {

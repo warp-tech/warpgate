@@ -248,7 +248,7 @@ impl ServerSession {
         self.channel_map
             .get_by_left(ch)
             .cloned()
-            .ok_or_else(|| WarpgateError::InconsistentState)
+            .ok_or(WarpgateError::InconsistentState)
     }
 
     fn map_channel_reverse(&self, ch: &Uuid) -> Result<ServerChannelId> {
