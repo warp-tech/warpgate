@@ -3199,9 +3199,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.35.0-beta.5"
+version = "0.35.0-beta.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355d7ad01489febf7f475495a898b49987f4fa79b2a70bfee3e109194a5ed93b"
+checksum = "0c130a5e8cb48fd94d117612590cd029924e3d968403c4064c709795fac0d52f"
 dependencies = [
  "aes",
  "aes-gcm",

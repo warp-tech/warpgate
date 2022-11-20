@@ -16,6 +16,7 @@ pub struct SessionChannel {
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: UnboundedSender<RCEvent>,
     session_id: SessionId,
+    closed: bool,
 }
 
 impl SessionChannel {
@@ -32,6 +33,7 @@ impl SessionChannel {
             ops_rx,
             events_tx,
             session_id,
+            closed: false,
         }
     }
 
@@ -110,7 +112,6 @@ impl SessionChannel {
                             )).map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break;
                         },
                         Some(russh::ChannelMsg::Success) => {
@@ -147,12 +148,23 @@ impl SessionChannel {
                             warn!("unhandled channel message: {:?}", msg);
                         }
                         None => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
                             break
                         },
                     }
                 }
             }
+        }
+        self.close()?;
+        Ok(())
+    }
+
+    fn close(&mut self) -> Result<(), SshClientError> {
+        if !self.closed {
+            let _ = self
+                .events_tx
+                .send(RCEvent::Close(self.channel_id))
+                .map_err(|_| SshClientError::MpscError);
+            self.closed = true;
         }
         Ok(())
     }
@@ -160,6 +172,7 @@ impl SessionChannel {
 
 impl Drop for SessionChannel {
     fn drop(&mut self) {
+        let _ = self.close();
         info!(channel=%self.channel_id, session=%self.session_id, "Closed");
     }
 }

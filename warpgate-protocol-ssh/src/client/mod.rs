@@ -241,15 +241,12 @@ impl RemoteClient {
             op => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
                 match channel_pipes.get(&channel_id) {
-                    Some(tx) => match tx.send(op) {
-                        Ok(_) => {}
-                        Err(SendError(_)) => {
+                    Some(tx) => {
+                        if tx.send(op).is_err() {
                             channel_pipes.remove(&channel_id);
                         }
-                    },
-                    None => {
-                        debug!(channel=%channel_id, "operation for unknown channel")
                     }
+                    None => debug!(channel=%channel_id, "operation for unknown channel"),
                 }
             }
         }
