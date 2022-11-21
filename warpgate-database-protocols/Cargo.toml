@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-database-protocols"
-version = "0.6.6"
+version = "0.7.0"
 description = "Core of SQLx, the rust SQL toolkit. Just the database protocol parts."
 license = "MIT OR Apache-2.0"
 edition = "2021"
