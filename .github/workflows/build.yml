@@ -57,7 +57,7 @@ jobs:
         with:
           command: build
           use-cross: true
-          args: --release --target ${{ matrix.target }} -Ztarget-applies-to-host
+          args: --release --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
