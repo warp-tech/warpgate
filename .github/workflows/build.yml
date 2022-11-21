@@ -58,6 +58,11 @@ jobs:
           command: build
           use-cross: true
           args: --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
+          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
