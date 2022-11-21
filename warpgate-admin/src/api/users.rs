@@ -213,8 +213,8 @@ fn process_credentials(credentials: &Vec<UserAuthCredential>) -> Vec<UserAuthCre
     let mut credentials = credentials.clone();
     for credential in credentials.iter_mut() {
         if let UserAuthCredential::Password(ref mut c) = credential {
-            if parse_hash(&c.hash.expose_secret()).is_err() {
-                c.hash = hash_password(&c.hash.expose_secret()).into();
+            if parse_hash(c.hash.expose_secret()).is_err() {
+                c.hash = hash_password(c.hash.expose_secret()).into();
             }
         }
     }

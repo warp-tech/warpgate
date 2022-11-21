@@ -15,7 +15,6 @@ config = { version = "0.13", features = ["yaml"], default_features = false }
 console = { version = "0.15", default_features = false }
 console-subscriber = { version = "0.1", optional = true }
 data-encoding = "2.3"
-dhat = { version = "0.3", optional = true }
 dialoguer = "0.10"
 futures = "0.3"
 notify = "^5.0.0"
@@ -44,8 +43,6 @@ sd-notify = "0.4"
 
 [features]
 default = ["sqlite"]
-dhat-ad-hoc = ["dhat"]
-dhat-heap = ["dhat"]
 tokio-console = ["dep:console-subscriber", "tokio/tracing"]
 postgres = ["warpgate-core/postgres"]
 mysql = ["warpgate-core/mysql"]

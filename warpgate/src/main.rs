@@ -11,10 +11,6 @@ use tracing::*;
 
 use crate::config::load_config;
 
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
 #[derive(clap::Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
@@ -108,9 +104,6 @@ async fn _main() -> Result<()> {
 
 #[tokio::main]
 async fn main() {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-
     if let Err(error) = _main().await {
         error!(?error, "Fatal error");
         std::process::exit(1);

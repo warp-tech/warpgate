@@ -449,7 +449,7 @@ async fn proxy_ws_inner(
                                     .send(Message::Close(data.map(|data| {
                                         (
                                             CloseCode::from(data.code),
-                                            data.reason.into_owned().to_string(),
+                                            data.reason.into_owned(),
                                         )
                                     })))
                                     .await?;
