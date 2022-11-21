@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::time::SystemTime;
 
+use data_encoding::BASE64;
 use once_cell::sync::Lazy;
-use openidconnect::{ClientId, ClientSecret, IssuerUrl};
+use openidconnect::{AuthType, ClientId, ClientSecret, IssuerUrl};
 use serde::{Deserialize, Serialize};
 
 use crate::SsoError;
@@ -42,6 +44,8 @@ pub enum SsoInternalProviderConfig {
     Apple {
         client_id: ClientId,
         client_secret: ClientSecret,
+        key_id: String,
+        team_id: String,
     },
     #[serde(rename = "azure")]
     Azure {
@@ -56,6 +60,15 @@ pub enum SsoInternalProviderConfig {
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
     },
+}
+
+#[derive(Debug, Serialize)]
+struct AppleIDClaims<'a> {
+    sub: &'a str,
+    aud: &'a str,
+    exp: usize,
+    nbf: usize,
+    iss: &'a str,
 }
 
 impl SsoInternalProviderConfig {
@@ -80,13 +93,53 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn client_secret(&self) -> &ClientSecret {
-        match self {
+    pub fn client_secret(&self) -> Result<ClientSecret, SsoError> {
+        Ok(match self {
             SsoInternalProviderConfig::Google { client_secret, .. }
-            | SsoInternalProviderConfig::Apple { client_secret, .. }
             | SsoInternalProviderConfig::Azure { client_secret, .. }
-            | SsoInternalProviderConfig::Custom { client_secret, .. } => client_secret,
-        }
+            | SsoInternalProviderConfig::Custom { client_secret, .. } => client_secret.clone(),
+            SsoInternalProviderConfig::Apple {
+                client_secret,
+                client_id,
+                key_id,
+                team_id,
+            } => {
+                let key_content =
+                    BASE64
+                        .decode(client_secret.secret().as_bytes())
+                        .map_err(|e| {
+                            SsoError::ConfigError(format!(
+                                "could not decode base64 client_secret: {e}"
+                            ))
+                        })?;
+                let key = jsonwebtoken::EncodingKey::from_ec_pem(&key_content).map_err(|e| {
+                    SsoError::ConfigError(format!(
+                        "could not parse client_secret as a private key: {e}"
+                    ))
+                })?;
+                let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+                header.kid = Some(key_id.into());
+
+                ClientSecret::new(jsonwebtoken::encode(
+                    &header,
+                    &AppleIDClaims {
+                        aud: &APPLE_ISSUER_URL,
+                        sub: client_id,
+                        exp: SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as usize
+                            + 600,
+                        nbf: SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as usize,
+                        iss: team_id,
+                    },
+                    &key,
+                )?)
+            }
+        })
     }
 
     #[inline]
@@ -104,10 +157,11 @@ impl SsoInternalProviderConfig {
     #[inline]
     pub fn scopes(&self) -> Vec<String> {
         match self {
-            SsoInternalProviderConfig::Google { .. }
-            | SsoInternalProviderConfig::Apple { .. }
-            | SsoInternalProviderConfig::Azure { .. } => vec!["email".to_string()],
+            SsoInternalProviderConfig::Google { .. } | SsoInternalProviderConfig::Azure { .. } => {
+                vec!["email".to_string()]
+            }
             SsoInternalProviderConfig::Custom { scopes, .. } => scopes.clone(),
+            SsoInternalProviderConfig::Apple { .. } => vec![],
         }
     }
 
@@ -122,6 +176,26 @@ impl SsoInternalProviderConfig {
                 map.insert("response_mode".to_string(), "form_post".to_string());
                 map
             }
+        }
+    }
+
+    #[inline]
+    pub fn auth_type(&self) -> AuthType {
+        match self {
+            SsoInternalProviderConfig::Google { .. }
+            | SsoInternalProviderConfig::Custom { .. }
+            | SsoInternalProviderConfig::Azure { .. } => AuthType::BasicAuth,
+            SsoInternalProviderConfig::Apple { .. } => AuthType::RequestBody,
+        }
+    }
+
+    #[inline]
+    pub fn needs_pkce_verifier(&self) -> bool {
+        match self {
+            SsoInternalProviderConfig::Google { .. }
+            | SsoInternalProviderConfig::Custom { .. }
+            | SsoInternalProviderConfig::Azure { .. } => true,
+            SsoInternalProviderConfig::Apple { .. } => false,
         }
     }
 }

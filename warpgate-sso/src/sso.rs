@@ -24,8 +24,9 @@ pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClien
     Ok(CoreClient::from_provider_metadata(
         metadata,
         config.client_id().clone(),
-        Some(config.client_secret().clone()),
-    ))
+        Some(config.client_secret()?),
+    )
+    .set_auth_type(config.auth_type()))
 }
 
 impl SsoClient {
@@ -34,8 +35,6 @@ impl SsoClient {
     }
 
     pub async fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
-        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-
         let redirect_url = RedirectUrl::new(redirect_url)?;
         let client = make_client(&self.config).await?;
         let mut auth_req = client
@@ -54,7 +53,15 @@ impl SsoClient {
             auth_req = auth_req.add_scope(Scope::new(scope.to_string()));
         }
 
-        let (auth_url, csrf_token, nonce) = auth_req.set_pkce_challenge(pkce_challenge).url();
+        let pkce_verifier = if self.config.needs_pkce_verifier() {
+            let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+            auth_req = auth_req.set_pkce_challenge(pkce_challenge);
+            Some(pkce_verifier)
+        } else {
+            None
+        };
+
+        let (auth_url, csrf_token, nonce) = auth_req.url();
 
         Ok(SsoLoginRequest {
             auth_url,

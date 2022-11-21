@@ -10,6 +10,8 @@ pub enum SsoError {
     Mitm,
     #[error("config parse error: {0}")]
     UrlParse(#[from] openidconnect::url::ParseError),
+    #[error("config error: {0}")]
+    ConfigError(String),
     #[error("provider discovery error: {0}")]
     Discovery(String),
     #[error("code verification error: {0}")]
@@ -20,6 +22,8 @@ pub enum SsoError {
     Signing(#[from] SigningError),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error("JWT error: {0}")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
 }

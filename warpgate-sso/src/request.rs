@@ -14,7 +14,7 @@ pub struct SsoLoginRequest {
     pub(crate) csrf_token: CsrfToken,
     pub(crate) nonce: Nonce,
     pub(crate) redirect_url: RedirectUrl,
-    pub(crate) pkce_verifier: PkceCodeVerifier,
+    pub(crate) pkce_verifier: Option<PkceCodeVerifier>,
     pub(crate) config: SsoInternalProviderConfig,
 }
 
@@ -32,15 +32,23 @@ impl SsoLoginRequest {
             .await?
             .set_redirect_uri(self.redirect_url.clone());
 
-        let token_response = client
-            .exchange_code(AuthorizationCode::new(code))
-            .set_pkce_verifier(self.pkce_verifier)
+        let mut req = client.exchange_code(AuthorizationCode::new(code));
+        if let Some(verifier) = self.pkce_verifier {
+            req = req.set_pkce_verifier(verifier);
+        }
+
+        let token_response = req
             .request_async(async_http_client)
             .await
             .map_err(|e| match e {
                 RequestTokenError::ServerResponse(response) => {
                     SsoError::Verification(response.error().to_string())
                 }
+                RequestTokenError::Parse(err, path) => SsoError::Verification(format!(
+                    "Parse error: {:?} / {:?}",
+                    err,
+                    String::from_utf8_lossy(&path)
+                )),
                 e => SsoError::Verification(format!("{e}")),
             })?;
 
