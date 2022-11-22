@@ -2776,7 +2776,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_yaml 0.9.11",
+ "serde_yaml",
  "thiserror",
  "tokio",
  "uuid",
@@ -3680,18 +3680,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.8.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
-dependencies = [
- "indexmap",
- "ryu",
- "serde",
- "yaml-rust",
 ]
 
 [[package]]
@@ -4647,7 +4635,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4666,7 +4654,7 @@ dependencies = [
  "sd-notify",
  "sea-orm",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "time 0.3.15",
  "tokio",
  "tracing",
@@ -4683,7 +4671,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4712,7 +4700,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4748,7 +4736,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4788,7 +4776,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4801,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4814,7 +4802,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "async-std",
  "chrono",
@@ -4826,7 +4814,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4858,7 +4846,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4885,7 +4873,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4910,7 +4898,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -4926,7 +4914,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.6.6"
+version = "0.7.0"
 dependencies = [
  "rust-embed",
  "serde",
