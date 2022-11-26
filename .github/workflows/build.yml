@@ -57,7 +57,7 @@ jobs:
         with:
           command: build
           use-cross: true
-          args: --release --target ${{ matrix.target }}
+          args: --all-features --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
