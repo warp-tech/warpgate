@@ -2699,9 +2699,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.48"
+version = "1.3.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "260f16c6c484d4a3920efc81df282a529381fd3e4f35b19e6a9e7181a5990478"
+checksum = "11c25b3110592eac1a2e0cc366524df2f920eba6a8a438828f7ad196ecec911d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2723,7 +2723,7 @@ dependencies = [
  "pin-project-lite",
  "poem-derive",
  "priority-queue",
- "quick-xml 0.25.0",
+ "quick-xml 0.26.0",
  "rand 0.8.5",
  "regex",
  "rfc7239",
@@ -2746,9 +2746,9 @@ dependencies = [
 
 [[package]]
 name = "poem-derive"
-version = "1.3.48"
+version = "1.3.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d372ab8ac89eec1c2551f04bf15b021c41fbb66d0920bd42772da802cf891413"
+checksum = "9de3ad7c191f60457a5b1061ca8220f19d391de14a6774c7d5a67ab8a124f443"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2946,9 +2946,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58e21a144a0ffb5fad7b464babcdab934a325ad69b7c0373bcfef5cbd9799ca9"
+checksum = "7f50b1c63b38611e7d4d7f68b82d3ad0cc71a2ad2e7f61fc10f1328d917c93cd"
 dependencies = [
  "memchr",
  "serde",
