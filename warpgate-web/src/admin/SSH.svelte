@@ -33,7 +33,7 @@ async function deleteHost (host: SSHKnownHost) {
 
 {#if ownKeys}
     <h2>Warpgate's own SSH keys</h2>
-    <Alert color="info">Add these keys to the targets' <code>authorized_hosts</code> files</Alert>
+    <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
     <div class="list-group list-group-flush">
         {#each ownKeys as key}
             <div class="list-group-item d-flex">
