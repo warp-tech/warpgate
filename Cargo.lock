@@ -2133,9 +2133,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.29.0"
+version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20ce6fdcef94a8e87fea3f9402de4d7e403f10e8c20b6e2bd207e6b6f8a4eab0"
+checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64",
  "bigdecimal",
@@ -2159,7 +2159,7 @@ dependencies = [
  "saturating",
  "serde",
  "serde_json",
- "sha-1",
+ "sha1",
  "sha2 0.10.2",
  "smallvec",
  "subprocess",
