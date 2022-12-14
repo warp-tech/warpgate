@@ -548,9 +548,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.2.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
+checksum = "dfb24e866b15a1af2a1b663f10c6b6b8f397a84aadb828f12e5b289ec23a3a3c"
 
 [[package]]
 name = "cache-padded"
@@ -2133,9 +2133,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.29.0"
+version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20ce6fdcef94a8e87fea3f9402de4d7e403f10e8c20b6e2bd207e6b6f8a4eab0"
+checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64",
  "bigdecimal",
@@ -2159,7 +2159,7 @@ dependencies = [
  "saturating",
  "serde",
  "serde_json",
- "sha-1",
+ "sha1",
  "sha2 0.10.2",
  "smallvec",
  "subprocess",
@@ -2699,9 +2699,9 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.48"
+version = "1.3.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "260f16c6c484d4a3920efc81df282a529381fd3e4f35b19e6a9e7181a5990478"
+checksum = "11c25b3110592eac1a2e0cc366524df2f920eba6a8a438828f7ad196ecec911d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2723,7 +2723,7 @@ dependencies = [
  "pin-project-lite",
  "poem-derive",
  "priority-queue",
- "quick-xml 0.25.0",
+ "quick-xml 0.26.0",
  "rand 0.8.5",
  "regex",
  "rfc7239",
@@ -2746,9 +2746,9 @@ dependencies = [
 
 [[package]]
 name = "poem-derive"
-version = "1.3.48"
+version = "1.3.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d372ab8ac89eec1c2551f04bf15b021c41fbb66d0920bd42772da802cf891413"
+checksum = "9de3ad7c191f60457a5b1061ca8220f19d391de14a6774c7d5a67ab8a124f443"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2946,9 +2946,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58e21a144a0ffb5fad7b464babcdab934a325ad69b7c0373bcfef5cbd9799ca9"
+checksum = "7f50b1c63b38611e7d4d7f68b82d3ad0cc71a2ad2e7f61fc10f1328d917c93cd"
 dependencies = [
  "memchr",
  "serde",
@@ -3439,9 +3439,9 @@ checksum = "2fde85c94a50dc789df8ca7b39f6b8b1eaa6cd320cc729e9ce1e1e1104292719"
 
 [[package]]
 name = "sea-orm"
-version = "0.10.3"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8744afc95ca462de12c2cea5a56d7e406f3be2b2683d3b05066e1afdba898bc5"
+checksum = "28fc9dad132e450d6320bd5953e70fb88b42785080b591e9be804da69bd8a170"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3482,9 +3482,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "0.10.3"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ca4d01381fdcabc3818b6d39c5f1f0c885900af90da638e4001406907462784"
+checksum = "66af5d33e04e56dafb2c700f9b1201a39e6c2c77b53ed9ee93244f21f8de6041"
 dependencies = [
  "bae",
  "heck 0.3.3",
@@ -3653,9 +3653,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.88"
+version = "1.0.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e8b3801309262e8184d9687fb697586833e939767aea0dda89f5a8e650e8bd7"
+checksum = "020ff22c755c2ed3f8cf162dbb41a7268d934702f3ed3631656ea597e08fc3db"
 dependencies = [
  "itoa",
  "ryu",
@@ -4155,9 +4155,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.20.1"
+version = "1.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
+checksum = "4761e560a37f74e62fbcce107b99a8e54445c1009cf643848f6ae6606cb06c67"
 dependencies = [
  "autocfg",
  "bytes",
@@ -4165,7 +4165,6 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
- "once_cell",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
