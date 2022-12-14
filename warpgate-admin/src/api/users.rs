@@ -209,8 +209,8 @@ impl DetailApi {
     }
 }
 
-fn process_credentials(credentials: &Vec<UserAuthCredential>) -> Vec<UserAuthCredential> {
-    let mut credentials = credentials.clone();
+fn process_credentials(credentials: &[UserAuthCredential]) -> Vec<UserAuthCredential> {
+    let mut credentials: Vec<UserAuthCredential> = credentials.into();
     for credential in credentials.iter_mut() {
         if let UserAuthCredential::Password(ref mut c) = credential {
             if parse_hash(c.hash.expose_secret()).is_err() {

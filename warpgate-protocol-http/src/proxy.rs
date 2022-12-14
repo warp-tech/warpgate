@@ -447,10 +447,7 @@ async fn proxy_ws_inner(
                             tungstenite::Message::Close(data) => {
                                 server_sink
                                     .send(Message::Close(data.map(|data| {
-                                        (
-                                            CloseCode::from(data.code),
-                                            data.reason.into_owned(),
-                                        )
+                                        (CloseCode::from(data.code), data.reason.into_owned())
                                     })))
                                     .await?;
                             }

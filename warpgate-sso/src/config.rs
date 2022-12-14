@@ -120,6 +120,7 @@ impl SsoInternalProviderConfig {
                 let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
                 header.kid = Some(key_id.into());
 
+                #[allow(clippy::unwrap_used)]
                 ClientSecret::new(jsonwebtoken::encode(
                     &header,
                     &AppleIDClaims {
