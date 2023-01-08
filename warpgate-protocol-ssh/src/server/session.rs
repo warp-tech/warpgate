@@ -13,7 +13,7 @@ use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::{CryptoVec, MethodSet, Sig};
-use russh_keys::key::PublicKey;
+use russh_keys::key::{PublicKey, SignatureHash};
 use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
@@ -1217,16 +1217,40 @@ impl ServerSession {
             key.public_key_base64()
         );
 
-        match self
-            .try_auth(
-                &selector,
-                Some(AuthCredential::PublicKey {
-                    kind: key.name().to_string(),
-                    public_key_bytes: Bytes::from(key.public_key_bytes()),
-                }),
-            )
-            .await
-        {
+        let mut keys = vec![key.clone()];
+        // Try all supported hash algorithms
+        if let PublicKey::RSA { key, hash } = &key {
+            for h in [
+                SignatureHash::SHA1,
+                SignatureHash::SHA2_256,
+                SignatureHash::SHA2_512,
+            ] {
+                if &h != hash {
+                    keys.push(PublicKey::RSA {
+                        key: key.clone(),
+                        hash: h,
+                    });
+                }
+            }
+        }
+
+        let mut result = Ok(AuthResult::Rejected);
+        for key in keys {
+            result = self
+                .try_auth(
+                    &selector,
+                    Some(AuthCredential::PublicKey {
+                        kind: key.name().to_string(),
+                        public_key_bytes: Bytes::from(key.public_key_bytes()),
+                    }),
+                )
+                .await;
+            if let Ok(AuthResult::Accepted { .. }) = result {
+                break;
+            }
+        }
+
+        match result {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(MethodSet::all()),
