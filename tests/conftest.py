@@ -280,7 +280,7 @@ def processes(ctx, report_generation):
 def report_generation():
     # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
     subprocess.check_call(
-        ["cargo", "llvm-cov", "run", "--no-report", "--", "--version"], cwd=cargo_root
+        ["cargo", "llvm-cov", "run", "--all-features", "--no-report", "--", "--version"], cwd=cargo_root
     )
     yield
     # subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
