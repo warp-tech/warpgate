@@ -1063,64 +1063,6 @@ impl ServerSession {
         self.traffic_recorders.get_mut(&(host, port))
     }
 
-    pub async fn _channel_shell_request_nowait(
-        &mut self,
-        server_channel_id: ServerChannelId,
-    ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
-        let _ = self.maybe_connect_remote().await;
-
-        let _ = self.send_command(RCCommand::Channel(
-            channel_id,
-            ChannelOperation::RequestShell,
-        ));
-
-        self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
-            .await;
-
-        info!(%channel_id, "Opening shell");
-
-        let _ = self
-            .session_handle
-            .as_mut()
-            .context("Invalid session state")?
-            .channel_success(server_channel_id.0)
-            .await;
-
-        Ok(())
-    }
-
-    pub async fn _channel_shell_request_begin(
-        &mut self,
-        server_channel_id: ServerChannelId,
-    ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
-        let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::Channel(
-            channel_id,
-            ChannelOperation::RequestShell,
-        ))
-        .await
-        .map_err(anyhow::Error::from)
-    }
-
-    pub async fn _channel_shell_request_finish(
-        &mut self,
-        server_channel_id: ServerChannelId,
-    ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
-        self.start_terminal_recording(channel_id, format!("shell-channel-{}", server_channel_id.0))
-            .await;
-
-        info!(%channel_id, "Opening shell");
-        let session = self
-            .session_handle
-            .clone()
-            .context("Invalid session state")?;
-        tokio::spawn(async move { session.channel_success(server_channel_id.0).await });
-        Ok(())
-    }
-
     pub async fn _channel_subsystem_request(
         &mut self,
         server_channel_id: ServerChannelId,
