@@ -38,4 +38,4 @@ warpgate-web = { version = "*", path = "../warpgate-web" }
 warpgate-sso = { version = "*", path = "../warpgate-sso" }
 percent-encoding = "2.1"
 uuid = { version = "1.2", features = ["v4"] }
-regex = "1.6"
+regex = "1.7"
