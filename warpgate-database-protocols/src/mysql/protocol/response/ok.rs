@@ -50,6 +50,7 @@ impl Encode<'_, ()> for OkPacket {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn test_decode_ok_packet() {
     const DATA: &[u8] = b"\x00\x00\x00\x02@\x00\x00";
 

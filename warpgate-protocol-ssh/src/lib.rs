@@ -100,16 +100,13 @@ impl ProtocolServer for SSHProtocolServer {
                     } = err
                     {
                         println!("\n");
-                        println!("Stored key   ({}): {}", known_key_type, known_key_base64);
-                        println!(
-                            "Received key ({}): {}",
-                            received_key_type, received_key_base64
-                        );
+                        println!("Stored key   ({known_key_type}): {known_key_base64}");
+                        println!("Received key ({received_key_type}): {received_key_base64}");
                         println!("Host key doesn't match the stored one.");
                         println!("If you know that the key is correct (e.g. it has been changed),");
                         println!("you can remove the old key in the Warpgate management UI and try again");
                     }
-                    return Err(TargetTestError::ConnectionError(format!("{:?}", err)));
+                    return Err(TargetTestError::ConnectionError(format!("{err:?}")));
                 }
                 RCEvent::State(state) => match state {
                     RCState::Connected => {

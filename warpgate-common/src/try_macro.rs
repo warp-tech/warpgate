@@ -27,6 +27,7 @@ macro_rules! try_block {
 
 #[test]
 #[allow(clippy::assertions_on_constants)]
+#[allow(clippy::unwrap_used)]
 fn test_catch() {
     let mut caught = false;
     try_block!({

@@ -93,7 +93,7 @@ pub struct ServerSession {
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
-    format!("[{} - {}]", id, remote_address)
+    format!("[{id} - {remote_address}]")
 }
 
 impl std::fmt::Debug for ServerSession {
@@ -169,7 +169,7 @@ impl ServerSession {
             }
         });
 
-        let name = format!("SSH {} session control", id);
+        let name = format!("SSH {id} session control");
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
             async move {
@@ -181,7 +181,7 @@ impl ServerSession {
             }
         });
 
-        let name = format!("SSH {} client events", id);
+        let name = format!("SSH {id} client events");
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
             async move {
@@ -193,7 +193,7 @@ impl ServerSession {
             }
         });
 
-        let name = format!("SSH {} server handler events", id);
+        let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
             async move {
@@ -1124,7 +1124,7 @@ impl ServerSession {
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        let _ = self.send_command_and_wait(RCCommand::Channel(
+        let _ = self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::ExtendedData { ext: code, data },
         ));

@@ -17,7 +17,7 @@ pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClien
         .await
         .map_err(|e| {
             SsoError::Discovery(match e {
-                DiscoveryError::Request(inner) => format!("Request error: {}", inner),
+                DiscoveryError::Request(inner) => format!("Request error: {inner}"),
                 e => format!("{e}"),
             })
         })?;

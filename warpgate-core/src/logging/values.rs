@@ -51,6 +51,6 @@ impl<'a> Visit for RecordVisitor<'a> {
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        self.values.insert(field.name(), format!("{:?}", value));
+        self.values.insert(field.name(), format!("{value:?}"));
     }
 }

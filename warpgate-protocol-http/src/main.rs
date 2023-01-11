@@ -13,5 +13,5 @@ pub fn main() {
     let re = Regex::new(r"PaginatedResponse<(?P<name>\w+)>").unwrap();
     let spec = re.replace_all(&spec, "Paginated$name");
 
-    println!("{}", spec);
+    println!("{spec}");
 }

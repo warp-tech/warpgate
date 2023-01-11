@@ -114,6 +114,7 @@ impl RecordingWriter {
 
 impl Drop for RecordingWriter {
     fn drop(&mut self) {
-        let _ = self.drop_signal.send(());
+        let signal = std::mem::replace(&mut self.drop_signal, mpsc::channel(1).0);
+        tokio::spawn(async move { signal.send(()).await });
     }
 }

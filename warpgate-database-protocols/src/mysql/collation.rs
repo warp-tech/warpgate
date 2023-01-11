@@ -191,7 +191,7 @@ impl FromStr for CharSet {
 
             _ => {
                 return Err(Error::Configuration(
-                    format!("unsupported MySQL charset: {}", char_set).into(),
+                    format!("unsupported MySQL charset: {char_set}").into(),
                 ));
             }
         })
@@ -893,7 +893,7 @@ impl FromStr for Collation {
 
             _ => {
                 return Err(Error::Configuration(
-                    format!("unsupported MySQL collation: {}", collation).into(),
+                    format!("unsupported MySQL collation: {collation}").into(),
                 ));
             }
         })

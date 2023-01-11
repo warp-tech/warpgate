@@ -126,6 +126,7 @@ impl Encode<'_, ()> for Handshake {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn test_decode_handshake_mysql_8_0_18() {
     const HANDSHAKE_MYSQL_8_0_18: &[u8] = b"\n8.0.18\x00\x19\x00\x00\x00\x114aB0c\x06g\x00\xff\xff\xff\x02\x00\xff\xc7\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00tL\x03s\x0f[4\rl4. \x00caching_sha2_password\x00";
 
@@ -180,6 +181,7 @@ fn test_decode_handshake_mysql_8_0_18() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn test_decode_handshake_mariadb_10_4_7() {
     const HANDSHAKE_MARIA_DB_10_4_7: &[u8] = b"\n5.5.5-10.4.7-MariaDB-1:10.4.7+maria~bionic\x00\x0b\x00\x00\x00t6L\\j\"dS\x00\xfe\xf7\x08\x02\x00\xff\x81\x15\x00\x00\x00\x00\x00\x00\x07\x00\x00\x00U14Oph9\"<H5n\x00mysql_native_password\x00";
 

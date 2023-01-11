@@ -19,7 +19,7 @@ where
     if socket_address.is_some() {
         socket = UnixDatagram::unbound()
             .map_err(|error| {
-                println!("Failed to create the log forwarding UDP socket: {}", error);
+                println!("Failed to create the log forwarding UDP socket: {error}");
             })
             .ok();
     }

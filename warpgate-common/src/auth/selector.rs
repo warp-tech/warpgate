@@ -38,7 +38,7 @@ impl Debug for AuthSelector {
             AuthSelector::User {
                 username,
                 target_name,
-            } => write!(f, "<{} for {}>", username, target_name),
+            } => write!(f, "<{username} for {target_name}>"),
             AuthSelector::Ticket { .. } => write!(f, "<ticket>"),
         }
     }

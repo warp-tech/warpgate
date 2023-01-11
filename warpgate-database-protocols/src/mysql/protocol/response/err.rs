@@ -57,6 +57,7 @@ impl Encode<'_, ()> for ErrPacket {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn test_decode_err_packet_out_of_order() {
     const ERR_PACKETS_OUT_OF_ORDER: &[u8] = b"\xff\x84\x04Got packets out of order";
 
@@ -69,6 +70,7 @@ fn test_decode_err_packet_out_of_order() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn test_decode_err_packet_unknown_database() {
     const ERR_HANDSHAKE_UNKNOWN_DB: &[u8] = b"\xff\x19\x04#42000Unknown database \'unknown\'";
 

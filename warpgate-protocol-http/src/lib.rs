@@ -69,7 +69,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let spec = api_service.spec_endpoint();
 
         let session_storage =
-            SharedSessionStorage(Arc::new(Mutex::new(Box::new(MemoryStorage::default()))));
+            SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())));
         let session_store = SessionStore::new();
 
         let cache_bust = || {

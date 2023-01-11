@@ -154,8 +154,7 @@ impl MySqlClient {
         } else if response.first() == Some(&0xff) {
             let error = ErrPacket::decode_with(response, options.capabilities)?;
             return Err(MySqlError::ProtocolError(format!(
-                "handshake failed: {:?}",
-                error
+                "handshake failed: {error:?}"
             )));
         } else {
             return Err(MySqlError::ProtocolError(format!(

@@ -38,7 +38,7 @@ impl ServiceOutput {
                                 tick_index = (tick_index + 1) % ticks.len();
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
-                                let badge = Colour::Black.on(Colour::Blue).paint(format!(" {} Warpgate connecting ", tick)).to_string();
+                                let badge = Colour::Black.on(Colour::Blue).paint(format!(" {tick} Warpgate connecting ")).to_string();
                                 let _ = output_tx.send(Bytes::from([ERASE_PROGRESS_SPINNER_BUF, badge.as_bytes()].concat()));
                             }
                         }
@@ -77,6 +77,7 @@ impl ServiceOutput {
 
 impl Drop for ServiceOutput {
     fn drop(&mut self) {
-        let _ = self.abort_tx.send(());
+        let signal = std::mem::replace(&mut self.abort_tx, mpsc::channel(1).0);
+        tokio::spawn(async move { signal.send(()).await });
     }
 }

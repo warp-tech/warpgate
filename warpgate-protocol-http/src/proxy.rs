@@ -314,14 +314,11 @@ async fn copy_client_body_and_embed(
         script_manifest.file
     );
     for css_file in script_manifest.css.unwrap_or_default() {
-        inject += &format!(
-            r#"<link rel="stylesheet" href="/@warpgate/{}" />"#,
-            css_file
-        );
+        inject += &format!(r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#,);
     }
 
     let before = "</head>";
-    let content = content.replacen(before, &format!("{}{}", inject, before), 1);
+    let content = content.replacen(before, &format!("{inject}{before}"), 1);
 
     response.headers_mut().remove(http::header::CONTENT_LENGTH);
     response

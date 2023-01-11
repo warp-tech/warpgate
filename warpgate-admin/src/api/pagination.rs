@@ -35,7 +35,7 @@ impl<T: ParseFromJSON + ToJSON + Send + Sync> PaginatedResponse<T> {
         let total = paginator
             .num_items()
             .await
-            .map_err(poem::error::InternalServerError)? as u64;
+            .map_err(poem::error::InternalServerError)?;
 
         let query = query.offset(offset).limit(limit);
 

@@ -12,6 +12,6 @@ impl Row {
     pub(crate) fn get(&self, index: usize) -> Option<&[u8]> {
         self.values[index]
             .as_ref()
-            .map(|col| &self.storage[(col.start as usize)..(col.end as usize)])
+            .map(|col| &self.storage[col.start..col.end])
     }
 }

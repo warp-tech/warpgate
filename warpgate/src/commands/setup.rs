@@ -28,7 +28,7 @@ use crate::Commands;
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     loop {
         let v = dialoguer::Input::with_theme(&ColorfulTheme::default())
-            .default(format!("{:?}", default))
+            .default(format!("{default:?}"))
             .with_prompt(prompt)
             .interact_text()
             .and_then(|v| v.to_socket_addrs());
@@ -257,7 +257,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     info!("Generated configuration:");
     let yaml = serde_yaml::to_string(&store)?;
-    println!("{}", yaml);
+    println!("{yaml}");
 
     File::create(&cli.config)?.write_all(yaml.as_bytes())?;
     info!("Saved into {}", cli.config.display());
