@@ -1414,10 +1414,10 @@ follow-redirects@^1.14.8:
   resolved "https://registry.yarnpkg.com/follow-redirects/-/follow-redirects-1.14.9.tgz#dd4ea157de7bfaf9ea9b3fbd85aa16951f78d8d7"
   integrity sha512-MQDfihBQYMcyy5dhRDJUHcw7lb2Pv/TuE6xP1vyraLukNDHKbDxDNaOE3NbCAdKQApno+GPRyo1YAp89yCjK4w==
 
-format-duration@^3.0.1:
-  version "3.0.1"
-  resolved "https://registry.yarnpkg.com/format-duration/-/format-duration-3.0.1.tgz#35c20f3f52cd32e8d5f62ea0e498982653502f8b"
-  integrity sha512-QlrVmC1IhqcC7Trm4EeRAqbyVyGKIjH9fI/ySf86nq/atpzTcCN6wYD551Cx9Atokaf0VAqAbaNnMLO6NPpTkA==
+format-duration@^3.0.2:
+  version "3.0.2"
+  resolved "https://registry.yarnpkg.com/format-duration/-/format-duration-3.0.2.tgz#cc90d76dcbf2b3a09978ae4c0f27619d4249cd1d"
+  integrity sha512-pKzJDSRgK2lqAiPW3uizDaIJaJnataZclsahz25UMwfdryBGDa+1HlbXGjzpMvX/2kMh4O0sNevFXKaEfCjHsA==
 
 fs-extra@10.0.1:
   version "10.0.1"
