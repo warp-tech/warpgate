@@ -48,10 +48,10 @@
     minimatch "^3.1.2"
     strip-json-comments "^3.1.1"
 
-"@fontsource/work-sans@^4.5.12":
-  version "4.5.12"
-  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-4.5.12.tgz#4e68dc559b7d8e76ae2d3c1dafd081fea877e682"
-  integrity sha512-imoabud+eUL7FTHyGtpSN4KoYOmWXBWweMpVrgWhLGeSDYnH0IVWeUZT+cPtPcgrHWSvxefsl0oEdP9Ef3E2mw==
+"@fontsource/work-sans@^4.5.14":
+  version "4.5.14"
+  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-4.5.14.tgz#965bf103baa9f812d042b5f678a34f632fa76f2e"
+  integrity sha512-AFBSDBA3hnSCXHwb52qBOMEGqF5nfdbANp+y5/hbE1PMjYfFY0lUdtUwL5J7mRAdyn1NJwobJlhduHtlAyPzmA==
 
 "@fortawesome/fontawesome-common-types@6.2.1":
   version "6.2.1"
