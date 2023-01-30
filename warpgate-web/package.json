@@ -34,7 +34,7 @@
     "@typescript-eslint/parser": "^5.48.1",
     "bootstrap": "^5.2.0-beta1",
     "copy-text-to-clipboard": "^3.0.1",
-    "eslint": "^8.31.0",
+    "eslint": "^8.33.0",
     "eslint-config-standard": "^16.0.3",
     "eslint-import-resolver-typescript": "^3.5.2",
     "eslint-plugin-import": "^2.26.0",
