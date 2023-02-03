@@ -2710,13 +2710,13 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
 name = "poem"
-version = "1.3.50"
+version = "1.3.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11c25b3110592eac1a2e0cc366524df2f920eba6a8a438828f7ad196ecec911d"
+checksum = "8944cb225d49272f3a3fab509cea681e5b5f825f79eda78cb48cf8fb36fa2fa9"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.13.0",
+ "base64 0.21.0",
  "bytes",
  "chrono",
  "cookie",
@@ -2734,7 +2734,7 @@ dependencies = [
  "pin-project-lite",
  "poem-derive",
  "priority-queue",
- "quick-xml",
+ "quick-xml 0.26.0",
  "rand 0.8.5",
  "regex",
  "rfc7239",
@@ -2743,6 +2743,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "serde_yaml 0.9.11",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -2750,16 +2751,16 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.18.0",
  "tokio-util",
  "tracing",
 ]
 
 [[package]]
 name = "poem-derive"
-version = "1.3.50"
+version = "1.3.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de3ad7c191f60457a5b1061ca8220f19d391de14a6774c7d5a67ab8a124f443"
+checksum = "37f47418a66a9280874efc8d503c1d7e5b22b5c4b77c661d9ade0ee73a87b17a"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2769,11 +2770,11 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi"
-version = "2.0.21"
+version = "2.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adfa635c582f266cc150fccc794672c93837bf66e9008d51e8df3571548f1c12"
+checksum = "6016d3dc5b937ccdbb784cbf054e5e902ca7c058c66e5e937ca407eaf94210f0"
 dependencies = [
- "base64 0.13.0",
+ "base64 0.21.0",
  "bytes",
  "chrono",
  "derive_more",
@@ -2782,7 +2783,7 @@ dependencies = [
  "num-traits",
  "poem",
  "poem-openapi-derive",
- "quick-xml",
+ "quick-xml 0.27.1",
  "regex",
  "serde",
  "serde_json",
@@ -2795,9 +2796,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi-derive"
-version = "2.0.21"
+version = "2.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a78b99aa96e451e6a8dd9c35085351b6d2cc6b7ff21cf7ee4b5b3efca0c5e8e3"
+checksum = "8f009430846f153f606436b3b667bd27f9093347c70ced54caec24c1c59d7945"
 dependencies = [
  "darling",
  "http",
@@ -2950,6 +2951,16 @@ name = "quick-xml"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f50b1c63b38611e7d4d7f68b82d3ad0cc71a2ad2e7f61fc10f1328d917c93cd"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffc053f057dd768a56f62cd7e434c42c831d296968997e9ac1f76ea7c2d14c41"
 dependencies = [
  "memchr",
  "serde",
@@ -4229,8 +4240,20 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.17.3",
  "webpki",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.18.0",
 ]
 
 [[package]]
@@ -4453,6 +4476,25 @@ dependencies = [
  "url",
  "utf-8",
  "webpki",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30ee6ab729cd4cf0fd55218530c4522ed30b7b6081752839b68fcec8d0960788"
+dependencies = [
+ "base64 0.13.0",
+ "byteorder",
+ "bytes",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "sha1",
+ "thiserror",
+ "url",
+ "utf-8",
 ]
 
 [[package]]
@@ -4836,7 +4878,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.17.2",
  "tracing",
  "uuid",
  "warpgate-admin",

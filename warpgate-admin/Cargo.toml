@@ -18,7 +18,7 @@ poem = { version = "1.3.50", features = [
     "anyhow",
     "websocket",
 ] }
-poem-openapi = { version = "2.0.21", features = [
+poem-openapi = { version = "2.0.25", features = [
     "swagger-ui",
     "chrono",
     "uuid",
