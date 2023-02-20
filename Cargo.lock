@@ -3199,9 +3199,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.35.0-beta.9"
+version = "0.37.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bd075593e0e0880877d9d9c67abf6dbb8bea6cbecc13d2d444d3ca5b20dceea"
+checksum = "c88d110606a1d4e03bc3957de8d81983aefa265dc4b1a726ced95818d167951c"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3224,7 +3224,7 @@ dependencies = [
  "poly1305",
  "rand 0.8.5",
  "russh-cryptovec",
- "russh-keys",
+ "russh-keys 0.37.0-beta.1",
  "sha1",
  "sha2 0.10.2",
  "subtle",
@@ -3273,6 +3273,42 @@ dependencies = [
  "russh-cryptovec",
  "serde",
  "serde_derive",
+ "sha2 0.10.2",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "yasna",
+]
+
+[[package]]
+name = "russh-keys"
+version = "0.37.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5140e9a451c1e83efbb2ac8befeea1e05cd13d3541c6daafc7473381888283c5"
+dependencies = [
+ "aes",
+ "bcrypt-pbkdf",
+ "bit-vec",
+ "block-padding",
+ "byteorder",
+ "cbc",
+ "ctr",
+ "data-encoding",
+ "dirs",
+ "ed25519-dalek",
+ "futures",
+ "hmac",
+ "inout",
+ "log",
+ "md5",
+ "num-bigint",
+ "num-integer",
+ "openssl",
+ "pbkdf2",
+ "rand 0.7.3",
+ "rand_core 0.5.1",
+ "russh-cryptovec",
+ "serde",
  "sha2 0.10.2",
  "thiserror",
  "tokio",
@@ -4686,7 +4722,7 @@ dependencies = [
  "poem",
  "poem-openapi",
  "regex",
- "russh-keys",
+ "russh-keys 0.23.0-beta.1",
  "rust-embed",
  "sea-orm",
  "serde",
@@ -4886,7 +4922,7 @@ dependencies = [
  "dialoguer",
  "futures",
  "russh",
- "russh-keys",
+ "russh-keys 0.23.0-beta.1",
  "sea-orm",
  "thiserror",
  "time 0.3.15",
