@@ -29,7 +29,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@4.2.3
+      - uses: rlespinasse/github-slug-action@v4.4.1
 
       - uses: actions-rs/toolchain@v1
         with:
