@@ -14,7 +14,7 @@ dialoguer = "0.10"
 futures = "0.3"
 russh = { version = "0.35.0-beta.9", features = ["vendored-openssl"] }
 # russh = { version = "0.35.0-beta.6", features = ["vendored-openssl"], path = "../../russh/russh"}
-russh-keys = { version = "0.23.0-beta.1", features = ["vendored-openssl"] }
+russh-keys = { version = "0.37.1", features = ["vendored-openssl"] }
 # russh-keys = { version = "0.23.0-beta.1", features = ["vendored-openssl"], path = "../../russh/russh-keys" }
 sea-orm = { version = "0.10.6", features = [
     "runtime-tokio-native-tls",
