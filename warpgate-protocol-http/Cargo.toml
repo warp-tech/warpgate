@@ -14,7 +14,7 @@ delegate = "0.6"
 futures = "0.3"
 http = "0.2"
 once_cell = "1.17"
-poem = { version = "^1.3.50", features = [
+poem = { version = "^1.3.55", features = [
     "cookie",
     "session",
     "anyhow",
