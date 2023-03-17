@@ -514,7 +514,7 @@ impl RemoteClient {
 
     async fn open_shell(&mut self, channel_id: Uuid) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             let channel = session.channel_open_session().await?;
 
             let (tx, rx) = unbounded_channel();
@@ -536,7 +536,7 @@ impl RemoteClient {
         params: DirectTCPIPParams,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             let channel = session
                 .channel_open_direct_tcpip(
                     params.host_to_connect,
@@ -577,7 +577,7 @@ impl RemoteClient {
         port: u32,
     ) -> Result<bool, SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             Ok(session.cancel_tcpip_forward(address, port).await?)
         } else {
             self.pending_forwards
