@@ -38,7 +38,7 @@ totp-rs = { version = "3.0", features = ["otpauth"] }
 tracing = "0.1"
 tracing-core = "0.1"
 url = "2.2"
-uuid = { version = "1.2", features = ["v4", "serde"] }
+uuid = { version = "1.3", features = ["v4", "serde"] }
 warpgate-sso = { version = "*", path = "../warpgate-sso" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0"
