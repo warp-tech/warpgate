@@ -3111,11 +3111,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.11"
+version = "0.11.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b75aa69a3f06bbcc66ede33af2af253c6f7a86b1ca0033f60c580a27074fbf92"
+checksum = "27b71749df584b7f4cac2c426c127a7c785a5106cc98f7a8feb044115f0fa254"
 dependencies = [
- "base64 0.13.0",
+ "base64 0.21.0",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -3128,10 +3128,10 @@ dependencies = [
  "hyper-tls",
  "ipnet",
  "js-sys",
- "lazy_static",
  "log",
  "mime",
  "native-tls",
+ "once_cell",
  "percent-encoding",
  "pin-project-lite",
  "rustls",
@@ -3148,6 +3148,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "webpki-roots",
  "winreg",
@@ -4637,7 +4638,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4673,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4702,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4738,7 +4739,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4778,7 +4779,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4791,7 +4792,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4804,7 +4805,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-std",
  "chrono",
@@ -4816,7 +4817,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4848,7 +4849,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4875,7 +4876,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4900,7 +4901,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -4916,7 +4917,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "rust-embed",
  "serde",
@@ -5007,6 +5008,19 @@ name = "wasm-bindgen-shared"
 version = "0.2.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6598dd0bd3c7d51095ff6531a5b23e02acdc81804e30d8f07afb77b7215a140a"
+
+[[package]]
+name = "wasm-streams"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bbae3363c08332cadccd13b67db371814cd214c2524020932f0804b8cf7c078"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
 
 [[package]]
 name = "web-sys"
