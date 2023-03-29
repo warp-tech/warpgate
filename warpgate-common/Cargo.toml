@@ -40,6 +40,6 @@ tracing-core = "0.1"
 url = "2.2"
 uuid = { version = "1.2", features = ["v4", "serde"] }
 warpgate-sso = { version = "*", path = "../warpgate-sso" }
-rustls = { version = "0.20", features = ["dangerous_configuration"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0"
 webpki = "0.22"

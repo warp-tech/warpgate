@@ -1687,7 +1687,7 @@ checksum = "d87c48c02e0dc5e3b849a2041db3029fd066650f8f717c07bf8ed78ccb895cac"
 dependencies = [
  "http",
  "hyper",
- "rustls",
+ "rustls 0.20.8",
  "tokio",
  "tokio-rustls",
 ]
@@ -3134,7 +3134,7 @@ dependencies = [
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
- "rustls",
+ "rustls 0.20.8",
  "rustls-native-certs",
  "rustls-pemfile",
  "serde",
@@ -3347,14 +3347,26 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.6"
+version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aab8ee6c7097ed6057f43c187a62418d0c05a4bd5f18b3571db50ee0f9ce033"
+checksum = "fff78fc74d175294f4e83b28343315ffcfb114b156f0185e9741cb5570f50e2f"
 dependencies = [
  "log",
  "ring",
  "sct",
  "webpki",
+]
+
+[[package]]
+name = "rustls"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07180898a28ed6a7f7ba2311594308f595e3dd2e3c3812fa0a80a47b45f17e5d"
+dependencies = [
+ "log",
+ "ring",
+ "rustls-webpki",
+ "sct",
 ]
 
 [[package]]
@@ -3376,6 +3388,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d194b56d58803a43635bdc398cd17e383d6f71f9182b9a192c127ca42494a59b"
 dependencies = [
  "base64 0.21.0",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.100.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6207cd5ed3d8dca7816f8f3725513a34609c0c765bf652b8c3cb4cfd87db46b"
+dependencies = [
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -4200,7 +4222,7 @@ version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c43ee83903113e03984cb9e5cebe6c04a5116269e900e3ddba8f068a62adda59"
 dependencies = [
- "rustls",
+ "rustls 0.20.8",
  "tokio",
  "webpki",
 ]
@@ -4224,7 +4246,7 @@ checksum = "f714dd15bead90401d77e04243611caec13726c2408afd5b31901dfcdcb3b181"
 dependencies = [
  "futures-util",
  "log",
- "rustls",
+ "rustls 0.20.8",
  "rustls-native-certs",
  "tokio",
  "tokio-rustls",
@@ -4446,7 +4468,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "rustls",
+ "rustls 0.20.8",
  "sha-1",
  "thiserror",
  "url",
@@ -4637,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4673,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4702,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4720,7 +4742,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_core 0.6.3",
- "rustls",
+ "rustls 0.21.0",
  "rustls-pemfile",
  "sea-orm",
  "serde",
@@ -4738,7 +4760,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4756,7 +4778,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_core 0.6.3",
- "rustls",
+ "rustls 0.21.0",
  "rustls-pemfile",
  "sea-orm",
  "serde",
@@ -4778,7 +4800,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4791,7 +4813,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "poem-openapi",
@@ -4804,7 +4826,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-std",
  "chrono",
@@ -4816,7 +4838,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4848,7 +4870,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4857,7 +4879,7 @@ dependencies = [
  "once_cell",
  "password-hash 0.2.3",
  "rand 0.8.5",
- "rustls",
+ "rustls 0.21.0",
  "rustls-native-certs",
  "rustls-pemfile",
  "sha1",
@@ -4875,7 +4897,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -4900,7 +4922,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -4916,7 +4938,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "rust-embed",
  "serde",
