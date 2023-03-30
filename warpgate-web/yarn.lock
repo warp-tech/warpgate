@@ -2631,10 +2631,10 @@ svelte-spa-router@^3.3.0:
   dependencies:
     regexparam "2.0.1"
 
-svelte@^3.55.1:
-  version "3.55.1"
-  resolved "https://registry.yarnpkg.com/svelte/-/svelte-3.55.1.tgz#6f93b153e5248039906ce5fe196efdb9e05dfce8"
-  integrity sha512-S+87/P0Ve67HxKkEV23iCdAh/SX1xiSfjF1HOglno/YTbSTW7RniICMCofWGdJJbdjw3S+0PfFb1JtGfTXE0oQ==
+svelte@^3.58.0:
+  version "3.58.0"
+  resolved "https://registry.yarnpkg.com/svelte/-/svelte-3.58.0.tgz#d3e6f103efd6129e51c7d709225ad3b4c052b64e"
+  integrity sha512-brIBNNB76mXFmU/Kerm4wFnkskBbluBDCjx/8TcpYRb298Yh2dztS2kQ6bhtjMcvUhd5ynClfwpz5h2gnzdQ1A==
 
 sveltestrap@^5.9.0:
   version "5.9.0"
