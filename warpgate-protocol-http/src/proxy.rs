@@ -10,7 +10,7 @@ use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::Uri;
 use once_cell::sync::Lazy;
-use poem::web::websocket::{CloseCode, Message, WebSocket};
+use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
@@ -414,7 +414,7 @@ async fn proxy_ws_inner(
                                 client_sink
                                     .send(tungstenite::Message::Close(data.map(|data| {
                                         tungstenite::protocol::CloseFrame {
-                                            code: data.0.into(),
+                                            code: u16::from(data.0).into(),
                                             reason: Cow::Owned(data.1),
                                         }
                                     })))
@@ -444,7 +444,7 @@ async fn proxy_ws_inner(
                             tungstenite::Message::Close(data) => {
                                 server_sink
                                     .send(Message::Close(data.map(|data| {
-                                        (CloseCode::from(data.code), data.reason.into_owned())
+                                        (u16::from(data.code).into(), data.reason.into_owned())
                                     })))
                                     .await?;
                             }
