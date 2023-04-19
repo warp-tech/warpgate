@@ -339,7 +339,7 @@ impl RemoteClient {
         self.child_tasks.push(
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
-                .spawn(session_channel.run()),
+                .spawn(session_channel.run()).unwrap(),
         );
 
         id
@@ -524,7 +524,7 @@ impl RemoteClient {
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run()),
+                    .spawn(channel.run()).unwrap(),
             );
         }
         Ok(())
@@ -554,7 +554,7 @@ impl RemoteClient {
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run()),
+                    .spawn(channel.run()).unwrap(),
             );
         }
         Ok(())

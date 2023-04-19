@@ -18,7 +18,7 @@ pub fn generate_setup_url(key: &OtpSecretKey, label: &str) -> Secret<String> {
     Secret::new(totp.get_url())
 }
 
-fn get_totp(key: &OtpSecretKey, label: Option<&str>) -> TOTP<OtpExposedSecretKey> {
+fn get_totp(key: &OtpSecretKey, label: Option<&str>) -> TOTP {
     TOTP {
         algorithm: Algorithm::SHA1,
         digits: 6,

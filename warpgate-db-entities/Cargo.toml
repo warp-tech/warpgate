@@ -5,9 +5,9 @@ name = "warpgate-db-entities"
 version = "0.7.1"
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
-poem-openapi = { version = "2.0.21", features = ["chrono", "uuid"] }
-sea-orm = { version = "0.10.6", features = [
+chrono = { version = "0.4", default_features = false, features = ["serde"] }
+poem-openapi = { version = "2.0", features = ["chrono", "uuid"] }
+sea-orm = { version = "0.11.2", features = [
     "macros",
     "with-chrono",
     "with-uuid",
