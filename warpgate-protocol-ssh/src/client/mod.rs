@@ -3,6 +3,7 @@ mod channel_session;
 mod error;
 mod handler;
 use std::collections::HashMap;
+use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
@@ -141,7 +142,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId, services: Services) -> RemoteClientHandles {
+    pub fn create(id: SessionId, services: Services) -> io::Result<RemoteClientHandles> {
         let (event_tx, event_rx) = unbounded_channel();
         let (command_tx, mut command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = unbounded_channel();
@@ -175,13 +176,13 @@ impl RemoteClient {
             .instrument(Span::current()),
         );
 
-        this.start();
+        this.start()?;
 
-        RemoteClientHandles {
+        Ok(RemoteClientHandles {
             event_rx,
             command_tx,
             abort_tx,
-        }
+        })
     }
 
     fn set_disconnected(&mut self) {
@@ -252,7 +253,7 @@ impl RemoteClient {
         Ok(())
     }
 
-    pub fn start(mut self) {
+    pub fn start(mut self) -> io::Result<JoinHandle<anyhow::Result<()>>> {
         let name = format!("SSH {} client commands", self.id);
         tokio::task::Builder::new().name(&name).spawn(
             async move {
@@ -285,7 +286,7 @@ impl RemoteClient {
                 Ok::<(), anyhow::Error>(())
             }
             .instrument(Span::current()),
-        );
+        )
     }
 
     async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
@@ -306,12 +307,12 @@ impl RemoteClient {
                     }
                     ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
                         info!("New forwarded connection: {params:?}");
-                        let id = self.setup_server_initiated_channel(channel).await;
+                        let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
                     }
                     ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
                         info!("New X11 connection from {originator_address}:{originator_port:?}");
-                        let id = self.setup_server_initiated_channel(channel).await;
+                        let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self
                             .tx
                             .send(RCEvent::X11(id, originator_address, originator_port));
@@ -328,7 +329,7 @@ impl RemoteClient {
     async fn setup_server_initiated_channel(
         &mut self,
         channel: russh::Channel<russh::client::Msg>,
-    ) -> Uuid {
+    ) -> Result<Uuid> {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();
@@ -339,10 +340,10 @@ impl RemoteClient {
         self.child_tasks.push(
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
-                .spawn(session_channel.run()).unwrap(),
+                .spawn(session_channel.run())?,
         );
 
-        id
+        Ok(id)
     }
 
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
@@ -524,7 +525,8 @@ impl RemoteClient {
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run()).unwrap(),
+                    .spawn(channel.run())
+                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
             );
         }
         Ok(())
@@ -554,7 +556,8 @@ impl RemoteClient {
             self.child_tasks.push(
                 tokio::task::Builder::new()
                     .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run()).unwrap(),
+                    .spawn(channel.run())
+                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
             );
         }
         Ok(())

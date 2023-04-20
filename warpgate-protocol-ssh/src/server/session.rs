@@ -115,7 +115,7 @@ impl ServerSession {
         let _span = info_span!("SSH", session=%id);
         let _enter = _span.enter();
 
-        let mut rc_handles = RemoteClient::create(id, services.clone());
+        let mut rc_handles = RemoteClient::create(id, services.clone())?;
 
         let (hub, event_sender) = EventHub::setup();
         let main_event_subscription = hub
@@ -179,7 +179,7 @@ impl ServerSession {
                     }
                 }
             }
-        });
+        })?;
 
         let name = format!("SSH {id} client events");
         tokio::task::Builder::new().name(&name).spawn({
@@ -191,7 +191,7 @@ impl ServerSession {
                     }
                 }
             }
-        });
+        })?;
 
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
@@ -203,7 +203,7 @@ impl ServerSession {
                     }
                 }
             }
-        });
+        })?;
 
         Ok(async move {
             while let Some(event) = this.get_next_event().await {
