@@ -134,8 +134,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     });
 
+    store.http.enable = true;
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
-        store.http.enable = true;
         store.http.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *http_port)));
     } else {
         if !is_docker() {
@@ -152,7 +152,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             store.ssh.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *ssh_port)));
         }
     } else {
-        if !is_docker() {
+        if is_docker() {
+            store.ssh.enable = true;
+        } else {
             info!("You will now choose specific protocol listeners to be enabled.");
             info!("");
             info!("NB: Nothing will be exposed by default -");
@@ -178,7 +180,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             store.mysql.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *mysql_port)));
         }
     } else {
-        if !is_docker() {
+        if is_docker() {
+            store.mysql.enable = true;
+        } else {
             store.mysql.enable = dialoguer::Confirm::with_theme(&theme)
                 .default(true)
                 .with_prompt("Accept MySQL connections?")
