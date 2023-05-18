@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use poem::web::Data;
-use poem_openapi::param::Path;
+use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    QueryOrder, Set,
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{Role as RoleConfig, WarpgateError};
@@ -38,11 +41,18 @@ impl ListApi {
     async fn api_get_all_roles(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        search: Query<Option<String>>,
     ) -> poem::Result<GetRolesResponse> {
         let db = db.lock().await;
 
-        let roles = Role::Entity::find()
-            .order_by_asc(Role::Column::Name)
+        let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
+
+        if let Some(ref search) = *search {
+            let search = format!("%{}%", search);
+            roles = roles.filter(Role::Column::Name.like(&*search));
+        }
+
+        let roles = roles
             .all(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;

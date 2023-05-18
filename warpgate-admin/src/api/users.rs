@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use poem::web::Data;
-use poem_openapi::param::Path;
+use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
@@ -46,14 +46,18 @@ impl ListApi {
     async fn api_get_all_users(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        search: Query<Option<String>>,
     ) -> poem::Result<GetUsersResponse> {
         let db = db.lock().await;
 
-        let users = User::Entity::find()
-            .order_by_asc(User::Column::Username)
-            .all(&*db)
-            .await
-            .map_err(WarpgateError::from)?;
+        let mut users = User::Entity::find().order_by_asc(User::Column::Username);
+
+        if let Some(ref search) = *search {
+            let search = format!("%{}%", search);
+            users = users.filter(User::Column::Username.like(&*search));
+        }
+
+        let users = users.all(&*db).await.map_err(WarpgateError::from)?;
 
         let users: Result<Vec<UserConfig>, _> = users.into_iter().map(|t| t.try_into()).collect();
         let users = users.map_err(WarpgateError::from)?;

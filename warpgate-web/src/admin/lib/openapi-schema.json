@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.7.0"
+    "version": "0.7.1"
   },
   "servers": [
     {
@@ -207,6 +207,18 @@
     },
     "/roles": {
       "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -366,6 +378,18 @@
     },
     "/targets": {
       "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -636,6 +660,18 @@
     },
     "/users": {
       "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
