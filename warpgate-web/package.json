@@ -49,7 +49,7 @@
     "shell-escape": "^0.2.0",
     "svelte": "^3.58.0",
     "svelte-check": "^2.9.2",
-    "svelte-fa": "^3.0.1",
+    "svelte-fa": "^3.0.4",
     "svelte-intersection-observer": "^0.10.0",
     "svelte-observable": "^0.4.0",
     "svelte-preprocess": "^4.10.7",
