@@ -207,10 +207,9 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     if let Some(host) = req.headers().get(http::header::HOST) {
-        target = target.header(
-            X_FORWARDED_HOST.clone(),
-            host.to_str()?.split(':').next().unwrap().to_string(),
-        );
+        if let Some(host) = host.to_str()?.split(':').next() {
+            target = target.header(X_FORWARDED_HOST.clone(), host.to_string());
+        }
     }
     target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str().to_owned());
     if let Some(addr) = req.remote_addr().as_socket_addr() {
