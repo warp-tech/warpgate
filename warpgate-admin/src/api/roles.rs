@@ -48,8 +48,8 @@ impl ListApi {
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
         if let Some(ref search) = *search {
-            let search = format!("%{}%", search);
-            roles = roles.filter(Role::Column::Name.like(&*search));
+            let search = format!("%{search}%");
+            roles = roles.filter(Role::Column::Name.like(&search));
         }
 
         let roles = roles
