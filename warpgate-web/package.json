@@ -58,7 +58,7 @@
     "thenby": "^1.3.4",
     "tslib": "^2.5.0",
     "typescript": "^4.9.4",
-    "vite": "^3.2.4",
+    "vite": "^3.2.7",
     "vite-plugin-checker": "^0.5.3",
     "vite-tsconfig-paths": "^4.0.9",
     "xterm": "^4.18.0",
