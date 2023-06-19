@@ -30,7 +30,7 @@
     "@tsconfig/svelte": "^3.0.0",
     "@types/qrcode": "^1.5.0",
     "@types/shell-escape": "^0.2.1",
-    "@typescript-eslint/eslint-plugin": "^5.43.0",
+    "@typescript-eslint/eslint-plugin": "^5.60.0",
     "@typescript-eslint/parser": "^5.58.0",
     "bootstrap": "^5.2.0-beta1",
     "copy-text-to-clipboard": "^3.0.1",
