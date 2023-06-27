@@ -56,7 +56,7 @@
     "svelte-spa-router": "^3.3.0",
     "sveltestrap": "^5.9.0",
     "thenby": "^1.3.4",
-    "tslib": "^2.5.0",
+    "tslib": "^2.6.0",
     "typescript": "^4.9.4",
     "vite": "^3.2.4",
     "vite-plugin-checker": "^0.5.3",
