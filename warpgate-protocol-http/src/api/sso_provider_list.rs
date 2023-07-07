@@ -193,6 +193,12 @@ impl Api {
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;
 
+        if state.username() != username {
+            return Ok(Err(format!(
+                "Incorrect account for SSO authentication ({username})"
+            )));
+        }
+
         if cp.validate_credential(&username, &cred).await? {
             state.add_valid_credential(cred);
         }
