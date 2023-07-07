@@ -193,15 +193,15 @@ async function startSSO (provider: SsoProviderDescription) {
                 <Fa class="ms-2" fw icon={faArrowRight} />
             </AsyncButton>
 
-            {#if authState === ApiAuthState.Failed}
-                <Alert color="danger">Incorrect credentials</Alert>
-            {/if}
-            {#if serverErrorMessage}
-                <Alert color="danger">{serverErrorMessage}</Alert>
-            {/if}
-            {#if error}
-                <Alert color="danger">{error}</Alert>
-            {/if}
+        {/if}
+        {#if authState === ApiAuthState.Failed}
+            <Alert color="danger">Incorrect credentials</Alert>
+        {/if}
+        {#if serverErrorMessage}
+            <Alert color="danger">{serverErrorMessage}</Alert>
+        {/if}
+        {#if error}
+            <Alert color="danger">{error}</Alert>
         {/if}
     </form>
 
