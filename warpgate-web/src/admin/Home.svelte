@@ -80,7 +80,7 @@
 {/if}
 
 <ItemList load={loadSessions} pageSize={100}>
-    <div slot="header" class="d-flex align-items-center mb-1">
+    <div slot="header" class="d-flex align-items-center mb-1 w-100">
         <div class="ms-auto"></div>
         <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
         <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />

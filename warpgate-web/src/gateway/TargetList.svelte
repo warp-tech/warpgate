@@ -1,35 +1,43 @@
 <script lang="ts">
+import { Observable, from, map } from 'rxjs'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
 import { api, TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
 import { Modal, ModalBody, ModalHeader } from 'sveltestrap'
 import { serverInfo } from './lib/store'
+import { firstBy } from 'thenby'
 
 const dispatch = createEventDispatcher()
 
-let targets: TargetSnapshot[]|undefined
-let haveAdminTarget = false
 let selectedTarget: TargetSnapshot|undefined
 
-async function init () {
-    targets = await api.getTargets()
-    haveAdminTarget = targets.some(t => t.kind === TargetKind.WebAdmin)
-    targets = targets.filter(t => t.kind !== TargetKind.WebAdmin)
+function loadTargets (options: LoadOptions): Observable<PaginatedResponse<TargetSnapshot>> {
+    return from(api.getTargets({ search: options.search })).pipe(
+        map(result => {
+            result = result.sort(
+                firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
+                    .thenBy(x => x.name.toLowerCase())
+            )
+            return {
+                items: result,
+                offset: 0,
+                total: result.length,
+            }
+        })
+    )
 }
 
 function selectTarget (target: TargetSnapshot) {
-    if (target.kind === TargetKind.Http) {
+    if (target.kind === TargetKind.WebAdmin) {
+        loadURL('/@warpgate/admin')
+    } else if (target.kind === TargetKind.Http) {
         loadURL(`/?warpgate-target=${target.name}`)
     } else {
         selectedTarget = target
     }
-}
-
-function selectAdminTarget () {
-    loadURL('/@warpgate/admin')
 }
 
 function loadURL (url: string) {
@@ -37,64 +45,46 @@ function loadURL (url: string) {
     location.href = url
 }
 
-init()
-
 </script>
 
-{#if targets}
-<div class="list-group list-group-flush">
-    {#if haveAdminTarget}
-        <a
-            class="list-group-item list-group-item-action target-item"
-            href="/@warpgate/admin"
-            on:click|preventDefault={e => {
-                if (e.metaKey || e.ctrlKey) {
-                    return
-                }
-                selectAdminTarget()
-            }}
-        >
-            <span class="me-auto">
-                Manage Warpgate
-            </span>
-            <Fa icon={faArrowRight} fw />
-        </a>
-    {/if}
-    {#each targets as target}
-        <a
-            class="list-group-item list-group-item-action target-item"
-            href={
-                target.kind === TargetKind.Http
-                ? `/?warpgate-target=${target.name}`
-                : '/@warpgate/admin'
+<ItemList load={loadTargets} showSearch={true}>
+    <a
+        slot="item" let:item={target}
+        class="list-group-item list-group-item-action target-item"
+        href={
+            target.kind === TargetKind.WebAdmin
+            ? '/@warpgate/admin'
+            : target.kind === TargetKind.Http
+            ? `/?warpgate-target=${target.name}`
+            : '/@warpgate/admin'
+        }
+        on:click|preventDefault={e => {
+            if (e.metaKey || e.ctrlKey) {
+                return
             }
-            on:click|preventDefault={e => {
-                if (e.metaKey || e.ctrlKey) {
-                    return
-                }
-                selectTarget(target)
-            }}
-        >
-            <span class="me-auto">
+            selectTarget(target)
+        }}
+    >
+        <span class="me-auto">
+            {#if target.kind === TargetKind.WebAdmin}
+                Manage Warpgate
+            {:else}
                 {target.name}
-            </span>
-            <small class="protocol text-muted ms-auto">
-                {#if target.kind === TargetKind.Ssh}
-                    SSH
-                {/if}
-                {#if target.kind === TargetKind.MySql}
-                    MySQL
-                {/if}
-            </small>
-            {#if target.kind === TargetKind.Http}
-                <Fa icon={faArrowRight} fw />
             {/if}
-        </a>
-    {/each}
-</div>
-{:else}
-    <DelayedSpinner />
-{/if}
+        </span>
+        <small class="protocol text-muted ms-auto">
+            {#if target.kind === TargetKind.Ssh}
+                SSH
+            {/if}
+            {#if target.kind === TargetKind.MySql}
+                MySQL
+            {/if}
+        </small>
+        {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
+            <Fa icon={faArrowRight} fw />
+        {/if}
+    </a>
+</ItemList>
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
     <ModalHeader toggle={() => selectedTarget = undefined}>

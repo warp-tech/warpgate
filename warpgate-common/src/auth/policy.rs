@@ -57,7 +57,9 @@ impl CredentialPolicy for AllCredentialsPolicy {
         let valid_credential_types: HashSet<CredentialKind> =
             valid_credentials.iter().map(|x| x.kind()).collect();
 
-        if valid_credential_types.is_superset(&self.required_credential_types) {
+        if !valid_credential_types.is_empty()
+            && valid_credential_types.is_superset(&self.required_credential_types)
+        {
             CredentialPolicyResponse::Ok
         } else {
             CredentialPolicyResponse::Need(

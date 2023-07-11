@@ -1,5 +1,6 @@
 use futures::{stream, StreamExt};
 use poem::web::Data;
+use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
@@ -36,11 +37,20 @@ impl Api {
         &self,
         services: Data<&Services>,
         auth: Data<&SessionAuthorization>,
+        search: Query<Option<String>>,
     ) -> poem::Result<GetTargetsResponse> {
-        let targets = {
+        let mut targets = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?
         };
+
+        if let Some(ref search) = *search {
+            targets = targets
+                .into_iter()
+                .filter(|t| t.name.contains(search))
+                .collect()
+        }
+
         let mut targets = stream::iter(targets)
             .filter(|t| {
                 let services = services.clone();
