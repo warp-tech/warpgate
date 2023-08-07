@@ -1,4 +1,4 @@
-import shellEscape from 'shell-escape'
+import { shellEscape } from 'gateway/lib/shellEscape'
 import type { Info } from 'gateway/lib/api'
 
 export interface ConnectionOptions {
