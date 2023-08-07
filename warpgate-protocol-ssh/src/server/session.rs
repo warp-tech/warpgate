@@ -228,7 +228,7 @@ impl ServerSession {
                 .auth_state_store
                 .lock()
                 .await
-                .create(username, crate::PROTOCOL_NAME)
+                .create(Some(&self.id), username, crate::PROTOCOL_NAME)
                 .await?
                 .1;
             self.auth_state = Some(state);
@@ -1279,6 +1279,8 @@ impl ServerSession {
                     let Some(auth_state) = self.auth_state.as_ref() else {
                         return russh::server::Auth::Reject { proceed_with_methods: None};
                     };
+                    let identification_string =
+                        auth_state.lock().await.identification_string().to_owned();
                     let auth_state_id = *auth_state.lock().await.id();
                     let event = self
                         .services
@@ -1311,11 +1313,19 @@ impl ServerSession {
                     russh::server::Auth::Partial {
                         name: Cow::Owned(format!(
                             concat!(
-                            "----------------------------------------------------------------\n",
-                            "Warpgate authentication: please open {} in your browser\n",
-                            "----------------------------------------------------------------\n"
+                            "-----------------------------------------------------------------------\n",
+                            "Warpgate authentication: please open the following URL in your browser:\n",
+                            "{}\n\n",
+                            "Make sure you're seeing this security key: {}\n",
+                            "-----------------------------------------------------------------------\n"
                         ),
-                            login_url
+                            login_url,
+                            identification_string
+                                .chars()
+                                .into_iter()
+                                .map(|x| x.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ")
                         )),
                         instructions: Cow::Borrowed(""),
                         prompts: Cow::Owned(vec![(Cow::Borrowed("Press Enter when done: "), true)]),
