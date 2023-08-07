@@ -183,7 +183,11 @@ impl MySqlSession {
                     .auth_state_store
                     .lock()
                     .await
-                    .create(&username, crate::common::PROTOCOL_NAME)
+                    .create(
+                        Some(&self.server_handle.lock().await.id()),
+                        &username,
+                        crate::common::PROTOCOL_NAME,
+                    )
                     .await?
                     .1;
                 let mut state = state_arc.lock().await;

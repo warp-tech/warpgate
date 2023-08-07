@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState};
-use warpgate_common::WarpgateError;
+use warpgate_common::{WarpgateError, SessionId};
 
 use crate::ConfigProvider;
 
@@ -49,6 +49,7 @@ impl AuthStateStore {
 
     pub async fn create(
         &mut self,
+        session_id: Option<&SessionId>,
         username: &str,
         protocol: &str,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
@@ -63,7 +64,13 @@ impl AuthStateStore {
             return Err(WarpgateError::UserNotFound)
         };
 
-        let state = AuthState::new(id, username.to_string(), protocol.to_string(), policy);
+        let state = AuthState::new(
+            id,
+            session_id.copied(),
+            username.to_string(),
+            protocol.to_string(),
+            policy,
+        );
         self.store
             .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));
 
