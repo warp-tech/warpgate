@@ -17,7 +17,7 @@ function escapeWin (arg: string): string {
 const isWin = new UAParser().getOS().name === 'Windows'
 
 export function shellEscape (stringOrArray: string[]|string): string {
-    const ret = []
+    const ret: string[] = []
 
     const escapePath = isWin ? escapeWin : escapeUnix
 
