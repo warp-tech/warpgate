@@ -4,6 +4,7 @@ import { Alert } from 'sveltestrap'
 import { api, ApiAuthState, AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import RelativeDate from 'admin/RelativeDate.svelte'
 
 export let params: { stateId: string }
 let authState: AuthStateResponseInternal
@@ -29,6 +30,19 @@ async function reject () {
 }
 </script>
 
+<style lang="scss">
+    .identification-string {
+        display: flex;
+        font-size: 3rem;
+
+        .card {
+            padding: 0rem 0.5rem;
+            border-radius: .5rem;
+            margin-right: .5rem;
+        }
+    }
+</style>
+
 {#await init()}
     <DelayedSpinner />
 {:then}
@@ -36,7 +50,25 @@ async function reject () {
         <h1>Authorization request</h1>
     </div>
 
-    <p>Authorize this {authState.protocol} session?</p>
+    <div class="mb-5">
+        <div class="mb-2">Ensure this security key matches your authentication prompt:</div>
+        <div class="identification-string">
+            {#each authState.identificationString as char}
+                <div class="card bg-secondary text-light">
+                    <div class="card-body">{char}</div>
+                </div>
+            {/each}
+        </div>    </div>
+
+    <div class="mb-3">
+        <div>
+            Authorize this {authState.protocol} session?
+        </div>
+        <small>
+            Requested <RelativeDate date={authState.started} />
+            {#if authState.address}from {authState.address}{/if}
+        </small>
+    </div>
 
     {#if authState.state === ApiAuthState.Success}
         <Alert color="success">

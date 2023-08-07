@@ -198,7 +198,9 @@ pub async fn get_auth_state_for_request(
     match session.get_auth_state_id() {
         Some(id) => Ok(store.get(&id.0).ok_or(WarpgateError::InconsistentState)?),
         None => {
-            let (id, state) = store.create(username, crate::common::PROTOCOL_NAME).await?;
+            let (id, state) = store
+                .create(None, username, crate::common::PROTOCOL_NAME)
+                .await?;
             session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
             Ok(state)
         }

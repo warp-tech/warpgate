@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.7.1"
+    "version": "0.7.4"
   },
   "servers": [
     {
@@ -386,14 +386,26 @@
         "type": "object",
         "required": [
           "protocol",
-          "state"
+          "started",
+          "state",
+          "identification_string"
         ],
         "properties": {
           "protocol": {
             "type": "string"
           },
+          "address": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
           "state": {
             "$ref": "#/components/schemas/ApiAuthState"
+          },
+          "identification_string": {
+            "type": "string"
           }
         }
       },

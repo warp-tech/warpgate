@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
@@ -66,7 +67,10 @@ enum LogoutResponse {
 #[derive(Object)]
 struct AuthStateResponseInternal {
     pub protocol: String,
+    pub address: Option<String>,
+    pub started: DateTime<Utc>,
     pub state: ApiAuthState,
+    pub identification_string: String,
 }
 
 #[derive(ApiResponse)]
@@ -214,7 +218,7 @@ impl Api {
         let Some(state_arc) = store.get(&state_id.0) else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc).await
+        serialize_auth_state_inner(state_arc, *services).await
     }
 
     #[oai(
@@ -237,7 +241,7 @@ impl Api {
         state_arc.lock().await.reject();
         store.complete(&state_id.0).await;
         session.clear_auth_state();
-        serialize_auth_state_inner(state_arc).await
+        serialize_auth_state_inner(state_arc, *services).await
     }
 
     #[oai(
@@ -256,7 +260,7 @@ impl Api {
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc).await
+        serialize_auth_state_inner(state_arc, *services).await
     }
 
     #[oai(
@@ -284,7 +288,7 @@ impl Api {
         if let AuthResult::Accepted { .. } = auth_result {
             services.auth_state_store.lock().await.complete(&id).await;
         }
-        serialize_auth_state_inner(state_arc).await
+        serialize_auth_state_inner(state_arc, *services).await
     }
 
     #[oai(
@@ -304,7 +308,7 @@ impl Api {
         };
         state_arc.lock().await.reject();
         services.auth_state_store.lock().await.complete(&id).await;
-        serialize_auth_state_inner(state_arc).await
+        serialize_auth_state_inner(state_arc, *services).await
     }
 }
 
@@ -339,10 +343,25 @@ async fn get_auth_state(
 
 async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
+    services: &Services,
 ) -> poem::Result<AuthStateResponse> {
     let state = state_arc.lock().await;
+
+    let session_state_store = services.state.lock().await;
+    let session_state = state
+        .session_id()
+        .and_then(|session_id| session_state_store.sessions.get(&session_id));
+
+    let peer_addr = match session_state {
+        Some(x) => x.lock().await.remote_address,
+        None => None,
+    };
+
     Ok(AuthStateResponse::Ok(Json(AuthStateResponseInternal {
         protocol: state.protocol().to_string(),
+        address: peer_addr.map(|x| x.ip().to_string()),
+        started: state.started().clone(),
         state: state.verify().into(),
+        identification_string: state.identification_string().to_owned(),
     })))
 }
