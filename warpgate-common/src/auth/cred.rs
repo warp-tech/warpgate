@@ -43,4 +43,14 @@ impl AuthCredential {
             Self::WebUserApproval => CredentialKind::WebUserApproval,
         }
     }
+
+    pub fn safe_description(&self) -> String {
+        match self {
+            Self::Password { .. } => "password".to_string(),
+            Self::PublicKey { .. } => "public key".to_string(),
+            Self::Otp { .. } => "one-time password".to_string(),
+            Self::Sso { provider, .. } => format!("SSO ({provider})"),
+            Self::WebUserApproval => "in-browser auth".to_string(),
+        }
+    }
 }

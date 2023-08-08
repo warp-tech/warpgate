@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -34,6 +35,7 @@ pub struct MySqlSession {
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     id: Uuid,
     services: Services,
+    remote_address: SocketAddr,
 }
 
 impl MySqlSession {
@@ -42,6 +44,7 @@ impl MySqlSession {
         services: Services,
         stream: TcpStream,
         tls_config: ServerConfig,
+        remote_address: SocketAddr,
     ) -> Self {
         let id = server_handle.lock().await.id();
         Self {
@@ -67,13 +70,17 @@ impl MySqlSession {
             database: None,
             server_handle,
             id,
+            remote_address,
         }
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
+        let client_ip = self.remote_address.ip().to_string();
         match self.username {
-            Some(ref username) => info_span!("MySQL", session=%self.id, session_username=%username),
-            None => info_span!("MySQL", session=%self.id),
+            Some(ref username) => {
+                info_span!("MySQL", session=%self.id, session_username=%username, %client_ip)
+            }
+            None => info_span!("MySQL", session=%self.id, %client_ip),
         }
     }
 
@@ -269,8 +276,6 @@ impl MySqlSession {
         )?;
         self.stream.flush().await?;
 
-        info!(%username, "Authenticated");
-
         let target = {
             self.services
                 .config_provider
@@ -307,9 +312,7 @@ impl MySqlSession {
             handle.set_target(&target).await?;
         }
 
-        let span = self.make_logging_span();
         self.run_authorized_inner(handshake, mysql_options)
-            .instrument(span)
             .await
     }
 

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use rand::Rng;
+use tracing::info;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
@@ -96,9 +97,20 @@ impl AuthState {
             .policy
             .is_sufficient(&self.protocol, &self.valid_credentials[..])
         {
-            CredentialPolicyResponse::Ok => AuthResult::Accepted {
-                username: self.username.clone(),
-            },
+            CredentialPolicyResponse::Ok => {
+                info!(
+                    username=%self.username,
+                    credentials=%self.valid_credentials
+                        .iter()
+                        .map(|x| x.safe_description())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    "Authenticated",
+                );
+                AuthResult::Accepted {
+                    username: self.username.clone(),
+                }
+            }
             CredentialPolicyResponse::Need(kinds) => AuthResult::Need(kinds),
         }
     }

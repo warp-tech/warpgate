@@ -222,7 +222,6 @@ pub async fn authorize_session(req: &Request, username: String) -> poem::Result<
         .await
         .set_username(username.clone())
         .await?;
-    info!(%username, "Authenticated");
     session.set_auth(SessionAuthorization::User(username));
 
     Ok(())
