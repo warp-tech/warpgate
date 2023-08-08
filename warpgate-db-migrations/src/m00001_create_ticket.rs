@@ -37,9 +37,20 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let builder = manager.get_database_backend();
         let schema = Schema::new(builder);
+
         manager
             .create_table(schema.create_table_from_entity(ticket::Entity))
-            .await
+            .await?;
+
+        // https://github.com/warp-tech/warpgate/issues/857
+        let _ = manager
+            .get_connection()
+            .execute_unprepared(
+                "ALTER TABLE `tickets` MODIFY COLUMN `expiry` TIMESTAMP NULL DEFAULT NULL",
+            )
+            .await;
+
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {

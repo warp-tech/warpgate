@@ -84,6 +84,7 @@ impl Api {
             username: Set(body.username.clone()),
             target: Set(body.target_name.clone()),
             created: Set(chrono::Utc::now()),
+            expiry: Set(None),
             ..Default::default()
         };
 
