@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState};
-use warpgate_common::{WarpgateError, SessionId};
+use warpgate_common::{SessionId, WarpgateError};
 
 use crate::ConfigProvider;
 

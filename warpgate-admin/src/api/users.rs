@@ -53,8 +53,8 @@ impl ListApi {
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
         if let Some(ref search) = *search {
-            let search = format!("%{}%", search);
-            users = users.filter(User::Column::Username.like(&*search));
+            let search = format!("%{search}%");
+            users = users.filter(User::Column::Username.like(&search));
         }
 
         let users = users.all(&*db).await.map_err(WarpgateError::from)?;

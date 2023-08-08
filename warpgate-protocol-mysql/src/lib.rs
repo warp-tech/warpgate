@@ -86,13 +86,15 @@ impl ProtocolServer for MySQLProtocolServer {
                     .register_session(
                         &crate::common::PROTOCOL_NAME,
                         SessionStateInit {
-                            remote_address: Some(remote_address.clone()),
+                            remote_address: Some(remote_address),
                             handle: Box::new(session_handle),
                         },
                     )
                     .await?;
 
-                let session = MySqlSession::new(server_handle, services, stream, tls_config, remote_address).await;
+                let session =
+                    MySqlSession::new(server_handle, services, stream, tls_config, remote_address)
+                        .await;
                 let span = session.make_logging_span();
                 tokio::select! {
                     result = session.run().instrument(span) => match result {

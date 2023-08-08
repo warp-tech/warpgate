@@ -45,10 +45,7 @@ impl Api {
         };
 
         if let Some(ref search) = *search {
-            targets = targets
-                .into_iter()
-                .filter(|t| t.name.contains(search))
-                .collect()
+            targets.retain(|t| t.name.contains(search))
         }
 
         let mut targets = stream::iter(targets)

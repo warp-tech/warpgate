@@ -50,8 +50,8 @@ impl ListApi {
         let mut targets = Target::Entity::find().order_by_asc(Target::Column::Name);
 
         if let Some(ref search) = *search {
-            let search = format!("%{}%", search);
-            targets = targets.filter(Target::Column::Name.like(&*search));
+            let search = format!("%{search}%");
+            targets = targets.filter(Target::Column::Name.like(&search));
         }
 
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
