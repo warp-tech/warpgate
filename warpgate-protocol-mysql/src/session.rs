@@ -312,8 +312,7 @@ impl MySqlSession {
             handle.set_target(&target).await?;
         }
 
-        self.run_authorized_inner(handshake, mysql_options)
-            .await
+        self.run_authorized_inner(handshake, mysql_options).await
     }
 
     async fn run_authorized_inner(

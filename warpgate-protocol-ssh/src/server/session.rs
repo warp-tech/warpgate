@@ -1325,7 +1325,6 @@ impl ServerSession {
                             login_url,
                             identification_string
                                 .chars()
-                                .into_iter()
                                 .map(|x| x.to_string())
                                 .collect::<Vec<_>>()
                                 .join(" ")

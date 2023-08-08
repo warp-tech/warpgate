@@ -8,7 +8,6 @@ use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::AuthState;
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};

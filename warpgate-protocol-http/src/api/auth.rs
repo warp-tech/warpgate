@@ -360,7 +360,7 @@ async fn serialize_auth_state_inner(
     Ok(AuthStateResponse::Ok(Json(AuthStateResponseInternal {
         protocol: state.protocol().to_string(),
         address: peer_addr.map(|x| x.ip().to_string()),
-        started: state.started().clone(),
+        started: *state.started(),
         state: state.verify().into(),
         identification_string: state.identification_string().to_owned(),
     })))
