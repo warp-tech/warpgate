@@ -7,7 +7,7 @@ version = "0.7.4"
 [dependencies]
 chrono = { version = "0.4", default_features = false, features = ["serde"] }
 poem-openapi = { version = "2.0", features = ["chrono", "uuid"] }
-sea-orm = { version = "0.11.2", features = [
+sea-orm = { version = "0.12.2", features = [
     "macros",
     "with-chrono",
     "with-uuid",
