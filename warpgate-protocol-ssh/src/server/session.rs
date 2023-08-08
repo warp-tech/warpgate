@@ -238,9 +238,12 @@ impl ServerSession {
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
+        let client_ip = self.remote_address.ip().to_string();
         match self.username {
-            Some(ref username) => info_span!("SSH", session=%self.id, session_username=%username),
-            None => info_span!("SSH", session=%self.id),
+            Some(ref username) => {
+                info_span!("SSH", session=%self.id, session_username=%username, %client_ip)
+            }
+            None => info_span!("SSH", session=%self.id, %client_ip),
         }
     }
 
@@ -1437,8 +1440,6 @@ impl ServerSession {
         username: &str,
         target_name: &str,
     ) -> Result<(), WarpgateError> {
-        info!(%username, "Authenticated");
-
         let _ = self
             .server_handle
             .lock()
