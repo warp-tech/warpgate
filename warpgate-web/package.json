@@ -59,7 +59,7 @@
     "typescript": "^4.9.4",
     "ua-parser-js": "^1.0.35",
     "vite": "^3.2.4",
-    "vite-plugin-checker": "^0.5.3",
+    "vite-plugin-checker": "^0.6.2",
     "vite-tsconfig-paths": "^4.0.9",
     "xterm": "^4.18.0",
     "xterm-addon-serialize": "^0.7.0"
