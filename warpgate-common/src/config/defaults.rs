@@ -77,5 +77,5 @@ pub(crate) fn _default_external_proxy_header_host_header() -> String {
 
 #[inline]
 pub(crate) fn _default_external_proxy_header_proto_header() -> String {
-    "x-forwarder-proto".to_owned()
+    "x-forwarded-proto".to_owned()
 }
