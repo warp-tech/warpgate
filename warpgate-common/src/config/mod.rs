@@ -127,17 +127,17 @@ impl Default for SSHConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ExternalProxyHeaderConfig {
     #[serde(default)]
-    pub host_header: String,
+    pub host: String,
 
     #[serde(default)]
-    pub proto_header: String,
+    pub proto: String,
 }
 
 impl Default for ExternalProxyHeaderConfig {
     fn default() -> Self {
         ExternalProxyHeaderConfig {
-            host_header: _default_external_proxy_header_host_header(),
-            proto_header: _default_external_proxy_header_proto_header(),
+            host: _default_external_proxy_header_host(),
+            proto: _default_external_proxy_header_proto(),
         }
     }
 }
@@ -315,8 +315,8 @@ impl WarpgateConfig {
         &self,
         for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let host_header = &self.store.external_proxy_header.host_header;
-        let proto_header = &self.store.external_proxy_header.proto_header;
+        let host_header = &self.store.external_proxy_header.host;
+        let proto_header = &self.store.external_proxy_header.proto;
         let url = if let Some(value) = for_request.and_then(|x| x.header(host_header)) {
             let value = value.to_string();
             let mut url = Url::parse(&format!("https://{value}/"))?;

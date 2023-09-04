@@ -71,11 +71,11 @@ pub(crate) fn _default_ssh_keys_path() -> String {
 }
 
 #[inline]
-pub(crate) fn _default_external_proxy_header_host_header() -> String {
+pub(crate) fn _default_external_proxy_header_host() -> String {
     "host".to_owned()
 }
 
 #[inline]
-pub(crate) fn _default_external_proxy_header_proto_header() -> String {
+pub(crate) fn _default_external_proxy_header_proto() -> String {
     "x-forwarded-proto".to_owned()
 }
