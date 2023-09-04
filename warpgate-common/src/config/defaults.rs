@@ -69,3 +69,13 @@ pub(crate) fn _default_ssh_listen() -> ListenEndpoint {
 pub(crate) fn _default_ssh_keys_path() -> String {
     "./data/keys".to_owned()
 }
+
+#[inline]
+pub(crate) fn _default_external_proxy_header_host_header() -> String {
+    "host".to_owned()
+}
+
+#[inline]
+pub(crate) fn _default_external_proxy_header_proto_header() -> String {
+    "x-forwarder-proto".to_owned()
+}

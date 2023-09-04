@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
-use poem::http;
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
@@ -122,6 +121,23 @@ impl Default for SSHConfig {
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             host_key_verification: Default::default(),
+        }
+    }
+}
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ExternalProxyHeaderConfig {
+    #[serde(default)]
+    pub host_header: String,
+
+    #[serde(default)]
+    pub proto_header: String,
+}
+
+impl Default for ExternalProxyHeaderConfig {
+    fn default() -> Self {
+        ExternalProxyHeaderConfig {
+            host_header: _default_external_proxy_header_host_header(),
+            proto_header: _default_external_proxy_header_proto_header(),
         }
     }
 }
@@ -246,6 +262,9 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub external_host: Option<String>,
 
+    #[serde(default)]
+    pub external_proxy_header: ExternalProxyHeaderConfig,
+
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
@@ -274,6 +293,7 @@ impl Default for WarpgateConfigStore {
             sso_providers: vec![],
             recordings: <_>::default(),
             external_host: None,
+            external_proxy_header: <_>::default(),
             database_url: _default_database_url(),
             ssh: <_>::default(),
             http: <_>::default(),
@@ -295,10 +315,12 @@ impl WarpgateConfig {
         &self,
         for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let url = if let Some(value) = for_request.and_then(|x| x.header(http::header::HOST)) {
+        let host_header = &self.store.external_proxy_header.host_header;
+        let proto_header = &self.store.external_proxy_header.proto_header;
+        let url = if let Some(value) = for_request.and_then(|x| x.header(host_header)) {
             let value = value.to_string();
             let mut url = Url::parse(&format!("https://{value}/"))?;
-            if let Some(value) = for_request.and_then(|x| x.header("x-forwarded-proto")) {
+            if let Some(value) = for_request.and_then(|x| x.header(proto_header)) {
                 let _ = url.set_scheme(value);
             }
             url
