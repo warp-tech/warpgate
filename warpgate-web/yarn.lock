@@ -2404,10 +2404,10 @@ sander@^0.5.0:
     mkdirp "^0.5.1"
     rimraf "^2.5.2"
 
-sass@^1.61.0:
-  version "1.61.0"
-  resolved "https://registry.yarnpkg.com/sass/-/sass-1.61.0.tgz#d1f6761bb833887b8fdab32a24e052c40531d02b"
-  integrity sha512-PDsN7BrVkNZK2+dj/dpKQAWZavbAQ87IXqVvw2+oEYI+GwlTWkvbQtL7F2cCNbMqJEYKPh1EcjSxsnqIb/kyaQ==
+sass@^1.68.0:
+  version "1.68.0"
+  resolved "https://registry.yarnpkg.com/sass/-/sass-1.68.0.tgz#0034b0cc9a50248b7d1702ac166fd25990023669"
+  integrity sha512-Lmj9lM/fef0nQswm1J2HJcEsBUba4wgNx2fea6yJHODREoMFnwRpZydBnX/RjyXw2REIwdkbqE4hrTo4qfDBUA==
   dependencies:
     chokidar ">=3.0.0 <4.0.0"
     immutable "^4.0.0"
