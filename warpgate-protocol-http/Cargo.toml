@@ -39,3 +39,4 @@ warpgate-sso = { version = "*", path = "../warpgate-sso" }
 percent-encoding = "2.1"
 uuid = { version = "1.2", features = ["v4"] }
 regex = "1.6"
+url = "2.4.1"
