@@ -466,6 +466,10 @@ impl ServerSession {
                 let _ = reply.send(self._auth_publickey(username, key).await);
             }
 
+            ServerHandlerEvent::AuthPublicKeyOffer(username, key, reply) => {
+                let _ = reply.send(self._auth_publickey_offer(username, key).await);
+            }
+
             ServerHandlerEvent::AuthPassword(username, password, reply) => {
                 let _ = reply.send(self._auth_password(username, password).await);
             }
@@ -1149,19 +1153,7 @@ impl ServerSession {
             .map_err(anyhow::Error::from)
     }
 
-    async fn _auth_publickey(
-        &mut self,
-        ssh_username: Secret<String>,
-        key: PublicKey,
-    ) -> russh::server::Auth {
-        let selector: AuthSelector = ssh_username.expose_secret().into();
-
-        info!(
-            "Public key auth as {:?} with key {}",
-            selector,
-            key.public_key_base64()
-        );
-
+    fn _get_public_keys_from_of(&self, key: PublicKey) -> Vec<PublicKey> {
         let mut keys = vec![key.clone()];
         // Try all supported hash algorithms
         if let PublicKey::RSA { key, hash } = &key {
@@ -1178,6 +1170,48 @@ impl ServerSession {
                 }
             }
         }
+        keys
+    }
+
+    async fn _auth_publickey_offer(
+        &mut self,
+        ssh_username: Secret<String>,
+        key: PublicKey,
+    ) -> bool {
+        let keys = self._get_public_keys_from_of(key);
+        let selector: AuthSelector = ssh_username.expose_secret().into();
+
+        for key in keys {
+            if let Ok(true) = self
+                .try_validate_public_key_offer(
+                    &selector,
+                    Some(AuthCredential::PublicKey {
+                        kind: key.name().to_string(),
+                        public_key_bytes: Bytes::from(key.public_key_bytes()),
+                    }),
+                )
+                .await
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    async fn _auth_publickey(
+        &mut self,
+        ssh_username: Secret<String>,
+        key: PublicKey,
+    ) -> russh::server::Auth {
+        let selector: AuthSelector = ssh_username.expose_secret().into();
+
+        info!(
+            "Public key auth as {:?} with key {}",
+            selector,
+            key.public_key_base64()
+        );
+
+        let keys = self._get_public_keys_from_of(key);
 
         let mut result = Ok(AuthResult::Rejected);
         for key in keys {
@@ -1359,6 +1393,29 @@ impl ServerSession {
             }
         }
         m
+    }
+
+    async fn try_validate_public_key_offer(
+        &mut self,
+        selector: &AuthSelector,
+        credential: Option<AuthCredential>,
+    ) -> Result<bool> {
+        match selector {
+            AuthSelector::User { username, .. } => {
+                let cp = self.services.config_provider.clone();
+
+                if let Some(credential) = credential {
+                    return Ok(cp
+                        .lock()
+                        .await
+                        .validate_credential(username, &credential)
+                        .await?);
+                }
+
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
     }
 
     async fn try_auth(
