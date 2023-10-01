@@ -6,7 +6,7 @@ import { Alert, FormGroup } from 'sveltestrap'
 
 let error: Error|null = null
 let name = ''
-let type: 'Ssh'|'MySql'|'Http' = 'Ssh'
+let type: 'Http' | 'MySql' | 'Ssh' = 'Ssh'
 
 async function create () {
     if (!name || !type) {

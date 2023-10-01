@@ -19,17 +19,12 @@ pub enum AsciiCast {
     Output(f32, String, String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub enum TerminalRecordingStreamId {
     Input,
+    #[default]
     Output,
     Error,
-}
-
-impl Default for TerminalRecordingStreamId {
-    fn default() -> Self {
-        TerminalRecordingStreamId::Output
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

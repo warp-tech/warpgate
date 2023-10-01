@@ -20,8 +20,6 @@ use uuid::Uuid;
 use warpgate_common::{ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
-use crate::client::{RCCommand, RemoteClient};
-
 pub static PROTOCOL_NAME: ProtocolName = "SSH";
 
 #[derive(Clone)]
