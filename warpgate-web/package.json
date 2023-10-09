@@ -18,7 +18,7 @@
     "openapi": "yarn run openapi:schema:admin && yarn run openapi:schema:gateway && yarn run openapi:client:admin && yarn run openapi:client:gateway"
   },
   "devDependencies": {
-    "@fontsource/work-sans": "^4.5.12",
+    "@fontsource/work-sans": "^5.0.13",
     "@fortawesome/free-brands-svg-icons": "^6.4.0",
     "@fortawesome/free-regular-svg-icons": "^6.4.0",
     "@fortawesome/free-solid-svg-icons": "^6.4.0",
