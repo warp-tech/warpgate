@@ -14,6 +14,7 @@ use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
+use url::Url;
 use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
 use warpgate_web::lookup_built_file;
 
@@ -149,12 +150,18 @@ fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOption
     Ok(req)
 }
 
-fn rewrite_response(resp: &mut Response, options: &TargetHTTPOptions) -> Result<()> {
+fn rewrite_response(
+    resp: &mut Response,
+    options: &TargetHTTPOptions,
+    source_uri: &Uri,
+) -> Result<()> {
     let target_uri = Uri::try_from(options.url.clone())?;
     let headers = resp.headers_mut();
 
     if let Some(value) = headers.get_mut(http::header::LOCATION) {
-        let redirect_uri = Uri::try_from(value.as_bytes())?;
+        let location = Url::parse(&source_uri.to_string())?.join(value.to_str()?)?;
+        let redirect_uri = Uri::try_from(location.to_string())?;
+
         if redirect_uri.authority() == target_uri.authority() {
             let old_value = value.clone();
             *value = Uri::builder()
@@ -285,7 +292,7 @@ pub async fn proxy_normal_request(
 
     log_request_result(req.method(), req.original_uri(), &status);
 
-    rewrite_response(&mut response, options)?;
+    rewrite_response(&mut response, options, &uri)?;
     Ok(response)
 }
 
@@ -470,6 +477,6 @@ async fn proxy_ws_inner(
         .into_response();
 
     copy_client_response(&client_response, &mut response);
-    rewrite_response(&mut response, options)?;
+    rewrite_response(&mut response, options, &uri)?;
     Ok(response)
 }

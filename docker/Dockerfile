@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.3-labs
-FROM rust:1.64.0-bullseye AS build
+FROM rust:1.72.1-bullseye AS build
 
 ENV DEBIAN_FRONTEND noninteractive
 
