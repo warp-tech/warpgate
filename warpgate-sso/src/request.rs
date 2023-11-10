@@ -1,4 +1,5 @@
 use openidconnect::reqwest::async_http_client;
+use openidconnect::core::CoreGenderClaim;
 use openidconnect::url::Url;
 use openidconnect::{
     AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeVerifier,

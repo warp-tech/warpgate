@@ -264,7 +264,8 @@ impl Api {
                         // Add role v
 
                         match &model {
-                            Some(model) => { 
+                            Some(_model) => { 
+                                //User already has role!
                             },
                             None => {
                                 info!("SSO Setting role {} for user  {}", v, _username); 
@@ -285,6 +286,7 @@ impl Api {
                                 model.delete(&*db).await.map_err(WarpgateError::from)?; 
                             },
                             None => {
+                                //User already does not have role
                             }
                         }
                     }
