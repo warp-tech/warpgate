@@ -7,8 +7,13 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
+use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_sso::SsoInternalProviderConfig;
+use warpgate_db_entities::{Role, User, UserRoleAssignment};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set,
+};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
 use crate::common::{authorize_session, get_auth_state_for_request};
@@ -169,8 +174,14 @@ impl Api {
             return Ok(Err("No e-mail information in the SSO response".to_string()));
         };
 
+        let groups = match response.groups {
+            Some(groups) => groups,
+            _ => Vec::new(),
+        };
+
         info!("SSO login as {email}");
 
+        let provider = context.provider.clone();
         let cred = AuthCredential::Sso {
             provider: context.provider,
             email: email.clone(),
@@ -203,9 +214,83 @@ impl Api {
             state.add_valid_credential(cred);
         }
 
+        let _username = username.clone();
+
         if let AuthResult::Accepted { username } = state.verify() {
             auth_state_store.complete(state.id()).await;
             authorize_session(req, username).await?;
+        }
+
+        let providers_config = services.config.lock().await.store.sso_providers.clone();
+        let mut iter = providers_config.iter();
+        let Some(provider_config) = iter.find(|x| x.name == provider) else {
+            return Ok(Err(format!("No provider matching {provider}")));
+        };
+
+        let mappings = provider_config.provider.clone().role_mappings();
+        let db = services.db.lock().await;
+        let Some(user) = User::Entity::find()
+            .filter(User::Column::Username.eq(_username.clone()))
+            .one(&*db)
+            .await
+            .map_err(WarpgateError::from)? else {
+                return Ok(Err(format!("Error finding user")));
+            };
+        let id = user.id;
+        match mappings {
+            Some(m) => {
+                for (k, v) in m.iter() {
+
+                    let role = Role::Entity::find()
+                        .filter(Role::Column::Name.eq(v))
+                        .one(&*db)
+                        .await
+                        .map_err(WarpgateError::from)?;
+                    
+                    let Some(role) = role else {
+                        return Ok(Err(format!("Error finding role")));
+                    };
+
+                    let role_id = role.id;
+                    
+                    let model = UserRoleAssignment::Entity::find()
+                        .filter(UserRoleAssignment::Column::UserId.eq(id))
+                        .filter(UserRoleAssignment::Column::RoleId.eq(role_id))
+                        .one(&*db)
+                        .await
+                        .map_err(WarpgateError::from)?;
+
+                    if groups.contains(k) {
+                        // Add role v
+
+                        match &model {
+                            Some(model) => { 
+                            },
+                            None => {
+                                info!("SSO Setting role {} for user  {}", v, _username); 
+                                let values = UserRoleAssignment::ActiveModel {
+                                    user_id: Set(id),
+                                    role_id: Set(role_id),
+                                    ..Default::default()
+                                };
+        
+                                values.insert(&*db).await.map_err(WarpgateError::from)?;
+                            }
+                        }                        
+
+                    } else{
+                        match model {
+                            Some(model) => { 
+                                info!("SSO Removing role {} for user {} ", v, _username);
+                                model.delete(&*db).await.map_err(WarpgateError::from)?; 
+                            },
+                            None => {
+                            }
+                        }
+                    }
+                }
+            }
+            None => { }
         }
 
         Ok(Ok(context

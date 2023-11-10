@@ -59,6 +59,7 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
+        role_mappings: Option<Vec<(String,String)>>,
     },
 }
 
@@ -197,6 +198,16 @@ impl SsoInternalProviderConfig {
             | SsoInternalProviderConfig::Custom { .. }
             | SsoInternalProviderConfig::Azure { .. } => true,
             SsoInternalProviderConfig::Apple { .. } => false,
+        }
+    }
+
+    #[inline]
+    pub fn role_mappings(&self) -> Option<Vec<(String,String)>> {
+        match self {
+            SsoInternalProviderConfig::Google { .. } => None,
+            | SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
+            | SsoInternalProviderConfig::Azure { .. } => None,
+            SsoInternalProviderConfig::Apple { .. } => None,
         }
     }
 }
