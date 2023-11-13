@@ -139,6 +139,9 @@ pub struct HTTPConfig {
 
     #[serde(default)]
     pub key: String,
+
+    #[serde(default)]
+    pub trust_x_forwarded_for: bool,
 }
 
 impl Default for HTTPConfig {
@@ -148,6 +151,7 @@ impl Default for HTTPConfig {
             listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
+            trust_x_forwarded_for: false,
         }
     }
 }
