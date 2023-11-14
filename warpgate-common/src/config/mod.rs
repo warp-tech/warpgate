@@ -141,7 +141,7 @@ pub struct HTTPConfig {
     pub key: String,
 
     #[serde(default)]
-    pub trust_x_forwarded_for: bool,
+    pub trust_x_forwarded_headers: bool,
 }
 
 impl Default for HTTPConfig {
@@ -151,7 +151,7 @@ impl Default for HTTPConfig {
             listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
-            trust_x_forwarded_for: false,
+            trust_x_forwarded_headers: false,
         }
     }
 }
@@ -299,26 +299,34 @@ impl WarpgateConfig {
         &self,
         for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let url = if let Some(value) = for_request.and_then(|x| x.header(http::header::HOST)) {
-            let value = value.to_string();
-            let mut url = Url::parse(&format!("https://{value}/"))?;
-            if let Some(value) = for_request.and_then(|x| x.header("x-forwarded-proto")) {
-                let _ = url.set_scheme(value);
-            }
-            url
-        } else {
-            let ext_host = self.store.external_host.as_deref();
-            let Some(ext_host) = ext_host  else {
-            return Err(WarpgateError::ExternalHostNotSet);
-          };
-            let mut url = Url::parse(&format!("https://{ext_host}/"))?;
-            let ext_port = self.store.http.listen.port();
-            if ext_port != 443 {
-                let _ = url.set_port(Some(ext_port));
-            }
-            url
+        // if trust x-forwarded, get x-forwarded-host, then try Host, then fallback on external_host
+        // if trust x-forwarded, get x-forwarded-proto, then try request scheme, then fallback https
+        // if trust x-forwarded, get x-forwarded-port, then try request port, then fallback http listen port
+        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
+        let (scheme, host, port) = ("https".to_string(), self.store.external_host.clone(), self.store.http.listen.port());
+
+        let (scheme, host, port) = match for_request {
+            Some(req) => {
+                let scheme = req.uri().scheme().map(|x| x.to_string()).unwrap_or(scheme.clone());
+                let host = req.uri().host().map(|x| x.to_string()).or(host);
+                let host = req.header(http::header::HOST).map(|x| x.to_string()).or(host);
+                let port = req.uri().port_u16().unwrap_or(port);
+                match trust_forwarded_headers {
+                    true => {
+                        let scheme = for_request.and_then(|x| x.header("x-forwarded-proto")).map(|x| x.to_string()).unwrap_or(scheme);
+                        let host = for_request.and_then(|x| x.header("x-forwarded-host")).map(|x| x.to_string()).or(host);
+                        let port = for_request.and_then(|x| x.header("x-forwarded-port")).and_then(|x| x.parse::<u16>().ok()).unwrap_or(port);
+                        (scheme, host, port)
+                    },
+                    false =>(scheme, host, port)
+                }
+            },
+            None => (scheme, host, port),
         };
 
-        Ok(url)
+        let Some(host) = host else {
+            return Err(WarpgateError::ExternalHostNotSet);
+        };
+        Url::parse(&format!("{}://{}:{}/", scheme, host, port)).map_err(|e| WarpgateError::UrlParse(e))
     }
 }

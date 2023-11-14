@@ -17,9 +17,9 @@ pub async fn span_for_request(req: &Request) -> poem::Result<Span> {
         .map(|x| x.ip().to_string())
         .unwrap_or("<unknown>".into());
 
-    let client_ip = match config.store.http.trust_x_forwarded_for {
+    let client_ip = match config.store.http.trust_x_forwarded_headers {
         true => req
-            .header("X-Forwarded-For")
+            .header("x-forwarded-for")
             .map(|x| x.to_string())
             .unwrap_or(remote_ip),
         false => remote_ip,
