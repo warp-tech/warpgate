@@ -303,7 +303,11 @@ impl WarpgateConfig {
         // if trust x-forwarded, get x-forwarded-proto, then try request scheme, then fallback https
         // if trust x-forwarded, get x-forwarded-port, then try request port, then fallback http listen port
         let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
-        let (scheme, host, port) = ("https".to_string(), self.store.external_host.clone(), self.store.http.listen.port());
+        let url = self.store.external_host.as_ref().map(|x| Url::parse(&format!("https://{}/", x))).and_then(|x| x.ok());
+        let (scheme, host, port) = url
+            .map_or(
+                ("https".to_string(), self.store.external_host.clone(), self.store.http.listen.port()), |
+                x| (x.scheme().to_string(), x.host().map(|x| x.to_string()).or(self.store.external_host.clone()), x.port().unwrap_or(self.store.http.listen.port())));
 
         let (scheme, host, port) = match for_request {
             Some(req) => {
