@@ -213,6 +213,7 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
 }
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
+    #[allow(clippy::unwrap_used)]
     if let Some(host) = req.headers().get(http::header::HOST) {
         target = target.header(
             X_FORWARDED_HOST.clone(),

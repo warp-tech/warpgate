@@ -10,7 +10,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, CredentialPolicy, CredentialKind};
+use warpgate_common::auth::{AuthCredential, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities::Ticket;
 

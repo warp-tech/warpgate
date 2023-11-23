@@ -1,6 +1,6 @@
 use http::{Method, StatusCode, Uri};
-use poem::{FromRequest, Request};
 use poem::web::Data;
+use poem::{FromRequest, Request};
 use tracing::*;
 use warpgate_core::Services;
 
