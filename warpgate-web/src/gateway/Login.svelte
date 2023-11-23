@@ -120,6 +120,7 @@ async function cancel () {
 function onInputKey (event: KeyboardEvent) {
     if (event.key === 'Enter') {
         login()
+        event.preventDefault()
     }
 }
 

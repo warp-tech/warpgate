@@ -9,7 +9,7 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::AuthState;
+use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, Services};
 
@@ -204,7 +204,16 @@ pub async fn get_auth_state_for_request(
     }
 
     let (id, state) = store
-        .create(None, username, crate::common::PROTOCOL_NAME)
+        .create(
+            None,
+            username,
+            crate::common::PROTOCOL_NAME,
+            &[
+                CredentialKind::Password,
+                CredentialKind::Sso,
+                CredentialKind::Totp,
+            ],
+        )
         .await?;
     session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)

@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
@@ -194,6 +194,7 @@ impl MySqlSession {
                         Some(&self.server_handle.lock().await.id()),
                         &username,
                         crate::common::PROTOCOL_NAME,
+                        &[CredentialKind::Password],
                     )
                     .await?
                     .1;

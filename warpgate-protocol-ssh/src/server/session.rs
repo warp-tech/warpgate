@@ -228,7 +228,17 @@ impl ServerSession {
                 .auth_state_store
                 .lock()
                 .await
-                .create(Some(&self.id), username, crate::PROTOCOL_NAME)
+                .create(
+                    Some(&self.id),
+                    username,
+                    crate::PROTOCOL_NAME,
+                    &[
+                        CredentialKind::Password,
+                        CredentialKind::PublicKey,
+                        CredentialKind::Totp,
+                        CredentialKind::WebUserApproval,
+                    ],
+                )
                 .await?
                 .1;
             self.auth_state = Some(state);

@@ -10,7 +10,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, CredentialPolicy};
+use warpgate_common::auth::{AuthCredential, CredentialPolicy, CredentialKind};
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities::Ticket;
 
@@ -34,6 +34,7 @@ pub trait ConfigProvider {
     async fn get_credential_policy(
         &mut self,
         username: &str,
+        supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError>;
 
     async fn authorize_target(

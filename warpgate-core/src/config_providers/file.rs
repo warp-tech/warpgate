@@ -59,6 +59,7 @@ impl ConfigProvider for FileConfigProvider {
     async fn get_credential_policy(
         &mut self,
         username: &str,
+        supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
         let user = {
             self.config
@@ -75,8 +76,12 @@ impl ConfigProvider for FileConfigProvider {
             return Ok(None);
         };
 
-        let supported_credential_types: HashSet<CredentialKind> =
-            user.credentials.iter().map(|x| x.kind()).collect();
+        let supported_credential_types: HashSet<CredentialKind> = user
+            .credentials
+            .iter()
+            .map(|x| x.kind())
+            .filter(|x| supported_credential_types.contains(x))
+            .collect();
         let default_policy = Box::new(AnySingleCredentialPolicy {
             supported_credential_types: supported_credential_types.clone(),
         }) as Box<dyn CredentialPolicy + Sync + Send>;
