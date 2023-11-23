@@ -194,16 +194,20 @@ pub async fn get_auth_state_for_request(
         }
     }
 
-    match session.get_auth_state_id() {
-        Some(id) => Ok(store.get(&id.0).ok_or(WarpgateError::InconsistentState)?),
-        None => {
-            let (id, state) = store
-                .create(None, username, crate::common::PROTOCOL_NAME)
-                .await?;
-            session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
-            Ok(state)
+    if let Some(id) = session.get_auth_state_id() {
+        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
+
+        let existing_matched = state.lock().await.username() == username;
+        if existing_matched {
+            return Ok(state);
         }
     }
+
+    let (id, state) = store
+        .create(None, username, crate::common::PROTOCOL_NAME)
+        .await?;
+    session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
+    Ok(state)
 }
 
 pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {

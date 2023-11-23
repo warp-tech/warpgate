@@ -129,7 +129,7 @@ impl Api {
 
         let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
         if cp
-            .validate_credential(&body.username, &password_cred)
+            .validate_credential(&state.username(), &password_cred)
             .await?
         {
             state.add_valid_credential(password_cred);
