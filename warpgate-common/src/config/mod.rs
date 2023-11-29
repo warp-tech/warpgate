@@ -143,6 +143,12 @@ pub struct HTTPConfig {
 
     #[serde(default)]
     pub trust_x_forwarded_headers: bool,
+
+    #[serde(default = "_default_session_max_age", with = "humantime_serde")]
+    pub session_max_age: Duration,
+
+    #[serde(default = "_default_cookie_max_age", with = "humantime_serde")]
+    pub cookie_max_age: Duration,
 }
 
 impl Default for HTTPConfig {
@@ -153,6 +159,8 @@ impl Default for HTTPConfig {
             certificate: "".to_owned(),
             key: "".to_owned(),
             trust_x_forwarded_headers: false,
+            session_max_age: _default_session_max_age(),
+            cookie_max_age: _default_cookie_max_age(),
         }
     }
 }
@@ -254,12 +262,6 @@ pub struct WarpgateConfigStore {
     #[serde(default = "_default_database_url")]
     pub database_url: Secret<String>,
 
-    #[serde(default = "_default_session_max_age", with = "humantime_serde")]
-    pub session_max_age: Duration,
-
-    #[serde(default = "_default_cookie_max_age", with = "humantime_serde")]
-    pub cookie_max_age: Duration,
-
     #[serde(default)]
     pub ssh: SSHConfig,
 
@@ -286,8 +288,6 @@ impl Default for WarpgateConfigStore {
             recordings: <_>::default(),
             external_host: None,
             database_url: _default_database_url(),
-            session_max_age: _default_session_max_age(),
-            cookie_max_age: _default_cookie_max_age(),
             ssh: <_>::default(),
             http: <_>::default(),
             mysql: <_>::default(),

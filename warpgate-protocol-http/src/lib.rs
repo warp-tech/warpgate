@@ -86,7 +86,10 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let (cookie_max_age, session_max_age) = {
             let config = self.services.config.lock().await;
-            (config.store.cookie_max_age, config.store.session_max_age)
+            (
+                config.store.http.cookie_max_age,
+                config.store.http.session_max_age,
+            )
         };
 
         let app = Route::new()
