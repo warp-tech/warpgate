@@ -12,7 +12,7 @@ use tracing::*;
 use warpgate_common::SessionId;
 use warpgate_core::{Services, SessionStateInit, WarpgateServerHandle};
 
-use crate::common::{PROTOCOL_NAME, SESSION_MAX_AGE};
+use crate::common::PROTOCOL_NAME;
 use crate::session_handle::{
     HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
 };
@@ -169,11 +169,11 @@ impl SessionStore {
         }
     }
 
-    pub async fn vacuum(&mut self) {
+    pub async fn vacuum(&mut self, session_max_age: Duration) {
         let now = Instant::now();
         let mut to_remove = vec![];
         for (id, timestamp) in self.session_timestamps.iter() {
-            if now.duration_since(*timestamp) > SESSION_MAX_AGE {
+            if now.duration_since(*timestamp) > session_max_age {
                 to_remove.push(*id);
             }
         }
