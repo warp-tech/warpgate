@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use http::StatusCode;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -19,8 +18,6 @@ pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
-pub static SESSION_MAX_AGE: Duration = Duration::from_secs(60 * 30);
-pub static COOKIE_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 
 pub trait SessionExt {
