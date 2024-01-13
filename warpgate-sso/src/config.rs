@@ -59,6 +59,7 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
+        additional_trusted_audiences: Option<Vec<String>>,
     },
 }
 
@@ -197,6 +198,17 @@ impl SsoInternalProviderConfig {
             | SsoInternalProviderConfig::Custom { .. }
             | SsoInternalProviderConfig::Azure { .. } => true,
             SsoInternalProviderConfig::Apple { .. } => false,
+        }
+    }
+
+    #[inline]
+    pub fn additional_trusted_audiences(&self) -> Option<&Vec<String>> {
+        match self {
+            SsoInternalProviderConfig::Custom {
+                additional_trusted_audiences,
+                ..
+            } => additional_trusted_audiences.as_ref(),
+            _ => None,
         }
     }
 }
