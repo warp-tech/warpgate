@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
-use poem::http;
+use poem::http::{self, uri};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
+use uri::Scheme;
 use url::Url;
 use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
@@ -139,6 +140,15 @@ pub struct HTTPConfig {
 
     #[serde(default)]
     pub key: String,
+
+    #[serde(default)]
+    pub trust_x_forwarded_headers: bool,
+
+    #[serde(default = "_default_session_max_age", with = "humantime_serde")]
+    pub session_max_age: Duration,
+
+    #[serde(default = "_default_cookie_max_age", with = "humantime_serde")]
+    pub cookie_max_age: Duration,
 }
 
 impl Default for HTTPConfig {
@@ -148,6 +158,9 @@ impl Default for HTTPConfig {
             listen: _default_http_listen(),
             certificate: "".to_owned(),
             key: "".to_owned(),
+            trust_x_forwarded_headers: false,
+            session_max_age: _default_session_max_age(),
+            cookie_max_age: _default_cookie_max_age(),
         }
     }
 }
@@ -295,26 +308,66 @@ impl WarpgateConfig {
         &self,
         for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let url = if let Some(value) = for_request.and_then(|x| x.header(http::header::HOST)) {
-            let value = value.to_string();
-            let mut url = Url::parse(&format!("https://{value}/"))?;
-            if let Some(value) = for_request.and_then(|x| x.header("x-forwarded-proto")) {
-                let _ = url.set_scheme(value);
+        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
+
+        // 1: external_host is not a valid `host[:port]`
+        let (mut scheme, mut host, mut port) = (
+            Scheme::HTTPS,
+            self.store.external_host.clone(),
+            Some(self.store.http.listen.port()),
+        );
+
+        // 2: external_host is a valid `host[:port]`
+        if let Some(external_url) = self
+            .store
+            .external_host
+            .as_ref()
+            .and_then(|x| Url::parse(&format!("https://{x}/")).ok())
+        {
+            host = external_url.host_str().map(Into::into).or(host);
+            port = external_url.port();
+        }
+
+        if let Some(request) = for_request {
+            // 3: Host header in the request
+            scheme = request.uri().scheme().map(Clone::clone).unwrap_or(scheme);
+
+            if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
+                if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {
+                    host = host_port.host_str().map(Into::into).or(host);
+                    port = host_port.port();
+                }
             }
-            url
-        } else {
-            let ext_host = self.store.external_host.as_deref();
-            let Some(ext_host) = ext_host  else {
+
+            // 4: X-Forwarded-* headers in the request
+            if trust_forwarded_headers {
+                scheme = request
+                    .header("x-forwarded-proto")
+                    .and_then(|x| Scheme::try_from(x).ok())
+                    .unwrap_or(scheme);
+
+                if let Some(xfh) = request.header("x-forwarded-host") {
+                    // XFH can contain both host and port
+                    let parts = xfh.split(':').collect::<Vec<_>>();
+                    host = parts.first().map(|x| x.to_string()).or(host);
+                    port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
+                }
+
+                port = request
+                    .header("x-forwarded-port")
+                    .and_then(|x| x.parse::<u16>().ok())
+                    .or(port);
+            }
+        }
+
+        let Some(host) = host else {
             return Err(WarpgateError::ExternalHostNotSet);
-          };
-            let mut url = Url::parse(&format!("https://{ext_host}/"))?;
-            let ext_port = self.store.http.listen.port();
-            if ext_port != 443 {
-                let _ = url.set_port(Some(ext_port));
-            }
-            url
         };
 
-        Ok(url)
+        let mut url = format!("{scheme}://{host}");
+        if let Some(port) = port {
+            url = format!("{url}:{port}");
+        };
+        Url::parse(&url).map_err(WarpgateError::UrlParse)
     }
 }

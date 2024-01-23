@@ -36,9 +36,7 @@ use warpgate_common::{
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
 
-use crate::common::{
-    endpoint_admin_auth, endpoint_auth, page_auth, COOKIE_MAX_AGE, SESSION_COOKIE_NAME,
-};
+use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKIE_NAME};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
@@ -83,6 +81,14 @@ impl ProtocolServer for HTTPProtocolServer {
             SetHeader::new().overriding(
                 http::header::CACHE_CONTROL,
                 HeaderValue::from_static("max-age=86400"),
+            )
+        };
+
+        let (cookie_max_age, session_max_age) = {
+            let config = self.services.config.lock().await;
+            (
+                config.store.http.cookie_max_age,
+                config.store.http.session_max_age,
             )
         };
 
@@ -149,7 +155,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(ServerSession::new(
                 CookieConfig::default()
                     .secure(false)
-                    .max_age(COOKIE_MAX_AGE)
+                    .max_age(cookie_max_age)
                     .name(SESSION_COOKIE_NAME),
                 session_storage.clone(),
             ))
@@ -160,7 +166,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum().await;
+                session_store.lock().await.vacuum(session_max_age).await;
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });

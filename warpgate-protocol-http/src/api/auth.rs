@@ -81,18 +81,32 @@ enum AuthStateResponse {
     NotFound,
 }
 
+const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
+    CredentialKind::PublicKey,
+    CredentialKind::Password,
+    CredentialKind::Totp,
+    CredentialKind::Sso,
+    CredentialKind::WebUserApproval,
+];
+
 impl From<AuthResult> for ApiAuthState {
     fn from(state: AuthResult) -> Self {
         match state {
             AuthResult::Rejected => ApiAuthState::Failed,
-            AuthResult::Need(kinds) => match kinds.iter().next() {
-                Some(CredentialKind::Password) => ApiAuthState::PasswordNeeded,
-                Some(CredentialKind::Totp) => ApiAuthState::OtpNeeded,
-                Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
-                Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
-                Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,
-                None => ApiAuthState::Failed,
-            },
+            AuthResult::Need(kinds) => {
+                let kind = PREFERRED_NEED_CRED_ORDER
+                    .iter()
+                    .find(|x| kinds.contains(x))
+                    .or(kinds.iter().next());
+                match kind {
+                    Some(CredentialKind::Password) => ApiAuthState::PasswordNeeded,
+                    Some(CredentialKind::Totp) => ApiAuthState::OtpNeeded,
+                    Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
+                    Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
+                    Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,
+                    None => ApiAuthState::Failed,
+                }
+            }
             AuthResult::Accepted { .. } => ApiAuthState::Success,
         }
     }
@@ -129,7 +143,7 @@ impl Api {
 
         let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
         if cp
-            .validate_credential(&body.username, &password_cred)
+            .validate_credential(state.username(), &password_cred)
             .await?
         {
             state.add_valid_credential(password_cred);

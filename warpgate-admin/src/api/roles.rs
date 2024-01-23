@@ -49,7 +49,7 @@ impl ListApi {
 
         if let Some(ref search) = *search {
             let search = format!("%{search}%");
-            roles = roles.filter(Role::Column::Name.like(&search));
+            roles = roles.filter(Role::Column::Name.like(search));
         }
 
         let roles = roles

@@ -51,7 +51,7 @@ impl ListApi {
 
         if let Some(ref search) = *search {
             let search = format!("%{search}%");
-            targets = targets.filter(Target::Column::Name.like(&search));
+            targets = targets.filter(Target::Column::Name.like(search));
         }
 
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;

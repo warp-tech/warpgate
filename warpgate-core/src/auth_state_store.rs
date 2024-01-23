@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{SessionId, WarpgateError};
 
 use crate::ConfigProvider;
@@ -52,13 +52,14 @@ impl AuthStateStore {
         session_id: Option<&SessionId>,
         username: &str,
         protocol: &str,
+        supported_credential_types: &[CredentialKind],
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
         let policy = self
             .config_provider
             .lock()
             .await
-            .get_credential_policy(username)
+            .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
             return Err(WarpgateError::UserNotFound(username.into()))

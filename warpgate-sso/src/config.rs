@@ -60,6 +60,7 @@ pub enum SsoInternalProviderConfig {
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
         role_mappings: Option<Vec<(String,String)>>,
+        additional_trusted_audiences: Option<Vec<String>>,
     },
 }
 
@@ -208,6 +209,17 @@ impl SsoInternalProviderConfig {
             | SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
             | SsoInternalProviderConfig::Azure { .. } => None,
             SsoInternalProviderConfig::Apple { .. } => None,
+        }
+    }
+
+    #[inline]
+    pub fn additional_trusted_audiences(&self) -> Option<&Vec<String>> {
+        match self {
+            SsoInternalProviderConfig::Custom {
+                additional_trusted_audiences,
+                ..
+            } => additional_trusted_audiences.as_ref(),
+            _ => None,
         }
     }
 }

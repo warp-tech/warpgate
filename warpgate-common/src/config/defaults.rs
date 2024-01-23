@@ -57,6 +57,16 @@ pub(crate) fn _default_retention() -> Duration {
 }
 
 #[inline]
+pub(crate) fn _default_session_max_age() -> Duration {
+    Duration::SECOND * 60 * 30
+}
+
+#[inline]
+pub(crate) fn _default_cookie_max_age() -> Duration {
+    Duration::SECOND * 60 * 60 * 24
+}
+
+#[inline]
 pub(crate) fn _default_empty_vec<T>() -> Vec<T> {
     vec![]
 }
