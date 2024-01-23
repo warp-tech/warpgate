@@ -136,7 +136,7 @@ fn copy_client_response<R: SomeResponse>(
             }
         }
     }
-    server_response.headers_mut().extend(headers.into_iter());
+    server_response.headers_mut().extend(headers);
 
     server_response.set_status(client_response.status());
 }

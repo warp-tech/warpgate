@@ -57,10 +57,7 @@ fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEnt
     let message = (*values).remove("message").unwrap_or_default();
 
     use sea_orm::ActiveValue::Set;
-    let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok());
-    let Some(session_id) = session_id else {
-            return None
-        };
+    let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok())?;
 
     Some(LogEntry::ActiveModel {
         id: Set(Uuid::new_v4()),
