@@ -1,4 +1,4 @@
-#![feature(drain_filter, duration_constants)]
+#![feature(duration_constants)]
 pub mod auth;
 mod config;
 pub mod consts;
@@ -12,5 +12,4 @@ mod types;
 pub use config::*;
 pub use error::WarpgateError;
 pub use tls::*;
-pub use try_macro::*;
 pub use types::*;

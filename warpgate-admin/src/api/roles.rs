@@ -133,9 +133,7 @@ impl DetailApi {
             .map_err(poem::error::InternalServerError)?;
 
         Ok(match role {
-            Some(role) => GetRoleResponse::Ok(Json(
-                role.try_into().map_err(poem::error::InternalServerError)?,
-            )),
+            Some(role) => GetRoleResponse::Ok(Json(role.into())),
             None => GetRoleResponse::NotFound,
         })
     }
@@ -152,7 +150,8 @@ impl DetailApi {
         let Some(role) = Role::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
+            .map_err(poem::error::InternalServerError)?
+        else {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
@@ -181,7 +180,8 @@ impl DetailApi {
         let Some(role) = Role::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
+            .map_err(poem::error::InternalServerError)?
+        else {
             return Ok(DeleteRoleResponse::NotFound);
         };
 

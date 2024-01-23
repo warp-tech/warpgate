@@ -20,8 +20,6 @@ use uuid::Uuid;
 use warpgate_common::{ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
-use crate::client::{RCCommand, RemoteClient};
-
 pub static PROTOCOL_NAME: ProtocolName = "SSH";
 
 #[derive(Clone)]
@@ -48,7 +46,9 @@ impl ProtocolServer for SSHProtocolServer {
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
         let TargetOptions::Ssh(ssh_options) = target.options else {
-            return Err(TargetTestError::Misconfigured("Not an SSH target".to_owned()));
+            return Err(TargetTestError::Misconfigured(
+                "Not an SSH target".to_owned(),
+            ));
         };
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), self.services.clone())?;
