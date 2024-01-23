@@ -61,7 +61,7 @@ impl AuthStateStore {
             .get_credential_policy(username)
             .await?;
         let Some(policy) = policy else {
-            return Err(WarpgateError::UserNotFound)
+            return Err(WarpgateError::UserNotFound(username.into()))
         };
 
         let state = AuthState::new(

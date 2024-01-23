@@ -31,6 +31,13 @@ pub trait ConfigProvider {
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError>;
 
+    async fn apply_sso_role_mappings(
+        &mut self,
+        username: &str,
+        managed_role_names: Vec<String>,
+        active_role_names: Vec<String>,
+    ) -> Result<(), WarpgateError>;
+
     async fn get_credential_policy(
         &mut self,
         username: &str,

@@ -116,7 +116,7 @@ impl Api {
         )
         .await
         {
-            Err(WarpgateError::UserNotFound) => {
+            Err(WarpgateError::UserNotFound(_)) => {
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::Failed,
                 })))
