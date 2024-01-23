@@ -49,9 +49,9 @@ impl Api {
         next: Query<Option<String>>,
     ) -> poem::Result<StartSsoResponse> {
         let config = services.config.lock().await;
-        
+
         let name = name.0;
-        
+
         let mut return_url = config.construct_external_url(Some(req))?;
         return_url.set_path("@warpgate/api/sso/return");
 

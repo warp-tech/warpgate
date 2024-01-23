@@ -284,11 +284,12 @@ impl ConfigProvider for FileConfigProvider {
         Ok(intersect)
     }
 
-
     async fn apply_sso_role_mappings(
         &mut self,
         _username: &str,
         _managed_role_names: Vec<String>,
         _assigned_role_names: Vec<String>,
-    ) -> Result<(), WarpgateError> {Ok(())}
+    ) -> Result<(), WarpgateError> {
+        Ok(())
+    }
 }

@@ -303,7 +303,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user = User::Entity::find()
-            .filter(User::Column::Username.eq(username.clone()))
+            .filter(User::Column::Username.eq(username))
             .one(&*db)
             .await
             .map_err(WarpgateError::from)?
