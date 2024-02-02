@@ -18,7 +18,7 @@ use url::Url;
 use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
 use warpgate_web::lookup_built_file;
 
-use crate::logging::log_request_result;
+use crate::logging::{get_client_ip, log_request_result};
 
 trait SomeResponse {
     fn status(&self) -> http::StatusCode;
@@ -291,7 +291,12 @@ pub async fn proxy_normal_request(
     copy_client_response(&client_response, &mut response);
     copy_client_body(client_response, &mut response).await?;
 
-    log_request_result(req.method(), req.original_uri(), &status);
+    log_request_result(
+        req.method(),
+        req.original_uri(),
+        get_client_ip(req).await?,
+        &status,
+    );
 
     rewrite_response(&mut response, options, &uri)?;
     Ok(response)
