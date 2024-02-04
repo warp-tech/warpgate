@@ -35,8 +35,13 @@ pub fn log_request_result(method: &Method, url: &Uri, client_ip: String, status:
 }
 
 pub async fn get_client_ip(req: &Request) -> poem::Result<String> {
-    let services: Data<&Services> = <_>::from_request_without_body(&req).await?;
-    let config = services.config.lock().await;
+    let services: Option<Data<&Services>> = <_>::from_request_without_body(&req).await.ok();
+    let trust_x_forwarded_headers = if let Some(services) = services {
+        let config = services.config.lock().await;
+        config.store.http.trust_x_forwarded_headers
+    } else {
+        false
+    };
 
     let remote_ip = req
         .remote_addr()
@@ -44,7 +49,7 @@ pub async fn get_client_ip(req: &Request) -> poem::Result<String> {
         .map(|x| x.ip().to_string())
         .unwrap_or("<unknown>".into());
 
-    match config.store.http.trust_x_forwarded_headers {
+    match trust_x_forwarded_headers {
         true => Ok(req
             .header("x-forwarded-for")
             .map(|x| x.to_string())
