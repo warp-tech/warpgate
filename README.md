@@ -71,9 +71,9 @@ It receives connections with specifically formatted credentials, authenticates t
 
 When connecting through HTTPS, Warpgate presents a selection of available targets, and will then proxy all traffic in a session to the selected target. You can switch between targets at any time.
 
-You manage the target and user lists and assign them to each other through a config file (default: `/etc/warpgate.yaml`), and the session history is stored in an SQLite database (default: in `/var/lib/warpgate`).
+You manage the target and user lists and assign them to each other through the admin UI, and the session history is stored in an SQLite database (default: in `/var/lib/warpgate`).
 
-You can use the admin web interface to view the live session list, review session recordings, logs and more.
+You can also use the admin web interface to view the live session list, review session recordings, logs and more.
 
 ## Contributing / building from source
 
