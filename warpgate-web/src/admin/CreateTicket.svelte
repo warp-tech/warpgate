@@ -12,6 +12,7 @@ let targets: Target[]|undefined
 let users: User[]|undefined
 let selectedTarget: Target|undefined
 let selectedUser: User|undefined
+let selectedExpiry: string|undefined
 let result: TicketAndSecret|undefined
 
 async function load () {
@@ -37,6 +38,7 @@ async function create () {
             createTicketRequest: {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
+                expiry: selectedExpiry ? new Date(selectedExpiry) : undefined
             },
         })
     } catch (err) {
@@ -102,6 +104,10 @@ async function create () {
         </select>
     </FormGroup>
     {/if}
+
+    <FormGroup floating label="Expiry">
+        <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
+    </FormGroup>
 
     <AsyncButton
         outline
