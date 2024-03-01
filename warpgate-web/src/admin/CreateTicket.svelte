@@ -38,7 +38,7 @@ async function create () {
             createTicketRequest: {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
-                expiry: selectedExpiry ? new Date(selectedExpiry) : undefined
+                expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
             },
         })
     } catch (err) {
@@ -77,6 +77,7 @@ async function create () {
         use:link
     >Done</a>
 {:else}
+<div class="narrow-page">
     <div class="page-summary-bar">
         <h1>Create an access ticket</h1>
     </div>
@@ -105,7 +106,7 @@ async function create () {
     </FormGroup>
     {/if}
 
-    <FormGroup floating label="Expiry">
+    <FormGroup floating label="Expiry (optional)">
         <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
     </FormGroup>
 
@@ -113,4 +114,5 @@ async function create () {
         outline
         click={create}
     >Create ticket</AsyncButton>
+</div>
 {/if}

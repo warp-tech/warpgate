@@ -47,15 +47,15 @@ async function deleteTicket (ticket: Ticket) {
         <div class="list-group list-group-flush">
             {#each tickets as ticket}
                 <div class="list-group-item">
-                    <strong class="{ticket.expiry ? 'me-4' : 'me-auto'}">
+                    <strong>
                         Access to {ticket.target} as {ticket.username}
                     </strong>
                     {#if ticket.expiry}
-                        <small class="me-auto">
-                            <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> {ticket.expiry?.toLocaleString()}
+                        <small class="text-muted ms-4">
+                            <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> Until {ticket.expiry?.toLocaleString()}
                         </small>
                     {/if}
-                    <small class="text-muted me-4">
+                    <small class="text-muted me-4 ms-auto">
                         <RelativeDate date={ticket.created} />
                     </small>
                     <a href={''} on:click|preventDefault={() => deleteTicket(ticket)}>Delete</a>
