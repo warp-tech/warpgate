@@ -12,6 +12,7 @@ let targets: Target[]|undefined
 let users: User[]|undefined
 let selectedTarget: Target|undefined
 let selectedUser: User|undefined
+let selectedExpiry: string|undefined
 let result: TicketAndSecret|undefined
 
 async function load () {
@@ -37,6 +38,7 @@ async function create () {
             createTicketRequest: {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
+                expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
             },
         })
     } catch (err) {
@@ -75,6 +77,7 @@ async function create () {
         use:link
     >Done</a>
 {:else}
+<div class="narrow-page">
     <div class="page-summary-bar">
         <h1>Create an access ticket</h1>
     </div>
@@ -103,8 +106,13 @@ async function create () {
     </FormGroup>
     {/if}
 
+    <FormGroup floating label="Expiry (optional)">
+        <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
+    </FormGroup>
+
     <AsyncButton
         outline
         click={create}
     >Create ticket</AsyncButton>
+</div>
 {/if}
