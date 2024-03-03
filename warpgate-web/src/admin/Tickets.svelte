@@ -4,7 +4,7 @@ import { link } from 'svelte-spa-router'
 import { Alert } from 'sveltestrap'
 import RelativeDate from './RelativeDate.svelte'
 import Fa from 'svelte-fa'
-import { faCalendarXmark, faCalendarCheck } from '@fortawesome/free-solid-svg-icons'
+import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 
 let error: Error|undefined
 let tickets: Ticket[]|undefined
@@ -53,6 +53,11 @@ async function deleteTicket (ticket: Ticket) {
                     {#if ticket.expiry}
                         <small class="text-muted ms-4">
                             <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> Until {ticket.expiry?.toLocaleString()}
+                        </small>
+                    {/if}
+                    {#if ticket.usesLeft != null}
+                        <small class="text-muted ms-4">
+                            <Fa icon={ticket.usesLeft > 0 ? faSquareCheck : faSquareXmark} fw /> Uses left {ticket.usesLeft}
                         </small>
                     {/if}
                     <small class="text-muted me-4 ms-auto">
