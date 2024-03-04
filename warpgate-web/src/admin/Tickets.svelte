@@ -56,9 +56,16 @@ async function deleteTicket (ticket: Ticket) {
                         </small>
                     {/if}
                     {#if ticket.usesLeft != null}
-                        <small class="text-muted ms-4">
-                            <Fa icon={ticket.usesLeft > 0 ? faSquareCheck : faSquareXmark} fw /> Uses left {ticket.usesLeft}
-                        </small>
+                        {#if ticket.usesLeft > 0}
+                            <small class="text-muted ms-4">
+                                <Fa icon={faSquareCheck} fw /> Uses left: {ticket.usesLeft}
+                            </small>
+                        {/if}
+                        {#if ticket.usesLeft === 0}
+                            <small class="text-danger ms-4">
+                                <Fa icon={faSquareXmark} fw /> Used up
+                            </small>
+                        {/if}
                     {/if}
                     <small class="text-muted me-4 ms-auto">
                         <RelativeDate date={ticket.created} />
