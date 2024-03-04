@@ -112,7 +112,7 @@ async function create () {
         <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
     </FormGroup>
 
-    <FormGroup floating label="Number of usage (optional)">
+    <FormGroup floating label="Number of uses (optional)">
         <input type="number" min="1" bind:value={selectedNumberOfUses} class="form-control"/>
     </FormGroup>
 
