@@ -134,9 +134,10 @@ impl DetailApi {
         let Some(user) = User::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(GetUserResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(GetUserResponse::NotFound);
+        };
 
         Ok(GetUserResponse::Ok(Json(
             user.try_into().map_err(poem::error::InternalServerError)?,
@@ -155,7 +156,8 @@ impl DetailApi {
         let Some(user) = User::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
+            .map_err(poem::error::InternalServerError)?
+        else {
             return Ok(UpdateUserResponse::NotFound);
         };
 
@@ -196,9 +198,10 @@ impl DetailApi {
         let Some(user) = User::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteUserResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteUserResponse::NotFound);
+        };
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
@@ -270,8 +273,9 @@ impl RolesApi {
             .all(&*db)
             .await
             .map(|x| x.into_iter().next())
-            .map_err(WarpgateError::from)? else {
-            return Ok(GetUserRolesResponse::NotFound)
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(GetUserRolesResponse::NotFound);
         };
 
         Ok(GetUserRolesResponse::Ok(Json(
@@ -330,25 +334,28 @@ impl RolesApi {
         let Some(_user) = User::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteUserRoleResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteUserRoleResponse::NotFound);
+        };
 
         let Some(_role) = Role::Entity::find_by_id(role_id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteUserRoleResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteUserRoleResponse::NotFound);
+        };
 
         let Some(model) = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
             .one(&*db)
             .await
-            .map_err(WarpgateError::from)? else {
-                return Ok(DeleteUserRoleResponse::NotFound);
-            };
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(DeleteUserRoleResponse::NotFound);
+        };
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
 

@@ -31,9 +31,9 @@ pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClien
     .set_auth_type(config.auth_type());
 
     if let Some(trusted_audiences) = config.additional_trusted_audiences() {
-        client.id_token_verifier().set_other_audience_verifier_fn(|aud| {
-            trusted_audiences.contains(aud.deref())
-        });
+        client
+            .id_token_verifier()
+            .set_other_audience_verifier_fn(|aud| trusted_audiences.contains(aud.deref()));
     }
 
     Ok(client)

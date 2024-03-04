@@ -139,9 +139,10 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(GetTargetResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(GetTargetResponse::NotFound);
+        };
 
         Ok(GetTargetResponse::Ok(Json(
             target
@@ -162,7 +163,8 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
+            .map_err(poem::error::InternalServerError)?
+        else {
             return Ok(UpdateTargetResponse::NotFound);
         };
 
@@ -199,9 +201,10 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteTargetResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteTargetResponse::NotFound);
+        };
 
         if target.kind == TargetKind::WebAdmin {
             return Ok(DeleteTargetResponse::Forbidden);
@@ -268,8 +271,9 @@ impl RolesApi {
             .all(&*db)
             .await
             .map(|x| x.into_iter().next())
-            .map_err(WarpgateError::from)? else {
-            return Ok(GetTargetRolesResponse::NotFound)
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(GetTargetRolesResponse::NotFound);
         };
 
         Ok(GetTargetRolesResponse::Ok(Json(
@@ -328,16 +332,18 @@ impl RolesApi {
         let Some(target) = Target::Entity::find_by_id(id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteTargetRoleResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteTargetRoleResponse::NotFound);
+        };
 
         let Some(role) = Role::Entity::find_by_id(role_id.0)
             .one(&*db)
             .await
-            .map_err(poem::error::InternalServerError)? else {
-                return Ok(DeleteTargetRoleResponse::NotFound);
-            };
+            .map_err(poem::error::InternalServerError)?
+        else {
+            return Ok(DeleteTargetRoleResponse::NotFound);
+        };
 
         if role.name == BUILTIN_ADMIN_ROLE_NAME && target.kind == TargetKind::WebAdmin {
             return Ok(DeleteTargetRoleResponse::Forbidden);
@@ -348,9 +354,10 @@ impl RolesApi {
             .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
             .one(&*db)
             .await
-            .map_err(WarpgateError::from)? else {
-                return Ok(DeleteTargetRoleResponse::NotFound);
-            };
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(DeleteTargetRoleResponse::NotFound);
+        };
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
 

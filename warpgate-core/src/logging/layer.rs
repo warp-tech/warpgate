@@ -32,9 +32,7 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
-        let Some(span) = ctx.span(id) else {
-            return
-        };
+        let Some(span) = ctx.span(id) else { return };
         if !span.metadata().target().starts_with("warpgate") {
             return;
         }

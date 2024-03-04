@@ -152,7 +152,9 @@ impl Api {
         };
 
         let Some(ref code) = *code else {
-            return Ok(Err("No authorization code in the return URL request".to_string()));
+            return Ok(Err(
+                "No authorization code in the return URL request".to_string()
+            ));
         };
 
         let response = context

@@ -67,7 +67,7 @@ impl MySqlClient {
         }
 
         let Some(payload) = stream.recv().await? else {
-            return Err(MySqlError::Eof)
+            return Err(MySqlError::Eof);
         };
         let handshake = Handshake::decode(payload)?;
 
@@ -147,7 +147,7 @@ impl MySqlClient {
         stream.flush().await?;
 
         let Some(response) = stream.recv().await? else {
-            return Err(MySqlError::Eof)
+            return Err(MySqlError::Eof);
         };
         if response.first() == Some(&0) || response.first() == Some(&0xfe) {
             debug!("Authorized");

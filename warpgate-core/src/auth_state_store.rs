@@ -62,7 +62,7 @@ impl AuthStateStore {
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
-            return Err(WarpgateError::UserNotFound)
+            return Err(WarpgateError::UserNotFound);
         };
 
         let state = AuthState::new(
@@ -93,7 +93,7 @@ impl AuthStateStore {
 
     pub async fn complete(&mut self, id: &Uuid) {
         let Some((state, _)) = self.store.get(id) else {
-            return
+            return;
         };
         if let Some(sig) = self.completion_signals.remove(id) {
             let _ = sig.sender.send(state.lock().await.verify());

@@ -422,7 +422,7 @@ impl MySqlSession {
         client: &mut MySqlClient,
     ) -> Result<(), MySqlError> {
         loop {
-            let Some(response) = client.stream.recv().await? else{
+            let Some(response) = client.stream.recv().await? else {
                 return Err(MySqlError::Eof);
             };
             trace!(?response, "client got packet");

@@ -55,7 +55,8 @@ impl Api {
         let mut return_url = config.construct_external_url(Some(req))?;
         return_url.set_path("@warpgate/api/sso/return");
 
-        let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name) else {
+        let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name)
+        else {
             return Ok(StartSsoResponse::NotFound);
         };
 

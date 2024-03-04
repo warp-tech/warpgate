@@ -179,7 +179,7 @@ impl Api {
         let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 state: ApiAuthState::NotStarted,
-            })))
+            })));
         };
 
         let mut state = state_arc.lock().await;
@@ -226,7 +226,7 @@ impl Api {
         services: Data<&Services>,
     ) -> poem::Result<AuthStateResponse> {
         let Some(state_id) = session.get_auth_state_id() else {
-            return Ok(AuthStateResponse::NotFound)
+            return Ok(AuthStateResponse::NotFound);
         };
         let store = services.auth_state_store.lock().await;
         let Some(state_arc) = store.get(&state_id.0) else {
@@ -246,7 +246,7 @@ impl Api {
         services: Data<&Services>,
     ) -> poem::Result<AuthStateResponse> {
         let Some(state_id) = session.get_auth_state_id() else {
-            return Ok(AuthStateResponse::NotFound)
+            return Ok(AuthStateResponse::NotFound);
         };
         let mut store = services.auth_state_store.lock().await;
         let Some(state_arc) = store.get(&state_id.0) else {
@@ -289,7 +289,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -317,7 +317,7 @@ impl Api {
         auth: Option<Data<&SessionAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x|x.0)).await else {
+        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();

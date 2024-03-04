@@ -132,7 +132,11 @@ impl ConfigProvider for FileConfigProvider {
         &mut self,
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError> {
-        let AuthCredential::Sso { provider: client_provider, email : client_email} = client_credential else {
+        let AuthCredential::Sso {
+            provider: client_provider,
+            email: client_email,
+        } = client_credential
+        else {
             return Ok(None);
         };
 

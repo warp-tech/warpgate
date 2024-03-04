@@ -135,7 +135,11 @@ impl ConfigProvider for DatabaseConfigProvider {
         &mut self,
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError> {
-        let AuthCredential::Sso { provider: client_provider, email : client_email} = client_credential else {
+        let AuthCredential::Sso {
+            provider: client_provider,
+            email: client_email,
+        } = client_credential
+        else {
             return Ok(None);
         };
 
@@ -171,9 +175,9 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?;
 
         let Some(user_model) = user_model else {
-                error!("Selected user not found: {}", username);
-                return Ok(false);
-            };
+            error!("Selected user not found: {}", username);
+            return Ok(false);
+        };
 
         let user: UserConfig = user_model.try_into()?;
 
