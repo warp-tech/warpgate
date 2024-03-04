@@ -113,7 +113,7 @@ async function create () {
     </FormGroup>
 
     <FormGroup floating label="Number of usage (optional)">
-        <input type="number" bind:value={selectedNumberOfUses} class="form-control"/>
+        <input type="number" min="1" bind:value={selectedNumberOfUses} class="form-control"/>
     </FormGroup>
 
     <AsyncButton
