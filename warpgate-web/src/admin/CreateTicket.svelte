@@ -13,6 +13,7 @@ let users: User[]|undefined
 let selectedTarget: Target|undefined
 let selectedUser: User|undefined
 let selectedExpiry: string|undefined
+let selectedNumberOfUses: number|undefined
 let result: TicketAndSecret|undefined
 
 async function load () {
@@ -39,6 +40,7 @@ async function create () {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
+                numberOfUses: selectedNumberOfUses
             },
         })
     } catch (err) {
@@ -108,6 +110,10 @@ async function create () {
 
     <FormGroup floating label="Expiry (optional)">
         <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
+    </FormGroup>
+
+    <FormGroup floating label="Number of uses (optional)">
+        <input type="number" min="1" bind:value={selectedNumberOfUses} class="form-control"/>
     </FormGroup>
 
     <AsyncButton

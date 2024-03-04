@@ -24,7 +24,8 @@ enum GetTicketsResponse {
 struct CreateTicketRequest {
     username: String,
     target_name: String,
-    expiry: Option<DateTime<Utc>>
+    expiry: Option<DateTime<Utc>>,
+    number_of_uses: Option<i32>
 }
 
 #[derive(Object)]
@@ -87,6 +88,7 @@ impl Api {
             target: Set(body.target_name.clone()),
             created: Set(chrono::Utc::now()),
             expiry: Set(body.expiry),
+            uses_left: Set(body.number_of_uses),
             ..Default::default()
         };
 
