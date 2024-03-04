@@ -13,7 +13,7 @@ let users: User[]|undefined
 let selectedTarget: Target|undefined
 let selectedUser: User|undefined
 let selectedExpiry: string|undefined
-let selectedNumberOfUsage: number|undefined
+let selectedNumberOfUses: number|undefined
 let result: TicketAndSecret|undefined
 
 async function load () {
@@ -40,7 +40,7 @@ async function create () {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
-                numberOfUsage: selectedNumberOfUsage
+                numberOfUses: selectedNumberOfUses
             },
         })
     } catch (err) {
@@ -113,7 +113,7 @@ async function create () {
     </FormGroup>
 
     <FormGroup floating label="Number of usage (optional)">
-        <input type="number" bind:value={selectedNumberOfUsage} class="form-control"/>
+        <input type="number" bind:value={selectedNumberOfUses} class="form-control"/>
     </FormGroup>
 
     <AsyncButton

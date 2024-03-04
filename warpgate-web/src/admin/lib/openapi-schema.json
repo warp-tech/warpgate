@@ -1128,7 +1128,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "number_of_usage": {
+          "number_of_uses": {
             "type": "integer",
             "format": "int32"
           }
