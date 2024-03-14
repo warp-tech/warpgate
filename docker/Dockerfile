@@ -3,7 +3,7 @@ FROM rust:1.72.1-bullseye AS build
 
 ENV DEBIAN_FRONTEND noninteractive
 
-RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get update \
     && apt-get install -y ca-certificates-java nodejs openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/* \
