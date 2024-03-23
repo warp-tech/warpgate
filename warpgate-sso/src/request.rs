@@ -118,7 +118,7 @@ impl SsoLoginRequest {
 
             email_verified: get_claim!(email_verified),
 
-            groups: userinfo_claims.and_then(|x| x.additional_claims().warpgate_groups.clone()),
+            groups: userinfo_claims.and_then(|x| x.additional_claims().warpgate_roles.clone()),
         })
     }
 }
