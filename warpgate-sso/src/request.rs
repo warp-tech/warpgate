@@ -1,17 +1,20 @@
-use openidconnect::reqwest::async_http_client;
+use futures::future::OptionFuture;
 use openidconnect::core::CoreGenderClaim;
+use openidconnect::reqwest::async_http_client;
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeVerifier,
-    RedirectUrl, RequestTokenError, TokenResponse, UserInfoClaims, AdditionalClaims,
+    AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse,
+    PkceCodeVerifier, RedirectUrl, RequestTokenError, TokenResponse, UserInfoClaims,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, error};
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct WarpgateClaims {
     // This uses the "warpgate_groups" claim from OIDC
     warpgate_groups: Option<Vec<String>>,
 }
+
 impl AdditionalClaims for WarpgateClaims {}
 
 use crate::{make_client, SsoError, SsoInternalProviderConfig, SsoLoginResponse};
@@ -63,18 +66,25 @@ impl SsoLoginRequest {
         let id_token = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = id_token.claims(&client.id_token_verifier(), &self.nonce)?;
 
-        let userinfo_claims: UserInfoClaims<WarpgateClaims, CoreGenderClaim> = client.user_info(token_response.access_token().to_owned(), None)
-            .unwrap_or_else(|_err| {
-                error!("Failed to fetch userinfo: ");
-                unreachable!()
+        let user_info_req = client
+            .user_info(token_response.access_token().to_owned(), None)
+            .map_err(|err| {
+                error!("Failed to fetch userinfo: {err:?}");
+                err
             })
-            .request_async(async_http_client)
-            .await
-            .unwrap_or_else(|_err| {
-                error!("Failed to fetch userinfo2: ");
-                unreachable!()
-            });
+            .ok();
 
+        let userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>> =
+            OptionFuture::from(user_info_req.map(|req| req.request_async(async_http_client)))
+                .await
+                .map(|res| {
+                    res.map_err(|err| {
+                        error!("Failed to fetch userinfo: {err:?}");
+                        err
+                    })
+                    .ok()
+                })
+                .flatten();
 
         if let Some(expected_access_token_hash) = claims.access_token_hash() {
             let actual_access_token_hash = AccessTokenHash::from_token(
@@ -86,15 +96,30 @@ impl SsoLoginRequest {
             }
         }
 
+        debug!("OIDC claims: {:?}", claims);
+        debug!("OIDC userinfo claims: {:?}", userinfo_claims);
+
+        macro_rules! get_claim {
+            ($method:ident) => {
+                claims
+                    .$method()
+                    .or(userinfo_claims.as_ref().and_then(|x| x.$method()))
+            };
+        }
+
         Ok(SsoLoginResponse {
-            name: claims
-                .name()
+            name: get_claim!(name)
                 .and_then(|x| x.get(None))
                 .map(|x| x.as_str())
                 .map(ToString::to_string),
-            email: claims.email().map(|x| x.as_str()).map(ToString::to_string),
-            email_verified: claims.email_verified(),
-            groups: userinfo_claims.additional_claims().warpgate_groups.clone(),
+
+            email: get_claim!(email)
+                .map(|x| x.as_str())
+                .map(ToString::to_string),
+
+            email_verified: get_claim!(email_verified),
+
+            groups: userinfo_claims.and_then(|x| x.additional_claims().warpgate_groups.clone()),
         })
     }
 }

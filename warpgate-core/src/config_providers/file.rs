@@ -132,7 +132,11 @@ impl ConfigProvider for FileConfigProvider {
         &mut self,
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError> {
-        let AuthCredential::Sso { provider: client_provider, email : client_email} = client_credential else {
+        let AuthCredential::Sso {
+            provider: client_provider,
+            email: client_email,
+        } = client_credential
+        else {
             return Ok(None);
         };
 
@@ -287,7 +291,7 @@ impl ConfigProvider for FileConfigProvider {
     async fn apply_sso_role_mappings(
         &mut self,
         _username: &str,
-        _managed_role_names: Vec<String>,
+        _managed_role_names: Option<Vec<String>>,
         _assigned_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
         Ok(())

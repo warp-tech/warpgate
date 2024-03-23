@@ -138,7 +138,11 @@ impl ConfigProvider for DatabaseConfigProvider {
         &mut self,
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError> {
-        let AuthCredential::Sso { provider: client_provider, email : client_email} = client_credential else {
+        let AuthCredential::Sso {
+            provider: client_provider,
+            email: client_email,
+        } = client_credential
+        else {
             return Ok(None);
         };
 
@@ -174,9 +178,9 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?;
 
         let Some(user_model) = user_model else {
-                error!("Selected user not found: {}", username);
-                return Ok(false);
-            };
+            error!("Selected user not found: {}", username);
+            return Ok(false);
+        };
 
         let user: UserConfig = user_model.try_into()?;
 
@@ -297,7 +301,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     async fn apply_sso_role_mappings(
         &mut self,
         username: &str,
-        managed_role_names: Vec<String>,
+        managed_role_names: Option<Vec<String>>,
         assigned_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
         let db = self.db.lock().await;
@@ -308,6 +312,16 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await
             .map_err(WarpgateError::from)?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
+
+        let managed_role_names = match managed_role_names {
+            Some(x) => x,
+            None => Role::Entity::find()
+                .all(&*db)
+                .await?
+                .into_iter()
+                .map(|x| x.name)
+                .collect(),
+        };
 
         for role_name in managed_role_names.into_iter() {
             let role = Role::Entity::find()
@@ -326,7 +340,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
-                    info!("Adding role {role_name} for user {username}");
+                    info!("Adding role {role_name} for user {username} (from SSO)");
                     let values = UserRoleAssignment::ActiveModel {
                         user_id: Set(user.id),
                         role_id: Set(role.id),
@@ -336,7 +350,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     values.insert(&*db).await.map_err(WarpgateError::from)?;
                 }
                 (Some(assignment), false) => {
-                    info!("Removing role {role_name} for user {username}");
+                    info!("Removing role {role_name} for user {username} (from SSO)");
                     assignment.delete(&*db).await.map_err(WarpgateError::from)?;
                 }
                 _ => (),

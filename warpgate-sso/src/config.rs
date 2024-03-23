@@ -59,7 +59,7 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
-        role_mappings: Option<Vec<(String, String)>>,
+        role_mappings: Option<HashMap<String, String>>,
         additional_trusted_audiences: Option<Vec<String>>,
     },
 }
@@ -199,7 +199,7 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn role_mappings(&self) -> Option<Vec<(String, String)>> {
+    pub fn role_mappings(&self) -> Option<HashMap<String, String>> {
         #[allow(clippy::match_like_matches_macro)]
         match self {
             SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),

@@ -34,7 +34,7 @@ pub trait ConfigProvider {
     async fn apply_sso_role_mappings(
         &mut self,
         username: &str,
-        managed_role_names: Vec<String>,
+        managed_role_names: Option<Vec<String>>,
         active_role_names: Vec<String>,
     ) -> Result<(), WarpgateError>;
 
