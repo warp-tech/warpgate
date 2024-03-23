@@ -95,7 +95,7 @@ async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Resu
     let services: Data<&Services> = <_>::from_request_without_body(req).await?;
 
     let SessionAuthorization::User(username) = auth else {
-        return Ok(false)
+        return Ok(false);
     };
 
     let mut config_provider = services.config_provider.lock().await;

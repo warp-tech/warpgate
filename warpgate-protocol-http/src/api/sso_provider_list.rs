@@ -152,7 +152,9 @@ impl Api {
         };
 
         let Some(ref code) = *code else {
-            return Ok(Err("No authorization code in the return URL request".to_string()));
+            return Ok(Err(
+                "No authorization code in the return URL request".to_string()
+            ));
         };
 
         let response = context
@@ -216,14 +218,27 @@ impl Api {
         };
 
         let mappings = provider_config.provider.role_mappings();
-        if let (Some(mappings), Some(remote_groups)) = (mappings, response.groups) {
-            let managed_role_names = mappings.iter().map(|x| x.1.clone()).collect::<Vec<_>>();
+        if let Some(remote_groups) = response.groups {
+            // If mappings is not set, all groups are subject to sync
+            // and names won't be remapped
+            let managed_role_names = mappings
+                .as_ref()
+                .map(|m| m.iter().map(|x| x.1.clone()).collect::<Vec<_>>());
+
             let active_role_names: Vec<_> = remote_groups
                 .iter()
-                .filter_map(|r| mappings.iter().find(|m| &m.0 == r))
-                .map(|x| x.1.clone())
+                .filter_map({
+                    |r| {
+                        if let Some(ref mappings) = mappings {
+                            mappings.get(r).cloned()
+                        } else {
+                            Some(r.clone())
+                        }
+                    }
+                })
                 .collect();
 
+            debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
             cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
                 .await?;
         }

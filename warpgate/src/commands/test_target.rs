@@ -17,7 +17,8 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         .await?
         .iter()
         .find(|x| &x.name == target_name)
-        .map(Target::clone) else {
+        .map(Target::clone)
+    else {
         error!("Target not found: {}", target_name);
         return Ok(());
     };

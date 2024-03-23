@@ -1324,7 +1324,9 @@ impl ServerSession {
                     }
                 } else if kinds.contains(&CredentialKind::WebUserApproval) {
                     let Some(auth_state) = self.auth_state.as_ref() else {
-                        return russh::server::Auth::Reject { proceed_with_methods: None};
+                        return russh::server::Auth::Reject {
+                            proceed_with_methods: None,
+                        };
                     };
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();

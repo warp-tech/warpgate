@@ -42,16 +42,14 @@ where
 
     tokio::spawn(async move {
         while let Some(values) = rx.recv().await {
-            let Some(ref socket) = socket else {
-                return
-            };
+            let Some(ref socket) = socket else { return };
             let Some(ref socket_address) = socket_address else {
-                return
+                return;
             };
 
             let Ok(serialized) = serde_json::to_vec(&values) else {
                 eprintln!("Failed to serialize log entry {values:?}");
-                continue
+                continue;
             };
 
             let buffer = BytesMut::from(&serialized[..]);

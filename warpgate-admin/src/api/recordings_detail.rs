@@ -69,8 +69,8 @@ pub async fn api_get_recording_cast(
         .map_err(InternalServerError)?;
 
     let Some(recording) = recording else {
-            return Err(NotFoundError.into())
-        };
+        return Err(NotFoundError.into());
+    };
 
     if recording.kind != RecordingKind::Terminal {
         return Err(NotFoundError.into());
@@ -128,8 +128,8 @@ pub async fn api_get_recording_tcpdump(
         .map_err(poem::error::InternalServerError)?;
 
     let Some(recording) = recording else {
-            return Err(NotFoundError.into())
-        };
+        return Err(NotFoundError.into());
+    };
 
     if recording.kind != RecordingKind::Traffic {
         return Err(NotFoundError.into());

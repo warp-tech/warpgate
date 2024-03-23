@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.7.4"
+    "version": "0.9.1"
   },
   "servers": [
     {
@@ -1123,6 +1123,14 @@
           },
           "target_name": {
             "type": "string"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "number_of_uses": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

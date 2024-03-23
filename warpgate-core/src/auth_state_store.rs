@@ -93,7 +93,7 @@ impl AuthStateStore {
 
     pub async fn complete(&mut self, id: &Uuid) {
         let Some((state, _)) = self.store.get(id) else {
-            return
+            return;
         };
         if let Some(sig) = self.completion_signals.remove(id) {
             let _ = sig.sender.send(state.lock().await.verify());

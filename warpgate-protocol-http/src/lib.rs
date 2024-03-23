@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use common::page_admin_auth;
 pub use common::PROTOCOL_NAME;
 use http::HeaderValue;
-use logging::{log_request_result, span_for_request};
+use logging::{get_client_ip, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
@@ -122,8 +122,11 @@ impl ProtocolServer for HTTPProtocolServer {
                     .around(move |ep, req| async move {
                         let method = req.method().clone();
                         let url = req.original_uri().clone();
+                        let client_ip = get_client_ip(&req).await?;
+
                         let response = ep.call(req).await?;
-                        log_request_result(&method, &url, &response.status());
+
+                        log_request_result(&method, &url, client_ip, &response.status());
                         Ok(response)
                     }),
             )
@@ -206,7 +209,9 @@ impl ProtocolServer for HTTPProtocolServer {
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
         let TargetOptions::Http(options) = target.options else {
-            return Err(TargetTestError::Misconfigured("Not an HTTP target".to_owned()));
+            return Err(TargetTestError::Misconfigured(
+                "Not an HTTP target".to_owned(),
+            ));
         };
         let request = poem::Request::builder().uri_str("http://host/").finish();
         crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)

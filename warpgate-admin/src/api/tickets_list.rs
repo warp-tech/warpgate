@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -23,6 +24,8 @@ enum GetTicketsResponse {
 struct CreateTicketRequest {
     username: String,
     target_name: String,
+    expiry: Option<DateTime<Utc>>,
+    number_of_uses: Option<i32>
 }
 
 #[derive(Object)]
@@ -84,7 +87,8 @@ impl Api {
             username: Set(body.username.clone()),
             target: Set(body.target_name.clone()),
             created: Set(chrono::Utc::now()),
-            expiry: Set(None),
+            expiry: Set(body.expiry),
+            uses_left: Set(body.number_of_uses),
             ..Default::default()
         };
 

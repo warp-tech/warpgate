@@ -128,7 +128,7 @@ impl SessionStore {
         session.set(SESSION_ID_SESSION_KEY, id);
 
         let Some(this) = self.this.upgrade() else {
-            return Err(anyhow::anyhow!("Invalid session state").into())
+            return Err(anyhow::anyhow!("Invalid session state").into());
         };
         tokio::spawn({
             let session_storage = (*session_storage).clone();

@@ -3,6 +3,8 @@ import { api, Ticket } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert } from 'sveltestrap'
 import RelativeDate from './RelativeDate.svelte'
+import Fa from 'svelte-fa'
+import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 
 let error: Error|undefined
 let tickets: Ticket[]|undefined
@@ -45,10 +47,27 @@ async function deleteTicket (ticket: Ticket) {
         <div class="list-group list-group-flush">
             {#each tickets as ticket}
                 <div class="list-group-item">
-                    <strong class="me-auto">
+                    <strong>
                         Access to {ticket.target} as {ticket.username}
                     </strong>
-                    <small class="text-muted me-4">
+                    {#if ticket.expiry}
+                        <small class="text-muted ms-4">
+                            <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> Until {ticket.expiry?.toLocaleString()}
+                        </small>
+                    {/if}
+                    {#if ticket.usesLeft != null}
+                        {#if ticket.usesLeft > 0}
+                            <small class="text-muted ms-4">
+                                <Fa icon={faSquareCheck} fw /> Uses left: {ticket.usesLeft}
+                            </small>
+                        {/if}
+                        {#if ticket.usesLeft === 0}
+                            <small class="text-danger ms-4">
+                                <Fa icon={faSquareXmark} fw /> Used up
+                            </small>
+                        {/if}
+                    {/if}
+                    <small class="text-muted me-4 ms-auto">
                         <RelativeDate date={ticket.created} />
                     </small>
                     <a href={''} on:click|preventDefault={() => deleteTicket(ticket)}>Delete</a>

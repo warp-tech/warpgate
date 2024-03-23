@@ -1,3 +1,5 @@
+@use "sass:map";
+
 // Layout & components
 @import "bootstrap/scss/root";
 @import "bootstrap/scss/reboot";
@@ -100,4 +102,10 @@ input:-webkit-autofill:focus {
 
 .form-floating>.form-control:not(:focus)::placeholder {
     color: transparent;
+}
+
+@include media-breakpoint-up(md) {
+    .narrow-page {
+        width: map.get($grid-breakpoints, "md");
+    }
 }

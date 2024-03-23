@@ -77,14 +77,13 @@ impl SsoLoginRequest {
         let userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>> =
             OptionFuture::from(user_info_req.map(|req| req.request_async(async_http_client)))
                 .await
-                .map(|res| {
+                .and_then(|res| {
                     res.map_err(|err| {
                         error!("Failed to fetch userinfo: {err:?}");
                         err
                     })
                     .ok()
-                })
-                .flatten();
+                });
 
         if let Some(expected_access_token_hash) = claims.access_token_hash() {
             let actual_access_token_hash = AccessTokenHash::from_token(
