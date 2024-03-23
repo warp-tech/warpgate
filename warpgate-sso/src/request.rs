@@ -11,8 +11,8 @@ use tracing::{debug, error};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct WarpgateClaims {
-    // This uses the "warpgate_groups" claim from OIDC
-    warpgate_groups: Option<Vec<String>>,
+    // This uses the "warpgate_roles" claim from OIDC
+    warpgate_roles: Option<Vec<String>>,
 }
 
 impl AdditionalClaims for WarpgateClaims {}
