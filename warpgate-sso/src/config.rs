@@ -59,6 +59,7 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
+        role_mappings: Option<HashMap<String, String>>,
         additional_trusted_audiences: Option<Vec<String>>,
     },
 }
@@ -170,39 +171,45 @@ impl SsoInternalProviderConfig {
     #[inline]
     pub fn extra_parameters(&self) -> HashMap<String, String> {
         match self {
-            SsoInternalProviderConfig::Google { .. }
-            | SsoInternalProviderConfig::Custom { .. }
-            | SsoInternalProviderConfig::Azure { .. } => HashMap::new(),
             SsoInternalProviderConfig::Apple { .. } => {
                 let mut map = HashMap::new();
                 map.insert("response_mode".to_string(), "form_post".to_string());
                 map
             }
+            _ => HashMap::new(),
         }
     }
 
     #[inline]
     pub fn auth_type(&self) -> AuthType {
+        #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Google { .. }
-            | SsoInternalProviderConfig::Custom { .. }
-            | SsoInternalProviderConfig::Azure { .. } => AuthType::BasicAuth,
             SsoInternalProviderConfig::Apple { .. } => AuthType::RequestBody,
+            _ => AuthType::BasicAuth,
         }
     }
 
     #[inline]
     pub fn needs_pkce_verifier(&self) -> bool {
+        #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Google { .. }
-            | SsoInternalProviderConfig::Custom { .. }
-            | SsoInternalProviderConfig::Azure { .. } => true,
             SsoInternalProviderConfig::Apple { .. } => false,
+            _ => true,
+        }
+    }
+
+    #[inline]
+    pub fn role_mappings(&self) -> Option<HashMap<String, String>> {
+        #[allow(clippy::match_like_matches_macro)]
+        match self {
+            SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
+            _ => None,
         }
     }
 
     #[inline]
     pub fn additional_trusted_audiences(&self) -> Option<&Vec<String>> {
+        #[allow(clippy::match_like_matches_macro)]
         match self {
             SsoInternalProviderConfig::Custom {
                 additional_trusted_audiences,

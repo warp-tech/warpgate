@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use data_encoding::BASE64;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    QueryOrder, Set,
+};
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{
@@ -17,7 +20,7 @@ use warpgate_common::{
     UserPasswordCredential, UserPublicKeyCredential, UserSsoCredential, UserTotpCredential,
     WarpgateError,
 };
-use warpgate_db_entities::{Role, Target, User};
+use warpgate_db_entities::{Role, Target, User, UserRoleAssignment};
 
 use super::ConfigProvider;
 
@@ -293,5 +296,67 @@ impl ConfigProvider for DatabaseConfigProvider {
         let intersect = user_roles.intersection(&target_roles).count() > 0;
 
         Ok(intersect)
+    }
+
+    async fn apply_sso_role_mappings(
+        &mut self,
+        username: &str,
+        managed_role_names: Option<Vec<String>>,
+        assigned_role_names: Vec<String>,
+    ) -> Result<(), WarpgateError> {
+        let db = self.db.lock().await;
+
+        let user = User::Entity::find()
+            .filter(User::Column::Username.eq(username))
+            .one(&*db)
+            .await
+            .map_err(WarpgateError::from)?
+            .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
+
+        let managed_role_names = match managed_role_names {
+            Some(x) => x,
+            None => Role::Entity::find()
+                .all(&*db)
+                .await?
+                .into_iter()
+                .map(|x| x.name)
+                .collect(),
+        };
+
+        for role_name in managed_role_names.into_iter() {
+            let role = Role::Entity::find()
+                .filter(Role::Column::Name.eq(role_name.clone()))
+                .one(&*db)
+                .await
+                .map_err(WarpgateError::from)?
+                .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
+
+            let assignment = UserRoleAssignment::Entity::find()
+                .filter(UserRoleAssignment::Column::UserId.eq(user.id))
+                .filter(UserRoleAssignment::Column::RoleId.eq(role.id))
+                .one(&*db)
+                .await
+                .map_err(WarpgateError::from)?;
+
+            match (assignment, assigned_role_names.contains(&role_name)) {
+                (None, true) => {
+                    info!("Adding role {role_name} for user {username} (from SSO)");
+                    let values = UserRoleAssignment::ActiveModel {
+                        user_id: Set(user.id),
+                        role_id: Set(role.id),
+                        ..Default::default()
+                    };
+
+                    values.insert(&*db).await.map_err(WarpgateError::from)?;
+                }
+                (Some(assignment), false) => {
+                    info!("Removing role {role_name} for user {username} (from SSO)");
+                    assignment.delete(&*db).await.map_err(WarpgateError::from)?;
+                }
+                _ => (),
+            }
+        }
+
+        Ok(())
     }
 }

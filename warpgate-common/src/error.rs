@@ -13,8 +13,10 @@ pub enum WarpgateError {
     InvalidCredentialType,
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
-    #[error("user not found")]
-    UserNotFound,
+    #[error("user {0} not found")]
+    UserNotFound(String),
+    #[error("role {0} not found")]
+    RoleNotFound(String),
     #[error("failed to parse URL: {0}")]
     UrlParse(#[from] url::ParseError),
     #[error("deserialization failed: {0}")]

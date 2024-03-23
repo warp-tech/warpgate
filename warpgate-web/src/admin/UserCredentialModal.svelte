@@ -113,7 +113,7 @@ $: {
                         bind:value={credential.provider}
                         type="select"
                     >
-                        <option value="" selected>Any</option>
+                        <option value={null} selected>Any</option>
                         {#each providers as provider}
                             <option value={provider.name}>{provider.label ?? provider.name}</option>
                         {/each}

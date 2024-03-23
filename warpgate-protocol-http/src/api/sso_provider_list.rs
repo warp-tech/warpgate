@@ -173,6 +173,7 @@ impl Api {
 
         info!("SSO login as {email}");
 
+        let provider = context.provider.clone();
         let cred = AuthCredential::Sso {
             provider: context.provider,
             email: email.clone(),
@@ -208,6 +209,38 @@ impl Api {
         if let AuthResult::Accepted { username } = state.verify() {
             auth_state_store.complete(state.id()).await;
             authorize_session(req, username).await?;
+        }
+
+        let providers_config = services.config.lock().await.store.sso_providers.clone();
+        let mut iter = providers_config.iter();
+        let Some(provider_config) = iter.find(|x| x.name == provider) else {
+            return Ok(Err(format!("No provider matching {provider}")));
+        };
+
+        let mappings = provider_config.provider.role_mappings();
+        if let Some(remote_groups) = response.groups {
+            // If mappings is not set, all groups are subject to sync
+            // and names won't be remapped
+            let managed_role_names = mappings
+                .as_ref()
+                .map(|m| m.iter().map(|x| x.1.clone()).collect::<Vec<_>>());
+
+            let active_role_names: Vec<_> = remote_groups
+                .iter()
+                .filter_map({
+                    |r| {
+                        if let Some(ref mappings) = mappings {
+                            mappings.get(r).cloned()
+                        } else {
+                            Some(r.clone())
+                        }
+                    }
+                })
+                .collect();
+
+            debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
+            cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
+                .await?;
         }
 
         Ok(Ok(context

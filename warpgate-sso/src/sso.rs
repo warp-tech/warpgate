@@ -70,9 +70,9 @@ impl SsoClient {
         } else {
             None
         };
-
+        
         let (auth_url, csrf_token, nonce) = auth_req.url();
-
+        
         Ok(SsoLoginRequest {
             auth_url,
             csrf_token,
