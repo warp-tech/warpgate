@@ -333,17 +333,11 @@ async fn get_auth_state(
 ) -> Option<Arc<Mutex<AuthState>>> {
     let store = services.auth_state_store.lock().await;
 
-    let Some(auth) = auth else {
+    let SessionAuthorization::User(username) = auth? else {
         return None;
     };
 
-    let SessionAuthorization::User(username) = auth else {
-        return None;
-    };
-
-    let Some(state_arc) = store.get(id) else {
-        return None;
-    };
+    let state_arc = store.get(id)?;
 
     {
         let state = state_arc.lock().await;

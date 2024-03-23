@@ -17,7 +17,7 @@
     let seekInputValue = 0
     let duration = 0
     let resizeObserver: ResizeObserver|undefined
-    let events: (SizeEvent | DataEvent | SnapshotEvent)[] = []
+    let events: (DataEvent | SizeEvent | SnapshotEvent)[] = []
     let playing = false
     let loading = true
     let sessionIsLive: boolean|null = null
@@ -67,7 +67,7 @@
     }
     // eslint-disable-next-line @typescript-eslint/no-type-alias
     type AsciiCastData = [number, 'o', string]
-    type AsciiCastItem = AsciiCastHeader | AsciiCastData
+    type AsciiCastItem = AsciiCastData | AsciiCastHeader
 
     function isAsciiCastHeader (data: AsciiCastItem): data is AsciiCastHeader {
         return 'version' in data

@@ -40,7 +40,7 @@ async function create () {
                 username: selectedUser.username,
                 targetName: selectedTarget.name,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
-                numberOfUses: selectedNumberOfUses
+                numberOfUses: selectedNumberOfUses,
             },
         })
     } catch (err) {

@@ -994,7 +994,7 @@ impl ServerSession {
     }
 
     async fn start_terminal_recording(&mut self, channel_id: Uuid, name: String) {
-        match async {
+        let recorder = async {
             let mut recorder = self
                 .services
                 .recordings
@@ -1009,8 +1009,8 @@ impl ServerSession {
             }
             Ok::<_, recordings::Error>(recorder)
         }
-        .await
-        {
+        .await;
+        match recorder {
             Ok(recorder) => {
                 self.channel_recorders.insert(channel_id, recorder);
             }
