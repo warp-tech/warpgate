@@ -1360,7 +1360,8 @@ impl ServerSession {
                     login_url.set_fragment(Some(&format!("/login/{auth_state_id}")));
 
                     russh::server::Auth::Partial {
-                        name: Cow::Owned(format!(
+                        name: Cow::Borrowed("Warpgate authentication"),
+                        instructions: Cow::Owned(format!(
                             concat!(
                             "-----------------------------------------------------------------------\n",
                             "Warpgate authentication: please open the following URL in your browser:\n",
@@ -1375,7 +1376,6 @@ impl ServerSession {
                                 .collect::<Vec<_>>()
                                 .join(" ")
                         )),
-                        instructions: Cow::Borrowed(""),
                         prompts: Cow::Owned(vec![(Cow::Borrowed("Press Enter when done: "), true)]),
                     }
                 } else {
