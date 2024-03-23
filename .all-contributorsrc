@@ -54,6 +54,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "SheaSmith",
+      "name": "Shea Smith",
+      "avatar_url": "https://avatars.githubusercontent.com/u/51303984?v=4",
+      "profile": "https://shea.nz/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7
