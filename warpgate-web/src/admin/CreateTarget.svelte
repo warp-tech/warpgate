@@ -15,24 +15,24 @@ async function create () {
     try {
         const options: TargetOptions|undefined = {
             Ssh: {
-                kind: 'Ssh',
+                kind: 'Ssh' as const,
                 host: '192.168.0.1',
                 port: 22,
                 username: 'root',
                 auth: {
-                    kind: 'PublicKey',
+                    kind: 'PublicKey' as const,
                 },
-            } as TargetOptions,
+            },
             Http: {
-                kind: 'Http',
+                kind: 'Http' as const,
                 url: 'http://192.168.0.1',
                 tls: {
                     mode: TlsMode.Preferred,
                     verify: true,
                 },
-            } as TargetOptions,
+            },
             MySql: {
-                kind: 'MySql',
+                kind: 'MySql' as const,
                 host: '192.168.0.1',
                 port: 3306,
                 tls: {
@@ -41,7 +41,7 @@ async function create () {
                 },
                 username: 'root',
                 password: '',
-            } as TargetOptions,
+            },
         }[type]
         if (!options) {
             return

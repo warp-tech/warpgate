@@ -15,6 +15,8 @@ pub struct TargetSSHOptions {
     #[serde(default = "_default_username")]
     pub username: String,
     #[serde(default)]
+    pub allow_insecure_algos: Option<bool>,
+    #[serde(default)]
     pub auth: SSHTargetAuth,
 }
 

@@ -1657,6 +1657,9 @@
           "username": {
             "type": "string"
           },
+          "allow_insecure_algos": {
+            "type": "boolean"
+          },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
           }
