@@ -5,7 +5,7 @@ name = "warpgate-web"
 version = "0.9.1"
 
 [dependencies]
-rust-embed = "6.3"
+rust-embed = "8.3"
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"

@@ -575,30 +575,29 @@ impl RemoteClient {
         Ok(())
     }
 
-    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<bool, SshClientError> {
+    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
             let mut session = session.lock().await;
-
-            Ok(session.tcpip_forward(address, port).await?)
+            session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
-            Ok(true)
         }
+        Ok(())
     }
 
     async fn cancel_tcpip_forward(
         &mut self,
         address: String,
         port: u32,
-    ) -> Result<bool, SshClientError> {
+    ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
             let session = session.lock().await;
-            Ok(session.cancel_tcpip_forward(address, port).await?)
+            session.cancel_tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards
                 .retain(|x| x.0 != address || x.1 != port);
-            Ok(true)
         }
+        Ok(())
     }
 
     async fn disconnect(&mut self) {
