@@ -14,6 +14,8 @@ pub struct TargetSSHOptions {
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
+    #[serde(default = "_default_false")]
+    pub allow_insecure_algos: bool,
     #[serde(default)]
     pub auth: SSHTargetAuth,
 }

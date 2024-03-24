@@ -15,8 +15,8 @@ pub use error::SshClientError;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::{Preferred, Sig};
-use russh_keys::key::{self, PublicKey};
+use russh::{kex, Preferred, Sig};
+use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -401,16 +401,28 @@ impl RemoteClient {
         };
 
         info!(?address, username = &ssh_options.username[..], "Connecting");
-        let config = russh::client::Config {
-            preferred: Preferred {
-                key: &[
-                    key::ED25519,
-                    key::RSA_SHA2_256,
-                    key::RSA_SHA2_512,
-                    key::SSH_RSA,
+        let algos = if ssh_options.allow_insecure_algos {
+            Preferred {
+                kex: &[
+                    kex::CURVE25519,
+                    kex::CURVE25519_PRE_RFC_8731,
+                    kex::DH_G16_SHA512,
+                    kex::DH_G14_SHA256, // non-default
+                    kex::DH_G14_SHA256,
+                    kex::DH_G1_SHA1, // non-default
+                    kex::EXTENSION_SUPPORT_AS_CLIENT,
+                    kex::EXTENSION_SUPPORT_AS_SERVER,
+                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
                 ],
                 ..<_>::default()
-            },
+            }
+        } else {
+            Preferred::default()
+        };
+
+        let config = russh::client::Config {
+            preferred: algos,
             ..Default::default()
         };
         let config = Arc::new(config);

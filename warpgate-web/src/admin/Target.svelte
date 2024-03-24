@@ -175,6 +175,15 @@ async function toggleRole (role: Role) {
                 </FormGroup>
             {/if}
         </div>
+
+        <div class="d-flex">
+            <Input
+                class="mb-0 me-2"
+                type="switch"
+                label="Allow insecure SSH algorithms (e.g. for older networks devices)"
+                checked={target.options.allowInsecureAlgos} />
+        </div>
+
     {/if}
 
     {#if target.options.kind === 'Http'}
