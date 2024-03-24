@@ -5827,6 +5827,7 @@ dependencies = [
  "bimap",
  "bytes",
  "dialoguer",
+ "ed25519-dalek",
  "futures",
  "russh",
  "russh-keys",
