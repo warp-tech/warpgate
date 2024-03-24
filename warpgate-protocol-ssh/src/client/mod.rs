@@ -401,7 +401,7 @@ impl RemoteClient {
         };
 
         info!(?address, username = &ssh_options.username[..], "Connecting");
-        let algos = if ssh_options.allow_insecure_algos {
+        let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
             Preferred {
                 kex: &[
                     kex::CURVE25519,

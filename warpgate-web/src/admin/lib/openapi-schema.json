@@ -1644,7 +1644,6 @@
           "host",
           "port",
           "username",
-          "allow_insecure_algos",
           "auth"
         ],
         "properties": {
