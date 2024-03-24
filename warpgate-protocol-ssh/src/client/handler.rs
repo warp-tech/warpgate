@@ -45,9 +45,9 @@ impl russh::client::Handler for ClientHandler {
     type Error = ClientHandlerError;
 
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         let mut known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
@@ -62,7 +62,7 @@ impl russh::client::Handler for ClientHandler {
             )
             .await
         {
-            Ok(KnownHostValidationResult::Valid) => Ok((self, true)),
+            Ok(KnownHostValidationResult::Valid) => Ok(true),
             Ok(KnownHostValidationResult::Invalid {
                 key_type,
                 key_base64,
@@ -99,9 +99,9 @@ impl russh::client::Handler for ClientHandler {
                     {
                         error!(?error, session=%self.session_id, "Failed to save host key");
                     }
-                    Ok((self, true))
+                    Ok(true)
                 } else {
-                    Ok((self, false))
+                    Ok(false)
                 }
             }
             Err(error) => {
@@ -112,14 +112,14 @@ impl russh::client::Handler for ClientHandler {
     }
 
     async fn server_channel_open_forwarded_tcpip(
-        self,
+        &mut self,
         channel: Channel<Msg>,
         connected_address: &str,
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        __session: &mut Session,
+    ) -> Result<(), Self::Error> {
         let connected_address = connected_address.to_string();
         let originator_address = originator_address.to_string();
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedTcpIp(
@@ -131,23 +131,23 @@ impl russh::client::Handler for ClientHandler {
                 originator_port,
             },
         ));
-        Ok((self, session))
+        Ok(())
     }
 
     async fn server_channel_open_x11(
-        self,
+        &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
         let originator_address = originator_address.to_string();
         let _ = self.event_tx.send(ClientHandlerEvent::X11(
             channel,
             originator_address,
             originator_port,
         ));
-        Ok((self, session))
+        Ok(())
     }
 }
 
