@@ -9,6 +9,7 @@ use poem::http::{self, uri};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
+use tracing::warn;
 use uri::Scheme;
 use url::Url;
 use uuid::Uuid;
@@ -102,12 +103,15 @@ pub enum SshHostKeyVerificationMode {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SSHConfig {
+pub struct SshConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_ssh_listen")]
     pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
 
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
@@ -116,24 +120,34 @@ pub struct SSHConfig {
     pub host_key_verification: SshHostKeyVerificationMode,
 }
 
-impl Default for SSHConfig {
+impl Default for SshConfig {
     fn default() -> Self {
-        SSHConfig {
+        SshConfig {
             enable: false,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
             host_key_verification: Default::default(),
+            external_port: None,
         }
     }
 }
 
+impl SshConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct HTTPConfig {
+pub struct HttpConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_http_listen")]
     pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
 
     #[serde(default)]
     pub certificate: String,
@@ -151,11 +165,12 @@ pub struct HTTPConfig {
     pub cookie_max_age: Duration,
 }
 
-impl Default for HTTPConfig {
+impl Default for HttpConfig {
     fn default() -> Self {
-        HTTPConfig {
+        HttpConfig {
             enable: false,
             listen: _default_http_listen(),
+            external_port: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
             trust_x_forwarded_headers: false,
@@ -165,13 +180,22 @@ impl Default for HTTPConfig {
     }
 }
 
+impl HttpConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct MySQLConfig {
+pub struct MySqlConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
 
     #[serde(default = "_default_mysql_listen")]
     pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
 
     #[serde(default)]
     pub certificate: String,
@@ -180,14 +204,21 @@ pub struct MySQLConfig {
     pub key: String,
 }
 
-impl Default for MySQLConfig {
+impl Default for MySqlConfig {
     fn default() -> Self {
-        MySQLConfig {
+        MySqlConfig {
             enable: false,
             listen: _default_mysql_listen(),
+            external_port: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
+    }
+}
+
+impl MySqlConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
     }
 }
 
@@ -263,13 +294,13 @@ pub struct WarpgateConfigStore {
     pub database_url: Secret<String>,
 
     #[serde(default)]
-    pub ssh: SSHConfig,
+    pub ssh: SshConfig,
 
     #[serde(default)]
-    pub http: HTTPConfig,
+    pub http: HttpConfig,
 
     #[serde(default)]
-    pub mysql: MySQLConfig,
+    pub mysql: MySqlConfig,
 
     #[serde(default)]
     pub log: LogConfig,
@@ -369,5 +400,14 @@ impl WarpgateConfig {
             url = format!("{url}:{port}");
         };
         Url::parse(&url).map_err(WarpgateError::UrlParse)
+    }
+
+    pub fn validate(&self) {
+        if let Some(ref ext) = self.store.external_host {
+            if ext.contains(':') {
+                warn!("Looks like your `external_host` config option contains a port - it will be ignored.");
+                warn!("Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.");
+            }
+        }
     }
 }

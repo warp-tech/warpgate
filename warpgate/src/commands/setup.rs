@@ -14,7 +14,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HTTPConfig, ListenEndpoint, MySQLConfig, SSHConfig, Secret, UserAuthCredential,
+    HttpConfig, ListenEndpoint, MySqlConfig, SshConfig, Secret, UserAuthCredential,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
@@ -74,7 +74,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let theme = ColorfulTheme::default();
     let mut store = WarpgateConfigStore {
-        http: HTTPConfig {
+        http: HttpConfig {
             enable: true,
             ..Default::default()
         },
@@ -141,7 +141,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
                 "Endpoint to listen for HTTP connections on",
-                HTTPConfig::default().listen,
+                HttpConfig::default().listen,
             );
         }
     }
@@ -168,7 +168,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             if store.ssh.enable {
                 store.ssh.listen = prompt_endpoint(
                     "Endpoint to listen for SSH connections on",
-                    SSHConfig::default().listen,
+                    SshConfig::default().listen,
                 );
             }
         }
@@ -191,7 +191,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             if store.mysql.enable {
                 store.mysql.listen = prompt_endpoint(
                     "Endpoint to listen for MySQL connections on",
-                    MySQLConfig::default().listen,
+                    MySqlConfig::default().listen,
                 );
             }
         }
