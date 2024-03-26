@@ -33,6 +33,10 @@ enum InstanceInfoResponse {
     Ok(Json<Info>),
 }
 
+fn strip_port(host: &str) -> Option<&str> {
+    host.split(':').next()
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/info", method = "get", operation_id = "get_info")]
@@ -47,8 +51,10 @@ impl Api {
             .store
             .external_host
             .as_deref()
-            .or_else(|| req.header(http::header::HOST))
+            .and_then(strip_port)
+            .or_else(|| req.header(http::header::HOST).and_then(strip_port))
             .or_else(|| req.original_uri().host());
+
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
             username: session.get_username(),
@@ -61,17 +67,17 @@ impl Api {
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {
-                        Some(config.store.ssh.listen.port())
+                        Some(config.store.ssh.external_port())
                     } else {
                         None
                     },
                     http: if config.store.http.enable {
-                        Some(config.store.http.listen.port())
+                        Some(config.store.http.external_port())
                     } else {
                         None
                     },
                     mysql: if config.store.mysql.enable {
-                        Some(config.store.mysql.listen.port())
+                        Some(config.store.mysql.external_port())
                     } else {
                         None
                     },

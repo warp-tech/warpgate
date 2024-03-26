@@ -33,6 +33,7 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
     };
 
     info!("Using config: {path:?}");
+    config.validate();
     Ok(config)
 }
 
