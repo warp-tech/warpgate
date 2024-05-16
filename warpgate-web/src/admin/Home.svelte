@@ -4,7 +4,7 @@
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
     import { api, SessionSnapshot } from 'admin/lib/api'
-    import moment from 'moment'
+    import { formatDistance } from 'date-fns';
     import { timer, Observable, switchMap, from, combineLatest, fromEvent, merge } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
@@ -104,7 +104,7 @@
 
             <div class="meta">
                 {#if session.ended }
-                    {moment.duration(moment(session.ended).diff(session.started)).humanize()}
+                    {formatDistance(new Date(session.started), new Date(session.ended))}
                 {/if}
             </div>
 
