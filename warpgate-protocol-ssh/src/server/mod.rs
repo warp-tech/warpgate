@@ -27,7 +27,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            inactivity_timeout: Some(Duration::from_secs(300)),
+            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
             event_buffer_size: 100,
