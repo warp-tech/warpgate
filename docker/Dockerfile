@@ -34,7 +34,5 @@ COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
-ENV DOCKER 1
-
 ENTRYPOINT ["warpgate", "--config", "/data/warpgate.yaml"]
 CMD ["run"]
