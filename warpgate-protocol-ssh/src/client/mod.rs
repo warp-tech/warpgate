@@ -409,7 +409,7 @@ impl RemoteClient {
                     kex::CURVE25519_PRE_RFC_8731,
                     kex::ECDH_SHA2_NISTP256,
                     kex::ECDH_SHA2_NISTP384,
-                    kex::ECDH_SHA2_NISTP512,
+                    kex::ECDH_SHA2_NISTP521,
                     kex::DH_G16_SHA512,
                     kex::DH_G14_SHA256, // non-default
                     kex::DH_G14_SHA256,
