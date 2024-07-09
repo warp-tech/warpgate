@@ -24,6 +24,8 @@ pub enum SsoError {
     Io(#[from] std::io::Error),
     #[error("JWT error: {0}")]
     Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("the OIDC provider doesn't support RP-initiated logout")]
+    LogoutNotSupported,
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
 }

@@ -1,9 +1,13 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
+use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreIdToken};
 use openidconnect::reqwest::async_http_client;
-use openidconnect::{CsrfToken, DiscoveryError, Nonce, PkceCodeChallenge, RedirectUrl, Scope};
+use openidconnect::url::Url;
+use openidconnect::{
+    CsrfToken, DiscoveryError, LogoutRequest, Nonce, PkceCodeChallenge, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, Scope,
+};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
@@ -13,15 +17,21 @@ pub struct SsoClient {
     config: SsoInternalProviderConfig,
 }
 
-pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
-    let metadata = CoreProviderMetadata::discover_async(config.issuer_url()?, async_http_client)
+pub async fn discover_metadata(
+    config: &SsoInternalProviderConfig,
+) -> Result<ProviderMetadataWithLogout, SsoError> {
+    ProviderMetadataWithLogout::discover_async(config.issuer_url()?, async_http_client)
         .await
         .map_err(|e| {
             SsoError::Discovery(match e {
                 DiscoveryError::Request(inner) => format!("Request error: {inner}"),
                 e => format!("{e}"),
             })
-        })?;
+        })
+}
+
+pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
+    let metadata = discover_metadata(config).await?;
 
     let client = CoreClient::from_provider_metadata(
         metadata,
@@ -81,5 +91,17 @@ impl SsoClient {
             redirect_url,
             config: self.config.clone(),
         })
+    }
+
+    pub async fn logout(&self, token: CoreIdToken, redirect_url: Url) -> Result<Url, SsoError> {
+        let metadata = discover_metadata(&self.config).await?;
+        let Some(ref url) = metadata.additional_metadata().end_session_endpoint else {
+            return Err(SsoError::LogoutNotSupported);
+        };
+        let mut req: LogoutRequest = url.clone().into();
+        req = req.set_id_token_hint(&token);
+        req = req.set_client_id(self.config.client_id().clone());
+        req = req.set_post_logout_redirect_uri(PostLogoutRedirectUrl::from_url(redirect_url));
+        return Ok(req.http_get_url());
     }
 }

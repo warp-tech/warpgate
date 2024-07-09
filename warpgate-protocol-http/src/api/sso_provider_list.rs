@@ -11,7 +11,7 @@ use warpgate_core::Services;
 use warpgate_sso::SsoInternalProviderConfig;
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
-use crate::common::{authorize_session, get_auth_state_for_request};
+use crate::common::{authorize_session, get_auth_state_for_request, SessionExt};
 
 pub struct Api;
 
@@ -209,6 +209,7 @@ impl Api {
         if let AuthResult::Accepted { username } = state.verify() {
             auth_state_store.complete(state.id()).await;
             authorize_session(req, username).await?;
+            session.set_oidc_token(response.id_token);
         }
 
         let providers_config = services.config.lock().await.store.sso_providers.clone();

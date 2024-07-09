@@ -5,6 +5,7 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -18,6 +19,7 @@ pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
+static AUTH_OIDC_TOKEN: &str = "auth_oidc_token";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 
 pub trait SessionExt {
@@ -30,6 +32,9 @@ pub trait SessionExt {
     fn set_auth(&self, auth: SessionAuthorization);
     fn get_auth_state_id(&self) -> Option<AuthStateId>;
     fn clear_auth_state(&self);
+
+    fn get_oidc_token<D: DeserializeOwned>(&self) -> Option<D>;
+    fn set_oidc_token<S: Serialize>(&self, token: S);
 }
 
 impl SessionExt for Session {
@@ -67,6 +72,17 @@ impl SessionExt for Session {
 
     fn clear_auth_state(&self) {
         self.remove(AUTH_STATE_ID_SESSION_KEY)
+    }
+
+    fn get_oidc_token<D: DeserializeOwned>(&self) -> Option<D> {
+        self.get::<String>(AUTH_OIDC_TOKEN)
+            .and_then(|x| serde_json::from_str(&x).ok())
+    }
+
+    fn set_oidc_token<S: Serialize>(&self, token: S) {
+        if let Ok(json) = serde_json::to_string(&token) {
+            self.set(AUTH_OIDC_TOKEN, json)
+        }
     }
 }
 
