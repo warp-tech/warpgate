@@ -2,6 +2,7 @@ mod channel_direct_tcpip;
 mod channel_session;
 mod error;
 mod handler;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
@@ -403,9 +404,12 @@ impl RemoteClient {
         info!(?address, username = &ssh_options.username[..], "Connecting");
         let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
             Preferred {
-                kex: &[
+                kex: Cow::Borrowed(&[
                     kex::CURVE25519,
                     kex::CURVE25519_PRE_RFC_8731,
+                    kex::ECDH_SHA2_NISTP256,
+                    kex::ECDH_SHA2_NISTP384,
+                    kex::ECDH_SHA2_NISTP512,
                     kex::DH_G16_SHA512,
                     kex::DH_G14_SHA256, // non-default
                     kex::DH_G14_SHA256,
@@ -414,7 +418,7 @@ impl RemoteClient {
                     kex::EXTENSION_SUPPORT_AS_SERVER,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-                ],
+                ]),
                 ..<_>::default()
             }
         } else {
