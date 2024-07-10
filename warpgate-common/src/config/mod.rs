@@ -365,7 +365,7 @@ impl WarpgateConfig {
 
         if let Some(request) = for_request {
             // 3: Host header in the request
-            scheme = request.uri().scheme().map(Clone::clone).unwrap_or(scheme);
+            scheme = request.uri().scheme().cloned().unwrap_or(scheme);
 
             if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
                 if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {

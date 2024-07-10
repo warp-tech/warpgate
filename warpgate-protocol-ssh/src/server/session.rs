@@ -244,7 +244,7 @@ impl ServerSession {
             self.auth_state = Some(state);
         }
         #[allow(clippy::unwrap_used)]
-        Ok(self.auth_state.as_ref().map(Clone::clone).unwrap())
+        Ok(self.auth_state.as_ref().cloned().unwrap())
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
