@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte'
-import { Alert, Button, FormGroup, Input, Modal, ModalBody, ModalFooter, ModalHeader } from 'sveltestrap'
+import { Alert, Button, FormGroup, Input, Modal, ModalBody, ModalFooter, ModalHeader } from '@sveltestrap/sveltestrap'
 import QRCode from 'qrcode'
 import { TOTP, TOTPOptions } from '@otplib/core'
 import { createDigest } from '@otplib/plugin-crypto-js'
@@ -66,7 +66,7 @@ $: {
 
         const uri = totp.keyuri(username, 'Warpgate', base32Encode(new Uint8Array(credential.key), 'RFC4648'))
 
-        QRCode.toDataURL(uri, (err: Error, imageUrl: string) => {
+        QRCode.toDataURL(uri, (err: Error | null | undefined, imageUrl: string) => {
             if (err) {
                 return
             }

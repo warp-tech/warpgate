@@ -1,6 +1,6 @@
 <script lang="ts">
 import { api, LogEntry } from 'admin/lib/api'
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'

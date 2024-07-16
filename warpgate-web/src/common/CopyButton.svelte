@@ -1,19 +1,19 @@
 <script lang="ts">
 import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Button } from 'sveltestrap'
+import { Button, Color } from '@sveltestrap/sveltestrap'
 import copyTextToClipboard from 'copy-text-to-clipboard'
-import type { ButtonColor } from 'sveltestrap/src/Button'
 
 export let text: string
 export let disabled = false
 export let outline = false
 export let link = false
-export let color: ButtonColor = 'link'
+export let color: Color | 'link' = 'link'
 let successVisible = false
 let button: HTMLElement
 
 async function _click () {
+    if (disabled) return
     successVisible = true
     copyTextToClipboard(text)
     setTimeout(() => {
@@ -28,8 +28,8 @@ async function _click () {
     <a
         href="#"
         class={$$props.class}
+        class:disabled={disabled}
         on:click|preventDefault={_click}
-        disabled={disabled}
         bind:this={button}
     >
         <slot>

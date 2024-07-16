@@ -5,7 +5,7 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, Button, FormGroup, Input } from 'sveltestrap'
+import { Alert, Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
 import AuthPolicyEditor from './AuthPolicyEditor.svelte'
 import UserCredentialModal from './UserCredentialModal.svelte'
 
@@ -16,9 +16,9 @@ let user: User
 let editingCredential: UserAuthCredential|undefined
 let policy: UserRequireCredentialsPolicy
 let allRoles: Role[] = []
-let roleIsAllowed = {}
+let roleIsAllowed: { [id: string] : any; } = {}
 
-const policyProtocols = [
+const policyProtocols: {id: 'ssh' | 'http' | 'mysql', name: string}[] = [
     { id: 'ssh', name: 'SSH' },
     { id: 'http', name: 'HTTP' },
     { id: 'mysql', name: 'MySQL' },
@@ -40,7 +40,7 @@ async function load () {
         const allowedRoles = await api.getUserRoles(user)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -59,7 +59,7 @@ async function update () {
             userDataRequest: user,
         })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
