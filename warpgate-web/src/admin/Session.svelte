@@ -3,7 +3,7 @@ import { api, SessionSnapshot, Recording, TargetSSHOptions, TargetHTTPOptions, T
 import { timeAgo } from 'admin/lib/time'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
-import moment from 'moment'
+import { formatDistance, formatDistanceToNow } from 'date-fns';
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
 import { Alert } from '@sveltestrap/sveltestrap'
@@ -79,9 +79,9 @@ onDestroy(() => clearInterval(interval))
                 </strong>
                 <span class="text-muted">
                     {#if session.ended}
-                        {moment.duration(moment(session.ended).diff(session.started)).humanize()} long, <RelativeDate date={session.started} />
+                        {formatDistance(new Date(session.started), new Date(session.ended))} long, <RelativeDate date={session.started} />
                     {:else}
-                        {moment.duration(moment().diff(session.started)).humanize()}
+                        {formatDistanceToNow(new Date(session.started))}
                     {/if}
                 </span>
             </div>

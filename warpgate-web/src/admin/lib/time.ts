@@ -1,5 +1,5 @@
-import moment from 'moment'
+import { formatDistanceToNow } from 'date-fns'
 
-export function timeAgo (t: Date): string {
-    return moment(t).fromNow()
+export function timeAgo(t: Date): string {
+    return formatDistanceToNow(t, { addSuffix: true })
 }
