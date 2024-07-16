@@ -28,6 +28,7 @@ async function _click () {
     <a
         href="#"
         class={$$props.class}
+        class:disabled={disabled}
         on:click|preventDefault={_click}
         bind:this={button}
     >
