@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Spinner } from 'sveltestrap'
+import { Spinner } from '@sveltestrap/sveltestrap'
 
 let visible = false
 

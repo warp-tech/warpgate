@@ -1,12 +1,12 @@
 <script lang="ts">
-import { Input } from 'sveltestrap'
+import { Input } from '@sveltestrap/sveltestrap'
 
 import { CredentialKind, User, UserRequireCredentialsPolicy } from './lib/api'
 
 export let user: User
 export let value: UserRequireCredentialsPolicy
 export let possibleCredentials: Set<CredentialKind>
-export let protocolId: string
+export let protocolId: "http" | "ssh" | "mysql"
 
 const labels = {
     Password: 'Password',
@@ -42,11 +42,11 @@ function updateAny () {
     })
 }
 
-function toggle (type: string) {
-    if (value[protocolId].includes(type)) {
-        value[protocolId] = value[protocolId].filter((x: CredentialKind) => x !== type)
+function toggle (type: CredentialKind) {
+    if (value[protocolId]!.includes(type)) {
+        value[protocolId] = value[protocolId]!.filter((x: CredentialKind) => x !== type)
     } else {
-        value[protocolId].push(type)
+        value[protocolId]!.push(type)
     }
 }
 </script>

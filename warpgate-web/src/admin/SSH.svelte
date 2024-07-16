@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, SSHKey, SSHKnownHost } from 'admin/lib/api'
 import CopyButton from 'common/CopyButton.svelte'
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 
 let error: Error|undefined
 let knownHosts: SSHKnownHost[]|undefined

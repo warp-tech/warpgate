@@ -6,7 +6,7 @@ import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte
 import { api, TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
-import { Modal, ModalBody, ModalHeader } from 'sveltestrap'
+import { Modal, ModalBody, ModalHeader } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 

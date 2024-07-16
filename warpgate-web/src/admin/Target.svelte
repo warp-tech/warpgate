@@ -8,7 +8,7 @@ import { TargetKind } from 'gateway/lib/api'
 import { serverInfo } from 'gateway/lib/store'
 import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Input } from 'sveltestrap'
+import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 
 export let params: { id: string }
@@ -17,13 +17,13 @@ let error: Error|undefined
 let selectedUser: User|undefined
 let target: Target
 let allRoles: Role[] = []
-let roleIsAllowed = {}
+let roleIsAllowed: { [id: string] : any; } = {}
 
 async function load () {
     try {
         target = await api.getTarget({ id: params.id })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -44,7 +44,7 @@ async function update () {
             targetDataRequest: target,
         })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -56,7 +56,7 @@ async function remove () {
 }
 
 async function toggleRole (role: Role) {
-    if (roleIsAllowed[role.id]) {
+    if (role.id in roleIsAllowed) {
         await api.deleteTargetRole({
             id: target.id,
             roleId: role.id,
@@ -124,7 +124,7 @@ async function toggleRole (role: Role) {
             Http: TargetKind.Http,
             MySql: TargetKind.MySql,
         }[target.options.kind ?? '']}
-        targetExternalHost={target.options['externalHost']}
+        targetExternalHost={target.options.kind == "Http" ? target.options.externalHost : undefined}
     />
 
     <h4 class="mt-4">Configuration</h4>

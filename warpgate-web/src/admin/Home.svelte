@@ -9,7 +9,7 @@
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
-    import { Input } from 'sveltestrap'
+    import { Input } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
 
     let [showActiveOnly, showActiveOnly$] = autosave('sessions-list:show-active-only', false)

@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 import Fa from 'svelte-fa'
 import Router, { push, RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'

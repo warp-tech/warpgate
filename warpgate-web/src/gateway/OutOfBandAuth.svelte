@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 
 import { api, ApiAuthState, AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'

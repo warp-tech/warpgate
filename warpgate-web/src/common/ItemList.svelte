@@ -17,7 +17,7 @@
     import { Subject, switchMap, map, Observable, distinctUntilChanged, share, combineLatest, tap, debounceTime } from 'rxjs'
     import Pagination from './Pagination.svelte'
     import { observe } from 'svelte-observable'
-    import { Input } from 'sveltestrap'
+    import { Input } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
 
     // eslint-disable-next-line @typescript-eslint/no-type-alias

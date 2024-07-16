@@ -22,7 +22,8 @@
             "*": [
                 "src/*"
             ]
-        }
+        },
+        "verbatimModuleSyntax": false,
     },
     "include": [
         "src/**/*.d.ts",
