@@ -56,7 +56,7 @@ async function remove () {
 }
 
 async function toggleRole (role: Role) {
-    if (role.id in roleIsAllowed) {
+    if (roleIsAllowed[role.id]) {
         await api.deleteTargetRole({
             id: target.id,
             roleId: role.id,

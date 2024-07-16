@@ -13,6 +13,7 @@ let successVisible = false
 let button: HTMLElement
 
 async function _click () {
+    if (disabled) return
     successVisible = true
     copyTextToClipboard(text)
     setTimeout(() => {
