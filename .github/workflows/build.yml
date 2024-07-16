@@ -26,9 +26,7 @@ jobs:
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: libssl-dev
+        run: sudo apt install -y libssl-dev
 
       - uses: actions/checkout@v2
         with:
