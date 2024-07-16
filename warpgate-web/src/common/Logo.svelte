@@ -1,4 +1,4 @@
-<script type="ts">
+<script lang="ts">
 import { onDestroy, onMount } from 'svelte'
 import { get } from 'svelte/store'
 import { currentThemeFile } from 'theme'

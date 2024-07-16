@@ -1,8 +1,7 @@
 <script lang="ts">
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Button, Spinner } from 'sveltestrap'
-import type { ButtonColor } from 'sveltestrap/src/Button'
+import { Button, Spinner, Color } from '@sveltestrap/sveltestrap'
 
 enum State {
     Normal = 'n',
@@ -12,7 +11,7 @@ enum State {
 }
 
 export let click: CallableFunction
-export let color: ButtonColor = 'secondary'
+export let color: Color | 'link' = 'secondary'
 export let disabled = false
 export let outline = false
 export let type = 'submit'

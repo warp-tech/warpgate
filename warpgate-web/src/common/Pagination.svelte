@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faAngleLeft, faAngleRight } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Pagination, PaginationItem, PaginationLink } from 'sveltestrap'
+import { Pagination, PaginationItem, PaginationLink } from '@sveltestrap/sveltestrap'
 
 export let page = 0
 export let pageSize = 1

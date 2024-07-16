@@ -118,6 +118,9 @@ pub struct SshConfig {
 
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
+
+    #[serde(default = "_default_ssh_inactivity_timeout", with = "humantime_serde")]
+    pub inactivity_timeout: Duration,
 }
 
 impl Default for SshConfig {
@@ -128,6 +131,7 @@ impl Default for SshConfig {
             keys: _default_ssh_keys_path(),
             host_key_verification: Default::default(),
             external_port: None,
+            inactivity_timeout: _default_ssh_inactivity_timeout(),
         }
     }
 }
@@ -361,7 +365,7 @@ impl WarpgateConfig {
 
         if let Some(request) = for_request {
             // 3: Host header in the request
-            scheme = request.uri().scheme().map(Clone::clone).unwrap_or(scheme);
+            scheme = request.uri().scheme().cloned().unwrap_or(scheme);
 
             if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
                 if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {

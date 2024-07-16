@@ -19,7 +19,7 @@ use crate::tls::configure_tls_connector;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,
-    pub capabilities: Capabilities,
+    pub _capabilities: Capabilities,
 }
 
 pub struct ConnectionOptions {
@@ -167,7 +167,7 @@ impl MySqlClient {
 
         Ok(Self {
             stream,
-            capabilities: options.capabilities,
+            _capabilities: options.capabilities,
         })
     }
 }

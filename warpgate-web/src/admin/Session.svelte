@@ -6,7 +6,7 @@ import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { formatDistance, formatDistanceToNow } from 'date-fns';
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
 

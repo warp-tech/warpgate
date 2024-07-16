@@ -11,8 +11,8 @@ async-trait = "0.1"
 atty = "0.2"
 bytes = "1.3"
 clap = { version = "3.2", features = ["derive"] }
-config = { version = "0.13", features = ["yaml"], default_features = false }
-console = { version = "0.15", default_features = false }
+config = { version = "0.13", features = ["yaml"], default-features = false }
+console = { version = "0.15", default-features = false }
 console-subscriber = { version = "0.1", optional = true }
 data-encoding = "2.3"
 dialoguer = "0.10"

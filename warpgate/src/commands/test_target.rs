@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tracing::*;
-use warpgate_common::{Target, TargetOptions};
+use warpgate_common::TargetOptions;
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
 use crate::config::load_config;
@@ -17,7 +17,7 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         .await?
         .iter()
         .find(|x| &x.name == target_name)
-        .map(Target::clone)
+        .cloned()
     else {
         error!("Target not found: {}", target_name);
         return Ok(());

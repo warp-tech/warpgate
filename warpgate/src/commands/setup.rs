@@ -14,7 +14,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, SshConfig, Secret, UserAuthCredential,
+    HttpConfig, ListenEndpoint, MySqlConfig, Secret, SshConfig, UserAuthCredential,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};

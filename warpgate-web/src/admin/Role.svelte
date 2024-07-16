@@ -3,7 +3,7 @@ import { api, Role } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from 'sveltestrap'
+import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 
 export let params: { id: string }
 
@@ -14,7 +14,7 @@ async function load () {
     try {
         role = await api.getRole({ id: params.id })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -25,7 +25,7 @@ async function update () {
             roleDataRequest: role,
         })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 

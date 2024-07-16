@@ -4,7 +4,7 @@
     import { Terminal } from 'xterm'
     import { SerializeAddon } from 'xterm-addon-serialize'
     import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
-    import { Spinner } from 'sveltestrap'
+    import { Spinner } from '@sveltestrap/sveltestrap'
     import formatDuration from 'format-duration'
     import type { Recording } from 'admin/lib/api'
 
@@ -32,7 +32,7 @@
         'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
     ]
 
-    const theme = {
+    const theme: { [key: string]: string } = {
         foreground: '#ffcb83',
         background: '#262626',
         cursor: '#fc531d',
@@ -74,7 +74,11 @@
     }
 
     function isAsciiCastData (data: AsciiCastItem): data is AsciiCastData {
-        return data[1] === 'o' || data[1] === 'e'
+        if (data instanceof Array) {
+            return data[1] === 'o' || data[1] === 'e'
+        } else {
+            return false
+        }
     }
 
     interface SizeEvent { time: number, cols: number, rows: number }
@@ -399,6 +403,7 @@
     }
 
     input[type="range"] {
+        appearance: none;
         -webkit-appearance: none;
         margin: 18px 10px 0;
         height: 2px;
