@@ -25,7 +25,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+      - if: startsWith(matrix.os, 'ubuntu')
+        uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libssl-dev
 
