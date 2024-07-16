@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
-        run: sudo apt install -y libssl-dev
+        run: sudo apt install -y libssl-dev pkg-config
 
       - uses: actions/checkout@v2
         with:
