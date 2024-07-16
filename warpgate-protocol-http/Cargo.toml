@@ -7,7 +7,7 @@ version = "0.9.1"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", default_features = false, features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 cookie = "0.16"
 data-encoding = "2.3"
 delegate = "0.6"

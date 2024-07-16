@@ -418,7 +418,7 @@ impl ServerSession {
                 }
             }
 
-            ServerHandlerEvent::PtyRequest(server_channel_id, request, _) => {
+            ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
                 let channel_id = self.map_channel(&server_channel_id)?;
                 self.channel_pty_size_map
                     .insert(channel_id, request.clone());
@@ -443,6 +443,7 @@ impl ServerSession {
                     .channel_success(server_channel_id.0)
                     .await;
                 self.pty_channels.push(channel_id);
+                let _ = reply.send(());
             }
 
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
@@ -488,28 +489,34 @@ impl ServerSession {
                 let _ = reply.send(self._auth_keyboard_interactive(username, response).await);
             }
 
-            ServerHandlerEvent::Data(channel, data, _) => {
+            ServerHandlerEvent::Data(channel, data, reply) => {
                 self._data(channel, data).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ExtendedData(channel, data, code, _) => {
+            ServerHandlerEvent::ExtendedData(channel, data, code, reply) => {
                 self._extended_data(channel, code, data).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ChannelClose(channel, _) => {
+            ServerHandlerEvent::ChannelClose(channel, reply) => {
                 self._channel_close(channel).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ChannelEof(channel, _) => {
+            ServerHandlerEvent::ChannelEof(channel, reply) => {
                 self._channel_eof(channel).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::WindowChangeRequest(channel, request, _) => {
+            ServerHandlerEvent::WindowChangeRequest(channel, request, reply) => {
                 self._window_change_request(channel, request).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::Signal(channel, signal, _) => {
+            ServerHandlerEvent::Signal(channel, signal, reply) => {
                 self._channel_signal(channel, signal).await?;
+                let _ = reply.send(());
             }
 
             ServerHandlerEvent::ExecRequest(channel, data, reply) => {
@@ -521,12 +528,14 @@ impl ServerSession {
                 let _ = reply.send(self._channel_open_direct_tcpip(channel, params).await?);
             }
 
-            ServerHandlerEvent::EnvRequest(channel, name, value, _) => {
+            ServerHandlerEvent::EnvRequest(channel, name, value, reply) => {
                 self._channel_env_request(channel, name, value).await?;
+                let _ = reply.send(());
             }
 
-            ServerHandlerEvent::X11Request(channel, request, _) => {
+            ServerHandlerEvent::X11Request(channel, request, reply) => {
                 self._channel_x11_request(channel, request).await?;
+                let _ = reply.send(());
             }
 
             ServerHandlerEvent::TcpIpForward(address, port, reply) => {

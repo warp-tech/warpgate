@@ -21,7 +21,6 @@ static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 
 pub trait SessionExt {
-    fn has_selected_target(&self) -> bool;
     fn get_target_name(&self) -> Option<String>;
     fn set_target_name(&self, target_name: String);
     fn is_authenticated(&self) -> bool;
@@ -33,10 +32,6 @@ pub trait SessionExt {
 }
 
 impl SessionExt for Session {
-    fn has_selected_target(&self) -> bool {
-        self.get_target_name().is_some()
-    }
-
     fn get_target_name(&self) -> Option<String> {
         self.get(TARGET_SESSION_KEY)
     }

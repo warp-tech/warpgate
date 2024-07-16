@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tracing::*;
-use warpgate_common::{Target, TargetOptions};
+use warpgate_common::TargetOptions;
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
 use crate::config::load_config;
