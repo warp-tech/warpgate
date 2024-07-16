@@ -25,6 +25,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - if: startsWith(matrix.os, 'ubuntu')
+        run: sudo apt install -y libssl-dev pkg-config
+
       - uses: actions/checkout@v2
         with:
           submodules: recursive

@@ -8,7 +8,7 @@ use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{Secret, SessionId};
+use warpgate_common::Secret;
 
 use crate::common::{PtyRequest, ServerChannelId};
 use crate::{DirectTCPIPParams, X11Request};
@@ -52,7 +52,6 @@ pub enum ServerHandlerEvent {
 }
 
 pub struct ServerHandler {
-    pub id: SessionId,
     pub event_tx: UnboundedSender<ServerHandlerEvent>,
 }
 

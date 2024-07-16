@@ -3,6 +3,7 @@ mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -32,12 +33,12 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             keys: load_host_keys(&config)?,
             event_buffer_size: 100,
             preferred: Preferred {
-                key: &[
+                key: Cow::Borrowed(&[
                     russh_keys::key::ED25519,
                     russh_keys::key::RSA_SHA2_256,
                     russh_keys::key::RSA_SHA2_512,
                     russh_keys::key::SSH_RSA,
-                ],
+                ]),
                 ..<_>::default()
             },
             ..<_>::default()
@@ -70,7 +71,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
 
         let (event_tx, event_rx) = unbounded_channel();
 
-        let handler = ServerHandler { id, event_tx };
+        let handler = ServerHandler { event_tx };
 
         let session = match ServerSession::start(
             remote_address,
