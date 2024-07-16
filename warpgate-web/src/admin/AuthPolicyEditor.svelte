@@ -29,17 +29,15 @@ $: {
 }
 
 function updateAny () {
-    setTimeout(() => {
-        if (isAny) {
-            value[protocolId] = undefined
-        } else {
-            value[protocolId] = []
-            let oneCred = Array.from(validCredentials).filter(x => possibleCredentials.has(x))[0]
-            if (oneCred) {
-                value[protocolId] = [oneCred]
-            }
+    if (isAny) {
+        value[protocolId] = undefined
+    } else {
+        value[protocolId] = []
+        let oneCred = Array.from(validCredentials).filter(x => possibleCredentials.has(x))[0]
+        if (oneCred) {
+            value[protocolId] = [oneCred]
         }
-    })
+    }
 }
 
 function toggle (type: CredentialKind) {
