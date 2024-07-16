@@ -25,6 +25,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libssl-dev
+
       - uses: actions/checkout@v2
         with:
           submodules: recursive
