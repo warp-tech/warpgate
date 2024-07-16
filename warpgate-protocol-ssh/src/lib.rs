@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait)]
+#![feature(type_alias_impl_trait, try_blocks)]
 mod client;
 mod common;
 mod compat;
