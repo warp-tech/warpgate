@@ -2,9 +2,9 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use russh::keys::key::PublicKey;
 use russh::server::{Auth, Handle, Msg, Session};
 use russh::{Channel, ChannelId, Pty, Sig};
-use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -181,7 +181,7 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey_offered(
         &mut self,
         user: &str,
-        key: &russh_keys::key::PublicKey,
+        key: &russh::keys::key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
@@ -205,7 +205,7 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        key: &russh_keys::key::PublicKey,
+        key: &russh::keys::key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();

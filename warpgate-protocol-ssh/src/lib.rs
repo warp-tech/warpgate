@@ -14,7 +14,7 @@ use async_trait::async_trait;
 pub use client::*;
 pub use common::*;
 pub use keys::*;
-use russh_keys::PublicKeyBase64;
+use russh::keys::PublicKeyBase64;
 pub use server::run_server;
 use uuid::Uuid;
 use warpgate_common::{ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions};

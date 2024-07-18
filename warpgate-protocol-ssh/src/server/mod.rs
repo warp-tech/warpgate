@@ -34,10 +34,10 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             event_buffer_size: 100,
             preferred: Preferred {
                 key: Cow::Borrowed(&[
-                    russh_keys::key::ED25519,
-                    russh_keys::key::RSA_SHA2_256,
-                    russh_keys::key::RSA_SHA2_512,
-                    russh_keys::key::SSH_RSA,
+                    russh::keys::key::ED25519,
+                    russh::keys::key::RSA_SHA2_256,
+                    russh::keys::key::RSA_SHA2_512,
+                    russh::keys::key::SSH_RSA,
                 ]),
                 ..<_>::default()
             },

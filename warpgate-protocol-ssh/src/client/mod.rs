@@ -16,8 +16,8 @@ pub use error::SshClientError;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
+use russh::keys::key::PublicKey;
 use russh::{kex, Preferred, Sig};
-use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -47,7 +47,7 @@ pub enum ConnectionError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Key(#[from] russh_keys::Error),
+    Key(#[from] russh::keys::Error),
 
     #[error(transparent)]
     Ssh(#[from] russh::Error),

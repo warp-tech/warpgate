@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use russh_keys::key::PublicKey;
-use russh_keys::PublicKeyBase64;
+use russh::keys::key::PublicKey;
+use russh::keys::PublicKeyBase64;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use uuid::Uuid;

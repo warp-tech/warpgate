@@ -24,8 +24,7 @@ poem-openapi = { version = "2.0", features = [
     "uuid",
     "static-files",
 ] }
-russh-keys = { version = "0.44.0-beta.5", features = ["legacy-ed25519-pkcs8-parser"] }
-# russh-keys = { version = "0.23.0-beta.1", path = "../../russh/russh-keys" }
+russh = { version = "0.44.0", features = ["legacy-ed25519-pkcs8-parser"] }
 rust-embed = "8.3"
 sea-orm = { version = "0.12.2", features = [
     "runtime-tokio-rustls",
