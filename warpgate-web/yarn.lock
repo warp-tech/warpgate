@@ -3239,7 +3239,7 @@ svelte-observable@^0.4.0:
   resolved "https://registry.yarnpkg.com/svelte-observable/-/svelte-observable-0.4.0.tgz#74756e42fa3516c154d53f4244fa9cf691854224"
   integrity sha512-e8CfnkUfOZ/nAIpdFi+g63lS5oU+8J+KKhwkHpO0/reADeTBbIiVbcCqVrLsETp8+i+4ydQoawNCwMP/C8oMyA==
 
-svelte-preprocess@^5.0.3, svelte-preprocess@^5.1.3:
+svelte-preprocess@^5.1.3:
   version "5.1.4"
   resolved "https://registry.yarnpkg.com/svelte-preprocess/-/svelte-preprocess-5.1.4.tgz#14ada075c94bbd2b71c5ec70ff72f8ebe1c95b91"
   integrity sha512-IvnbQ6D6Ao3Gg6ftiM5tdbR6aAETwjhHV+UKGf5bHGYR69RQvF1ho0JKPcbUON4vy4R7zom13jPjgdOWCQ5hDA==
@@ -3249,6 +3249,11 @@ svelte-preprocess@^5.0.3, svelte-preprocess@^5.1.3:
     magic-string "^0.30.5"
     sorcery "^0.11.0"
     strip-indent "^3.0.0"
+
+svelte-preprocess@^6.0.2:
+  version "6.0.2"
+  resolved "https://registry.yarnpkg.com/svelte-preprocess/-/svelte-preprocess-6.0.2.tgz#920bd53b1127757edb0a7d946dace75a0cac9ecf"
+  integrity sha512-OvDTLfaOkkhjprbDKO0SOCkjNYuHy16dbD4SpqbIi6QiabOMHxRT4km5/dzbFFkmW1L0E2INF3MFltG2pgOyKQ==
 
 svelte-spa-router@^4.0.1:
   version "4.0.1"
