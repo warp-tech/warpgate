@@ -1196,7 +1196,7 @@ impl ServerSession {
         &mut self,
         ssh_username: Secret<String>,
         key: PublicKey,
-    ) -> bool {
+    ) -> russh::server::Auth {
         let keys = self._get_public_keys_from_of(key);
         let selector: AuthSelector = ssh_username.expose_secret().into();
 
@@ -1211,10 +1211,19 @@ impl ServerSession {
                 )
                 .await
             {
-                return true;
+                return russh::server::Auth::Accept;
             }
         }
-        false
+
+        let selector: AuthSelector = ssh_username.expose_secret().into();
+        match self.try_auth(&selector, None).await {
+            Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+            },
+            _ => russh::server::Auth::Reject {
+                proceed_with_methods: None,
+            },
+        }
     }
 
     async fn _auth_publickey(
@@ -1281,8 +1290,8 @@ impl ServerSession {
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: None,
             },
-            Ok(AuthResult::Need(_)) => russh::server::Auth::Reject {
-                proceed_with_methods: None,
+            Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");

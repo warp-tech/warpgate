@@ -29,7 +29,7 @@ pub enum ServerHandlerEvent {
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     ShellRequest(ServerChannelId, oneshot::Sender<bool>),
     AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
-    AuthPublicKeyOffer(Secret<String>, PublicKey, oneshot::Sender<bool>),
+    AuthPublicKeyOffer(Secret<String>, PublicKey, oneshot::Sender<Auth>),
     AuthPassword(Secret<String>, Secret<String>, oneshot::Sender<Auth>),
     AuthKeyboardInteractive(
         Secret<String>,
@@ -192,14 +192,7 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        let result = rx.await.unwrap_or(false);
-        Ok(if result {
-            Auth::Accept
-        } else {
-            Auth::Reject {
-                proceed_with_methods: None,
-            }
-        })
+        Ok(rx.await.unwrap_or(Auth::Reject { proceed_with_methods: None }))
     }
 
     async fn auth_publickey(
