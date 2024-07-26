@@ -2,7 +2,7 @@
 import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert } from '@sveltestrap/sveltestrap'
 import Fa from 'svelte-fa'
-import Router, { push, RouteDetail } from 'svelte-spa-router'
+import Router, { push, type RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
 import { api } from 'gateway/lib/api'

@@ -1,12 +1,12 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
 
-import { CredentialKind, User, UserRequireCredentialsPolicy } from './lib/api'
+import { CredentialKind, type User, type UserRequireCredentialsPolicy } from './lib/api'
 
 export let user: User
 export let value: UserRequireCredentialsPolicy
 export let possibleCredentials: Set<CredentialKind>
-export let protocolId: "http" | "ssh" | "mysql"
+export let protocolId: 'http' | 'ssh' | 'mysql'
 
 const labels = {
     Password: 'Password',
@@ -33,7 +33,7 @@ function updateAny () {
         value[protocolId] = undefined
     } else {
         value[protocolId] = []
-        let oneCred = Array.from(validCredentials).filter(x => possibleCredentials.has(x))[0]
+        let oneCred = Array.from(validCredentials).find(x => possibleCredentials.has(x))
         if (oneCred) {
             value[protocolId] = [oneCred]
         }

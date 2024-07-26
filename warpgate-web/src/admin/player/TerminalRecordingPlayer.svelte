@@ -32,7 +32,7 @@
         'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
     ]
 
-    const theme: { [key: string]: string } = {
+    const theme: Record<string, string> = {
         foreground: '#ffcb83',
         background: '#262626',
         cursor: '#fc531d',
@@ -56,7 +56,7 @@
         '#fafaff',
     ]
     for (let i = 0; i < COLOR_NAMES.length; i++) {
-        theme[COLOR_NAMES[i]] = colors[i]
+        theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
     interface AsciiCastHeader {
@@ -216,7 +216,7 @@
         let lastSize = { cols: term.cols, rows: term.rows }
 
         for (let i = 0; i <= index; i++) {
-            let event = events[i]
+            let event = events[i]!
             if ('cols' in event) {
                 lastSize = { cols: event.cols, rows: event.rows }
             }
@@ -233,7 +233,7 @@
 
         for (let i = index; i < events.length; i++) {
             let shouldSnapshot = false
-            let event = events[i]
+            let event = events[i]!
             if (event.time > time) {
                 break
             }
@@ -296,6 +296,12 @@
         playing = !playing
     }
 
+    function keyPressHandler (event: KeyboardEvent) {
+        if (event.key === ' ') {
+            togglePlaying()
+        }
+    }
+
     step()
 
     function toggleFullscreen () {
@@ -318,10 +324,13 @@
     </div>
     {/if}
 
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
         class="container"
         class:invisible={loading}
         on:click={togglePlaying}
+        on:keypress={keyPressHandler}
+        role="img"
         bind:this={containerElement}
     ></div>
 

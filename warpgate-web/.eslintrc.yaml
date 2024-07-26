@@ -138,11 +138,14 @@ rules:
     imports: always-multiline
     exports: always-multiline
     functions: only-multiline
+  '@typescript-eslint/use-unknown-in-catch-callback-variable': off
 
 overrides:
   - files: '*.svelte'
     parser: 'svelte-eslint-parser'
     parserOptions:
+      svelteFeatures:
+        experimentalGenerics: true
       parser:
         ts: '@typescript-eslint/parser'
         js: 'espree'

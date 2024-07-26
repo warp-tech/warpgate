@@ -6,7 +6,7 @@ import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
-import { api, ApiAuthState, LoginFailureResponseFromJSON, SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
+import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -56,7 +56,7 @@ async function continueWithState () {
             // todo
         }
         if (providers.length === 1) {
-            startSSO(providers[0])
+            startSSO(providers[0]!)
         }
     }
     if (authState === ApiAuthState.OtpNeeded) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, Ticket } from 'admin/lib/api'
+import { api, type Ticket } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert } from '@sveltestrap/sveltestrap'
 import RelativeDate from './RelativeDate.svelte'

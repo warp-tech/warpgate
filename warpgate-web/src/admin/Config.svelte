@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
-    import { Role, Target, User, api } from 'admin/lib/api'
-    import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
+    import { type Role, type Target, type User, api } from 'admin/lib/api'
+    import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
@@ -48,7 +48,6 @@
         </div>
 
         <ItemList load={getTargets} showSearch={true}>
-            <!-- svelte-ignore a11y-missing-attribute -->
             <a
                 slot="item" let:item={target}
                 class="list-group-item list-group-item-action"
@@ -87,7 +86,6 @@
         </div>
 
         <ItemList load={getUsers} showSearch={true}>
-            <!-- svelte-ignore a11y-missing-attribute -->
             <a
                 slot="item" let:item={user}
                 class="list-group-item list-group-item-action"
@@ -110,7 +108,6 @@
         </div>
 
         <ItemList load={getRoles} showSearch={true}>
-            <!-- svelte-ignore a11y-missing-attribute -->
             <a
                 slot="item" let:item={role}
                 class="list-group-item list-group-item-action"

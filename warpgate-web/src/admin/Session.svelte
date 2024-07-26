@@ -1,9 +1,9 @@
 <script lang="ts">
-import { api, SessionSnapshot, Recording, TargetSSHOptions, TargetHTTPOptions, TargetMySqlOptions } from 'admin/lib/api'
+import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions } from 'admin/lib/api'
 import { timeAgo } from 'admin/lib/time'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
-import { formatDistance, formatDistanceToNow } from 'date-fns';
+import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
 import { Alert } from '@sveltestrap/sveltestrap'

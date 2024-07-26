@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, SSHKey, SSHKnownHost } from 'admin/lib/api'
+import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
 import CopyButton from 'common/CopyButton.svelte'
 import { Alert } from '@sveltestrap/sveltestrap'
 

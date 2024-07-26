@@ -21,8 +21,8 @@ yarn *ARGS:
 migrate *ARGS:
     cargo run --all-features -p warpgate-db-migrations -- {{ARGS}}
 
-lint:
-    cd warpgate-web && yarn run lint
+lint *ARGS:
+    cd warpgate-web && yarn run lint {{ARGS}}
 
 svelte-check:
     cd warpgate-web && yarn run check

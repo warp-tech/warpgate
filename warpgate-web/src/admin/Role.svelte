@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, Role } from 'admin/lib/api'
+import { api, type Role } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'

@@ -2,7 +2,7 @@
 import { onMount } from 'svelte'
 import { Alert, Button, FormGroup, Input, Modal, ModalBody, ModalFooter, ModalHeader } from '@sveltestrap/sveltestrap'
 import QRCode from 'qrcode'
-import { TOTP, TOTPOptions } from '@otplib/core'
+import { TOTP, type TOTPOptions } from '@otplib/core'
 import { createDigest } from '@otplib/plugin-crypto-js'
 import { faRefresh } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'

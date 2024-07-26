@@ -3,12 +3,12 @@
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
-    import { api, SessionSnapshot } from 'admin/lib/api'
-    import { formatDistance } from 'date-fns';
+    import { api, type SessionSnapshot } from 'admin/lib/api'
+    import { formatDistance } from 'date-fns'
     import { timer, Observable, switchMap, from, combineLatest, fromEvent, merge } from 'rxjs'
     import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
+    import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { Input } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
 

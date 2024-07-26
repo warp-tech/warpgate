@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, User, Target, TargetOptions, TicketAndSecret } from 'admin/lib/api'
+import { api, type User, type Target, type TicketAndSecret } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
@@ -68,7 +68,7 @@ async function create () {
         targetName={selectedTarget.name}
         targetKind={TargetKind[selectedTarget.options.kind]}
         username={selectedUser.username}
-        targetExternalHost={selectedTarget.options.kind == "Http" ? selectedTarget.options.externalHost : undefined}
+        targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
         ticketSecret={result.secret}
     />
     {/if}

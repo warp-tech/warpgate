@@ -1,6 +1,6 @@
 <script lang="ts">
 import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
-import { api, Role, Target, User } from 'admin/lib/api'
+import { api, type Role, type Target, type User } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -17,7 +17,7 @@ let error: Error|undefined
 let selectedUser: User|undefined
 let target: Target
 let allRoles: Role[] = []
-let roleIsAllowed: { [id: string] : any; } = {}
+let roleIsAllowed: Record<string, any> = {}
 
 async function load () {
     try {
@@ -110,8 +110,8 @@ async function toggleRole (role: Role) {
                     {/each}
                 </select>
             </FormGroup>
-        {:catch error}
-            <Alert color="danger">{error}</Alert>
+        {:catch _error}
+            <Alert color="danger">{_error}</Alert>
         {/await}
     {/if}
 
@@ -124,7 +124,7 @@ async function toggleRole (role: Role) {
             Http: TargetKind.Http,
             MySql: TargetKind.MySql,
         }[target.options.kind ?? '']}
-        targetExternalHost={target.options.kind == "Http" ? target.options.externalHost : undefined}
+        targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
     />
 
     <h4 class="mt-4">Configuration</h4>
@@ -234,16 +234,18 @@ async function toggleRole (role: Role) {
     {#await loadRoles() then}
         <div class="list-group list-group-flush mb-3">
             {#each allRoles as role}
-                <div
+                <label
+                    for="role-{role.id}"
                     class="list-group-item list-group-item-action d-flex align-items-center"
-                    on:click={() => toggleRole(role)}
                 >
                     <Input
+                        id="role-{role.id}"
                         class="mb-0 me-2"
                         type="switch"
+                        on:click={() => toggleRole(role)}
                         checked={roleIsAllowed[role.id]} />
                     <div>{role.name}</div>
-                </div>
+                </label>
             {/each}
         </div>
     {/await}

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Tls, TlsMode } from 'admin/lib/api'
+import { type Tls, TlsMode } from 'admin/lib/api'
 import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 
 export let value: Tls

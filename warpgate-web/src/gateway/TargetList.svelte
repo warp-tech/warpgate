@@ -2,8 +2,8 @@
 import { Observable, from, map } from 'rxjs'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-import ItemList, { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
-import { api, TargetSnapshot, TargetKind } from 'gateway/lib/api'
+import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
+import { api, type TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import { createEventDispatcher } from 'svelte'
 import Fa from 'svelte-fa'
 import { Modal, ModalBody, ModalHeader } from '@sveltestrap/sveltestrap'
@@ -53,10 +53,10 @@ function loadURL (url: string) {
         class="list-group-item list-group-item-action target-item"
         href={
             target.kind === TargetKind.WebAdmin
-            ? '/@warpgate/admin'
-            : target.kind === TargetKind.Http
-            ? `/?warpgate-target=${target.name}`
-            : '/@warpgate/admin'
+                ? '/@warpgate/admin'
+                : target.kind === TargetKind.Http
+                    ? `/?warpgate-target=${target.name}`
+                    : '/@warpgate/admin'
         }
         on:click|preventDefault={e => {
             if (e.metaKey || e.ctrlKey) {

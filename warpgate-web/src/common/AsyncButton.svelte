@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Button, Spinner, Color } from '@sveltestrap/sveltestrap'
+import { Button, Spinner, type Color } from '@sveltestrap/sveltestrap'
 
 enum State {
     Normal = 'n',

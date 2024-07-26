@@ -1,7 +1,7 @@
 <script lang="ts">
 import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
-import { Button, Color } from '@sveltestrap/sveltestrap'
+import { Button, type Color } from '@sveltestrap/sveltestrap'
 import copyTextToClipboard from 'copy-text-to-clipboard'
 
 export let text: string
@@ -13,7 +13,9 @@ let successVisible = false
 let button: HTMLElement
 
 async function _click () {
-    if (disabled) return
+    if (disabled) {
+        return
+    }
     successVisible = true
     copyTextToClipboard(text)
     setTimeout(() => {

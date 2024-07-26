@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, LogEntry } from 'admin/lib/api'
+import { api, type LogEntry } from 'admin/lib/api'
 import { Alert } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
@@ -31,7 +31,7 @@ function addItems (newItems: LogEntry[]) {
         return
     }
     items ??= []
-    if (items?.[0]?.timestamp > newItems[0].timestamp) {
+    if ((items?.[0]?.timestamp ?? 0) > newItems[0]!.timestamp) {
         items = items.concat(newItems)
     } else {
         items = [
