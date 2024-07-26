@@ -339,69 +339,82 @@ pub struct WarpgateConfig {
 }
 
 impl WarpgateConfig {
+    pub fn _external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
+        if let Some(external_host) = self.store.external_host.as_ref() {
+            #[allow(clippy::unwrap_used)]
+            let external_host = external_host.split(":").next().unwrap();
+
+            Some((
+                Scheme::HTTPS,
+                external_host.to_owned(),
+                self.store
+                    .http
+                    .external_port
+                    .or(Some(self.store.http.listen.port())),
+            ))
+        } else {
+            None
+        }
+    }
+
+    // Extract external host:port from request headers
+    pub fn _external_host_from_request(
+        &self,
+        request: &poem::Request,
+    ) -> Option<(Scheme, String, Option<u16>)> {
+        let (mut scheme, mut host, mut port) = (Scheme::HTTPS, None, None);
+        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
+
+        // Try the Host header first
+        scheme = request.uri().scheme().cloned().unwrap_or(scheme);
+
+        if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
+            if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {
+                host = host_port.host_str().map(Into::into).or(host);
+                port = host_port.port();
+            }
+        }
+
+        // But prefer X-Forwarded-* headers if enabled
+        if trust_forwarded_headers {
+            scheme = request
+                .header("x-forwarded-proto")
+                .and_then(|x| Scheme::try_from(x).ok())
+                .unwrap_or(scheme);
+
+            if let Some(xfh) = request.header("x-forwarded-host") {
+                // XFH can contain both host and port
+                let parts = xfh.split(':').collect::<Vec<_>>();
+                host = parts.first().map(|x| x.to_string()).or(host);
+                port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
+            }
+
+            port = request
+                .header("x-forwarded-port")
+                .and_then(|x| x.parse::<u16>().ok())
+                .or(port);
+        }
+
+        host.map(|host| (scheme, host, port))
+    }
+
     pub fn construct_external_url(
         &self,
         for_request: Option<&poem::Request>,
     ) -> Result<Url, WarpgateError> {
-        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
-
-        // 1: external_host is not a valid `host[:port]`
-        let (mut scheme, mut host, mut port) = (
-            Scheme::HTTPS,
-            self.store.external_host.clone(),
-            Some(self.store.http.listen.port()),
-        );
-
-        // 2: external_host is a valid `host[:port]`
-        if let Some(external_url) = self
-            .store
-            .external_host
-            .as_ref()
-            .and_then(|x| Url::parse(&format!("https://{x}/")).ok())
-        {
-            host = external_url.host_str().map(Into::into).or(host);
-            port = external_url.port();
-        }
-
-        if let Some(request) = for_request {
-            // 3: Host header in the request
-            scheme = request.uri().scheme().cloned().unwrap_or(scheme);
-
-            if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
-                if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {
-                    host = host_port.host_str().map(Into::into).or(host);
-                    port = host_port.port();
-                }
-            }
-
-            // 4: X-Forwarded-* headers in the request
-            if trust_forwarded_headers {
-                scheme = request
-                    .header("x-forwarded-proto")
-                    .and_then(|x| Scheme::try_from(x).ok())
-                    .unwrap_or(scheme);
-
-                if let Some(xfh) = request.header("x-forwarded-host") {
-                    // XFH can contain both host and port
-                    let parts = xfh.split(':').collect::<Vec<_>>();
-                    host = parts.first().map(|x| x.to_string()).or(host);
-                    port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
-                }
-
-                port = request
-                    .header("x-forwarded-port")
-                    .and_then(|x| x.parse::<u16>().ok())
-                    .or(port);
-            }
-        }
-
-        let Some(host) = host else {
+        let Some((scheme, host, port)) = self
+            ._external_host_from_config()
+            .or(for_request.and_then(|r| self._external_host_from_request(r)))
+        else {
             return Err(WarpgateError::ExternalHostNotSet);
         };
 
         let mut url = format!("{scheme}://{host}");
         if let Some(port) = port {
-            url = format!("{url}:{port}");
+            // can't `match` `Scheme`
+            if scheme == Scheme::HTTP && port != 80 || scheme == Scheme::HTTPS && port != 443 {
+                url = format!("{url}:{port}");
+            }
         };
         Url::parse(&url).map_err(WarpgateError::UrlParse)
     }
