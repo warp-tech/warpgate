@@ -29,7 +29,7 @@ pub struct ManifestEntry {
 }
 
 pub fn lookup_built_file(source: &str) -> Result<ManifestEntry, LookupError> {
-    let file = Assets::get("manifest.json").ok_or(LookupError::ManifestNotFound)?;
+    let file = Assets::get(".vite/manifest.json").ok_or(LookupError::ManifestNotFound)?;
 
     let obj: HashMap<String, ManifestEntry> = serde_json::from_slice(&file.data)?;
 
