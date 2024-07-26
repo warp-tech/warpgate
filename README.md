@@ -17,7 +17,7 @@
 
 ---
 
-Warpgate is a smart SSH, HTTPS and MySQL bastion host for Linux that doesn't need special client apps.
+Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that doesn't need special client apps.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
@@ -63,7 +63,7 @@ In particular, we're working on:
 
 ## How it works
 
-Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS and MySQL connections and provide an (optional) web admin UI.
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, MySQL and PostgreSQL connections and provide an (optional) web admin UI.
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) for details.
 

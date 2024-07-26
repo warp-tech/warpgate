@@ -36,6 +36,7 @@ warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
+warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

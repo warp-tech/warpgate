@@ -5,7 +5,6 @@ mod error;
 mod session;
 mod session_handle;
 mod stream;
-mod tls;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,13 +17,12 @@ use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
 use crate::session::MySqlSession;
 use crate::session_handle::MySqlSessionHandle;
-use crate::tls::ResolveServerCert;
 
 pub struct MySQLProtocolServer {
     services: Services,

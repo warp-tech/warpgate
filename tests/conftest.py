@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
-from typing import List
+from typing import List, Optional
 
 from .util import alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
@@ -40,6 +40,7 @@ class WarpgateProcess:
     http_port: int
     ssh_port: int
     mysql_port: int
+    postgres_port: int
 
 
 class ProcessManager:
@@ -132,7 +133,7 @@ class ProcessManager:
         self,
         config="",
         args=None,
-        share_with: WarpgateProcess = None,
+        share_with: Optional[WarpgateProcess] = None,
         stderr=None,
         stdout=None,
     ) -> WarpgateProcess:
@@ -142,11 +143,13 @@ class ProcessManager:
             config_path = share_with.config_path
             ssh_port = share_with.ssh_port
             mysql_port = share_with.mysql_port
+            postgres_port = share_with.postgres_port
             http_port = share_with.http_port
         else:
             ssh_port = alloc_port()
             http_port = alloc_port()
             mysql_port = alloc_port()
+            postgres_port = alloc_port()
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
@@ -198,6 +201,8 @@ class ProcessManager:
                     str(http_port),
                     "--mysql-port",
                     str(mysql_port),
+                    "--postgres-port",
+                    str(postgres_port),
                     "--data-path",
                     data_dir,
                 ],
@@ -221,6 +226,7 @@ class ProcessManager:
             ssh_port=ssh_port,
             http_port=http_port,
             mysql_port=mysql_port,
+            postgres_port=postgres_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):

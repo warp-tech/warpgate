@@ -6,9 +6,8 @@ use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, Error as TlsError, ServerName};
-use warpgate_common::RustlsSetupError;
 
-use super::ROOT_CERT_STORE;
+use super::{RustlsSetupError, ROOT_CERT_STORE};
 
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);
 

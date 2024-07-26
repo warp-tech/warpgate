@@ -6,7 +6,7 @@ import { CredentialKind, type User, type UserRequireCredentialsPolicy } from './
 export let user: User
 export let value: UserRequireCredentialsPolicy
 export let possibleCredentials: Set<CredentialKind>
-export let protocolId: 'http' | 'ssh' | 'mysql'
+export let protocolId: 'http' | 'ssh' | 'mysql' | 'postgres'
 
 const labels = {
     Password: 'Password',

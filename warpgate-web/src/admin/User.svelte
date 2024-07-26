@@ -18,16 +18,18 @@ let policy: UserRequireCredentialsPolicy
 let allRoles: Role[] = []
 let roleIsAllowed: Record<string, any> = {}
 
-const policyProtocols: { id: 'ssh' | 'http' | 'mysql', name: string }[] = [
+const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres', name: string }[] = [
     { id: 'ssh', name: 'SSH' },
     { id: 'http', name: 'HTTP' },
     { id: 'mysql', name: 'MySQL' },
+    { id: 'postgres', name: 'PostgreSQL' },
 ]
 
 const possibleCredentials: Record<string, Set<CredentialKind>> = {
     ssh: new Set([CredentialKind.Password, CredentialKind.PublicKey, CredentialKind.Totp, CredentialKind.WebUserApproval]),
     http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
     mysql: new Set([CredentialKind.Password]),
+    postgres: new Set([CredentialKind.Password]),
 }
 
 async function load () {

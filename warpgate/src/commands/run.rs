@@ -11,6 +11,7 @@ use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
+use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
@@ -47,6 +48,14 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             MySQLProtocolServer::new(&services)
                 .await?
                 .run(*config.store.mysql.listen),
+        );
+    }
+
+    if config.store.postgres.enable {
+        protocol_futures.push(
+            PostgresProtocolServer::new(&services)
+                .await?
+                .run(*config.store.postgres.listen),
         );
     }
 
@@ -88,6 +97,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             info!(
                 "Accepting MySQL connections on {:?}",
                 config.store.mysql.listen
+            );
+        }
+        if config.store.postgres.enable {
+            info!(
+                "Accepting PostgreSQL connections on {:?}",
+                config.store.postgres.listen
             );
         }
         info!("--------------------------------------------");

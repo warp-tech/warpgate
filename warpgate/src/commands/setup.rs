@@ -14,7 +14,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, Secret, SshConfig, UserAuthCredential,
+    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig, UserAuthCredential,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
@@ -196,6 +196,29 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             }
         }
     }
+    if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
+        if let Some(postgres_port) = postgres_port {
+            store.postgres.enable = true;
+            store.postgres.listen =
+                ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *postgres_port)));
+        }
+    } else {
+        if is_docker() {
+            store.postgres.enable = true;
+        } else {
+            store.postgres.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept PostgreSQL connections?")
+                .interact()?;
+
+            if store.postgres.enable {
+                store.postgres.listen = prompt_endpoint(
+                    "Endpoint to listen for PostgreSQL connections on",
+                    PostgresConfig::default().listen,
+                );
+            }
+        }
+    }
 
     store.http.certificate = PathBuf::from(&data_path)
         .join("tls.certificate.pem")
@@ -209,6 +232,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     store.mysql.certificate = store.http.certificate.clone();
     store.mysql.key = store.http.key.clone();
+
+    store.postgres.certificate = store.http.certificate.clone();
+    store.postgres.key = store.http.key.clone();
 
     // ---
 

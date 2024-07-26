@@ -110,6 +110,15 @@ impl ConfigProvider for FileConfigProvider {
                     }),
                 );
             }
+            if let Some(p) = req.postgres {
+                policy.protocols.insert(
+                    "PostgreSQL",
+                    Box::new(AllCredentialsPolicy {
+                        supported_credential_types: supported_credential_types.clone(),
+                        required_credential_types: p.into_iter().collect(),
+                    }),
+                );
+            }
             if let Some(p) = req.ssh {
                 policy.protocols.insert(
                     "SSH",

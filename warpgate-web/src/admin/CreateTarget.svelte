@@ -6,7 +6,7 @@ import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 
 let error: Error|null = null
 let name = ''
-let type: 'Http' | 'MySql' | 'Ssh' = 'Ssh'
+let type: 'Http' | 'MySql' | 'Ssh' | 'Postgres' = 'Ssh'
 
 async function create () {
     if (!name || !type) {
@@ -40,6 +40,17 @@ async function create () {
                     verify: true,
                 },
                 username: 'root',
+                password: '',
+            },
+            Postgres: {
+                kind: 'Postgres' as const,
+                host: '192.168.0.1',
+                port: 5432,
+                tls: {
+                    mode: TlsMode.Preferred,
+                    verify: true,
+                },
+                username: 'postgres',
                 password: '',
             },
         }[type]
@@ -78,6 +89,7 @@ async function create () {
         <option value={'Ssh'}>SSH</option>
         <option value={'Http'}>HTTP</option>
         <option value={'MySql'}>MySQL</option>
+        <option value={'Postgres'}>PostgreSQL</option>
     </select>
 </FormGroup>
 

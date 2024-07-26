@@ -5567,6 +5567,7 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-protocol-http",
  "warpgate-protocol-mysql",
+ "warpgate-protocol-postgres",
  "warpgate-protocol-ssh",
 ]
 
@@ -5620,12 +5621,14 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "rustls 0.20.9",
+ "rustls-native-certs",
  "rustls-pemfile",
  "sea-orm",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-rustls 0.23.4",
  "totp-rs",
  "tracing",
  "tracing-core",
@@ -5758,7 +5761,6 @@ dependencies = [
  "password-hash 0.2.1",
  "rand",
  "rustls 0.20.9",
- "rustls-native-certs",
  "rustls-pemfile",
  "sha1",
  "thiserror",
@@ -5771,6 +5773,23 @@ dependencies = [
  "warpgate-database-protocols",
  "warpgate-db-entities",
  "webpki",
+]
+
+[[package]]
+name = "warpgate-protocol-postgres"
+version = "0.10.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "rustls 0.20.9",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "tokio",
+ "tokio-rustls 0.23.4",
+ "tracing",
+ "warpgate-common",
+ "warpgate-core",
+ "warpgate-database-protocols",
 ]
 
 [[package]]

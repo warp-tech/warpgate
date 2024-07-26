@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tracing::*;
-use warpgate_common::{TargetMySqlOptions, TlsMode};
+use warpgate_common::{configure_tls_connector, TargetMySqlOptions, TlsMode};
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
@@ -15,7 +15,6 @@ use warpgate_database_protocols::mysql::protocol::Capabilities;
 use crate::common::compute_auth_challenge_response;
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
-use crate::tls::configure_tls_connector;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,

@@ -55,6 +55,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         mysql_port: Option<u16>,
 
+        /// Enable PostgreSQL and set port
+        #[clap(long)]
+        postgres_port: Option<u16>,
+
         /// Enable session recording
         #[clap(long)]
         record_sessions: bool,

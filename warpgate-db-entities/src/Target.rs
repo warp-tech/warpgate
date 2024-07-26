@@ -13,6 +13,8 @@ pub enum TargetKind {
     MySql,
     #[sea_orm(string_value = "ssh")]
     Ssh,
+    #[sea_orm(string_value = "postgres")]
+    Postgres,
     #[sea_orm(string_value = "web_admin")]
     WebAdmin,
 }
@@ -22,6 +24,7 @@ impl From<&TargetOptions> for TargetKind {
         match options {
             TargetOptions::Http(_) => Self::Http,
             TargetOptions::MySql(_) => Self::MySql,
+            TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
             TargetOptions::WebAdmin(_) => Self::WebAdmin,
         }

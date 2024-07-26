@@ -26,6 +26,7 @@ poem-openapi = { version = "2.0", features = [
 rand = "0.8"
 rand_chacha = "0.3"
 rand_core = { version = "0.6", features = ["std"] }
+rustls-native-certs = "0.6"
 sea-orm = { version = "0.12.2", features = [
     "runtime-tokio-rustls",
     "macros",
@@ -34,6 +35,7 @@ serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1.20", features = ["tracing"] }
+tokio-rustls = "0.23"
 totp-rs = { version = "5.0", features = ["otpauth"] }
 tracing = "0.1"
 tracing-core = "0.1"

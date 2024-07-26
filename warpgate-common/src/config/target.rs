@@ -107,6 +107,24 @@ pub struct TargetMySqlOptions {
     pub tls: Tls,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetPostgresOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_mysql_port")]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub password: Option<String>,
+
+    #[serde(default)]
+    pub tls: Tls,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
@@ -130,6 +148,8 @@ pub enum TargetOptions {
     Http(TargetHTTPOptions),
     #[serde(rename = "mysql")]
     MySql(TargetMySqlOptions),
+    #[serde(rename = "postgres")]
+    Postgres(TargetPostgresOptions),
     #[serde(rename = "web_admin")]
     WebAdmin(TargetWebAdminOptions),
 }
