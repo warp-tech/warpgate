@@ -2,9 +2,7 @@ use std::error::Error;
 use std::string::FromUtf8Error;
 
 use pgwire::error::PgWireError;
-use pgwire::messages::PgWireFrontendMessage;
-use scram_rs::ScramRuntimeError;
-use warpgate_common::{MaybeTlsStreamError, RustlsSetupError, WarpgateError};
+use warpgate_common::{MaybeTlsStreamError, WarpgateError};
 
 use crate::stream::PostgresStreamError;
 
@@ -14,8 +12,6 @@ pub enum PostgresError {
     ProtocolError(String),
     #[error("decode: {0}")]
     Decode(#[from] PgWireError),
-    #[error("unexpected message: {0:?}")]
-    UnexpectedMessage(PgWireFrontendMessage),
     #[error("sudden disconnection")]
     Eof,
     #[error("stream: {0}")]
@@ -34,8 +30,6 @@ pub enum PostgresError {
     Io(#[from] std::io::Error),
     #[error("UTF-8: {0}")]
     Utf8(#[from] FromUtf8Error),
-    #[error("SASL: {0}")]
-    Sasl(ScramRuntimeError),
     // #[error("packet decode error: {0}")]
     // Decode(Box<dyn Error + Send + Sync>),
     #[error(transparent)]

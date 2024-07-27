@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::PgWireFrontendMessage;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -120,13 +120,5 @@ where
     ) -> Result<Self, MaybeTlsStreamError> {
         self.stream = self.stream.upgrade(config).await?;
         Ok(self)
-    }
-
-    pub fn is_tls(&self) -> bool {
-        match self.stream {
-            MaybeTlsStream::Raw(_) => false,
-            MaybeTlsStream::Tls(_) => true,
-            MaybeTlsStream::Upgrading => false,
-        }
     }
 }

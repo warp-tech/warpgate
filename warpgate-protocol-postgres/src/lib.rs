@@ -5,20 +5,12 @@ mod session;
 mod session_handle;
 mod stream;
 
-// mod client;
-// mod common;
-// mod error;
-// mod session;
-// mod session_handle;
-// mod stream;
-// mod tls;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-// use client::{ConnectionOptions, MySqlClient};
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use session::PostgresSession;
@@ -26,14 +18,11 @@ use session_handle::PostgresSessionHandle;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
+    ResolveServerCert, Target, TlsCertificateAndPrivateKey, TlsCertificateBundle,
     TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
-// use crate::session::MySqlSession;
-// use crate::session_handle::MySqlSessionHandle;
-// use crate::tls::ResolveServerCert;
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -125,7 +114,7 @@ impl ProtocolServer for PostgresProtocolServer {
         }
     }
 
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
+    async fn test_target(&self, _target: Target) -> Result<(), TargetTestError> {
         unimplemented!();
         // let TargetOptions::MySql(options) = target.options else {
         //     return Err(TargetTestError::Misconfigured(
