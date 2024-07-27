@@ -242,7 +242,7 @@ async function toggleRole (role: Role) {
                         id="role-{role.id}"
                         class="mb-0 me-2"
                         type="switch"
-                        on:click={() => toggleRole(role)}
+                        on:change={() => toggleRole(role)}
                         checked={roleIsAllowed[role.id]} />
                     <div>{role.name}</div>
                 </label>
