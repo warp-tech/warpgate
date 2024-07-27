@@ -1,4 +1,10 @@
 #![feature(type_alias_impl_trait, try_blocks)]
+mod common;
+mod error;
+mod session;
+mod session_handle;
+mod stream;
+
 // mod client;
 // mod common;
 // mod error;
@@ -15,10 +21,13 @@ use async_trait::async_trait;
 // use client::{ConnectionOptions, MySqlClient};
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
+use session::PostgresSession;
+use session_handle::PostgresSessionHandle;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey
+    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
+    TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
@@ -72,44 +81,48 @@ impl ProtocolServer for PostgresProtocolServer {
 
         info!(?address, "Listening");
         let listener = TcpListener::bind(address).await?;
-        // loop {
-        //     let (stream, remote_address) = listener.accept().await?;
-        //     let tls_config = tls_config.clone();
-        //     let services = self.services.clone();
-        //     tokio::spawn(async move {
-        //         let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
+        loop {
+            let (stream, remote_address) = listener.accept().await?;
+            let tls_config = tls_config.clone();
+            let services = self.services.clone();
+            tokio::spawn(async move {
+                let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
-        //         let server_handle = services
-        //             .state
-        //             .lock()
-        //             .await
-        //             .register_session(
-        //                 &crate::common::PROTOCOL_NAME,
-        //                 SessionStateInit {
-        //                     remote_address: Some(remote_address),
-        //                     handle: Box::new(session_handle),
-        //                 },
-        //             )
-        //             .await?;
+                let server_handle = services
+                    .state
+                    .lock()
+                    .await
+                    .register_session(
+                        &crate::common::PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await?;
 
-        //         let session =
-        //             MySqlSession::new(server_handle, services, stream, tls_config, remote_address)
-        //                 .await;
-        //         let span = session.make_logging_span();
-        //         tokio::select! {
-        //             result = session.run().instrument(span) => match result {
-        //                 Ok(_) => info!("Session ended"),
-        //                 Err(e) => error!(error=%e, "Session failed"),
-        //             },
-        //             _ = abort_rx.recv() => {
-        //                 warn!("Session aborted by admin");
-        //             },
-        //         }
+                let session = PostgresSession::new(
+                    server_handle,
+                    services,
+                    stream,
+                    tls_config,
+                    remote_address,
+                ).await;
 
-        //         Ok::<(), anyhow::Error>(())
-        //     });
-        // }
-        unimplemented!();
+                let span = session.make_logging_span();
+                tokio::select! {
+                    result = session.run().instrument(span) => match result {
+                        Ok(_) => info!("Session ended"),
+                        Err(e) => error!(error=%e, "Session failed"),
+                    },
+                    _ = abort_rx.recv() => {
+                        warn!("Session aborted by admin");
+                    },
+                }
+
+                Ok::<(), anyhow::Error>(())
+            });
+        }
     }
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {

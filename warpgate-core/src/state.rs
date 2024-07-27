@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::{ProtocolName, SessionId, Target};
+use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
 use crate::{SessionHandle, WarpgateServerHandle};
@@ -36,7 +36,7 @@ impl State {
         &mut self,
         protocol: &ProtocolName,
         state: SessionStateInit,
-    ) -> Result<Arc<Mutex<WarpgateServerHandle>>> {
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let id = uuid::Uuid::new_v4();
 
         let state = Arc::new(Mutex::new(SessionState::new(
@@ -66,7 +66,7 @@ impl State {
             values
                 .insert(&*db)
                 .await
-                .context("Error inserting session")?;
+                .context("Error inserting session").map_err(WarpgateError::from)?;
         }
 
         let _ = self.change_sender.send(());
@@ -78,7 +78,7 @@ impl State {
                 this,
                 state,
             )))),
-            None => anyhow::bail!("State is being detroyed"),
+            None => Err(anyhow!("State is being detroyed").into()),
         }
     }
 

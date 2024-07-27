@@ -9,7 +9,7 @@ warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
 
-anyhow = "1.0"
+anyhow = { version = "1.0", features = ["std"] }
 argon2 = "0.4"
 async-trait = "0.1"
 bytes = "1.3"
