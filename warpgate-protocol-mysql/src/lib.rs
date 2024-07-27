@@ -17,7 +17,8 @@ use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey
+    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
+    TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 

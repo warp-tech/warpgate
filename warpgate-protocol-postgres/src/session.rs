@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use pgwire::error::ErrorInfo;
-use pgwire::messages::response::TransactionStatus;
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use rustls::ServerConfig;
 use tokio::net::TcpStream;
@@ -349,17 +348,14 @@ impl PostgresSession {
             PgWireFrontendMessage::Query(query) => {
                 info!(query=%query.query, "Query");
             }
-            _ => ()
+            _ => (),
         }
     }
 
     fn maybe_log_server_msg(&self, msg: &PgWireBackendMessage) {
         debug!(?msg, "S->C message");
-        match msg {
-            PgWireBackendMessage::ErrorResponse(error) => {
-                info!(?error, "PostgreSQL error");
-            }
-            _ => ()
+        if let PgWireBackendMessage::ErrorResponse(error) = msg {
+            info!(?error, "PostgreSQL error");
         }
     }
 }

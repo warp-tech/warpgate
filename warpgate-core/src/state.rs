@@ -66,7 +66,8 @@ impl State {
             values
                 .insert(&*db)
                 .await
-                .context("Error inserting session").map_err(WarpgateError::from)?;
+                .context("Error inserting session")
+                .map_err(WarpgateError::from)?;
         }
 
         let _ = self.change_sender.send(());

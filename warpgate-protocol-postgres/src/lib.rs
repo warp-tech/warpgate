@@ -1,10 +1,10 @@
 #![feature(type_alias_impl_trait, try_blocks)]
+mod client;
 mod common;
 mod error;
 mod session;
 mod session_handle;
 mod stream;
-mod client;
 
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -19,11 +19,9 @@ use session_handle::PostgresSessionHandle;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TlsCertificateAndPrivateKey, TlsCertificateBundle,
-    TlsPrivateKey,
+    ResolveServerCert, Target, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
-
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -97,7 +95,8 @@ impl ProtocolServer for PostgresProtocolServer {
                     stream,
                     tls_config,
                     remote_address,
-                ).await;
+                )
+                .await;
 
                 let span = session.make_logging_span();
                 tokio::select! {
