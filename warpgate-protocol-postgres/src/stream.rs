@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use bytes::BytesMut;
 use pgwire::error::{PgWireError, PgWireResult};
-use pgwire::messages::PgWireFrontendMessage;
+use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::*;
@@ -14,6 +14,12 @@ pub enum PostgresStreamError {
     Decode(#[from] PgWireError),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+}
+
+pub(crate) trait PostgresEncode {
+    fn encode(&self, buf: &mut BytesMut) -> PgWireResult<()>
+    where
+        Self: Sized;
 }
 
 pub(crate) trait PostgresDecode {
@@ -40,9 +46,18 @@ impl PostgresDecode for PgWireStartupOrSslRequest {
 #[derive(Debug)]
 pub(crate) struct PgWireGenericFrontendMessage(pub PgWireFrontendMessage);
 
+#[derive(Debug)]
+pub(crate) struct PgWireGenericBackendMessage(pub PgWireBackendMessage);
+
 impl PostgresDecode for PgWireGenericFrontendMessage {
     fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
         PgWireFrontendMessage::decode(buf).map(|x| x.map(PgWireGenericFrontendMessage))
+    }
+}
+
+impl PostgresDecode for PgWireGenericBackendMessage {
+    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
+        PgWireBackendMessage::decode(buf).map(|x| x.map(PgWireGenericBackendMessage))
     }
 }
 
@@ -52,13 +67,30 @@ impl<T: pgwire::messages::Message> PostgresDecode for T {
     }
 }
 
+impl PostgresEncode for PgWireGenericFrontendMessage {
+    fn encode(&self, buf: &mut BytesMut) -> PgWireResult<()> {
+        self.0.encode(buf)
+    }
+}
+
+impl PostgresEncode for PgWireGenericBackendMessage {
+    fn encode(&self, buf: &mut BytesMut) -> PgWireResult<()> {
+        self.0.encode(buf)
+    }
+}
+
+impl<T: pgwire::messages::Message> PostgresEncode for T {
+    fn encode(&self, buf: &mut BytesMut) -> PgWireResult<()> {
+        self.encode(buf)
+    }
+}
+
 pub(crate) struct PostgresStream<TS>
 where
     TcpStream: UpgradableStream<TS>,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
     stream: MaybeTlsStream<TcpStream, TS>,
-    // codec: PacketCodec,
     inbound_buffer: BytesMut,
     outbound_buffer: BytesMut,
 }
@@ -71,22 +103,21 @@ where
     pub fn new(stream: TcpStream) -> Self {
         Self {
             stream: MaybeTlsStream::new(stream),
-            // codec: PacketCodec::default(),
             inbound_buffer: BytesMut::new(),
             outbound_buffer: BytesMut::new(),
         }
     }
 
-    pub fn push<M: pgwire::messages::Message>(
+    pub fn push<M: PostgresEncode + Debug>(
         &mut self,
         message: M,
     ) -> Result<(), PostgresStreamError> {
+        trace!(?message, "sending");
         message.encode(&mut self.outbound_buffer)?;
         Ok(())
     }
 
     pub async fn flush(&mut self) -> std::io::Result<()> {
-        trace!(outbound_buffer=?self.outbound_buffer, "sending");
         self.stream.write_all(&self.outbound_buffer[..]).await?;
         self.outbound_buffer = BytesMut::new();
         self.stream.flush().await?;
@@ -106,13 +137,8 @@ where
             if read_bytes == 0 {
                 return Ok(None);
             }
-            trace!(inbound_buffer=?self.inbound_buffer, "received chunk");
         }
     }
-
-    // pub fn reset_sequence_id(&mut self) {
-    //     self.codec.reset_seq_id();
-    // }
 
     pub(crate) async fn upgrade(
         mut self,

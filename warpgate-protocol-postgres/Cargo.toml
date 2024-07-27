@@ -25,4 +25,4 @@ thiserror = "1.0"
 # webpki = "0.22"
 # once_cell = "1.17"
 rustls-native-certs = "0.6"
-pgwire = { version = "0.23", default-features = false }
+pgwire = { version = "0.23", default-features = false, features = ["server-api"]}

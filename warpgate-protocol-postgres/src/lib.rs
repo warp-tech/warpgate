@@ -4,6 +4,7 @@ mod error;
 mod session;
 mod session_handle;
 mod stream;
+mod client;
 
 use std::fmt::Debug;
 use std::net::SocketAddr;
