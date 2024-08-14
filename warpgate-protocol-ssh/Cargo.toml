@@ -14,7 +14,7 @@ dialoguer = "0.10"
 curve25519-dalek = "4.0.0" # pin due to build fail on x86
 ed25519-dalek = "2.0.0" # pin due to build fail on x86 in 2.1
 futures = "0.3"
-russh = { version = "0.44.0", features = ["legacy-ed25519-pkcs8-parser"] }
+russh = { version = "0.44.1", features = ["legacy-ed25519-pkcs8-parser"] }
 # russh = { version = "0.35.0-beta.6", path = "../../russh/russh"}
 sea-orm = { version = "0.12.2", features = [
     "runtime-tokio-rustls",
