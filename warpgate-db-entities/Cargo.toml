@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-entities"
-version = "0.10.1"
+version = "0.10.2"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
