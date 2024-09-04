@@ -46,7 +46,7 @@
     "format-duration": "^3.0.2",
     "otplib": "^12.0.1",
     "qrcode": "^1.5.1",
-    "sass": "^1.77.6",
+    "sass": "^1.78.0",
     "svelte": "^4.0.0",
     "svelte-check": "^3.4.3",
     "svelte-fa": "^4.0.2",
