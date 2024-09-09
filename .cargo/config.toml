@@ -1,2 +1,6 @@
-[build]
+#[build]
+#rustflags = ["--cfg", "tokio_unstable"]
+
+# https://github.com/rust-lang/cargo/issues/5376#issuecomment-2163350032
+[target.'cfg(all())']
 rustflags = ["--cfg", "tokio_unstable"]
