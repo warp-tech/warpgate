@@ -25,3 +25,4 @@ dhat-heap.json
 
 # IntelliJ based IDEs
 .idea/
+/.data/
