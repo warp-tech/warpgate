@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "devbuild": "vite build --mode development --minify false",
     "watch": "vite build -w --mode development --minify false",
     "preview": "vite preview",
     "check": "svelte-check --compiler-warnings 'a11y-no-noninteractive-element-interactions:ignore,a11y-click-events-have-key-events:ignore,a11y-no-static-element-interactions:ignore' --tsconfig ./tsconfig.json",
