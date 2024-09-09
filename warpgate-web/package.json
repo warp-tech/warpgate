@@ -45,7 +45,6 @@
     "eslint-plugin-promise": "^7.1.0",
     "eslint-plugin-svelte": "^2.39.4",
     "format-duration": "^3.0.2",
-    "otplib": "^12.0.1",
     "qrcode": "^1.5.4",
     "sass": "^1.78.0",
     "svelte": "^4.2.19",
@@ -64,5 +63,8 @@
     "vite-tsconfig-paths": "^4.3.2",
     "xterm": "^4.18.0",
     "xterm-addon-serialize": "^0.11.0"
+  },
+  "dependencies": {
+    "otpauth": "^9.3.2"
   }
 }
