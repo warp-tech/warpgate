@@ -1,7 +1,7 @@
 projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-http warpgate-core warpgate-sso"
 
-run *ARGS:
-    RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
+run $RUST_BACKTRACE='1' *ARGS='run':
+     cargo run --all-features -- --config config.yaml {{ARGS}}
 
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
@@ -15,7 +15,7 @@ clippy *ARGS:
 test:
     for p in {{projects}}; do cargo test --all-features -p $p; done
 
-yarn *ARGS:
+yarn *ARGS='dev':
     cd warpgate-web && yarn {{ARGS}}
 
 migrate *ARGS:
