@@ -5,13 +5,13 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, Services};
+use warpgate_sso::CoreIdToken;
 
 use crate::session::SessionStore;
 
@@ -19,8 +19,15 @@ pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
-static AUTH_OIDC_TOKEN: &str = "auth_oidc_token";
+static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
+
+#[derive(Serialize, Deserialize)]
+pub struct SsoLoginState {
+    pub token: CoreIdToken,
+    pub provider: String,
+    pub supports_single_logout: bool,
+}
 
 pub trait SessionExt {
     fn get_target_name(&self) -> Option<String>;
@@ -32,8 +39,8 @@ pub trait SessionExt {
     fn get_auth_state_id(&self) -> Option<AuthStateId>;
     fn clear_auth_state(&self);
 
-    fn get_oidc_token<D: DeserializeOwned>(&self) -> Option<D>;
-    fn set_oidc_token<S: Serialize>(&self, token: S);
+    fn get_sso_login_state(&self) -> Option<SsoLoginState>;
+    fn set_sso_login_state(&self, token: SsoLoginState);
 }
 
 impl SessionExt for Session {
@@ -69,14 +76,14 @@ impl SessionExt for Session {
         self.remove(AUTH_STATE_ID_SESSION_KEY)
     }
 
-    fn get_oidc_token<D: DeserializeOwned>(&self) -> Option<D> {
-        self.get::<String>(AUTH_OIDC_TOKEN)
+    fn get_sso_login_state(&self) -> Option<SsoLoginState> {
+        self.get::<String>(AUTH_SSO_LOGIN_STATE)
             .and_then(|x| serde_json::from_str(&x).ok())
     }
 
-    fn set_oidc_token<S: Serialize>(&self, token: S) {
-        if let Ok(json) = serde_json::to_string(&token) {
-            self.set(AUTH_OIDC_TOKEN, json)
+    fn set_sso_login_state(&self, state: SsoLoginState) {
+        if let Ok(json) = serde_json::to_string(&state) {
+            self.set(AUTH_SSO_LOGIN_STATE, json)
         }
     }
 }

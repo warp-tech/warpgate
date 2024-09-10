@@ -54,6 +54,14 @@ impl SsoClient {
         Self { config }
     }
 
+    pub async fn supports_single_logout(&self) -> Result<bool, SsoError> {
+        let metadata = discover_metadata(&self.config).await?;
+        Ok(metadata
+            .additional_metadata()
+            .end_session_endpoint
+            .is_some())
+    }
+
     pub async fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
         let redirect_url = RedirectUrl::new(redirect_url)?;
         let client = make_client(&self.config).await?;

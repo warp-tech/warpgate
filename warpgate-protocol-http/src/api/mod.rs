@@ -1,6 +1,7 @@
 use poem_openapi::OpenApi;
 
 pub mod auth;
+mod common;
 pub mod info;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;

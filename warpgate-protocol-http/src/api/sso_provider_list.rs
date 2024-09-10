@@ -1,3 +1,6 @@
+use std::ops::DerefMut;
+use std::sync::Arc;
+
 use poem::session::Session;
 use poem::web::{Data, Form};
 use poem::Request;
@@ -5,13 +8,17 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::{Html, Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
+use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_core::Services;
-use warpgate_sso::SsoInternalProviderConfig;
+use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
+use crate::api::common::logout;
 use crate::common::{authorize_session, get_auth_state_for_request, SessionExt};
+use crate::session::SessionStore;
+use crate::SsoLoginState;
 
 pub struct Api;
 
@@ -53,6 +60,22 @@ enum ReturnToSsoPostResponse {
 #[derive(Deserialize)]
 pub struct ReturnToSsoFormData {
     pub code: Option<String>,
+}
+
+#[derive(Object)]
+struct StartSloResponseParams {
+    url: String,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(ApiResponse)]
+enum StartSloResponse {
+    #[oai(status = 200)]
+    Ok(Json<StartSloResponseParams>),
+    #[oai(status = 400)]
+    NotInSsoSession,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 fn make_redirect_url(err: &str) -> String {
@@ -175,7 +198,7 @@ impl Api {
 
         let provider = context.provider.clone();
         let cred = AuthCredential::Sso {
-            provider: context.provider,
+            provider: context.provider.clone(),
             email: email.clone(),
         };
 
@@ -204,12 +227,20 @@ impl Api {
 
         if cp.validate_credential(&username, &cred).await? {
             state.add_valid_credential(cred);
+        } else {
+            return Ok(Err(format!(
+                "Failed to validate SSO credential for {username}"
+            )));
         }
 
         if let AuthResult::Accepted { username } = state.verify() {
             auth_state_store.complete(state.id()).await;
             authorize_session(req, username).await?;
-            session.set_oidc_token(response.id_token);
+            session.set_sso_login_state(SsoLoginState {
+                provider: context.provider,
+                token: response.id_token,
+                supports_single_logout: context.supports_single_logout,
+            });
         }
 
         let providers_config = services.config.lock().await.store.sso_providers.clone();
@@ -249,5 +280,48 @@ impl Api {
             .as_deref()
             .unwrap_or("/@warpgate#/login")
             .to_owned()))
+    }
+
+    #[oai(
+        path = "/sso/logout",
+        method = "get",
+        operation_id = "initiate_sso_logout"
+    )]
+    async fn api_start_slo(
+        &self,
+        req: &Request,
+        session: &Session,
+        services: Data<&Services>,
+        session_middleware: Data<&Arc<Mutex<SessionStore>>>,
+    ) -> poem::Result<StartSloResponse> {
+        let Some(state) = session.get_sso_login_state() else {
+            return Ok(StartSloResponse::NotInSsoSession);
+        };
+
+        let config = services.config.lock().await;
+
+        let return_url = config.construct_external_url(Some(req))?;
+        debug!("Return URL: {}", &return_url);
+
+        let Some(provider_config) = config
+            .store
+            .sso_providers
+            .iter()
+            .find(|p| p.name == state.provider)
+        else {
+            return Ok(StartSloResponse::NotFound);
+        };
+
+        let client = SsoClient::new(provider_config.provider.clone());
+        let logout_url = client
+            .logout(state.token, return_url)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+
+        logout(session, session_middleware.lock().await.deref_mut());
+
+        Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
+            url: logout_url.to_string(),
+        })))
     }
 }
