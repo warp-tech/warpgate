@@ -2,7 +2,7 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from 'sveltestrap'
+import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 
 let error: Error|null = null
 let username = ''
@@ -21,7 +21,7 @@ async function create () {
         })
         replace(`/users/${user.id}`)
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 

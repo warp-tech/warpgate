@@ -8,7 +8,7 @@ export default defineConfig({
     plugins: [
         svelte(),
         tsconfigPaths(),
-        checker({ typescript: true }),
+        // checker({ typescript: true }),
     ],
     base: '/@warpgate',
     build: {

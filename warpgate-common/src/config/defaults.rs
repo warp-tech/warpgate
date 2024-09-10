@@ -79,3 +79,7 @@ pub(crate) fn _default_ssh_listen() -> ListenEndpoint {
 pub(crate) fn _default_ssh_keys_path() -> String {
     "./data/keys".to_owned()
 }
+
+pub(crate) fn _default_ssh_inactivity_timeout() -> Duration {
+    Duration::SECOND * 60 * 5
+}

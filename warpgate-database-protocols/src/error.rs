@@ -94,10 +94,6 @@ pub enum Error {
     /// A background worker has crashed.
     #[error("attempted to communicate with a crashed background worker")]
     WorkerCrashed,
-
-    #[cfg(feature = "migrate")]
-    #[error("{0}")]
-    Migrate(#[source] Box<crate::migrate::MigrateError>),
 }
 
 impl StdError for Box<dyn DatabaseError> {}
@@ -177,22 +173,6 @@ where
     #[inline]
     fn from(error: E) -> Self {
         Error::Database(Box::new(error))
-    }
-}
-
-#[cfg(feature = "migrate")]
-impl From<crate::migrate::MigrateError> for Error {
-    #[inline]
-    fn from(error: crate::migrate::MigrateError) -> Self {
-        Error::Migrate(Box::new(error))
-    }
-}
-
-#[cfg(feature = "_tls-native-tls")]
-impl From<sqlx_rt::native_tls::Error> for Error {
-    #[inline]
-    fn from(error: sqlx_rt::native_tls::Error) -> Self {
-        Error::Tls(Box::new(error))
     }
 }
 

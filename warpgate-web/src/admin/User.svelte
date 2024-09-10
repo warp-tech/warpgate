@@ -1,11 +1,11 @@
 <script lang="ts">
 import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-import { api, CredentialKind, Role, User, UserAuthCredential, UserRequireCredentialsPolicy } from 'admin/lib/api'
+import { api, CredentialKind, type Role, type User, type UserAuthCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, Button, FormGroup, Input } from 'sveltestrap'
+import { Alert, Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
 import AuthPolicyEditor from './AuthPolicyEditor.svelte'
 import UserCredentialModal from './UserCredentialModal.svelte'
 
@@ -16,9 +16,9 @@ let user: User
 let editingCredential: UserAuthCredential|undefined
 let policy: UserRequireCredentialsPolicy
 let allRoles: Role[] = []
-let roleIsAllowed = {}
+let roleIsAllowed: Record<string, any> = {}
 
-const policyProtocols = [
+const policyProtocols: { id: 'ssh' | 'http' | 'mysql', name: string }[] = [
     { id: 'ssh', name: 'SSH' },
     { id: 'http', name: 'HTTP' },
     { id: 'mysql', name: 'MySQL' },
@@ -40,7 +40,7 @@ async function load () {
         const allowedRoles = await api.getUserRoles(user)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -59,7 +59,7 @@ async function update () {
             userDataRequest: user,
         })
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 
@@ -100,7 +100,7 @@ function saveCredential () {
                     editingCredential.kind === CredentialKind.Totp
                     && !user.credentialPolicy?.[protocol]
                     && user.credentials.some(x => x.kind === ck)
-                    && possibleCredentials[protocol].has(ck)
+                    && possibleCredentials[protocol]?.has(ck)
                 ) {
                     user.credentialPolicy = {
                         ...user.credentialPolicy ?? {},
@@ -114,6 +114,12 @@ function saveCredential () {
     editingCredential = undefined
 }
 
+function assertDefined<T>(value: T|undefined): T {
+    if (value === undefined) {
+        throw new Error('Value is undefined')
+    }
+    return value
+}
 </script>
 
 {#await load()}
@@ -202,12 +208,15 @@ function saveCredential () {
                 <div>
                     <strong>{protocol.name}</strong>
                 </div>
-                <AuthPolicyEditor
-                    user={user}
-                    bind:value={policy}
-                    possibleCredentials={possibleCredentials[protocol.id]}
-                    protocolId={protocol.id}
-                />
+                {#if possibleCredentials[protocol.id]}
+                    {@const _possibleCredentials = assertDefined(possibleCredentials[protocol.id])}
+                    <AuthPolicyEditor
+                        user={user}
+                        bind:value={policy}
+                        possibleCredentials={_possibleCredentials}
+                        protocolId={protocol.id}
+                    />
+                {/if}
             </div>
         {/each}
     </div>
@@ -215,16 +224,18 @@ function saveCredential () {
     <h4 class="mt-4">User roles</h4>
     <div class="list-group list-group-flush mb-3">
         {#each allRoles as role}
-            <div
+            <label
+                for="role-{role.id}"
                 class="list-group-item list-group-item-action d-flex align-items-center"
-                on:click={() => toggleRole(role)}
             >
                 <Input
+                    id="role-{role.id}"
                     class="mb-0 me-2"
                     type="switch"
+                    on:change={() => toggleRole(role)}
                     checked={roleIsAllowed[role.id]} />
                 <div>{role.name}</div>
-            </div>
+            </label>
         {/each}
     </div>
 

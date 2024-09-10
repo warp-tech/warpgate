@@ -12,16 +12,13 @@
     }
 </script>
 
-<script lang="ts">
+<script lang="ts" generics="T">
     import { onDestroy } from 'svelte'
     import { Subject, switchMap, map, Observable, distinctUntilChanged, share, combineLatest, tap, debounceTime } from 'rxjs'
     import Pagination from './Pagination.svelte'
     import { observe } from 'svelte-observable'
-    import { Input } from 'sveltestrap'
+    import { Input } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
-
-    // eslint-disable-next-line @typescript-eslint/no-type-alias
-    type T = $$Generic
 
     export let page = 0
     export let pageSize: number|undefined = undefined
@@ -83,27 +80,27 @@
 </div>
 {#await $items}
     <DelayedSpinner />
-{:then items}
-    {#if items}
+{:then _items}
+    {#if _items}
         <div class="list-group list-group-flush mb-3">
-            {#each items as item}
+            {#each _items as item}
                 <slot name="item" item={item} />
             {/each}
         </div>
-        <slot name="footer" items={items} />
+        <slot name="footer" items={_items} />
     {:else}
         <DelayedSpinner />
     {/if}
 
-    {#if filter && loaded && !items?.length}
+    {#if filter && loaded && !_items?.length}
         <em>
             Nothing found
         </em>
     {/if}
 {/await}
 
-{#await $total then total}
-    {#if pageSize && total > pageSize}
-        <Pagination total={total} bind:page={page} pageSize={pageSize} />
+{#await $total then _total}
+    {#if pageSize && _total > pageSize}
+        <Pagination total={_total} bind:page={page} pageSize={pageSize} />
     {/if}
 {/await}

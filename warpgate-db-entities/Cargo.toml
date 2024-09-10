@@ -2,10 +2,10 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-entities"
-version = "0.9.1"
+version = "0.10.2"
 
 [dependencies]
-chrono = { version = "0.4", default_features = false, features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 poem-openapi = { version = "2.0", features = ["chrono", "uuid"] }
 sea-orm = { version = "0.12.2", features = [
     "macros",

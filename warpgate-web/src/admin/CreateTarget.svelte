@@ -1,8 +1,8 @@
 <script lang="ts">
-import { api, TargetOptions, TlsMode } from 'admin/lib/api'
+import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from 'sveltestrap'
+import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 
 let error: Error|null = null
 let name = ''
@@ -54,7 +54,7 @@ async function create () {
         })
         replace(`/targets/${target.id}`)
     } catch (err) {
-        error = err
+        error = err as Error
     }
 }
 

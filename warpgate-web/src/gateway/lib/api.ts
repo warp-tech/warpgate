@@ -1,4 +1,4 @@
-import { DefaultApi, Configuration } from './api-client/dist'
+import { DefaultApi, Configuration } from './api-client'
 
 const configuration = new Configuration({
     basePath: '/@warpgate/api',

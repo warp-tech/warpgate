@@ -3,15 +3,15 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-migrations"
 publish = false
-version = "0.9.1"
+version = "0.10.2"
 
 [lib]
 
 [dependencies]
 async-std = { version = "^1.11", features = ["attributes"] }
-chrono = { version = "0.4", default_features = false, features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 sea-orm = { version = "0.12.2", features = [
-    "runtime-tokio-native-tls",
+    "runtime-tokio-rustls",
     "macros",
     "with-chrono",
     "with-uuid",

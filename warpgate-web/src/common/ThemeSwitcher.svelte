@@ -1,7 +1,7 @@
 <script lang="ts">
 import Fa from 'svelte-fa'
 import { faCloudSun, faMoon, faSun } from '@fortawesome/free-solid-svg-icons'
-import { Button, Tooltip } from 'sveltestrap'
+import { Button, Tooltip } from '@sveltestrap/sveltestrap'
 import { get } from 'svelte/store'
 
 import { currentTheme, setCurrentTheme } from 'theme'
@@ -17,7 +17,7 @@ function toggle () {
 }
 </script>
 
-<Button color="link" on:click={toggle} id="button" alt="Switch theme">
+<Button color="link" on:click={toggle} id="button" title="Switch theme">
     {#if $currentTheme === 'dark'}
         <Fa fw icon={faMoon} />
     {:else if $currentTheme === 'light'}

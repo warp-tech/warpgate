@@ -1,12 +1,12 @@
 <script lang="ts">
 import { get } from 'svelte/store'
 import { querystring, replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from 'sveltestrap'
+import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
-import { api, ApiAuthState, LoginFailureResponseFromJSON, SsoProviderDescription, SsoProviderKind } from 'gateway/lib/api'
+import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -29,9 +29,8 @@ async function init () {
     try {
         authState = (await api.getDefaultAuthState()).state
     } catch (err) {
-        if (err.status) {
-            const response = err as Response
-            if (response.status === 404) {
+        if (err instanceof ResponseError) {
+            if (err.response.status === 404) {
                 authState = ApiAuthState.NotStarted
             }
         }
@@ -57,7 +56,7 @@ async function continueWithState () {
             // todo
         }
         if (providers.length === 1) {
-            startSSO(providers[0])
+            startSSO(providers[0]!)
         }
     }
     if (authState === ApiAuthState.OtpNeeded) {
@@ -96,18 +95,17 @@ async function _login () {
         await reloadServerInfo()
         success()
     } catch (err) {
-        if (err.status) {
-            const response = err as Response
-            if (response.status === 401) {
-                const failure = LoginFailureResponseFromJSON(await response.json())
+        if (err instanceof ResponseError) {
+            if (err.response.status === 401) {
+                const failure = LoginFailureResponseFromJSON(await err.response.json())
                 authState = failure.state
 
                 continueWithState()
             } else {
-                error = new Error(await response.text())
+                error = new Error(await err.response.text())
             }
         } else {
-            error = err
+            error = err as Error
         }
     }
 }

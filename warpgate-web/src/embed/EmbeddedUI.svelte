@@ -82,6 +82,7 @@ async function logout () {
             }
         }}
     >
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <img class="logo" src={logo} alt="Warpgate" on:mousedown|preventDefault />
     </button>
 

@@ -2,12 +2,12 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.9.1"
+version = "0.10.2"
 
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", default_features = false, features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 cookie = "0.16"
 data-encoding = "2.3"
 delegate = "0.6"
@@ -24,7 +24,10 @@ poem = { version = "^1.3.50", features = [
     "embed",
 ] }
 poem-openapi = { version = "2.0", features = ["swagger-ui"] }
-reqwest = { version = "0.11", features = ["rustls-tls-native-roots", "stream"] }
+reqwest = { version = "0.11", features = [
+    "rustls-tls-native-roots",
+    "stream",
+], default-features = false }
 serde = "1.0"
 serde_json = "1.0"
 tokio = { version = "1.20", features = ["tracing", "signal"] }

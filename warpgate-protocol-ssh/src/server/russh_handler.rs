@@ -2,13 +2,13 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use russh::keys::key::PublicKey;
 use russh::server::{Auth, Handle, Msg, Session};
 use russh::{Channel, ChannelId, Pty, Sig};
-use russh_keys::key::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{Secret, SessionId};
+use warpgate_common::Secret;
 
 use crate::common::{PtyRequest, ServerChannelId};
 use crate::{DirectTCPIPParams, X11Request};
@@ -29,7 +29,7 @@ pub enum ServerHandlerEvent {
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     ShellRequest(ServerChannelId, oneshot::Sender<bool>),
     AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
-    AuthPublicKeyOffer(Secret<String>, PublicKey, oneshot::Sender<bool>),
+    AuthPublicKeyOffer(Secret<String>, PublicKey, oneshot::Sender<Auth>),
     AuthPassword(Secret<String>, Secret<String>, oneshot::Sender<Auth>),
     AuthKeyboardInteractive(
         Secret<String>,
@@ -52,7 +52,6 @@ pub enum ServerHandlerEvent {
 }
 
 pub struct ServerHandler {
-    pub id: SessionId,
     pub event_tx: UnboundedSender<ServerHandlerEvent>,
 }
 
@@ -182,7 +181,7 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey_offered(
         &mut self,
         user: &str,
-        key: &russh_keys::key::PublicKey,
+        key: &russh::keys::key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
@@ -193,20 +192,15 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        let result = rx.await.unwrap_or(false);
-        Ok(if result {
-            Auth::Accept
-        } else {
-            Auth::Reject {
-                proceed_with_methods: None,
-            }
-        })
+        Ok(rx.await.unwrap_or(Auth::Reject {
+            proceed_with_methods: None,
+        }))
     }
 
     async fn auth_publickey(
         &mut self,
         user: &str,
-        key: &russh_keys::key::PublicKey,
+        key: &russh::keys::key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();

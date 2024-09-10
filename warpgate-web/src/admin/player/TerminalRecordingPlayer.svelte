@@ -4,7 +4,7 @@
     import { Terminal } from 'xterm'
     import { SerializeAddon } from 'xterm-addon-serialize'
     import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
-    import { Spinner } from 'sveltestrap'
+    import { Spinner } from '@sveltestrap/sveltestrap'
     import formatDuration from 'format-duration'
     import type { Recording } from 'admin/lib/api'
 
@@ -32,7 +32,7 @@
         'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
     ]
 
-    const theme = {
+    const theme: Record<string, string> = {
         foreground: '#ffcb83',
         background: '#262626',
         cursor: '#fc531d',
@@ -56,7 +56,7 @@
         '#fafaff',
     ]
     for (let i = 0; i < COLOR_NAMES.length; i++) {
-        theme[COLOR_NAMES[i]] = colors[i]
+        theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
     interface AsciiCastHeader {
@@ -74,7 +74,11 @@
     }
 
     function isAsciiCastData (data: AsciiCastItem): data is AsciiCastData {
-        return data[1] === 'o' || data[1] === 'e'
+        if (data instanceof Array) {
+            return data[1] === 'o' || data[1] === 'e'
+        } else {
+            return false
+        }
     }
 
     interface SizeEvent { time: number, cols: number, rows: number }
@@ -212,7 +216,7 @@
         let lastSize = { cols: term.cols, rows: term.rows }
 
         for (let i = 0; i <= index; i++) {
-            let event = events[i]
+            let event = events[i]!
             if ('cols' in event) {
                 lastSize = { cols: event.cols, rows: event.rows }
             }
@@ -229,7 +233,7 @@
 
         for (let i = index; i < events.length; i++) {
             let shouldSnapshot = false
-            let event = events[i]
+            let event = events[i]!
             if (event.time > time) {
                 break
             }
@@ -292,6 +296,12 @@
         playing = !playing
     }
 
+    function keyPressHandler (event: KeyboardEvent) {
+        if (event.key === ' ') {
+            togglePlaying()
+        }
+    }
+
     step()
 
     function toggleFullscreen () {
@@ -314,10 +324,13 @@
     </div>
     {/if}
 
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
         class="container"
         class:invisible={loading}
         on:click={togglePlaying}
+        on:keypress={keyPressHandler}
+        role="img"
         bind:this={containerElement}
     ></div>
 
@@ -399,6 +412,7 @@
     }
 
     input[type="range"] {
+        appearance: none;
         -webkit-appearance: none;
         margin: 18px 10px 0;
         height: 2px;

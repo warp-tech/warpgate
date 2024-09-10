@@ -1,7 +1,7 @@
 <script lang="ts">
-import { Alert } from 'sveltestrap'
+import { Alert } from '@sveltestrap/sveltestrap'
 
-import { api, ApiAuthState, AuthStateResponseInternal } from 'gateway/lib/api'
+import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import RelativeDate from 'admin/RelativeDate.svelte'

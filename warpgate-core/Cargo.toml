@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.9.1"
+version = "0.10.2"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common" }
@@ -13,7 +13,7 @@ anyhow = "1.0"
 argon2 = "0.4"
 async-trait = "0.1"
 bytes = "1.3"
-chrono = { version = "0.4", default_features = false, features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding = "2.3"
 humantime-serde = "1.1"
 futures = "0.3"
@@ -31,7 +31,7 @@ rand = "0.8"
 rand_chacha = "0.3"
 rand_core = { version = "0.6", features = ["std"] }
 sea-orm = { version = "0.12.2", features = [
-    "runtime-tokio-native-tls",
+    "runtime-tokio-rustls",
     "macros",
 ], default-features = false }
 serde = "1.0"

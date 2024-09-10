@@ -12,12 +12,11 @@ extends:
   - 'plugin:import/recommended'
   - 'plugin:import/typescript'
   - 'plugin:@typescript-eslint/all'
+  - 'plugin:svelte/recommended'
 plugins:
   - import
-  - svelte3
   - '@typescript-eslint/eslint-plugin'
 settings:
-  svelte3/typescript: true
   import/resolver:
     typescript: {}
 rules:
@@ -118,6 +117,7 @@ rules:
   '@typescript-eslint/naming-convention': 'off'
   '@typescript-eslint/lines-between-class-members':
     - error
+    - always
     - exceptAfterSingleLine: true
   '@typescript-eslint/dot-notation': 'off'
   '@typescript-eslint/no-implicit-any-catch': 'off'
@@ -138,10 +138,18 @@ rules:
     imports: always-multiline
     exports: always-multiline
     functions: only-multiline
+  '@typescript-eslint/use-unknown-in-catch-callback-variable': off
 
 overrides:
   - files: '*.svelte'
-    processor: svelte3/svelte3
+    parser: 'svelte-eslint-parser'
+    parserOptions:
+      svelteFeatures:
+        experimentalGenerics: true
+      parser:
+        ts: '@typescript-eslint/parser'
+        js: 'espree'
+        typescript: '@typescript-eslint/parser'
     rules:
         # To allow prop definitions
         '@typescript-eslint/init-declarations': off

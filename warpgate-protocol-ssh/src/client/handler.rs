@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use russh::client::{Msg, Session};
+use russh::keys::key::PublicKey;
+use russh::keys::PublicKeyBase64;
 use russh::Channel;
-use russh_keys::key::PublicKey;
-use russh_keys::PublicKeyBase64;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;

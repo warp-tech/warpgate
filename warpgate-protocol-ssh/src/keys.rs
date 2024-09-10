@@ -1,9 +1,9 @@
 use std::fs::{create_dir_all, File};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use russh_keys::key::{KeyPair, SignatureHash};
-use russh_keys::{encode_pkcs8_pem, load_secret_key};
+use russh::keys::key::{KeyPair, SignatureHash};
+use russh::keys::{encode_pkcs8_pem, load_secret_key};
 use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::WarpgateConfig;
@@ -41,12 +41,12 @@ pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh_keys::Error> {
+pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh::keys::Error> {
     let path = get_keys_path(config);
     let mut keys = Vec::new();
 
     let key_path = path.join("host-ed25519");
-    keys.push(load_secret_key(key_path, None)?);
+    keys.push(load_and_maybe_resave_ed25519_key(key_path)?);
 
     let key_path = path.join("host-rsa");
     let key = load_secret_key(key_path, None)?;
@@ -90,15 +90,29 @@ pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn load_client_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh_keys::Error> {
+pub fn load_client_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh::keys::Error> {
     let path = get_keys_path(config);
     let mut keys = Vec::new();
 
-    let key_path = path.join("client-ed25519");
-    keys.push(load_secret_key(key_path, None)?);
+    let key_path: PathBuf = path.join("client-ed25519");
+    keys.push(load_and_maybe_resave_ed25519_key(key_path)?);
 
     let key_path = path.join("client-rsa");
     keys.push(load_secret_key(key_path, None)?);
 
     Ok(keys)
+}
+
+/// russh 0.43 has a bug that generates incorrect PKCS#8 encoding for Ed25519 keys
+/// This will preemptively try to correctly re-encode and save the key
+fn load_and_maybe_resave_ed25519_key<P: AsRef<Path>>(p: P) -> Result<KeyPair, russh::keys::Error> {
+    let key = load_secret_key(&p, None)?;
+    if let KeyPair::Ed25519(_) = &key {
+        if let Ok(f) = File::create(p) {
+            if let Err(e) = encode_pkcs8_pem(&key, f) {
+                error!("Failed to re-save the Ed25519 key: {e:?}");
+            }
+        }
+    };
+    Ok(key)
 }

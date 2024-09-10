@@ -1,5 +1,5 @@
-<script type="ts">
-    import { Alert, FormGroup } from 'sveltestrap'
+<script lang="ts">
+    import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL } from 'common/protocols'

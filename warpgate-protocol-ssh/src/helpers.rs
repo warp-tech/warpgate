@@ -1,5 +1,5 @@
-use russh_keys::key::KeyPair;
-use russh_keys::PublicKeyBase64;
+use russh::keys::key::KeyPair;
+use russh::keys::PublicKeyBase64;
 
 pub trait PublicKeyAsOpenSSH {
     fn as_openssh(&self) -> String;
