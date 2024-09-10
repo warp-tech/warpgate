@@ -1,27 +1,19 @@
 <script lang="ts">
-import { faSignOut } from '@fortawesome/free-solid-svg-icons'
 import { Alert } from '@sveltestrap/sveltestrap'
-import Fa from 'svelte-fa'
 import Router, { push, type RouteDetail } from 'svelte-spa-router'
 import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
-import { api } from 'gateway/lib/api'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import AuthBar from 'common/AuthBar.svelte'
 
 let redirecting = false
 let serverInfoPromise = reloadServerInfo()
 
 async function init () {
     await serverInfoPromise
-}
-
-async function logout () {
-    await api.logout()
-    await reloadServerInfo()
-    push('/login')
 }
 
 function onPageResume () {
@@ -76,17 +68,7 @@ init()
                 <Logo />
             </a>
 
-            {#if $serverInfo?.username}
-                <div class="ms-auto">
-                    {$serverInfo.username}
-                    {#if $serverInfo.authorizedViaTicket}
-                        <span class="ml-2">(ticket auth)</span>
-                    {/if}
-                </div>
-                <button class="btn btn-link" on:click={logout} title="Log out">
-                    <Fa icon={faSignOut} fw />
-                </button>
-            {/if}
+            <AuthBar />
         </div>
 
         <main>

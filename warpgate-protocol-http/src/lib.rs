@@ -17,7 +17,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use common::page_admin_auth;
-pub use common::PROTOCOL_NAME;
+pub use common::{PROTOCOL_NAME, SsoLoginState};
 use http::HeaderValue;
 use logging::{get_client_ip, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};

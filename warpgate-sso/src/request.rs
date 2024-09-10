@@ -1,5 +1,5 @@
 use futures::future::OptionFuture;
-use openidconnect::core::CoreGenderClaim;
+use openidconnect::core::{CoreGenderClaim, CoreIdToken};
 use openidconnect::reqwest::async_http_client;
 use openidconnect::url::Url;
 use openidconnect::{
@@ -63,7 +63,7 @@ impl SsoLoginRequest {
                 e => SsoError::Verification(format!("{e}")),
             })?;
 
-        let id_token = token_response.id_token().ok_or(SsoError::NotOidc)?;
+        let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = id_token.claims(&client.id_token_verifier(), &self.nonce)?;
 
         let user_info_req = client
@@ -119,6 +119,8 @@ impl SsoLoginRequest {
             email_verified: get_claim!(email_verified),
 
             groups: userinfo_claims.and_then(|x| x.additional_claims().warpgate_roles.clone()),
+
+            id_token: id_token.clone(),
         })
     }
 }
