@@ -62,7 +62,7 @@ function _validate () : boolean {
     console.debug(`Validating credentials of kind "${credential.kind}"`)
 
     if (credential.kind === 'Totp' && totpValidationValue) {
-        totp.secret ??= OTPAuth.Secret.fromBase32(generateTotpSecret(credential))
+        totp.secret ??= OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
         totpValid = totp.validate({ token: totpValidationValue, window: 1 }) !== null
 
         if (!totpValid) {
@@ -77,6 +77,8 @@ function _validate () : boolean {
 
         if (!passwordValid) {
             validationFeedback = 'Password cannot be empty or whitespace'
+        } else {
+            validationFeedback = undefined
         }
 
         return passwordValid
@@ -124,7 +126,7 @@ onMount(() => {
  * @param {UserTotpCredential} cred - The credential containing a key for TOTP generation.
  * @return {string} The base32 encoded TOTP secret key.
  */
-function generateTotpSecret (cred: UserTotpCredential) : string {
+function encodeTotpSecret (cred: UserTotpCredential) : string {
     return base32Encode(new Uint8Array(cred.key), 'RFC4648')
 }
 
@@ -135,7 +137,7 @@ $: {
         }
 
         totp.label = username
-        totp.secret = OTPAuth.Secret.fromBase32(generateTotpSecret(credential))
+        totp.secret = OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
         totpUri = totp.toString()
 
         QRCode.toDataURL(totpUri, (err: Error | null | undefined, imageUrl: string) => {
@@ -222,21 +224,29 @@ $: {
         {#if credential.kind === 'Totp'}
             <div class="row">
                 <div class="col-12 col-md-6">
-                    <img class="qr" id="totpQR" bind:this={qrImage} alt="OTP QR code" />
+                    <img class="qr" bind:this={qrImage} alt="OTP QR code" />
                 </div>
                 <div class="col-12 col-md-6">
-                    <Button outline class="d-flex align-items-center" color="heading" on:click={generateNewTotpKey}>
+                    <Button outline class="d-flex align-items-center" color="link" on:click={generateNewTotpKey}>
                         <Fa class="me-2" fw icon={faRefresh} />
                         Reset secret key
                     </Button>
-                    <Button outline class="d-flex align-items-center" color="heading" on:click={copyTotpUri}>
+                    <Button outline class="d-flex align-items-center" color="link" on:click={copyTotpUri}>
                         <Fa class="me-2" fw icon={faClipboard} />
                         Copy raw value
                     </Button>
                 </div>
             </div>
             <FormGroup floating label="Paste TOTP code for validation" class="mt-3">
-                <Input required bind:feedback={validationFeedback} bind:value={totpValidationValue} valid={totpValid} invalid={!totpValid} on:change={_validate} />
+                <Input
+                    required
+                    bind:feedback={validationFeedback}
+                    bind:value={totpValidationValue}
+                    valid={totpValid}
+                    invalid={!totpValid}
+                    pattern="\d{6}"
+                    on:change={_validate}
+                    on:keyup={_validate} />
             </FormGroup>
         {/if}
     </ModalBody>

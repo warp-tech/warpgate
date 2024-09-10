@@ -15,7 +15,7 @@ clippy *ARGS:
 test:
     for p in {{projects}}; do cargo test --all-features -p $p; done
 
-yarn *ARGS='dev':
+yarn *ARGS:
     cd warpgate-web && yarn {{ARGS}}
 
 migrate *ARGS:
