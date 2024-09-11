@@ -1,8 +1,5 @@
 <script lang="ts">
-import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import { api } from 'gateway/lib/api'
 import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
-import Fa from 'svelte-fa'
 
 import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
@@ -10,15 +7,10 @@ import { wrap } from 'svelte-spa-router/wrap'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import AuthBar from 'common/AuthBar.svelte'
 
 async function init () {
     await reloadServerInfo()
-}
-
-async function logout () {
-    await api.logout()
-    await reloadServerInfo()
-    location.href = '/@warpgate'
 }
 
 init()
@@ -86,14 +78,7 @@ const routes = {
                 <a use:link use:active href="/ssh">SSH</a>
                 <a use:link use:active href="/log">Log</a>
             {/if}
-            {#if $serverInfo?.username}
-            <div class="username ms-auto">
-                {$serverInfo?.username}
-            </div>
-            <button class="btn btn-link" on:click={logout} title="Log out">
-                <Fa icon={faSignOut} fw />
-            </button>
-            {/if}
+            <AuthBar />
         </header>
         <main>
             <Router {routes}/>

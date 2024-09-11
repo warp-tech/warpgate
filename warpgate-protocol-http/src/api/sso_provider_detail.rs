@@ -5,6 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
+use tracing::*;
 use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
@@ -31,6 +32,7 @@ pub struct SsoContext {
     pub provider: String,
     pub request: SsoLoginRequest,
     pub next_url: Option<String>,
+    pub supports_single_logout: bool,
 }
 
 #[OpenApi]
@@ -54,6 +56,7 @@ impl Api {
 
         let mut return_url = config.construct_external_url(Some(req))?;
         return_url.set_path("@warpgate/api/sso/return");
+        debug!("Return URL: {}", &return_url);
 
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name)
         else {
@@ -74,6 +77,10 @@ impl Api {
                 provider: name,
                 request: sso_req,
                 next_url: next.0.clone(),
+                supports_single_logout: client
+                    .supports_single_logout()
+                    .await
+                    .map_err(poem::error::InternalServerError)?,
             },
         );
 

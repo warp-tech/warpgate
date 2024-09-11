@@ -9,3 +9,5 @@ pub use error::*;
 pub use request::*;
 pub use response::*;
 pub use sso::*;
+
+pub use openidconnect::core::CoreIdToken;
