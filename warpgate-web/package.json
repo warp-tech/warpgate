@@ -4,10 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
+    "devbuild": "vite build --mode development --minify false",
     "watch": "vite build -w --mode development --minify false",
-    "preview": "vite preview",
     "check": "svelte-check --compiler-warnings 'a11y-no-noninteractive-element-interactions:ignore,a11y-click-events-have-key-events:ignore,a11y-no-static-element-interactions:ignore' --tsconfig ./tsconfig.json",
     "lint": "eslint src && svelte-check",
     "postinstall": "yarn run openapi:client:gateway && yarn run openapi:client:admin",
@@ -32,7 +31,7 @@
     "@types/qrcode": "^1.5.0",
     "@types/ua-parser-js": "^0.7.36",
     "@typescript-eslint/eslint-plugin": "^7.17.0",
-    "@typescript-eslint/parser": "^7.17.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "bootstrap": "^5.3.3",
     "copy-text-to-clipboard": "^3.0.1",
     "date-fns": "^3.6.0",
@@ -44,7 +43,6 @@
     "eslint-plugin-promise": "^7.1.0",
     "eslint-plugin-svelte": "^2.39.4",
     "format-duration": "^3.0.2",
-    "otplib": "^12.0.1",
     "qrcode": "^1.5.4",
     "sass": "^1.78.0",
     "svelte": "^4.2.19",
@@ -62,6 +60,7 @@
     "vite-plugin-checker": "^0.7.2",
     "vite-tsconfig-paths": "^4.3.2",
     "xterm": "^4.18.0",
-    "xterm-addon-serialize": "^0.11.0"
+    "xterm-addon-serialize": "^0.11.0",
+    "otpauth": "^9.3.2"
   }
 }
