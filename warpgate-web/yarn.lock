@@ -3363,10 +3363,10 @@ util-deprecate@^1.0.1, util-deprecate@^1.0.2:
   resolved "https://registry.yarnpkg.com/util-deprecate/-/util-deprecate-1.0.2.tgz#450d4dc9fa70de732762fbd2d4a28981419a0ccf"
   integrity sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==
 
-vite-plugin-checker@^0.7.2:
-  version "0.7.2"
-  resolved "https://registry.yarnpkg.com/vite-plugin-checker/-/vite-plugin-checker-0.7.2.tgz#093ffdf9ccf51b2c9eab7101480bd0217ae99536"
-  integrity sha512-xeYeJbG0gaCaT0QcUC4B2Zo4y5NR8ZhYenc5gPbttrZvraRFwkEADCYwq+BfEHl9zYz7yf85TxsiGoYwyyIjhw==
+vite-plugin-checker@^0.8.0:
+  version "0.8.0"
+  resolved "https://registry.yarnpkg.com/vite-plugin-checker/-/vite-plugin-checker-0.8.0.tgz#33419857a623b35c9483e4f603d4ca8b6984acde"
+  integrity sha512-UA5uzOGm97UvZRTdZHiQVYFnd86AVn8EVaD4L3PoVzxH+IZSfaAw14WGFwX9QS23UW3lV/5bVKZn6l0w+q9P0g==
   dependencies:
     "@babel/code-frame" "^7.12.13"
     ansi-escapes "^4.3.0"
@@ -3392,10 +3392,10 @@ vite-tsconfig-paths@^4.3.2:
     globrex "^0.1.2"
     tsconfck "^3.0.3"
 
-vite@^5.4.3:
-  version "5.4.3"
-  resolved "https://registry.yarnpkg.com/vite/-/vite-5.4.3.tgz#771c470e808cb6732f204e1ee96c2ed65b97a0eb"
-  integrity sha512-IH+nl64eq9lJjFqU+/yrRnrHPVTlgy42/+IzbOdaFDVlyLgI/wDlf+FCobXLX1cT0X5+7LMyH1mIy2xJdLfo8Q==
+vite@^5.4.4:
+  version "5.4.4"
+  resolved "https://registry.yarnpkg.com/vite/-/vite-5.4.4.tgz#3da90314b617047366459443320ea78f39111008"
+  integrity sha512-RHFCkULitycHVTtelJ6jQLd+KSAAzOgEYorV32R2q++M6COBjKJR6BxqClwp5sf0XaBDjVMuJ9wnNfyAJwjMkA==
   dependencies:
     esbuild "^0.21.3"
     postcss "^8.4.43"
