@@ -56,7 +56,7 @@
     "tslib": "^2.7.0",
     "typescript": "^5.5.4",
     "ua-parser-js": "^1.0.38",
-    "vite": "^5.4.3",
+    "vite": "^5.4.6",
     "vite-plugin-checker": "^0.7.2",
     "vite-tsconfig-paths": "^4.3.2",
     "xterm": "^4.18.0",
