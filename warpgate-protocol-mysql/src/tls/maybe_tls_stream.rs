@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use async_trait::async_trait;
-use rustls::{ClientConfig, ServerConfig, ServerName};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ServerConfig};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tracing::*;
 
@@ -126,7 +127,7 @@ impl<S> UpgradableStream<tokio_rustls::client::TlsStream<S>> for S
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    type UpgradeConfig = (ServerName, Arc<ClientConfig>);
+    type UpgradeConfig = (ServerName<'static>, Arc<ClientConfig>);
 
     async fn upgrade(
         mut self,

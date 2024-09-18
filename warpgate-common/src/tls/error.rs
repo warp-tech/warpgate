@@ -1,9 +1,11 @@
+use rustls::server::VerifierBuilderError;
+
 #[derive(thiserror::Error, Debug)]
 pub enum RustlsSetupError {
     #[error("rustls: {0}")]
     Rustls(#[from] rustls::Error),
-    #[error("sign: {0}")]
-    Sign(#[from] rustls::sign::SignError),
+    #[error("verifier setup: {0}")]
+    VerifierBuilder(#[from] VerifierBuilderError),
     #[error("no certificates found in certificate file")]
     NoCertificates,
     #[error("no private keys found in key file")]
@@ -11,5 +13,5 @@ pub enum RustlsSetupError {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("PKI: {0}")]
-    Pki(#[from] webpki::Error),
+    Pki(webpki::Error),
 }

@@ -110,6 +110,6 @@ impl SsoClient {
         req = req.set_id_token_hint(&token);
         req = req.set_client_id(self.config.client_id().clone());
         req = req.set_post_logout_redirect_uri(PostLogoutRedirectUrl::from_url(redirect_url));
-        return Ok(req.http_get_url());
+        Ok(req.http_get_url())
     }
 }

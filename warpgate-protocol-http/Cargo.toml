@@ -8,13 +8,13 @@ version = "0.10.2"
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
-cookie = "0.16"
+cookie = "0.17"
 data-encoding = "2.3"
 delegate = "0.6"
 futures = "0.3"
-http = "0.2"
+http = "1.0"
 once_cell = "1.17"
-poem = { version = "^1.3.50", features = [
+poem = { version = "3.1", features = [
     "cookie",
     "session",
     "anyhow",
@@ -23,15 +23,15 @@ poem = { version = "^1.3.50", features = [
     "sse",
     "embed",
 ] }
-poem-openapi = { version = "2.0", features = ["swagger-ui"] }
-reqwest = { version = "0.11", features = [
+poem-openapi = { version = "5.1", features = ["swagger-ui"] }
+reqwest = { version = "0.12", features = [
     "rustls-tls-native-roots",
     "stream",
 ], default-features = false }
 serde = "1.0"
 serde_json = "1.0"
 tokio = { version = "1.20", features = ["tracing", "signal"] }
-tokio-tungstenite = { version = "0.17", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 tracing = "0.1"
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
@@ -40,6 +40,6 @@ warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-web = { version = "*", path = "../warpgate-web" }
 warpgate-sso = { version = "*", path = "../warpgate-sso" }
 percent-encoding = "2.1"
-uuid = { version = "1.2", features = ["v4"] }
+uuid = { version = "1.3", features = ["v4"] }
 regex = "1.6"
-url = "2.4.1"
+url = "2.4"

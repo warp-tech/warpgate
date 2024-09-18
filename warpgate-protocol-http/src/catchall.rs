@@ -61,9 +61,9 @@ async fn get_target_for_request(
     req: &Request,
     services: &Services,
 ) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
-    let session: &Session = <_>::from_request_without_body(req).await?;
+    let session = <&Session>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
-    let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(req).await?;
+    let auth = Data::<&SessionAuthorization>::from_request_without_body(req).await?;
 
     let selected_target_name;
     let need_role_auth;

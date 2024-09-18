@@ -97,7 +97,7 @@ impl MySqlClient {
                 .upgrade((
                     target
                         .host
-                        .as_str()
+                        .clone()
                         .try_into()
                         .map_err(|_| MySqlError::InvalidDomainName)?,
                     client_config,
