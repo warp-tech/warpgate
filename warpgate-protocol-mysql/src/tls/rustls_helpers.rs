@@ -1,15 +1,17 @@
 use std::io::Cursor;
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use rustls::client::{ServerCertVerified, ServerCertVerifier, WebPkiVerifier};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::{ClientConfig, Error as TlsError, ServerName};
+use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
 use warpgate_common::RustlsSetupError;
 
 use super::ROOT_CERT_STORE;
 
+#[derive(Debug)]
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);
 
 impl ResolvesServerCert for ResolveServerCert {
@@ -23,10 +25,11 @@ pub async fn configure_tls_connector(
     accept_invalid_hostnames: bool,
     root_cert: Option<&[u8]>,
 ) -> Result<ClientConfig, RustlsSetupError> {
-    let config = ClientConfig::builder().with_safe_defaults();
+    let config = ClientConfig::builder();
 
     let config = if accept_invalid_certs {
         config
+            .dangerous()
             .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier))
             .with_no_client_auth()
     } else {
@@ -36,14 +39,15 @@ pub async fn configure_tls_connector(
             let mut cursor = Cursor::new(data);
 
             for cert in rustls_pemfile::certs(&mut cursor)? {
-                cert_store.add(&rustls::Certificate(cert))?;
+                cert_store.add(CertificateDer::from(cert))?;
             }
         }
 
         if accept_invalid_hostnames {
-            let verifier = WebPkiVerifier::new(cert_store, None);
+            let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store)).build()?;
 
             config
+                .dangerous()
                 .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
                 .with_no_client_auth()
         } else {
@@ -56,50 +60,105 @@ pub async fn configure_tls_connector(
     Ok(config)
 }
 
+#[derive(Debug)]
 pub struct DummyTlsVerifier;
 
 impl ServerCertVerifier for DummyTlsVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: SystemTime,
-    ) -> Result<ServerCertVerified, TlsError> {
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::ECDSA_SHA1_Legacy,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ]
     }
 }
 
+#[derive(Debug)]
 pub struct NoHostnameTlsVerifier {
-    verifier: WebPkiVerifier,
+    verifier: Arc<WebPkiServerVerifier>,
 }
 
 impl ServerCertVerifier for NoHostnameTlsVerifier {
     fn verify_server_cert(
         &self,
-        end_entity: &rustls::Certificate,
-        intermediates: &[rustls::Certificate],
-        server_name: &ServerName,
-        scts: &mut dyn Iterator<Item = &[u8]>,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
         ocsp_response: &[u8],
-        now: SystemTime,
-    ) -> Result<ServerCertVerified, TlsError> {
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
         match self.verifier.verify_server_cert(
             end_entity,
             intermediates,
             server_name,
-            scts,
             ocsp_response,
             now,
         ) {
-            Err(TlsError::InvalidCertificateData(reason))
-                if reason.contains("CertNotValidForName") =>
-            {
+            Err(TlsError::InvalidCertificate(CertificateError::NotValidForName)) => {
                 Ok(ServerCertVerified::assertion())
             }
             res => res,
         }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        self.verifier.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        self.verifier.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.verifier.supported_verify_schemes()
     }
 }

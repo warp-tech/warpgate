@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use poem::listener::RustlsCertificate;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::sign::{CertifiedKey, SigningKey};
-use rustls::{Certificate, PrivateKey};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
@@ -11,7 +11,7 @@ use crate::RustlsSetupError;
 
 pub struct TlsCertificateBundle {
     bytes: Vec<u8>,
-    certificates: Vec<Certificate>,
+    certificates: Vec<CertificateDer<'static>>,
 }
 
 pub struct TlsPrivateKey {
@@ -36,8 +36,8 @@ impl TlsCertificateBundle {
         let certificates = rustls_pemfile::certs(&mut &bytes[..]).map(|mut certs| {
             certs
                 .drain(..)
-                .map(Certificate)
-                .collect::<Vec<Certificate>>()
+                .map(CertificateDer::from)
+                .collect::<Vec<CertificateDer>>()
         })?;
         if certificates.is_empty() {
             return Err(RustlsSetupError::NoCertificates);
@@ -61,17 +61,17 @@ impl TlsPrivateKey {
         let mut key = rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice())?
             .drain(..)
             .next()
-            .map(PrivateKey);
+            .and_then(|x| PrivateKeyDer::try_from(x).ok());
 
         if key.is_none() {
             key = rustls_pemfile::rsa_private_keys(&mut bytes.as_slice())?
                 .drain(..)
                 .next()
-                .map(PrivateKey);
+                .and_then(|x| PrivateKeyDer::try_from(x).ok());
         }
 
         let key = key.ok_or(RustlsSetupError::NoKeys)?;
-        let key = rustls::sign::any_supported_type(&key)?;
+        let key = rustls::crypto::ring::sign::any_supported_type(&key)?;
 
         Ok(Self { bytes, key })
     }
@@ -105,7 +105,6 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
             cert: cert.certificates,
             key: key.key,
             ocsp: None,
-            sct_list: None,
         }
     }
 }

@@ -5,7 +5,7 @@ mod logging;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{ArgAction, StructOpt};
+use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
 
