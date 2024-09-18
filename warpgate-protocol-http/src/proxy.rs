@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use cookie::Cookie;
 use delegate::delegate;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::Uri;
@@ -313,7 +313,11 @@ async fn copy_client_body(
         return Ok(());
     }
 
-    response.set_body(Body::from_bytes_stream(client_response.bytes_stream()));
+    response.set_body(Body::from_bytes_stream(
+        client_response
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+    ));
     Ok(())
 }
 
@@ -397,6 +401,7 @@ async fn proxy_ws_inner(
             .body(())
             .map_err(poem::error::InternalServerError)?,
         None,
+        true,
     )
     .await
     .map_err(poem::error::BadGateway)?;

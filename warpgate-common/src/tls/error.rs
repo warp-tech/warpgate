@@ -13,5 +13,5 @@ pub enum RustlsSetupError {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("PKI: {0}")]
-    Pki(#[from] webpki::Error),
+    Pki(webpki::Error),
 }

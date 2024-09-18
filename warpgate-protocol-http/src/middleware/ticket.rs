@@ -1,4 +1,5 @@
-use async_trait::async_trait;
+use std::future::Future;
+
 use poem::session::Session;
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
@@ -34,58 +35,59 @@ struct QueryParams {
     ticket: Option<String>,
 }
 
-#[async_trait]
 impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
     type Output = E::Output;
 
-    async fn call(&self, req: Request) -> poem::Result<Self::Output> {
-        let mut session_is_temporary = false;
-        let session: &Session = <_>::from_request_without_body(&req).await?;
-        let session = session.clone();
+    fn call(&self, req: Request) -> impl Future<Output = poem::Result<Self::Output>> {
+        async move {
+            let mut session_is_temporary = false;
+            let session = <&Session>::from_request_without_body(&req).await?;
+            let session = session.clone();
 
-        {
-            let params: QueryParams = req.params()?;
+            {
+                let params: QueryParams = req.params()?;
 
-            let mut ticket_value = None;
-            if let Some(t) = params.ticket {
-                ticket_value = Some(t);
-            }
-            for h in req.headers().get_all(http::header::AUTHORIZATION) {
-                let header_value = h.to_str().unwrap_or("").to_string();
-                if let Some((token_type, token_value)) = header_value.split_once(' ') {
-                    if &token_type.to_lowercase() == "warpgate" {
-                        ticket_value = Some(token_value.to_string());
-                        session_is_temporary = true;
+                let mut ticket_value = None;
+                if let Some(t) = params.ticket {
+                    ticket_value = Some(t);
+                }
+                for h in req.headers().get_all(http::header::AUTHORIZATION) {
+                    let header_value = h.to_str().unwrap_or("").to_string();
+                    if let Some((token_type, token_value)) = header_value.split_once(' ') {
+                        if &token_type.to_lowercase() == "warpgate" {
+                            ticket_value = Some(token_value.to_string());
+                            session_is_temporary = true;
+                        }
+                    }
+                }
+
+                if let Some(ticket) = ticket_value {
+                    let services = Data::<&Services>::from_request_without_body(&req).await?;
+
+                    if let Some(ticket_model) = {
+                        let ticket = Secret::new(ticket);
+                        if let Some(res) = authorize_ticket(&services.db, &ticket).await? {
+                            consume_ticket(&services.db, &res.id).await?;
+                            Some(res)
+                        } else {
+                            None
+                        }
+                    } {
+                        session.set_auth(crate::common::SessionAuthorization::Ticket {
+                            username: ticket_model.username,
+                            target_name: ticket_model.target,
+                        });
                     }
                 }
             }
 
-            if let Some(ticket) = ticket_value {
-                let services: Data<&Services> = <_>::from_request_without_body(&req).await?;
+            let resp = self.inner.call(req).await;
 
-                if let Some(ticket_model) = {
-                    let ticket = Secret::new(ticket);
-                    if let Some(res) = authorize_ticket(&services.db, &ticket).await? {
-                        consume_ticket(&services.db, &res.id).await?;
-                        Some(res)
-                    } else {
-                        None
-                    }
-                } {
-                    session.set_auth(crate::common::SessionAuthorization::Ticket {
-                        username: ticket_model.username,
-                        target_name: ticket_model.target,
-                    });
-                }
+            if session_is_temporary {
+                session.clear();
             }
+
+            resp
         }
-
-        let resp = self.inner.call(req).await;
-
-        if session_is_temporary {
-            session.clear();
-        }
-
-        resp
     }
 }

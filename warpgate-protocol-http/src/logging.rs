@@ -35,7 +35,7 @@ pub fn log_request_result(method: &Method, url: &Uri, client_ip: String, status:
 }
 
 pub async fn get_client_ip(req: &Request) -> poem::Result<String> {
-    let services: Option<Data<&Services>> = <_>::from_request_without_body(req).await.ok();
+    let services = Data::<&Services>::from_request_without_body(req).await.ok();
     let trust_x_forwarded_headers = if let Some(services) = services {
         let config = services.config.lock().await;
         config.store.http.trust_x_forwarded_headers
