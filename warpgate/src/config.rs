@@ -40,15 +40,15 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
 fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     use serde_yaml::Value;
     if let Some(map) = store.as_mapping_mut() {
-        if let Some(web_admin) = map.remove(&Value::String("web_admin".into())) {
+        if let Some(web_admin) = map.remove(Value::String("web_admin".into())) {
             warn!("The `web_admin` config section is deprecated. Rename it to `http`.");
             map.insert(Value::String("http".into()), web_admin);
         }
 
-        if let Some(Value::Sequence(ref mut users)) = map.get_mut(&Value::String("users".into())) {
+        if let Some(Value::Sequence(ref mut users)) = map.get_mut(Value::String("users".into())) {
             for user in users {
                 if let Value::Mapping(ref mut user) = user {
-                    if let Some(new_require) = match user.get(&Value::String("require".into())) {
+                    if let Some(new_require) = match user.get(Value::String("require".into())) {
                         Some(Value::Sequence(ref old_requires)) => Some(Value::Mapping(
                             vec![
                                 (
