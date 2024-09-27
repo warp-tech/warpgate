@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::future::Future;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -23,45 +22,38 @@ pub struct SharedSessionStorage(pub Arc<Mutex<Box<MemoryStorage>>>);
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
 impl SessionStorage for SharedSessionStorage {
-    fn load_session<'a>(
+    async fn load_session<'a>(
         &'a self,
         session_id: &'a str,
-    ) -> impl Future<Output = poem::Result<Option<BTreeMap<String, Value>>>> + Send + 'a {
-        async move {
-            self.0.lock().await.load_session(session_id).await.map(|o| {
-                o.map(|mut s| {
-                    s.insert(
-                        POEM_SESSION_ID_SESSION_KEY.to_string(),
-                        session_id.to_string().into(),
-                    );
-                    s
-                })
+    ) -> poem::Result<Option<BTreeMap<String, Value>>> {
+        self.0.lock().await.load_session(session_id).await.map(|o| {
+            o.map(|mut s| {
+                s.insert(
+                    POEM_SESSION_ID_SESSION_KEY.to_string(),
+                    session_id.to_string().into(),
+                );
+                s
             })
-        }
+        })
     }
 
     /// Insert or update a session.
-    fn update_session<'a>(
+    async fn update_session<'a>(
         &'a self,
         session_id: &'a str,
         entries: &'a BTreeMap<String, Value>,
         expires: Option<Duration>,
-    ) -> impl Future<Output = poem::Result<()>> + Send + 'a {
-        async move {
-            self.0
-                .lock()
-                .await
-                .update_session(session_id, entries, expires)
-                .await
-        }
+    ) -> poem::Result<()> {
+        self.0
+            .lock()
+            .await
+            .update_session(session_id, entries, expires)
+            .await
     }
 
     /// Remove a session by session id.
-    fn remove_session<'a>(
-        &'a self,
-        session_id: &'a str,
-    ) -> impl Future<Output = poem::Result<()>> + Send + 'a {
-        async move { self.0.lock().await.remove_session(session_id).await }
+    async fn remove_session<'a>(&'a self, session_id: &'a str) -> poem::Result<()> {
+        self.0.lock().await.remove_session(session_id).await
     }
 }
 
