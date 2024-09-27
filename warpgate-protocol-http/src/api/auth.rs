@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -14,6 +15,7 @@ use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKin
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_core::Services;
 
+use super::common::logout;
 use crate::common::{
     authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,
 };
@@ -209,9 +211,7 @@ impl Api {
         session: &Session,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
-        session_middleware.lock().await.remove_session(session);
-        session.clear();
-        info!("Logged out");
+        logout(session, session_middleware.lock().await.deref_mut());
         Ok(LogoutResponse::Success)
     }
 

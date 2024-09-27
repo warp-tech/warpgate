@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
-use poem::session::{Session, SessionStorage};
+use poem::session::{MemoryStorage, Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use serde_json::Value;
@@ -18,15 +17,14 @@ use crate::session_handle::{
 };
 
 #[derive(Clone)]
-pub struct SharedSessionStorage(pub Arc<Mutex<Box<dyn SessionStorage>>>);
+pub struct SharedSessionStorage(pub Arc<Mutex<Box<MemoryStorage>>>);
 
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
-#[async_trait]
 impl SessionStorage for SharedSessionStorage {
-    async fn load_session(
-        &self,
-        session_id: &str,
+    async fn load_session<'a>(
+        &'a self,
+        session_id: &'a str,
     ) -> poem::Result<Option<BTreeMap<String, Value>>> {
         self.0.lock().await.load_session(session_id).await.map(|o| {
             o.map(|mut s| {
@@ -39,10 +37,11 @@ impl SessionStorage for SharedSessionStorage {
         })
     }
 
-    async fn update_session(
-        &self,
-        session_id: &str,
-        entries: &BTreeMap<String, Value>,
+    /// Insert or update a session.
+    async fn update_session<'a>(
+        &'a self,
+        session_id: &'a str,
+        entries: &'a BTreeMap<String, Value>,
         expires: Option<Duration>,
     ) -> poem::Result<()> {
         self.0
@@ -52,7 +51,8 @@ impl SessionStorage for SharedSessionStorage {
             .await
     }
 
-    async fn remove_session(&self, session_id: &str) -> poem::Result<()> {
+    /// Remove a session by session id.
+    async fn remove_session<'a>(&'a self, session_id: &'a str) -> poem::Result<()> {
         self.0.lock().await.remove_session(session_id).await
     }
 }
@@ -78,7 +78,7 @@ impl SessionStore {
     }
 
     pub async fn process_request(&mut self, req: Request) -> poem::Result<Request> {
-        let session: &Session = <_>::from_request_without_body(&req).await?;
+        let session = <&Session>::from_request_without_body(&req).await?;
 
         let request_counter = session.get::<u64>(REQUEST_COUNTER_SESSION_KEY).unwrap_or(0);
         session.set(REQUEST_COUNTER_SESSION_KEY, request_counter + 1);
@@ -97,14 +97,14 @@ impl SessionStore {
         &mut self,
         req: &Request,
     ) -> poem::Result<WarpgateServerHandleFromRequest> {
-        let session: &Session = <_>::from_request_without_body(req).await?;
+        let session = <&Session>::from_request_without_body(req).await?;
 
         if let Some(handle) = self.handle_for(session) {
             return Ok(handle.into());
         }
 
         let services = Data::<&Services>::from_request_without_body(req).await?;
-        let remote_address: &RemoteAddr = <_>::from_request_without_body(req).await?;
+        let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
         let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();

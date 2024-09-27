@@ -18,9 +18,9 @@ bytes = "1.3"
 # rand = "0.8"
 # sha1 = "0.10.5"
 # password-hash = { version = "0.2", features = ["std"] }
-rustls = { version = "0.20", features = ["dangerous_configuration"] }
+rustls = { version = "0.23", features = ["ring"], default-features = false }
 rustls-pemfile = "1.0"
-tokio-rustls = "0.23"
+tokio-rustls = "0.26"
 thiserror = "1.0"
 # webpki = "0.22"
 # once_cell = "1.17"

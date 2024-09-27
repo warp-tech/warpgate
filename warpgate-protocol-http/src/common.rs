@@ -11,6 +11,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, Services};
+use warpgate_sso::CoreIdToken;
 
 use crate::session::SessionStore;
 
@@ -18,7 +19,15 @@ pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
+static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
+
+#[derive(Serialize, Deserialize)]
+pub struct SsoLoginState {
+    pub token: CoreIdToken,
+    pub provider: String,
+    pub supports_single_logout: bool,
+}
 
 pub trait SessionExt {
     fn get_target_name(&self) -> Option<String>;
@@ -29,6 +38,9 @@ pub trait SessionExt {
     fn set_auth(&self, auth: SessionAuthorization);
     fn get_auth_state_id(&self) -> Option<AuthStateId>;
     fn clear_auth_state(&self);
+
+    fn get_sso_login_state(&self) -> Option<SsoLoginState>;
+    fn set_sso_login_state(&self, token: SsoLoginState);
 }
 
 impl SessionExt for Session {
@@ -63,6 +75,17 @@ impl SessionExt for Session {
     fn clear_auth_state(&self) {
         self.remove(AUTH_STATE_ID_SESSION_KEY)
     }
+
+    fn get_sso_login_state(&self) -> Option<SsoLoginState> {
+        self.get::<String>(AUTH_SSO_LOGIN_STATE)
+            .and_then(|x| serde_json::from_str(&x).ok())
+    }
+
+    fn set_sso_login_state(&self, state: SsoLoginState) {
+        if let Ok(json) = serde_json::to_string(&state) {
+            self.set(AUTH_SSO_LOGIN_STATE, json)
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -87,7 +110,7 @@ impl SessionAuthorization {
 }
 
 async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Result<bool> {
-    let services: Data<&Services> = <_>::from_request_without_body(req).await?;
+    let services = Data::<&Services>::from_request_without_body(req).await?;
 
     let SessionAuthorization::User(username) = auth else {
         return Ok(false);
@@ -110,7 +133,7 @@ async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Resu
 
 pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(&req).await?;
+        let auth = Data::<&SessionAuthorization>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
         }
@@ -120,8 +143,8 @@ pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
 
 pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth: Data<&SessionAuthorization> = <_>::from_request_without_body(&req).await?;
-        let session: &Session = <_>::from_request_without_body(&req).await?;
+        let auth = Data::<&SessionAuthorization>::from_request_without_body(&req).await?;
+        let session = <&Session>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
         }
@@ -134,7 +157,7 @@ pub async fn _inner_auth<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
 ) -> poem::Result<Option<E::Output>> {
-    let session: &Session = FromRequest::from_request_without_body(&req).await?;
+    let session = <&Session>::from_request_without_body(&req).await?;
 
     Ok(match session.get_auth() {
         Some(auth) => Some(ep.data(auth).call(req).await?),
@@ -212,9 +235,9 @@ pub async fn get_auth_state_for_request(
 }
 
 pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {
-    let session_middleware: Data<&Arc<Mutex<SessionStore>>> =
-        <_>::from_request_without_body(req).await?;
-    let session: &Session = <_>::from_request_without_body(req).await?;
+    let session_middleware =
+        Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
+    let session = <&Session>::from_request_without_body(req).await?;
 
     let server_handle = session_middleware
         .lock()

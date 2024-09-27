@@ -6,12 +6,24 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     labels: ["type/deps"]
-    open-pull-requests-limit: 25
+    #open-pull-requests-limit: 25
     schedule:
       interval: "daily"
+    groups:
+      version-bumps:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: "npm"
     directory: "/warpgate-web"
     labels: ["type/deps"]
-    open-pull-requests-limit: 25
+    #open-pull-requests-limit: 25
+    groups:
+      version-bumps:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
     schedule:
       interval: "daily"

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use poem::session::Session;
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
@@ -34,13 +33,12 @@ struct QueryParams {
     ticket: Option<String>,
 }
 
-#[async_trait]
 impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
     type Output = E::Output;
 
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
         let mut session_is_temporary = false;
-        let session: &Session = <_>::from_request_without_body(&req).await?;
+        let session = <&Session>::from_request_without_body(&req).await?;
         let session = session.clone();
 
         {
@@ -61,7 +59,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             }
 
             if let Some(ticket) = ticket_value {
-                let services: Data<&Services> = <_>::from_request_without_body(&req).await?;
+                let services = Data::<&Services>::from_request_without_body(&req).await?;
 
                 if let Some(ticket_model) = {
                     let ticket = Secret::new(ticket);

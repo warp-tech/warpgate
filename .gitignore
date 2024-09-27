@@ -22,3 +22,7 @@ config.yaml
 __pycache__
 .pytest_cache
 dhat-heap.json
+
+# IntelliJ based IDEs
+.idea/
+/.data/

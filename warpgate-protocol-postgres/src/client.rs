@@ -76,7 +76,7 @@ impl PostgresClient {
                     .upgrade((
                         target
                             .host
-                            .as_str()
+                            .clone()
                             .try_into()
                             .map_err(|_| PostgresError::InvalidDomainName)?,
                         client_config,

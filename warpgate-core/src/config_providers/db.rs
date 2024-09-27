@@ -246,8 +246,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                         ref email,
                     }) = credential
                     {
-                        if provider.as_ref().unwrap_or(client_provider) == client_provider {
-                            return Ok(email == client_email);
+                        if provider.as_ref().unwrap_or(client_provider) == client_provider
+                            && email == client_email
+                        {
+                            return Ok(true);
                         }
                     }
                 }

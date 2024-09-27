@@ -2,7 +2,11 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
+<<<<<<< HEAD
     "version": "0.10.1"
+=======
+    "version": "0.10.2"
+>>>>>>> main
   },
   "servers": [
     {
@@ -324,6 +328,29 @@
         "operationId": "return_to_sso_with_form_data"
       }
     },
+    "/sso/logout": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSloResponseParams"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "initiate_sso_logout"
+      }
+    },
     "/sso/providers/{name}/start": {
       "get": {
         "parameters": [
@@ -414,7 +441,8 @@
         "required": [
           "version",
           "ports",
-          "authorized_via_ticket"
+          "authorized_via_ticket",
+          "authorized_via_sso_with_single_logout"
         ],
         "properties": {
           "version": {
@@ -433,6 +461,9 @@
             "$ref": "#/components/schemas/PortsInfo"
           },
           "authorized_via_ticket": {
+            "type": "boolean"
+          },
+          "authorized_via_sso_with_single_logout": {
             "type": "boolean"
           }
         }
@@ -518,6 +549,17 @@
           "Azure",
           "Custom"
         ]
+      },
+      "StartSloResponseParams": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
       },
       "StartSsoResponseParams": {
         "type": "object",

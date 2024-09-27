@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use http::header::Entry;
 use poem::web::cookie::Cookie;
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
@@ -25,7 +24,6 @@ impl<E: Endpoint> Middleware<E> for CookieHostMiddleware {
     }
 }
 
-#[async_trait]
 impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
     type Output = Response;
 

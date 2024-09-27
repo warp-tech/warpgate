@@ -62,12 +62,13 @@ impl ProtocolServer for MySQLProtocolServer {
             }
         };
 
-        let tls_config = ServerConfig::builder()
-            .with_safe_defaults()
-            .with_client_cert_verifier(NoClientAuth::new())
-            .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
-                certificate_and_key.into(),
-            ))));
+        let tls_config =
+            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()?
+                .with_client_cert_verifier(Arc::new(NoClientAuth))
+                .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+                    certificate_and_key.into(),
+                ))));
 
         info!(?address, "Listening");
         let listener = TcpListener::bind(address).await?;

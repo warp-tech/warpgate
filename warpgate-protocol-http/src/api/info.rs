@@ -25,6 +25,7 @@ pub struct Info {
     external_host: Option<String>,
     ports: PortsInfo,
     authorized_via_ticket: bool,
+    authorized_via_sso_with_single_logout: bool,
 }
 
 #[derive(ApiResponse)]
@@ -64,6 +65,9 @@ impl Api {
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
             ),
+            authorized_via_sso_with_single_logout: session
+                .get_sso_login_state()
+                .map_or(false, |state| state.supports_single_logout),
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {
