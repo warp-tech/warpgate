@@ -65,6 +65,11 @@ enum KeyboardInteractiveState {
     WebAuthRequested(broadcast::Receiver<AuthResult>),
 }
 
+struct CachedSuccessfulTicketAuth {
+    ticket: Secret<String>,
+    username: String,
+}
+
 pub struct ServerSession {
     pub id: SessionId,
     username: Option<String>,
@@ -90,6 +95,7 @@ pub struct ServerSession {
     channel_writer: ChannelWriter,
     auth_state: Option<Arc<Mutex<AuthState>>>,
     keyboard_interactive_state: KeyboardInteractiveState,
+    cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -147,6 +153,7 @@ impl ServerSession {
             channel_writer: ChannelWriter::new(),
             auth_state: None,
             keyboard_interactive_state: KeyboardInteractiveState::None,
+            cached_successful_ticket_auth: None,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -1216,7 +1223,7 @@ impl ServerSession {
         }
 
         let selector: AuthSelector = ssh_username.expose_secret().into();
-        match self.try_auth(&selector, None).await {
+        match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
             },
@@ -1244,7 +1251,7 @@ impl ServerSession {
         let mut result = Ok(AuthResult::Rejected);
         for key in keys {
             result = self
-                .try_auth(
+                .try_auth_lazy(
                     &selector,
                     Some(AuthCredential::PublicKey {
                         kind: key.name().to_string(),
@@ -1283,7 +1290,7 @@ impl ServerSession {
         info!("Password auth as {:?}", selector);
 
         match self
-            .try_auth(&selector, Some(AuthCredential::Password(password)))
+            .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
@@ -1327,7 +1334,7 @@ impl ServerSession {
 
         self.keyboard_interactive_state = KeyboardInteractiveState::None;
 
-        match self.try_auth(&selector, cred).await {
+        match self.try_auth_lazy(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: None,
@@ -1448,7 +1455,38 @@ impl ServerSession {
         }
     }
 
-    async fn try_auth(
+    /// As try_auth_lazy is called multiple times, this memoization prevents
+    /// consuming the ticket multiple times, depleting its uses.
+    async fn try_auth_lazy(
+        &mut self,
+        selector: &AuthSelector,
+        credential: Option<AuthCredential>,
+    ) -> Result<AuthResult> {
+        if let AuthSelector::Ticket { secret } = selector {
+            if let Some(ref csta) = self.cached_successful_ticket_auth {
+                // Only if the client hasn't maliciously changed the username
+                // between auth attempts
+                if &csta.ticket == secret {
+                    return Ok(AuthResult::Accepted {
+                        username: csta.username.clone(),
+                    });
+                }
+            }
+
+            let result = self.try_auth_eager(selector, credential).await?;
+            if let AuthResult::Accepted { ref username } = result {
+                self.cached_successful_ticket_auth = Some(CachedSuccessfulTicketAuth {
+                    ticket: secret.clone(),
+                    username: username.clone(),
+                });
+            }
+
+            return Ok(result);
+        }
+        self.try_auth_eager(selector, credential).await
+    }
+
+    async fn try_auth_eager(
         &mut self,
         selector: &AuthSelector,
         credential: Option<AuthCredential>,
