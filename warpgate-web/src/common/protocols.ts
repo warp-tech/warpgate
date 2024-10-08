@@ -43,7 +43,7 @@ export function makeExampleMySQLURI (opt: ConnectionOptions): string {
 export const makePostgreSQLUsername = makeMySQLUsername
 
 export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
-    return shellEscape(['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString(), 'database-name'])
+    return shellEscape(['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString(), '--password', 'database-name'])
 }
 
 export function makeExamplePostgreSQLURI (opt: ConnectionOptions): string {

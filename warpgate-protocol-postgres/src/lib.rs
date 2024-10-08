@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use client::{ConnectionOptions, PostgresClient};
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use session::PostgresSession;
@@ -19,7 +20,8 @@ use session_handle::PostgresSessionHandle;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
+    TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
@@ -115,17 +117,20 @@ impl ProtocolServer for PostgresProtocolServer {
         }
     }
 
-    async fn test_target(&self, _target: Target) -> Result<(), TargetTestError> {
-        unimplemented!();
-        // let TargetOptions::MySql(options) = target.options else {
-        //     return Err(TargetTestError::Misconfigured(
-        //         "Not a MySQL target".to_owned(),
-        //     ));
-        // };
-        // MySqlClient::connect(&options, ConnectionOptions::default())
-        //     .await
-        //     .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
-        // Ok(())
+    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
+        let TargetOptions::Postgres(options) = target.options else {
+            return Err(TargetTestError::Misconfigured(
+                "Not a PostgreSQL target".to_owned(),
+            ));
+        };
+        let mut conn_options = ConnectionOptions::default();
+        conn_options
+            .parameters
+            .insert("database".into(), "postgres".into());
+        PostgresClient::connect(&options, conn_options)
+            .await
+            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
+        Ok(())
     }
 }
 

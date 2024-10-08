@@ -3,6 +3,7 @@ use std::string::FromUtf8Error;
 
 use pgwire::error::PgWireError;
 use pgwire::messages::response::ErrorResponse;
+use rsasl::prelude::{SASLError, SessionError};
 use warpgate_common::{MaybeTlsStreamError, RustlsSetupError, WarpgateError};
 
 use crate::stream::PostgresStreamError;
@@ -33,6 +34,10 @@ pub enum PostgresError {
     Io(#[from] std::io::Error),
     #[error("UTF-8: {0}")]
     Utf8(#[from] FromUtf8Error),
+    #[error("SASL: {0}")]
+    Sasl(#[from] SASLError),
+    #[error("SASL session: {0}")]
+    SaslSession(#[from] SessionError),
     #[error("Password is required for authentication")]
     PasswordRequired,
     // #[error("packet decode error: {0}")]

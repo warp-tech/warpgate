@@ -129,6 +129,13 @@ class ProcessManager:
         )
         return port
 
+    def start_postgres_server(self):
+        port = alloc_port()
+        self.start(
+            ["docker", "run", "--rm", "-p", f"{port}:5432", "warpgate-e2e-postgres-server"]
+        )
+        return port
+
     def start_wg(
         self,
         config="",

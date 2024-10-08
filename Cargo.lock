@@ -1009,6 +1009,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "core2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b49ba7ef1ad6107f8824dbe97de947cbaac53c44e7f9756a1fba0d37c1eec505"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3921,6 +3930,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsasl"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45035615cdd68c71daac89aef75b130d4b2cad29599966e1b4671f8fbb463559"
+dependencies = [
+ "base64 0.22.1",
+ "core2",
+ "digest",
+ "hmac",
+ "pbkdf2 0.12.2",
+ "rand",
+ "serde_json",
+ "sha2",
+ "stringprep",
+ "thiserror",
+]
+
+[[package]]
 name = "russh"
 version = "0.44.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6018,6 +6045,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "pgwire",
+ "rsasl",
  "rustls 0.23.12",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
