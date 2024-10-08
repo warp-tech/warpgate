@@ -53,13 +53,7 @@ Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that
 
 ## Project Status
 
-The project is currently in **alpha** stage and is gathering community feedback. See the [official roadmap](https://github.com/orgs/warp-tech/projects/1/views/2) for the upcoming features.
-
-In particular, we're working on:
-
-* Requesting admin approvals for sessions
-* Support for tunneling PostgreSQL connections,
-* and much more.
+The project is currently in **alpha** stage and is gathering community feedback.
 
 ## How it works
 
