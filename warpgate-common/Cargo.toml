@@ -45,3 +45,4 @@ warpgate-sso = { version = "*", path = "../warpgate-sso" }
 rustls = { version = "0.23", features = ["ring"], default-features = false}
 rustls-pemfile = "1.0"
 webpki = "0.22"
+aho-corasick = "1.1.3"

@@ -5838,6 +5838,7 @@ dependencies = [
 name = "warpgate-common"
 version = "0.10.2"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "argon2",
  "async-trait",
