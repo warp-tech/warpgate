@@ -22,8 +22,6 @@ pub enum PostgresError {
     Stream(#[from] PostgresStreamError),
     #[error("server doesn't offer TLS")]
     TlsNotSupported,
-    // #[error("client doesn't support TLS")]
-    // TlsNotSupportedByClient,
     #[error("TLS setup failed: {0}")]
     TlsSetup(#[from] RustlsSetupError),
     #[error("TLS stream error: {0}")]
@@ -40,8 +38,6 @@ pub enum PostgresError {
     SaslSession(#[from] SessionError),
     #[error("Password is required for authentication")]
     PasswordRequired,
-    // #[error("packet decode error: {0}")]
-    // Decode(Box<dyn Error + Send + Sync>),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
     #[error(transparent)]

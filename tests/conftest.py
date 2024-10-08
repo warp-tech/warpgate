@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import psutil
 import pytest
 import requests
@@ -14,7 +15,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import List, Optional
 
-from .util import alloc_port, wait_port
+from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -46,9 +47,10 @@ class WarpgateProcess:
 class ProcessManager:
     children: List[Child]
 
-    def __init__(self, ctx: Context) -> None:
+    def __init__(self, ctx: Context, timeout: int) -> None:
         self.children = []
         self.ctx = ctx
+        self.timeout = timeout
 
     def stop(self):
         for child in self.children:
@@ -131,9 +133,32 @@ class ProcessManager:
 
     def start_postgres_server(self):
         port = alloc_port()
+        container_name = f"warpgate-e2e-postgres-server-{uuid.uuid4()}"
         self.start(
-            ["docker", "run", "--rm", "-p", f"{port}:5432", "warpgate-e2e-postgres-server"]
+            ["docker", "run", "--rm", '--name', container_name, "-p", f"{port}:5432", "warpgate-e2e-postgres-server"]
         )
+
+        def wait_postgres():
+            while True:
+                try:
+                    subprocess.check_call(
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "pg_isready",
+                            "-h",
+                            "localhost",
+                            "-U",
+                            "user",
+                        ]
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_postgres, "Postgres is not ready", timeout=self.timeout)
+        logging.debug(f"Postgres {container_name} is up")
         return port
 
     def start_wg(
@@ -280,8 +305,8 @@ def ctx():
 
 
 @pytest.fixture(scope="session")
-def processes(ctx, report_generation):
-    mgr = ProcessManager(ctx)
+def processes(ctx, timeout, report_generation):
+    mgr = ProcessManager(ctx, timeout)
     try:
         yield mgr
     finally:
