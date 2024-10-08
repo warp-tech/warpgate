@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-postgres"
-version = "0.10.1"
+version = "0.11.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common" }
