@@ -23,6 +23,14 @@ def alloc_port():
     return last_port
 
 
+def _wait_timeout(fn, msg, timeout=60):
+    t = threading.Thread(target=fn, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    if t.is_alive():
+        raise Exception(msg)
+
+
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None):
     logging.debug(f"Waiting for port {port}")
 
@@ -53,11 +61,7 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None)
                 else:
                     time.sleep(0.1)
 
-    t = threading.Thread(target=wait, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-    if t.is_alive():
-        raise Exception(f"Port {port} is not up")
+    _wait_timeout(wait, f"Port {port} is not up", timeout=timeout)
     return data
 
 

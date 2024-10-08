@@ -82,6 +82,9 @@ async function toggleRole (role: Role) {
                 {#if target.options.kind === 'MySql'}
                     MySQL target
                 {/if}
+                {#if target.options.kind === 'Postgres'}
+                    PostgreSQL target
+                {/if}
                 {#if target.options.kind === 'Ssh'}
                     SSH target
                 {/if}
@@ -97,7 +100,7 @@ async function toggleRole (role: Role) {
 
     <h4>Access instructions</h4>
 
-    {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql'}
+    {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
         {#await api.getUsers()}
             <DelayedSpinner/>
         {:then users}
@@ -123,6 +126,7 @@ async function toggleRole (role: Role) {
             WebAdmin: TargetKind.WebAdmin,
             Http: TargetKind.Http,
             MySql: TargetKind.MySql,
+            Postgres: TargetKind.Postgres,
         }[target.options.kind ?? '']}
         targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
     />
@@ -200,7 +204,7 @@ async function toggleRole (role: Role) {
         {/if}
     {/if}
 
-    {#if target.options.kind === 'MySql'}
+    {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
         <div class="row">
             <div class="col-8">
                 <FormGroup floating label="Target host">

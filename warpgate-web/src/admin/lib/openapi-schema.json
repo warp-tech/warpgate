@@ -1555,6 +1555,9 @@
             "$ref": "#/components/schemas/TargetOptions_TargetMySqlOptions"
           },
           {
+            "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+          },
+          {
             "$ref": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
           }
         ],
@@ -1564,6 +1567,7 @@
             "Ssh": "#/components/schemas/TargetOptions_TargetSSHOptions",
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
             "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
           }
         }
@@ -1612,6 +1616,28 @@
           }
         ]
       },
+      "TargetOptions_TargetPostgresOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Postgres"
+                ],
+                "example": "Postgres"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetPostgresOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -1655,6 +1681,33 @@
             "$ref": "#/components/schemas/TargetWebAdminOptions"
           }
         ]
+      },
+      "TargetPostgresOptions": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          }
+        }
       },
       "TargetSSHOptions": {
         "type": "object",
@@ -1963,6 +2016,12 @@
             }
           },
           "mysql": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "postgres": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

@@ -4,9 +4,8 @@ use mysql_common::proto::codec::PacketCodec;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::*;
+use warpgate_common::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 use warpgate_database_protocols::io::Encode;
-
-use crate::tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MySqlStreamError {

@@ -515,6 +515,10 @@
           "mysql": {
             "type": "integer",
             "format": "uint16"
+          },
+          "postgres": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -574,6 +578,7 @@
           "Http",
           "MySql",
           "Ssh",
+          "Postgres",
           "WebAdmin"
         ]
       },

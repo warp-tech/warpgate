@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import psutil
 import pytest
 import requests
@@ -12,9 +13,9 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
-from typing import List
+from typing import List, Optional
 
-from .util import alloc_port, wait_port
+from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -40,14 +41,16 @@ class WarpgateProcess:
     http_port: int
     ssh_port: int
     mysql_port: int
+    postgres_port: int
 
 
 class ProcessManager:
     children: List[Child]
 
-    def __init__(self, ctx: Context) -> None:
+    def __init__(self, ctx: Context, timeout: int) -> None:
         self.children = []
         self.ctx = ctx
+        self.timeout = timeout
 
     def stop(self):
         for child in self.children:
@@ -128,11 +131,41 @@ class ProcessManager:
         )
         return port
 
+    def start_postgres_server(self):
+        port = alloc_port()
+        container_name = f"warpgate-e2e-postgres-server-{uuid.uuid4()}"
+        self.start(
+            ["docker", "run", "--rm", '--name', container_name, "-p", f"{port}:5432", "warpgate-e2e-postgres-server"]
+        )
+
+        def wait_postgres():
+            while True:
+                try:
+                    subprocess.check_call(
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "pg_isready",
+                            "-h",
+                            "localhost",
+                            "-U",
+                            "user",
+                        ]
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_postgres, "Postgres is not ready", timeout=self.timeout)
+        logging.debug(f"Postgres {container_name} is up")
+        return port
+
     def start_wg(
         self,
         config="",
         args=None,
-        share_with: WarpgateProcess = None,
+        share_with: Optional[WarpgateProcess] = None,
         stderr=None,
         stdout=None,
     ) -> WarpgateProcess:
@@ -142,11 +175,13 @@ class ProcessManager:
             config_path = share_with.config_path
             ssh_port = share_with.ssh_port
             mysql_port = share_with.mysql_port
+            postgres_port = share_with.postgres_port
             http_port = share_with.http_port
         else:
             ssh_port = alloc_port()
             http_port = alloc_port()
             mysql_port = alloc_port()
+            postgres_port = alloc_port()
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
@@ -198,6 +233,8 @@ class ProcessManager:
                     str(http_port),
                     "--mysql-port",
                     str(mysql_port),
+                    "--postgres-port",
+                    str(postgres_port),
                     "--data-path",
                     data_dir,
                 ],
@@ -221,6 +258,7 @@ class ProcessManager:
             ssh_port=ssh_port,
             http_port=http_port,
             mysql_port=mysql_port,
+            postgres_port=postgres_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -267,8 +305,8 @@ def ctx():
 
 
 @pytest.fixture(scope="session")
-def processes(ctx, report_generation):
-    mgr = ProcessManager(ctx)
+def processes(ctx, timeout, report_generation):
+    mgr = ProcessManager(ctx, timeout)
     try:
         yield mgr
     finally:

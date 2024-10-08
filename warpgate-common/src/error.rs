@@ -27,6 +27,8 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state error")]
     InconsistentState,
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
 
     #[error("Session end")]
     SessionEnd,

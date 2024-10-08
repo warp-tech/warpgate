@@ -52,6 +52,12 @@ pub(crate) fn _default_mysql_listen() -> ListenEndpoint {
 }
 
 #[inline]
+pub(crate) fn _default_postgres_listen() -> ListenEndpoint {
+    #[allow(clippy::unwrap_used)]
+    ListenEndpoint("0.0.0.0:55432".to_socket_addrs().unwrap().next().unwrap())
+}
+
+#[inline]
 pub(crate) fn _default_retention() -> Duration {
     Duration::SECOND * 60 * 60 * 24 * 7
 }

@@ -43,9 +43,14 @@ jobs:
         with:
           key: "build"
 
-      - name: Install just
+      - name: Install tools
         run: |
           cargo install just
+          cargo install cargo-deny
+
+      - name: cargo-deny
+        run: |
+          cargo deny check bans
 
       - name: Install admin UI deps
         run: |

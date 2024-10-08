@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -165,7 +166,7 @@ impl MySqlSession {
         handshake: HandshakeResponse,
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
-        let selector: AuthSelector = (&handshake.username).into();
+        let selector: AuthSelector = handshake.username.deref().into();
 
         async fn fail(this: &mut MySqlSession) -> Result<(), MySqlError> {
             this.stream.push(

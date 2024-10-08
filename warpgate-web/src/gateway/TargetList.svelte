@@ -79,6 +79,9 @@ function loadURL (url: string) {
             {#if target.kind === TargetKind.MySql}
                 MySQL
             {/if}
+            {#if target.kind === TargetKind.Postgres}
+                PostgreSQL
+            {/if}
         </small>
         {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
             <Fa icon={faArrowRight} fw />

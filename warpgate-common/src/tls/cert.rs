@@ -61,7 +61,8 @@ impl TlsPrivateKey {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
         let bytes = {
             // https://github.com/rustls/rustls/issues/767
-            let ac = AhoCorasick::new(&[b"EC PRIVATE KEY"]).expect("EC PK AhoCorasick");
+            #[allow(clippy::expect_used)]
+            let ac = AhoCorasick::new([b"EC PRIVATE KEY"]).expect("EC PK AhoCorasick");
             let mut new_bytes = vec![];
             ac.replace_all_with_bytes(&bytes, &mut new_bytes, |_, _, dst| {
                 dst.extend_from_slice(b"PRIVATE KEY");

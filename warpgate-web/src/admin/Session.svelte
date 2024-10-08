@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions } from 'admin/lib/api'
+import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions } from 'admin/lib/api'
 import { timeAgo } from 'admin/lib/time'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -34,6 +34,10 @@ function getTargetDescription () {
         }
         if (session.target.options.kind === 'MySql') {
             const options = session.target.options as TargetMySqlOptions
+            address = `${options.host}:${options?.port}`
+        }
+        if (session.target.options.kind === 'Postgres') {
+            const options = session.target.options as TargetPostgresOptions
             address = `${options.host}:${options?.port}`
         }
         if (session.target.options.kind === 'Http') {

@@ -63,6 +63,9 @@
                     {#if target.options.kind === 'MySql'}
                         MySQL
                     {/if}
+                    {#if target.options.kind === 'Postgres'}
+                        PostgreSQL
+                    {/if}
                     {#if target.options.kind === 'Ssh'}
                         SSH
                     {/if}

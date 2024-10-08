@@ -71,6 +71,8 @@ pub struct UserRequireCredentialsPolicy {
     pub ssh: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mysql: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub postgres: Option<Vec<CredentialKind>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -227,6 +229,42 @@ impl MySqlConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PostgresConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_postgres_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for PostgresConfig {
+    fn default() -> Self {
+        PostgresConfig {
+            enable: false,
+            listen: _default_postgres_listen(),
+            external_port: None,
+            certificate: "".to_owned(),
+            key: "".to_owned(),
+        }
+    }
+}
+
+impl PostgresConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -307,6 +345,9 @@ pub struct WarpgateConfigStore {
     pub mysql: MySqlConfig,
 
     #[serde(default)]
+    pub postgres: PostgresConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 
     #[serde(default)]
@@ -326,6 +367,7 @@ impl Default for WarpgateConfigStore {
             ssh: <_>::default(),
             http: <_>::default(),
             mysql: <_>::default(),
+            postgres: <_>::default(),
             log: <_>::default(),
             config_provider: <_>::default(),
         }

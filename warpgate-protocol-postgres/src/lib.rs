@@ -5,15 +5,18 @@ mod error;
 mod session;
 mod session_handle;
 mod stream;
+
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use client::{ConnectionOptions, MySqlClient};
+use client::{ConnectionOptions, PostgresClient};
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
+use session::PostgresSession;
+use session_handle::PostgresSessionHandle;
 use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
@@ -22,23 +25,20 @@ use warpgate_common::{
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
-use crate::session::MySqlSession;
-use crate::session_handle::MySqlSessionHandle;
-
-pub struct MySQLProtocolServer {
+pub struct PostgresProtocolServer {
     services: Services,
 }
 
-impl MySQLProtocolServer {
+impl PostgresProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
-        Ok(MySQLProtocolServer {
+        Ok(PostgresProtocolServer {
             services: services.clone(),
         })
     }
 }
 
 #[async_trait]
-impl ProtocolServer for MySQLProtocolServer {
+impl ProtocolServer for PostgresProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
         let certificate_and_key = {
             let config = self.services.config.lock().await;
@@ -77,7 +77,7 @@ impl ProtocolServer for MySQLProtocolServer {
             let tls_config = tls_config.clone();
             let services = self.services.clone();
             tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
+                let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
                 let server_handle = services
                     .state
@@ -92,9 +92,15 @@ impl ProtocolServer for MySQLProtocolServer {
                     )
                     .await?;
 
-                let session =
-                    MySqlSession::new(server_handle, services, stream, tls_config, remote_address)
-                        .await;
+                let session = PostgresSession::new(
+                    server_handle,
+                    services,
+                    stream,
+                    tls_config,
+                    remote_address,
+                )
+                .await;
+
                 let span = session.make_logging_span();
                 tokio::select! {
                     result = session.run().instrument(span) => match result {
@@ -112,20 +118,24 @@ impl ProtocolServer for MySQLProtocolServer {
     }
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::MySql(options) = target.options else {
+        let TargetOptions::Postgres(options) = target.options else {
             return Err(TargetTestError::Misconfigured(
-                "Not a MySQL target".to_owned(),
+                "Not a PostgreSQL target".to_owned(),
             ));
         };
-        MySqlClient::connect(&options, ConnectionOptions::default())
+        let mut conn_options = ConnectionOptions::default();
+        conn_options
+            .parameters
+            .insert("database".into(), "postgres".into());
+        PostgresClient::connect(&options, conn_options)
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 }
 
-impl Debug for MySQLProtocolServer {
+impl Debug for PostgresProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MySQLProtocolServer")
+        write!(f, "PostgresProtocolServer")
     }
 }

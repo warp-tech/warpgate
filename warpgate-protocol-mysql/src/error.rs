@@ -1,10 +1,9 @@
 use std::error::Error;
 
-use warpgate_common::{RustlsSetupError, WarpgateError};
+use warpgate_common::{MaybeTlsStreamError, RustlsSetupError, WarpgateError};
 use warpgate_database_protocols::error::Error as SqlxError;
 
 use crate::stream::MySqlStreamError;
-use crate::tls::MaybeTlsStreamError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum MySqlError {

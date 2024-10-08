@@ -40,6 +40,17 @@ export function makeExampleMySQLURI (opt: ConnectionOptions): string {
     return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port'}?sslMode=required`
 }
 
+export const makePostgreSQLUsername = makeMySQLUsername
+
+export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
+    return shellEscape(['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString(), '--password', 'database-name'])
+}
+
+export function makeExamplePostgreSQLURI (opt: ConnectionOptions): string {
+    const pwSuffix = opt.ticketSecret ? '' : ':<password>'
+    return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port'}/database-name?sslmode=require`
+}
+
 export function makeTargetURL (opt: ConnectionOptions): string {
     const host = opt.targetExternalHost ? `${opt.targetExternalHost}:${opt.serverInfo?.ports.http ?? 443}` : location.host
     if (opt.ticketSecret) {
