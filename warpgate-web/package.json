@@ -59,8 +59,8 @@
     "vite": "^5.4.8",
     "vite-plugin-checker": "^0.8.0",
     "vite-tsconfig-paths": "^4.3.2",
-    "xterm": "^4.18.0",
-    "xterm-addon-serialize": "^0.11.0",
+    "@xterm/xterm": "^5.5",
+    "@xterm/addon-serialize": "^0.13",
     "otpauth": "^9.3.3"
   }
 }

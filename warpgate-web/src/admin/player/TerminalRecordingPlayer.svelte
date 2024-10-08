@@ -1,8 +1,8 @@
 <script lang="ts">
     import Fa from 'svelte-fa'
     import { onDestroy, onMount } from 'svelte'
-    import { Terminal } from 'xterm'
-    import { SerializeAddon } from 'xterm-addon-serialize'
+    import { Terminal } from '@xterm/xterm'
+    import { SerializeAddon } from '@xterm/addon-serialize'
     import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
     import formatDuration from 'format-duration'
@@ -362,7 +362,7 @@
 </div>
 
 <style lang="scss">
-    @import "../../../node_modules/xterm/css/xterm.css";
+    @import "../../../node_modules/@xterm/xterm/css/xterm.css";
 
     .root {
         border-radius: 5px;
