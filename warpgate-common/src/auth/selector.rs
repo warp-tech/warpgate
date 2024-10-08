@@ -13,16 +13,20 @@ pub enum AuthSelector {
     },
 }
 
-impl From<&String> for AuthSelector {
-    fn from(selector: &String) -> Self {
-        if let Some(secret) = selector.strip_prefix(TICKET_SELECTOR_PREFIX) {
+impl<T: AsRef<str>> From<T> for AuthSelector {
+    fn from(selector: T) -> Self {
+        if let Some(secret) = selector.as_ref().strip_prefix(TICKET_SELECTOR_PREFIX) {
             let secret = Secret::new(secret.into());
             return AuthSelector::Ticket { secret };
         }
 
-        let separator = if selector.contains('#') { '#' } else { ':' };
+        let separator = if selector.as_ref().contains('#') {
+            '#'
+        } else {
+            ':'
+        };
 
-        let mut parts = selector.splitn(2, separator);
+        let mut parts = selector.as_ref().splitn(2, separator);
         let username = parts.next().unwrap_or("").to_string();
         let target_name = parts.next().unwrap_or("").to_string();
         AuthSelector::User {

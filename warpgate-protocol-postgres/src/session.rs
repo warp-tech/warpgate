@@ -85,27 +85,33 @@ impl PostgresSession {
             return Err(PostgresError::ProtocolError("expected Startup".into()));
         };
 
-        self.stream
-            .push(pgwire::messages::startup::Authentication::CleartextPassword)?;
-        self.stream.flush().await?;
-
-        let Some(PgWireGenericFrontendMessage(PgWireFrontendMessage::PasswordMessageFamily(
-            message,
-        ))) = self.stream.recv::<PgWireGenericFrontendMessage>().await?
-        else {
-            return Err(PostgresError::Eof);
-        };
-
         let username = startup.parameters.get("user").cloned();
         self.username = username.clone();
         self.database = startup.parameters.get("database").cloned();
 
-        let password = Secret::from(
-            message
-                .into_password()
-                .map_err(PostgresError::from)?
-                .password,
-        );
+        let password = if let AuthSelector::Ticket { .. } =
+            AuthSelector::from(username.as_deref().unwrap_or(""))
+        {
+            Secret::from("".to_string())
+        } else {
+            self.stream
+                .push(pgwire::messages::startup::Authentication::CleartextPassword)?;
+            self.stream.flush().await?;
+
+            let Some(PgWireGenericFrontendMessage(PgWireFrontendMessage::PasswordMessageFamily(
+                message,
+            ))) = self.stream.recv::<PgWireGenericFrontendMessage>().await?
+            else {
+                return Err(PostgresError::Eof);
+            };
+
+            Secret::from(
+                message
+                    .into_password()
+                    .map_err(PostgresError::from)?
+                    .password,
+            )
+        };
 
         self.run_authorization(startup, &username.unwrap_or("".into()), password)
             .await
