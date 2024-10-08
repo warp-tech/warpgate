@@ -2,7 +2,7 @@
     import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL } from 'common/protocols'
+    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
 
     export let targetName: string|undefined
@@ -23,6 +23,9 @@
     $: mySQLUsername = makeMySQLUsername(opts)
     $: exampleMySQLCommand = makeExampleMySQLCommand(opts)
     $: exampleMySQLURI = makeExampleMySQLURI(opts)
+    $: postgreSQLUsername = makePostgreSQLUsername(opts)
+    $: examplePostgreSQLCommand = makeExamplePostgreSQLCommand(opts)
+    $: examplePostgreSQLURI = makeExamplePostgreSQLURI(opts)
     $: targetURL = targetName ? makeTargetURL(opts) : ''
     $: authHeader = `Authorization: Warpgate ${ticketSecret}`
 </script>
@@ -76,5 +79,22 @@
 {/if}
 
 {#if targetKind === TargetKind.Postgres}
-<h1> TODO </h1>
+<FormGroup floating label="PostgreSQL username" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={postgreSQLUsername} />
+    <CopyButton text={postgreSQLUsername} />
+</FormGroup>
+
+<FormGroup floating label="Example command" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={examplePostgreSQLCommand} />
+    <CopyButton text={examplePostgreSQLCommand} />
+</FormGroup>
+
+<FormGroup floating label="Example database URL" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={examplePostgreSQLURI} />
+    <CopyButton text={examplePostgreSQLURI} />
+</FormGroup>
+
+<Alert color="info">
+    Make sure you've set your client to require TLS and allowed cleartext password authentication.
+</Alert>
 {/if}

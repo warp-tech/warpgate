@@ -79,9 +79,6 @@ async function toggleRole (role: Role) {
         <div>
             <h1>{target.name}</h1>
             <div class="text-muted">
-                {#if target.options.kind === 'Postgres'}
-                    PostgreSQL target
-                {/if}
                 {#if target.options.kind === 'MySql'}
                     MySQL target
                 {/if}

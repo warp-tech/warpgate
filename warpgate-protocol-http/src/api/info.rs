@@ -15,6 +15,7 @@ pub struct PortsInfo {
     ssh: Option<u16>,
     http: Option<u16>,
     mysql: Option<u16>,
+    postgres: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -85,12 +86,18 @@ impl Api {
                     } else {
                         None
                     },
+                    postgres: if config.store.postgres.enable {
+                        Some(config.store.postgres.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
                     ssh: None,
                     http: None,
                     mysql: None,
+                    postgres: None,
                 }
             },
         })))

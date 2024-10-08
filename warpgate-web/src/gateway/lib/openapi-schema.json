@@ -515,6 +515,10 @@
           "mysql": {
             "type": "integer",
             "format": "uint16"
+          },
+          "postgres": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },

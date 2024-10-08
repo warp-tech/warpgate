@@ -20,8 +20,6 @@ use crate::stream::{PgWireGenericFrontendMessage, PgWireStartupOrSslRequest, Pos
 pub struct PostgresSession {
     stream: PostgresStream<TlsStream<TcpStream>>,
     tls_config: Arc<ServerConfig>,
-    // capabilities: Capabilities,
-    // challenge: [u8; 20],
     username: Option<String>,
     database: Option<String>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,

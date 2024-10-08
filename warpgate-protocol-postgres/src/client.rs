@@ -113,7 +113,6 @@ impl PostgresClient {
                             break;
                         }
                         pgwire::messages::startup::Authentication::CleartextPassword => {
-                            // TODO test
                             let password = target
                                 .password
                                 .as_ref()
@@ -124,7 +123,6 @@ impl PostgresClient {
                             stream.flush().await?;
                         }
                         pgwire::messages::startup::Authentication::MD5Password(scramble) => {
-                            // TODO test
                             let password = target
                                 .password
                                 .as_ref()
