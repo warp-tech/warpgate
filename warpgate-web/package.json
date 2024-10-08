@@ -21,7 +21,7 @@
     "@fortawesome/free-brands-svg-icons": "^6.6.0",
     "@fortawesome/free-regular-svg-icons": "^6.6.0",
     "@fortawesome/free-solid-svg-icons": "^6.6.0",
-    "@openapitools/openapi-generator-cli": "^2.13.9",
+    "@openapitools/openapi-generator-cli": "^2.14.0",
     "@otplib/plugin-base32-enc-dec": "^12.0.1",
     "@otplib/plugin-crypto-js": "^12.0.1",
     "@otplib/preset-browser": "^12.0.1",
@@ -38,15 +38,15 @@
     "eslint": "^8",
     "eslint-config-standard": "^17.1.0",
     "eslint-import-resolver-typescript": "^3.6.3",
-    "eslint-plugin-import": "^2.30.0",
+    "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^7.1.0",
     "eslint-plugin-svelte": "^2.44.1",
     "format-duration": "^3.0.2",
     "qrcode": "^1.5.4",
-    "sass": "^1.79.3",
+    "sass": "^1.79.4",
     "svelte": "^4.2.19",
-    "svelte-check": "^4.0.3",
+    "svelte-check": "^4.0.4",
     "svelte-fa": "^4.0.3",
     "svelte-intersection-observer": "^1.0.0",
     "svelte-observable": "^0.4.0",
@@ -61,6 +61,6 @@
     "vite-tsconfig-paths": "^4.3.2",
     "xterm": "^4.18.0",
     "xterm-addon-serialize": "^0.11.0",
-    "otpauth": "^9.3.3"
+    "otpauth": "^9.3.4"
   }
 }
