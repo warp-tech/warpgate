@@ -67,6 +67,8 @@ impl PostgresDecode for PgWireGenericBackendMessage {
                 None
             }
         };
+
+        #[allow(clippy::single_match)]
         match first_byte {
             Some(MESSAGE_TYPE_BYTE_AUTHENTICATION) => {
                 return Ok(AuthenticationMsgExt::decode(buf)?.map(|x| {
