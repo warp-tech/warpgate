@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use http::{Method, StatusCode, Uri};
 use poem::web::Data;
 use poem::{FromRequest, Request};
@@ -26,12 +28,16 @@ pub async fn span_for_request(req: &Request) -> poem::Result<Span> {
     })
 }
 
-pub fn log_request_result(method: &Method, url: &Uri, client_ip: String, status: &StatusCode) {
+pub fn log_request_result(method: &Method, url: &Uri, client_ip: &str, status: &StatusCode) {
     if status.is_server_error() || status.is_client_error() {
         warn!(%method, %url, %status, %client_ip, "Request failed");
     } else {
         info!(%method, %url, %status, %client_ip, "Request");
     }
+}
+
+pub fn log_request_error<E: Error>(method: &Method, url: &Uri, client_ip: &str, error: E) {
+    error!(%method, %url, %error, %client_ip, "Request failed");
 }
 
 pub async fn get_client_ip(req: &Request) -> poem::Result<String> {

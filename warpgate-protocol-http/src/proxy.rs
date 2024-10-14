@@ -294,7 +294,7 @@ pub async fn proxy_normal_request(
     log_request_result(
         req.method(),
         req.original_uri(),
-        get_client_ip(req).await?,
+        &get_client_ip(req).await?,
         &status,
     );
 

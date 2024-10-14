@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use common::page_admin_auth;
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
-use logging::{get_client_ip, log_request_result, span_for_request};
+use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
@@ -124,9 +124,12 @@ impl ProtocolServer for HTTPProtocolServer {
                         let url = req.original_uri().clone();
                         let client_ip = get_client_ip(&req).await?;
 
-                        let response = ep.call(req).await?;
+                        let response = ep.call(req).await.map_err(|e| {
+                            log_request_error(&method, &url, &client_ip, &e);
+                            e
+                        })?;
 
-                        log_request_result(&method, &url, client_ip, &response.status());
+                        log_request_result(&method, &url, &client_ip, &response.status());
                         Ok(response)
                     }),
             )
