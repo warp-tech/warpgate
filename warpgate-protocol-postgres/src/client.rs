@@ -237,8 +237,6 @@ impl PostgresClient {
                 return Err(PostgresError::Eof);
             };
 
-            dbg!(&payload);
-
             match payload.0 {
                 PgWireBackendMessage::ErrorResponse(response) => return Err(response.into()),
                 PgWireBackendMessage::Authentication(
