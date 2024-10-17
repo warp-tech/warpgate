@@ -8,7 +8,7 @@ version = "0.11.0"
 [lib]
 
 [dependencies]
-async-std = { version = "^1.11", features = ["attributes"] }
+tokio = { version = "1.20", features = ["macros", "rt-multi-thread"] }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 sea-orm = { version = "0.12", features = [
     "runtime-tokio-rustls",
@@ -22,3 +22,8 @@ sea-orm-migration = { version = "0.12", default-features = false, features = [
 ] }
 uuid = { version = "1.3", features = ["v4", "serde"] }
 serde_json = "1.0"
+
+[features]
+postgres = ["sea-orm/sqlx-postgres"]
+mysql = ["sea-orm/sqlx-mysql"]
+sqlite = ["sea-orm/sqlx-sqlite"]
