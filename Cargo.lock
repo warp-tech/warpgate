@@ -276,6 +276,7 @@ dependencies = [
  "aws-lc-sys",
  "mirai-annotations",
  "paste",
+ "untrusted 0.7.1",
  "zeroize",
 ]
 
@@ -399,17 +400,6 @@ dependencies = [
  "blowfish",
  "pbkdf2 0.12.2",
  "sha2",
-]
-
-[[package]]
-name = "bigdecimal"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6773ddc0eafc0e509fb60e48dff7f450f8e674a0686ae8605e8d9901bd5eefa"
-dependencies = [
- "num-bigint",
- "num-integer",
- "num-traits",
 ]
 
 [[package]]
@@ -1330,7 +1320,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "324a1be68054ef05ad64b861cc9eaf1d623d2d8cb25b4bf2cb9cdd902b4bf253"
 dependencies = [
  "crc32fast",
- "libz-sys",
  "miniz_oxide",
 ]
 
@@ -1358,62 +1347,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "frunk"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "874b6a17738fc273ec753618bac60ddaeac48cb1d7684c3e7bd472e57a28b817"
-dependencies = [
- "frunk_core",
- "frunk_derives",
- "frunk_proc_macros",
- "serde",
-]
-
-[[package]]
-name = "frunk_core"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3529a07095650187788833d585c219761114005d5976185760cf794d265b6a5c"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "frunk_derives"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e99b8b3c28ae0e84b604c75f721c21dc77afb3706076af5e8216d15fd1deaae3"
-dependencies = [
- "frunk_proc_macro_helpers",
- "quote",
- "syn 2.0.77",
-]
-
-[[package]]
-name = "frunk_proc_macro_helpers"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05a956ef36c377977e512e227dcad20f68c2786ac7a54dacece3746046fea5ce"
-dependencies = [
- "frunk_core",
- "proc-macro2",
- "quote",
- "syn 2.0.77",
-]
-
-[[package]]
-name = "frunk_proc_macros"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67e86c2c9183662713fea27ea527aad20fb15fee635a71081ff91bf93df4dc51"
-dependencies = [
- "frunk_core",
- "frunk_proc_macro_helpers",
- "quote",
- "syn 2.0.77",
 ]
 
 [[package]]
@@ -2305,17 +2238,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libz-sys"
-version = "1.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2d16453e800a8cf6dd2fc3eb4bc99b786a9b90c663b8559a5b1a041bf89e472"
-dependencies = [
- "cc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2466,7 +2388,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64 0.13.1",
- "bigdecimal",
  "bindgen 0.59.2",
  "bitflags 1.3.2",
  "bitvec",
@@ -2476,14 +2397,12 @@ dependencies = [
  "cmake",
  "crc32fast",
  "flate2",
- "frunk",
  "lazy_static",
  "lexical",
  "num-bigint",
  "num-traits",
  "rand",
  "regex",
- "rust_decimal",
  "saturating",
  "serde",
  "serde_json",
@@ -2492,8 +2411,6 @@ dependencies = [
  "smallvec",
  "subprocess",
  "thiserror",
- "time",
- "uuid",
 ]
 
 [[package]]
@@ -2918,6 +2835,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e63bc3945a17010ff93677589c656c5e8fb4183b00bc86360de8e187d2a86cb"
 dependencies = [
  "async-trait",
+ "aws-lc-rs",
  "bytes",
  "chrono",
  "derive-new",

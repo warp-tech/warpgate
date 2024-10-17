@@ -83,7 +83,7 @@ impl TlsPrivateKey {
         }
 
         let key = key.ok_or(RustlsSetupError::NoKeys)?;
-        let key = rustls::crypto::ring::sign::any_supported_type(&key)?;
+        let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
 
         Ok(Self { bytes, key })
     }

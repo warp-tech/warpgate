@@ -25,7 +25,7 @@ pub async fn configure_tls_connector(
     root_cert: Option<&[u8]>,
 ) -> Result<ClientConfig, RustlsSetupError> {
     let config =
-        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
             .with_safe_default_protocol_versions()?;
 
     let config = if accept_invalid_certs {
