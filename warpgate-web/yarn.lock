@@ -187,10 +187,10 @@
   resolved "https://registry.yarnpkg.com/@eslint/js/-/js-8.57.1.tgz#de633db3ec2ef6a3c89e2f19038063e8a122e2c2"
   integrity sha512-d9zaMRSTIKDLhctzH12MtXvJKSSUhaHcjV+2Z+GK+EEY7XKpP5yR4x+N3TAcHTcu963nIr+TMcCb4DBCYX1z6Q==
 
-"@fontsource/work-sans@^4.5.12":
-  version "4.5.14"
-  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-4.5.14.tgz#965bf103baa9f812d042b5f678a34f632fa76f2e"
-  integrity sha512-AFBSDBA3hnSCXHwb52qBOMEGqF5nfdbANp+y5/hbE1PMjYfFY0lUdtUwL5J7mRAdyn1NJwobJlhduHtlAyPzmA==
+"@fontsource/work-sans@^5.1.0":
+  version "5.1.0"
+  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-5.1.0.tgz#32bb309bdf0cc0986be078c7b3e000fdb20c104f"
+  integrity sha512-DQ0ZxqY6ue0yNTyUnOXjvxjISNVzmhJksGcOtDgZuVvzkg+pPhln1B5myZTF2mAuP+1eacwGCPzghdWMwR292Q==
 
 "@fortawesome/fontawesome-common-types@6.6.0":
   version "6.6.0"
