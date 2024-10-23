@@ -124,9 +124,8 @@ impl ProtocolServer for HTTPProtocolServer {
                         let url = req.original_uri().clone();
                         let client_ip = get_client_ip(&req).await?;
 
-                        let response = ep.call(req).await.map_err(|e| {
-                            log_request_error(&method, &url, &client_ip, &e);
-                            e
+                        let response = ep.call(req).await.inspect_err(|e| {
+                            log_request_error(&method, &url, &client_ip, e);
                         })?;
 
                         log_request_result(&method, &url, &client_ip, &response.status());

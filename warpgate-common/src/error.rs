@@ -21,8 +21,10 @@ pub enum WarpgateError {
     UrlParse(#[from] url::ParseError),
     #[error("deserialization failed: {0}")]
     DeserializeJson(#[from] serde_json::Error),
-    #[error("external_url config option is not set")]
-    ExternalHostNotSet,
+    #[error("no valid Host header found and `external_host` config option is not set")]
+    ExternalHostUnknown,
+    #[error("current hostname ({0}) is not on the whitelist ({1:?})")]
+    ExternalHostNotWhitelisted(String, Vec<String>),
     #[error("URL contains no host")]
     NoHostInUrl,
     #[error("Inconsistent state error")]

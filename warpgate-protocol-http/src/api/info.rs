@@ -35,10 +35,6 @@ enum InstanceInfoResponse {
     Ok(Json<Info>),
 }
 
-fn strip_port(host: &str) -> Option<&str> {
-    host.split(':').next()
-}
-
 #[OpenApi]
 impl Api {
     #[oai(path = "/info", method = "get", operation_id = "get_info")]
@@ -50,18 +46,15 @@ impl Api {
     ) -> poem::Result<InstanceInfoResponse> {
         let config = services.config.lock().await;
         let external_host = config
-            .store
-            .external_host
-            .as_deref()
-            .and_then(strip_port)
-            .or_else(|| req.header(http::header::HOST).and_then(strip_port))
-            .or_else(|| req.original_uri().host());
+            .construct_external_url(Some(req), None)?
+            .host()
+            .map(|x| x.to_string());
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
             username: session.get_username(),
             selected_target: session.get_target_name(),
-            external_host: external_host.map(str::to_string),
+            external_host,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })

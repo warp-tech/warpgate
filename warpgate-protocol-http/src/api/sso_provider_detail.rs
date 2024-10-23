@@ -54,14 +54,17 @@ impl Api {
 
         let name = name.0;
 
-        let mut return_url = config.construct_external_url(Some(req))?;
-        return_url.set_path("@warpgate/api/sso/return");
-        debug!("Return URL: {}", &return_url);
-
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name)
         else {
             return Ok(StartSsoResponse::NotFound);
         };
+
+        let mut return_url = config.construct_external_url(
+            Some(req),
+            provider_config.return_domain_whitelist.as_deref(),
+        )?;
+        return_url.set_path("@warpgate/api/sso/return");
+        debug!("Return URL: {}", &return_url);
 
         let client = SsoClient::new(provider_config.provider.clone());
 

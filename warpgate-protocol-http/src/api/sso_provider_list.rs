@@ -300,7 +300,7 @@ impl Api {
 
         let config = services.config.lock().await;
 
-        let return_url = config.construct_external_url(Some(req))?;
+        let return_url = config.construct_external_url(Some(req), None)?;
         debug!("Return URL: {}", &return_url);
 
         let Some(provider_config) = config

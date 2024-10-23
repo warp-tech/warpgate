@@ -21,6 +21,7 @@ pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
     pub provider: SsoInternalProviderConfig,
+    pub return_domain_whitelist: Option<Vec<String>>,
 }
 
 impl SsoProviderConfig {

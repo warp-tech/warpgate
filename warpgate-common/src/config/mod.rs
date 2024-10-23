@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::*;
-use poem::http::{self, uri};
+use poem::http::uri;
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 pub use target::*;
@@ -381,7 +381,7 @@ pub struct WarpgateConfig {
 }
 
 impl WarpgateConfig {
-    pub fn _external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
+    pub fn external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
         if let Some(external_host) = self.store.external_host.as_ref() {
             #[allow(clippy::unwrap_used)]
             let external_host = external_host.split(":").next().unwrap();
@@ -399,8 +399,8 @@ impl WarpgateConfig {
         }
     }
 
-    // Extract external host:port from request headers
-    pub fn _external_host_from_request(
+    /// Extract external host:port from request headers
+    pub fn external_host_from_request(
         &self,
         request: &poem::Request,
     ) -> Option<(Scheme, String, Option<u16>)> {
@@ -410,11 +410,10 @@ impl WarpgateConfig {
         // Try the Host header first
         scheme = request.uri().scheme().cloned().unwrap_or(scheme);
 
-        if let Some(host_header) = request.header(http::header::HOST).map(|x| x.to_string()) {
-            if let Ok(host_port) = Url::parse(&format!("https://{host_header}/")) {
-                host = host_port.host_str().map(Into::into).or(host);
-                port = host_port.port();
-            }
+        let original_url = request.original_uri();
+        if let Some(original_host) = original_url.host() {
+            host = Some(original_host.to_string());
+            port = original_url.port().map(|x| x.as_u16());
         }
 
         // But prefer X-Forwarded-* headers if enabled
@@ -443,13 +442,23 @@ impl WarpgateConfig {
     pub fn construct_external_url(
         &self,
         for_request: Option<&poem::Request>,
+        domain_whitelist: Option<&[String]>,
     ) -> Result<Url, WarpgateError> {
-        let Some((scheme, host, port)) = self
-            ._external_host_from_config()
-            .or(for_request.and_then(|r| self._external_host_from_request(r)))
+        let Some((scheme, host, port)) = for_request
+            .and_then(|r| self.external_host_from_request(r))
+            .or(self.external_host_from_config())
         else {
-            return Err(WarpgateError::ExternalHostNotSet);
+            return Err(WarpgateError::ExternalHostUnknown);
         };
+
+        if let Some(list) = domain_whitelist {
+            if !list.contains(&host) {
+                return Err(WarpgateError::ExternalHostNotWhitelisted(
+                    host.clone(),
+                    list.iter().map(|x| x.to_string()).collect(),
+                ));
+            }
+        }
 
         let mut url = format!("{scheme}://{host}");
         if let Some(port) = port {

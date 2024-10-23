@@ -1370,7 +1370,7 @@ impl ServerSession {
                         .config
                         .lock()
                         .await
-                        .construct_external_url(None)
+                        .construct_external_url(None, None)
                     {
                         Ok(url) => url,
                         Err(error) => {
