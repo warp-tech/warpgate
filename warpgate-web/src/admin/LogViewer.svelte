@@ -5,12 +5,13 @@ import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
 import { onDestroy, onMount } from 'svelte'
+import { stringifyError } from 'common/errors'
 
 export let filters: {
     sessionId?: string,
 } | undefined
 
-let error: Error|undefined
+let error: string|null = null
 let items: LogEntry[]|undefined
 let visibleItems: LogEntry[]|undefined
 let loading = true
@@ -92,8 +93,8 @@ function stringifyDate (date: Date) {
     return date.toLocaleString()
 }
 
-loadOlder().catch(e => {
-    error = e
+loadOlder().catch(async e => {
+    error = await stringifyError(e)
 })
 
 onMount(() => {

@@ -8,10 +8,11 @@ import { replace } from 'svelte-spa-router'
 import { Alert, Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
 import AuthPolicyEditor from './AuthPolicyEditor.svelte'
 import UserCredentialModal from './UserCredentialModal.svelte'
+import { stringifyError } from 'common/errors'
 
 export let params: { id: string }
 
-let error: Error|undefined
+let error: string|null = null
 let user: User
 let editingCredential: UserAuthCredential|undefined
 let policy: UserRequireCredentialsPolicy
@@ -42,7 +43,7 @@ async function load () {
         const allowedRoles = await api.getUserRoles(user)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 
@@ -61,7 +62,7 @@ async function update () {
             userDataRequest: user,
         })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 

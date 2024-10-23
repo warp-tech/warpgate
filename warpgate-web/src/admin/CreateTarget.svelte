@@ -3,8 +3,9 @@ import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { stringifyError } from 'common/errors'
 
-let error: Error|null = null
+let error: string|null = null
 let name = ''
 let type: 'Http' | 'MySql' | 'Ssh' | 'Postgres' = 'Ssh'
 
@@ -65,7 +66,7 @@ async function create () {
         })
         replace(`/targets/${target.id}`)
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 

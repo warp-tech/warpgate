@@ -5,16 +5,17 @@ import { Alert } from '@sveltestrap/sveltestrap'
 import RelativeDate from './RelativeDate.svelte'
 import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
+import { stringifyError } from 'common/errors'
 
-let error: Error|undefined
+let error: string|undefined
 let tickets: Ticket[]|undefined
 
 async function load () {
     tickets = await api.getTickets()
 }
 
-load().catch(e => {
-    error = e
+load().catch(async e => {
+    error = await stringifyError(e)
 })
 
 async function deleteTicket (ticket: Ticket) {

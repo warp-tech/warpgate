@@ -10,10 +10,11 @@ import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
+import { stringifyError } from 'common/errors'
 
 export let params: { id: string }
 
-let error: Error|undefined
+let error: string|undefined
 let selectedUser: User|undefined
 let target: Target
 let allRoles: Role[] = []
@@ -23,7 +24,7 @@ async function load () {
     try {
         target = await api.getTarget({ id: params.id })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 
@@ -44,7 +45,7 @@ async function update () {
             targetDataRequest: target,
         })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 

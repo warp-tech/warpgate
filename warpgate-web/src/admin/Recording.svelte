@@ -3,10 +3,11 @@ import { api, type Recording } from 'admin/lib/api'
 import { Alert } from '@sveltestrap/sveltestrap'
 import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import { stringifyError } from 'common/errors'
 
 export let params = { id: '' }
 
-let error: Error|null = null
+let error: string|null = null
 let recording: Recording|null = null
 
 async function load () {
@@ -17,8 +18,8 @@ function getTCPDumpURL () {
     return `/@warpgate/api/recordings/${recording?.id}/tcpdump`
 }
 
-load().catch(e => {
-    error = e
+load().catch(async e => {
+    error = await stringifyError(e)
 })
 
 </script>

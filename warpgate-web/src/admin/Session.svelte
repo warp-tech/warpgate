@@ -9,10 +9,11 @@ import { link } from 'svelte-spa-router'
 import { Alert } from '@sveltestrap/sveltestrap'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
+import { stringifyError } from 'common/errors'
 
 export let params = { id: '' }
 
-let error: Error|null = null
+let error: string|null = null
 let session: SessionSnapshot|null = null
 let recordings: Recording[]|null = null
 
@@ -50,8 +51,8 @@ function getTargetDescription () {
     }
 }
 
-load().catch(e => {
-    error = e
+load().catch(async e => {
+    error = await stringifyError(e)
 })
 
 const interval = setInterval(load, 1000)

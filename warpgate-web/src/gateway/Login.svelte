@@ -10,10 +10,11 @@ import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescri
 import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
+import { stringifyError } from 'common/errors'
 
 export const params: { stateId?: string } = {}
 
-let error: Error|null = null
+let error: string|null = null
 let username = ''
 let password = ''
 let otp = ''
@@ -102,10 +103,10 @@ async function _login () {
 
                 continueWithState()
             } else {
-                error = new Error(await err.response.text())
+                error = await err.response.text()
             }
         } else {
-            error = err as Error
+            error = await stringifyError(err)
         }
     }
 }
@@ -127,7 +128,8 @@ async function startSSO (provider: SsoProviderDescription) {
     try {
         const p = await api.startSso({ name: provider.name, next: nextURL })
         location.href = p.url
-    } catch {
+    } catch (err) {
+        error = await stringifyError(err)
         busy = false
     }
 }

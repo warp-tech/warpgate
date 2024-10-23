@@ -6,8 +6,9 @@ import { TargetKind } from 'gateway/lib/api'
 import { link } from 'svelte-spa-router'
 import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
+import { stringifyError } from 'common/errors'
 
-let error: Error|null = null
+let error: string|null = null
 let targets: Target[]|undefined
 let users: User[]|undefined
 let selectedTarget: Target|undefined
@@ -26,8 +27,8 @@ async function load () {
     users.sort(firstBy('username'))
 }
 
-load().catch(e => {
-    error = e
+load().catch(async e => {
+    error = await stringifyError(e)
 })
 
 async function create () {
@@ -44,7 +45,7 @@ async function create () {
             },
         })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 

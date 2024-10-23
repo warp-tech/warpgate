@@ -4,17 +4,18 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { stringifyError } from 'common/errors'
 
 export let params: { id: string }
 
-let error: Error|undefined
+let error: string|null = null
 let role: Role
 
 async function load () {
     try {
         role = await api.getRole({ id: params.id })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 
@@ -25,7 +26,7 @@ async function update () {
             roleDataRequest: role,
         })
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 

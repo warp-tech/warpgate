@@ -2,8 +2,9 @@
 import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
 import CopyButton from 'common/CopyButton.svelte'
 import { Alert } from '@sveltestrap/sveltestrap'
+import { stringifyError } from 'common/errors'
 
-let error: Error|undefined
+let error: string|undefined
 let knownHosts: SSHKnownHost[]|undefined
 let ownKeys: SSHKey[]|undefined
 
@@ -12,8 +13,8 @@ async function load () {
     knownHosts = await api.getSshKnownHosts()
 }
 
-load().catch(e => {
-    error = e
+load().catch(async e => {
+    error = await stringifyError(e)
 })
 
 async function deleteHost (host: SSHKnownHost) {

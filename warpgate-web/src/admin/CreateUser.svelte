@@ -3,8 +3,9 @@ import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
 import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { stringifyError } from 'common/errors'
 
-let error: Error|null = null
+let error: string|null = null
 let username = ''
 
 async function create () {
@@ -21,7 +22,7 @@ async function create () {
         })
         replace(`/users/${user.id}`)
     } catch (err) {
-        error = err as Error
+        error = await stringifyError(err)
     }
 }
 
