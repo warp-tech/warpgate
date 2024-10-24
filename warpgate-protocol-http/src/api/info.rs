@@ -46,9 +46,9 @@ impl Api {
     ) -> poem::Result<InstanceInfoResponse> {
         let config = services.config.lock().await;
         let external_host = config
-            .construct_external_url(Some(req), None)?
-            .host()
-            .map(|x| x.to_string());
+            .construct_external_url(Some(req), None)
+            .ok()
+            .map(|x| x.host().to_string());
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
