@@ -76,6 +76,13 @@ impl TlsPrivateKey {
             .and_then(|x| PrivateKeyDer::try_from(x).ok());
 
         if key.is_none() {
+            key = rustls_pemfile::ec_private_keys(&mut bytes.as_slice())?
+                .drain(..)
+                .next()
+                .and_then(|x| PrivateKeyDer::try_from(x).ok());
+        }
+
+        if key.is_none() {
             key = rustls_pemfile::rsa_private_keys(&mut bytes.as_slice())?
                 .drain(..)
                 .next()
