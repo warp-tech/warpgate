@@ -1,17 +1,38 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreIdToken};
+use futures::future::OptionFuture;
+use openidconnect::core::{
+    CoreAuthenticationFlow, CoreClient, CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
+};
 use openidconnect::reqwest::async_http_client;
 use openidconnect::url::Url;
 use openidconnect::{
-    CsrfToken, DiscoveryError, LogoutRequest, Nonce, PkceCodeChallenge, PostLogoutRedirectUrl,
-    ProviderMetadataWithLogout, RedirectUrl, Scope,
+    AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, DiscoveryError, LogoutRequest,
+    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, TokenResponse,
+    UserInfoClaims,
 };
+use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::SsoError;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct WarpgateClaims {
+    // This uses the "warpgate_roles" claim from OIDC
+    pub warpgate_roles: Option<Vec<String>>,
+}
+
+impl AdditionalClaims for WarpgateClaims {}
+
+pub struct SsoResult {
+    pub token: CoreIdToken,
+    pub claims: CoreIdTokenClaims,
+    pub userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>>,
+}
 
 pub struct SsoClient {
     config: SsoInternalProviderConfig,
@@ -30,7 +51,7 @@ pub async fn discover_metadata(
         })
 }
 
-pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
+async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
     let metadata = discover_metadata(config).await?;
 
     let client = CoreClient::from_provider_metadata(
@@ -39,12 +60,6 @@ pub async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClien
         Some(config.client_secret()?),
     )
     .set_auth_type(config.auth_type());
-
-    if let Some(trusted_audiences) = config.additional_trusted_audiences() {
-        client
-            .id_token_verifier()
-            .set_other_audience_verifier_fn(|aud| trusted_audiences.contains(aud.deref()));
-    }
 
     Ok(client)
 }
@@ -98,6 +113,86 @@ impl SsoClient {
             pkce_verifier,
             redirect_url,
             config: self.config.clone(),
+        })
+    }
+
+    pub async fn finish_login(
+        &self,
+        pkce_verifier: Option<PkceCodeVerifier>,
+        redirect_url: RedirectUrl,
+        nonce: &Nonce,
+        code: String,
+    ) -> Result<SsoResult, SsoError> {
+        let client = make_client(&self.config)
+            .await?
+            .set_redirect_uri(redirect_url);
+
+        let mut req = client.exchange_code(AuthorizationCode::new(code));
+        if let Some(verifier) = pkce_verifier {
+            req = req.set_pkce_verifier(verifier);
+        }
+
+        let token_response = req
+            .request_async(async_http_client)
+            .await
+            .map_err(|e| match e {
+                RequestTokenError::ServerResponse(response) => {
+                    SsoError::Verification(response.error().to_string())
+                }
+                RequestTokenError::Parse(err, path) => SsoError::Verification(format!(
+                    "Parse error: {:?} / {:?}",
+                    err,
+                    String::from_utf8_lossy(&path)
+                )),
+                e => SsoError::Verification(format!("{e}")),
+            })?;
+
+        let mut token_verifier = client.id_token_verifier();
+        dbg!(self.config.additional_trusted_audiences());
+
+        if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
+            token_verifier = token_verifier
+                .set_other_audience_verifier_fn(|aud| {
+                    dbg!(aud);
+                    trusted_audiences.contains(aud.deref())});
+        }
+
+        let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
+        let claims = id_token.claims(&token_verifier, nonce)?;
+
+        let user_info_req = client
+            .user_info(token_response.access_token().to_owned(), None)
+            .map_err(|err| {
+                error!("Failed to fetch userinfo: {err:?}");
+                err
+            })
+            .ok();
+
+        let userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>> =
+            OptionFuture::from(user_info_req.map(|req| req.request_async(async_http_client)))
+                .await
+                .and_then(|res| {
+                    res.map_err(|err| {
+                        error!("Failed to fetch userinfo: {err:?}");
+                        err
+                    })
+                    .ok()
+                });
+
+        if let Some(expected_access_token_hash) = claims.access_token_hash() {
+            let actual_access_token_hash = AccessTokenHash::from_token(
+                token_response.access_token(),
+                &id_token.signing_alg()?,
+            )?;
+            if actual_access_token_hash != *expected_access_token_hash {
+                return Err(SsoError::Mitm);
+            }
+        }
+
+        Ok(SsoResult {
+            token: id_token.clone(),
+            userinfo_claims,
+            claims: claims.clone(),
         })
     }
 
