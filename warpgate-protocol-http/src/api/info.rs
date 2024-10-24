@@ -48,7 +48,9 @@ impl Api {
         let external_host = config
             .construct_external_url(Some(req), None)
             .ok()
-            .map(|x| x.host().to_string());
+            .as_ref()
+            .and_then(|x| x.host())
+            .map(|x| x.to_string());
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
