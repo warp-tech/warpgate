@@ -1,4 +1,5 @@
 use tracing::*;
+use std::path::Path;
 
 pub(crate) fn assert_interactive_terminal() {
     if !atty::is(atty::Stream::Stdin) {
@@ -11,5 +12,5 @@ pub(crate) fn assert_interactive_terminal() {
 }
 
 pub(crate) fn is_docker() -> bool {
-    std::env::var("DOCKER").is_ok()
+    Path::new("/.dockerenv").exists()
 }
