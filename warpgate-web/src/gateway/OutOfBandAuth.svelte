@@ -1,13 +1,17 @@
 <script lang="ts">
-import { Alert } from '@sveltestrap/sveltestrap'
-
 import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import RelativeDate from 'admin/RelativeDate.svelte'
+import Alert from 'common/Alert.svelte'
 
-export let params: { stateId: string }
-let authState: AuthStateResponseInternal
+interface Props {
+    params: { stateId: string };
+}
+
+let { params }: Props = $props()
+
+let authState: AuthStateResponseInternal | undefined = $state()
 
 async function reload () {
     authState = await api.getAuthState({ id: params.stateId })
@@ -46,6 +50,7 @@ async function reject () {
 {#await init()}
     <DelayedSpinner />
 {:then}
+{#if authState}
     <div class="page-summary-bar">
         <h1>Authorization request</h1>
     </div>
@@ -53,7 +58,7 @@ async function reject () {
     <div class="mb-5">
         <div class="mb-2">Ensure this security key matches your authentication prompt:</div>
         <div class="identification-string">
-            {#each authState.identificationString as char}
+            {#each authState?.identificationString as char}
                 <div class="card bg-secondary text-light">
                     <div class="card-body">{char}</div>
                 </div>
@@ -97,4 +102,5 @@ async function reject () {
             </AsyncButton>
         </div>
     {/if}
+{/if}
 {/await}

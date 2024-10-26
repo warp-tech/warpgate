@@ -1,7 +1,8 @@
+import { mount } from 'svelte'
 import Login from './Login.svelte'
 
 const app = {}
-new Login({
+mount(Login, {
     target: document.getElementById('app')!,
 })
 

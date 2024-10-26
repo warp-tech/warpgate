@@ -1,14 +1,14 @@
 <script lang="ts">
 import { api, type Ticket } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
-import { Alert } from '@sveltestrap/sveltestrap'
 import RelativeDate from './RelativeDate.svelte'
 import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-let error: string|undefined
-let tickets: Ticket[]|undefined
+let error: string|undefined = $state()
+let tickets: Ticket[]|undefined = $state()
 
 async function load () {
     tickets = await api.getTickets()
@@ -71,7 +71,10 @@ async function deleteTicket (ticket: Ticket) {
                     <small class="text-muted me-4 ms-auto">
                         <RelativeDate date={ticket.created} />
                     </small>
-                    <a href={''} on:click|preventDefault={() => deleteTicket(ticket)}>Delete</a>
+                    <a href={''} onclick={e => {
+                        deleteTicket(ticket)
+                        e.preventDefault()
+                    }}>Delete</a>
                 </div>
             {/each}
         </div>

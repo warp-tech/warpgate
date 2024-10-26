@@ -5,6 +5,9 @@ const config = {
     compilerOptions: {
         enableSourcemap: true,
         dev: true,
+        compatibility: {
+          componentApi: 4,
+        },
     },
     preprocess: sveltePreprocess({
         sourceMap: true,

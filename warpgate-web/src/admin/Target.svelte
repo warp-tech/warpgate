@@ -8,17 +8,22 @@ import { TargetKind } from 'gateway/lib/api'
 import { serverInfo } from 'gateway/lib/store'
 import Fa from 'svelte-fa'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
+import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-export let params: { id: string }
+interface Props {
+    params: { id: string };
+}
 
-let error: string|undefined
-let selectedUser: User|undefined
-let target: Target
-let allRoles: Role[] = []
-let roleIsAllowed: Record<string, any> = {}
+let { params }: Props = $props()
+
+let error: string|undefined = $state()
+let selectedUser: User|undefined = $state()
+let target: Target | undefined = $state()
+let allRoles: Role[] = $state([])
+let roleIsAllowed: Record<string, any> = $state({})
 
 async function load () {
     try {
@@ -30,19 +35,18 @@ async function load () {
 
 async function loadRoles () {
     allRoles = await api.getRoles()
-    const allowedRoles = await api.getTargetRoles(target)
+    const allowedRoles = await api.getTargetRoles(target!)
     roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
 }
 
 async function update () {
     try {
-        if (target.options.kind === 'Http') {
-            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-            target.options.externalHost = target.options.externalHost || undefined
+        if (target!.options.kind === 'Http') {
+            target!.options.externalHost = target!.options.externalHost || undefined
         }
         target = await api.updateTarget({
             id: params.id,
-            targetDataRequest: target,
+            targetDataRequest: target!,
         })
     } catch (err) {
         error = await stringifyError(err)
@@ -50,8 +54,8 @@ async function update () {
 }
 
 async function remove () {
-    if (confirm(`Delete target ${target.name}?`)) {
-        await api.deleteTarget(target)
+    if (confirm(`Delete target ${target!.name}?`)) {
+        await api.deleteTarget(target!)
         replace('/config')
     }
 }
@@ -59,13 +63,13 @@ async function remove () {
 async function toggleRole (role: Role) {
     if (roleIsAllowed[role.id]) {
         await api.deleteTargetRole({
-            id: target.id,
+            id: target!.id,
             roleId: role.id,
         })
         roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
     } else {
         await api.addTargetRole({
-            id: target.id,
+            id: target!.id,
             roleId: role.id,
         })
         roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
@@ -76,6 +80,7 @@ async function toggleRole (role: Role) {
 {#await load()}
     <DelayedSpinner />
 {:then}
+{#if target}
     <div class="page-summary-bar">
         <div>
             <h1>{target.name}</h1>
@@ -254,6 +259,7 @@ async function toggleRole (role: Role) {
             {/each}
         </div>
     {/await}
+{/if}
 {/await}
 
 {#if error}

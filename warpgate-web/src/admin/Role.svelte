@@ -3,13 +3,18 @@ import { api, type Role } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-export let params: { id: string }
+interface Props {
+    params: { id: string };
+}
 
-let error: string|null = null
-let role: Role
+let { params }: Props = $props()
+
+let error: string|null = $state(null)
+let role: Role | undefined = $state()
 
 async function load () {
     try {
@@ -23,7 +28,7 @@ async function update () {
     try {
         role = await api.updateRole({
             id: params.id,
-            roleDataRequest: role,
+            roleDataRequest: role!,
         })
     } catch (err) {
         error = await stringifyError(err)
@@ -31,8 +36,8 @@ async function update () {
 }
 
 async function remove () {
-    if (confirm(`Delete role ${role.name}?`)) {
-        await api.deleteRole(role)
+    if (confirm(`Delete role ${role!.name}?`)) {
+        await api.deleteRole(role!)
         replace('/config')
     }
 }
@@ -43,13 +48,13 @@ async function remove () {
 {:then}
     <div class="page-summary-bar">
         <div>
-            <h1>{role.name}</h1>
+            <h1>{role!.name}</h1>
             <div class="text-muted">Role</div>
         </div>
     </div>
 
     <FormGroup floating label="Name">
-        <input class="form-control" bind:value={role.name} />
+        <input class="form-control" bind:value={role!.name} />
     </FormGroup>
 {/await}
 

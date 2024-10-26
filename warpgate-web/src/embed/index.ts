@@ -1,7 +1,6 @@
 import { api } from 'gateway/lib/api'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
-// eslint-disable-next-line @typescript-eslint/no-useless-empty-export
 export { }
 
 navigator.serviceWorker.getRegistrations().then(registrations => {

@@ -48,32 +48,33 @@
         </div>
 
         <ItemList load={getTargets} showSearch={true}>
-            <a
-                slot="item" let:item={target}
-                class="list-group-item list-group-item-action"
-                href="/targets/{target.id}"
-                use:link>
-                <strong class="me-auto">
-                    {target.name}
-                </strong>
-                <small class="text-muted ms-auto">
-                    {#if target.options.kind === 'Http'}
-                        HTTP
-                    {/if}
-                    {#if target.options.kind === 'MySql'}
-                        MySQL
-                    {/if}
-                    {#if target.options.kind === 'Postgres'}
-                        PostgreSQL
-                    {/if}
-                    {#if target.options.kind === 'Ssh'}
-                        SSH
-                    {/if}
-                    {#if target.options.kind === 'WebAdmin'}
-                        This web admin interface
-                    {/if}
-                </small>
-            </a>
+            {#snippet item({ item: target })}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/targets/{target.id}"
+                    use:link>
+                    <strong class="me-auto">
+                        {target.name}
+                    </strong>
+                    <small class="text-muted ms-auto">
+                        {#if target.options.kind === 'Http'}
+                            HTTP
+                        {/if}
+                        {#if target.options.kind === 'MySql'}
+                            MySQL
+                        {/if}
+                        {#if target.options.kind === 'Postgres'}
+                            PostgreSQL
+                        {/if}
+                        {#if target.options.kind === 'Ssh'}
+                            SSH
+                        {/if}
+                        {#if target.options.kind === 'WebAdmin'}
+                            This web admin interface
+                        {/if}
+                    </small>
+                </a>
+                    {/snippet}
         </ItemList>
     </div>
 
@@ -89,15 +90,16 @@
         </div>
 
         <ItemList load={getUsers} showSearch={true}>
-            <a
-                slot="item" let:item={user}
-                class="list-group-item list-group-item-action"
-                href="/users/{user.id}"
-                use:link>
-                <strong class="me-auto">
-                    {user.username}
-                </strong>
-            </a>
+            {#snippet item({ item: user })}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/users/{user.id}"
+                    use:link>
+                    <strong class="me-auto">
+                        {user.username}
+                    </strong>
+                </a>
+            {/snippet}
         </ItemList>
 
         <div class="page-summary-bar mt-4">
@@ -111,15 +113,16 @@
         </div>
 
         <ItemList load={getRoles} showSearch={true}>
-            <a
-                slot="item" let:item={role}
-                class="list-group-item list-group-item-action"
-                href="/roles/{role.id}"
-                use:link>
-                <strong class="me-auto">
-                    {role.name}
-                </strong>
-            </a>
+            {#snippet item({ item: role })}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/roles/{role.id}"
+                    use:link>
+                    <strong class="me-auto">
+                        {role.name}
+                    </strong>
+                </a>
+            {/snippet}
         </ItemList>
     </div>
 </div>

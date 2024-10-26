@@ -1,14 +1,14 @@
 import { UAParser } from 'ua-parser-js'
 
 function escapeUnix (arg: string): string {
-    if (!/^[A-Za-z0-9_\/-]+$/.test(arg)) {
+    if (!/^[A-Za-z0-9_/-]+$/.test(arg)) {
         return ('\'' + arg.replace(/'/g, '\'"\'"\'') + '\'').replace(/''/g, '')
     }
     return arg
 }
 
 function escapeWin (arg: string): string {
-    if (!/^[A-Za-z0-9_\/-]+$/.test(arg)) {
+    if (!/^[A-Za-z0-9_/-]+$/.test(arg)) {
         return '"' + arg.replace(/"/g, '""') + '"'
     }
     return arg

@@ -1,12 +1,20 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
-
 import { CredentialKind, type User, type UserRequireCredentialsPolicy } from './lib/api'
 
-export let user: User
-export let value: UserRequireCredentialsPolicy
-export let possibleCredentials: Set<CredentialKind>
-export let protocolId: 'http' | 'ssh' | 'mysql' | 'postgres'
+interface Props {
+    user: User;
+    value: UserRequireCredentialsPolicy;
+    possibleCredentials: Set<CredentialKind>;
+    protocolId: 'http' | 'ssh' | 'mysql' | 'postgres';
+}
+
+let {
+    user,
+    value = $bindable(),
+    possibleCredentials,
+    protocolId,
+}: Props = $props()
 
 const labels = {
     Password: 'Password',
@@ -16,17 +24,17 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
-let isAny = false
-let validCredentials = new Set<CredentialKind>()
+let isAny = $state(false)
+const validCredentials = $derived.by(() => {
+    let vc = new Set<CredentialKind>()
+    vc = new Set(user.credentials.map(x => x.kind as CredentialKind))
+    vc.add(CredentialKind.WebUserApproval)
+    return vc
+})
 
-$: {
-    validCredentials = new Set(user.credentials.map(x => x.kind as CredentialKind))
-    validCredentials.add(CredentialKind.WebUserApproval)
-
-    setTimeout(() => {
-        isAny = !value[protocolId]
-    })
-}
+$effect(() => {
+    isAny = !value[protocolId]
+})
 
 function updateAny () {
     if (isAny) {

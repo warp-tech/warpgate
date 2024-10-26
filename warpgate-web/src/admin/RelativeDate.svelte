@@ -1,6 +1,10 @@
 <script lang="ts">
 import { timeAgo } from 'admin/lib/time'
-export let date: any
+interface Props {
+    date: Date;
+}
+
+let { date }: Props = $props()
 </script>
 
-<span title={date}>{timeAgo(date)}</span>
+<span title={date.toLocaleString()}>{timeAgo(date)}</span>

@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
     export interface LoadOptions {
         search?: string
         offset: number
@@ -13,20 +13,36 @@
 </script>
 
 <script lang="ts" generics="T">
-    import { onDestroy } from 'svelte'
     import { Subject, switchMap, map, Observable, distinctUntilChanged, share, combineLatest, tap, debounceTime } from 'rxjs'
     import Pagination from './Pagination.svelte'
     import { observe } from 'svelte-observable'
     import { Input } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
+    import { onDestroy } from 'svelte'
 
-    export let page = 0
-    export let pageSize: number|undefined = undefined
-    export let load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
-    export let showSearch = false
+    interface Props {
+        page?: number
+        pageSize?: number|undefined
+        // eslint-disable-next-line no-undef
+        load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
+        showSearch?: boolean
+        header?: import('svelte').Snippet<[any]>
+        item?: import('svelte').Snippet<[any]>
+        footer?: import('svelte').Snippet<[any]>
+    }
 
-    let filter = ''
-    let loaded = false
+    let {
+        page = $bindable(0),
+        pageSize = undefined,
+        load,
+        showSearch = false,
+        header,
+        item,
+        footer,
+    }: Props = $props()
+
+    let filter = $state('')
+    let loaded = $state(false)
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
@@ -57,6 +73,7 @@
     )
 
     const total = observe<number>(responses.pipe(map(x => x.total)), 0)
+    // eslint-disable-next-line no-undef
     const items = observe<T[]|null>(responses.pipe(map(x => x.items)), null)
 
     onDestroy(() => {
@@ -64,8 +81,12 @@
         filter$.complete()
     })
 
-    $: page$.next(page)
-    $: filter$.next(filter)
+    $effect(() => {
+        page$.next(page)
+    })
+    $effect(() => {
+        filter$.next(filter)
+    })
 
     filter$.subscribe(() => {
         page = 0
@@ -76,18 +97,18 @@
     {#if showSearch}
         <Input bind:value={filter} placeholder="Search..." class="flex-grow-1 border-0" />
     {/if}
-    <slot name="header" items={items} />
+    {@render header?.({ items })}
 </div>
 {#await $items}
     <DelayedSpinner />
 {:then _items}
     {#if _items}
         <div class="list-group list-group-flush mb-3">
-            {#each _items as item}
-                <slot name="item" item={item} />
+            {#each _items as _item}
+                {@render item?.({ item: _item })}
             {/each}
         </div>
-        <slot name="footer" items={_items} />
+        {@render footer?.({ items: _items })}
     {:else}
         <DelayedSpinner />
     {/if}

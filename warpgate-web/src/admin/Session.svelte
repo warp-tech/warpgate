@@ -6,16 +6,20 @@ import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { onDestroy } from 'svelte'
 import { link } from 'svelte-spa-router'
-import { Alert } from '@sveltestrap/sveltestrap'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-export let params = { id: '' }
+interface Props {
+    params: { id: string }
+}
 
-let error: string|null = null
-let session: SessionSnapshot|null = null
-let recordings: Recording[]|null = null
+let { params = { id: '' } }: Props = $props()
+
+let error: string|null = $state(null)
+let session: SessionSnapshot|null = $state(null)
+let recordings: Recording[]|null = $state(null)
 
 async function load () {
     session = await api.getSession(params)

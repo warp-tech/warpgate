@@ -1,7 +1,7 @@
 <script lang="ts">
 import { get } from 'svelte/store'
 import { querystring, replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup } from '@sveltestrap/sveltestrap'
 import Fa from 'svelte-fa'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
@@ -11,16 +11,15 @@ import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-export const params: { stateId?: string } = {}
-
-let error: string|null = null
-let username = ''
-let password = ''
-let otp = ''
-let busy = false
-let otpInput: HTMLInputElement|undefined
-let authState: ApiAuthState|undefined
+let error: string|null = $state(null)
+let username = $state('')
+let password = $state('')
+let otp = $state('')
+let busy = $state(false)
+let otpInput: HTMLInputElement|undefined = $state()
+let authState: ApiAuthState|undefined = $state()
 let ssoProvidersPromise = api.getSsoProviders()
 
 const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
@@ -148,11 +147,11 @@ async function startSSO (provider: SsoProviderDescription) {
         </div>
         {#if authState === ApiAuthState.OtpNeeded}
             <FormGroup floating label="One-time password">
-                <!-- svelte-ignore a11y-autofocus -->
+                <!-- svelte-ignore a11y_autofocus -->
                 <input
                     bind:value={otp}
                     bind:this={otpInput}
-                    on:keypress={onInputKey}
+                    onkeypress={onInputKey}
                     name="otp"
                     autofocus
                     disabled={busy}
@@ -161,10 +160,10 @@ async function startSSO (provider: SsoProviderDescription) {
         {/if}
         {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed}
             <FormGroup floating label="Username">
-                <!-- svelte-ignore a11y-autofocus -->
+                <!-- svelte-ignore a11y_autofocus -->
                 <input
                     bind:value={username}
-                    on:keypress={onInputKey}
+                    onkeypress={onInputKey}
                     name="username"
                     autocomplete="username"
                     disabled={busy}
@@ -175,7 +174,7 @@ async function startSSO (provider: SsoProviderDescription) {
             <FormGroup floating label="Password">
                 <input
                     bind:value={password}
-                    on:keypress={onInputKey}
+                    onkeypress={onInputKey}
                     name="password"
                     type="password"
                     autocomplete="current-password"
@@ -213,7 +212,7 @@ async function startSSO (provider: SsoProviderDescription) {
                     <button
                         class="btn d-flex align-items-center w-100 mb-2 btn-outline-primary"
                         disabled={busy}
-                        on:click={() => startSSO(ssoProvider)}
+                        onclick={() => startSSO(ssoProvider)}
                     >
                         <span class="m-auto">
                             {#if ssoProvider.kind === SsoProviderKind.Google}
@@ -236,7 +235,7 @@ async function startSSO (provider: SsoProviderDescription) {
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
         <button
             class="btn w-100 mt-3 btn-outline-secondary"
-            on:click={cancel}
+            onclick={cancel}
         >
             Cancel
         </button>

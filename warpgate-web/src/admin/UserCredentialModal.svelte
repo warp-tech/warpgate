@@ -1,157 +1,166 @@
 <script lang="ts">
-import { onMount } from 'svelte'
-import {
-    Alert,
-    Button,
-    FormGroup,
-    Input,
-    Modal,
-    ModalBody,
-    ModalFooter,
-    ModalHeader,
-} from '@sveltestrap/sveltestrap'
-import QRCode from 'qrcode'
-import * as OTPAuth from 'otpauth'
-import { faClipboard, faRefresh } from '@fortawesome/free-solid-svg-icons'
-import Fa from 'svelte-fa'
-import base32Encode from 'base32-encode'
+    import {
+        Alert,
+        Button,
+        FormGroup,
+        Input,
+        Modal,
+        ModalBody,
+        ModalFooter,
+    } from '@sveltestrap/sveltestrap'
+    import QRCode from 'qrcode'
+    import * as OTPAuth from 'otpauth'
+    import { faClipboard, faRefresh } from '@fortawesome/free-solid-svg-icons'
+    import Fa from 'svelte-fa'
+    import base32Encode from 'base32-encode'
 
-import { api } from 'gateway/lib/api'
-import type { UserAuthCredential, UserTotpCredential } from './lib/api'
+    import { api } from 'gateway/lib/api'
+    import type { UserAuthCredential, UserTotpCredential } from './lib/api'
+    import ModalHeader from 'common/ModalHeader.svelte'
+    import { onMount } from 'svelte'
 
-export let credential: UserAuthCredential
-export let username: string
-export let save: () => void
-export let cancel: () => void
-let visible = true
-let newPassword = ''
-let field: HTMLInputElement|undefined
-let qrImage: HTMLImageElement|undefined
-let totpUri: string|undefined
-let totpValidationValue: string|undefined
-let validationFeedback: string|undefined
-let totpValid = false
-let passwordValid = false
-
-export const totp = new OTPAuth.TOTP({
-    issuer: 'Warpgate',
-    digits: 6,
-    period: 30,
-    algorithm: 'SHA1',
-})
-
-function _save () {
-
-    if (credential.kind === 'Password') {
-        if (!newPassword) {
-            return
-        }
-        credential.hash = newPassword
-    }
-    if (credential.kind === 'PublicKey') {
-        if (credential.key.includes(' ')) {
-            const parts = credential.key.split(' ').filter(x => x)
-            credential.key = `${parts[0]} ${parts[1]}`
-        }
-    }
-    visible = false
-    save()
-}
-
-function _validate () : boolean {
-    console.debug(`Validating credentials of kind "${credential.kind}"`)
-
-    if (credential.kind === 'Totp' && totpValidationValue) {
-        totp.secret ??= OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
-        totpValid = totp.validate({ token: totpValidationValue, window: 1 }) !== null
-
-        if (!totpValid) {
-            validationFeedback = 'The TOTP code is not valid'
-        } else {
-            validationFeedback = undefined
-        }
-
-        return totpValid
-    } else if (credential.kind === 'Password') {
-        passwordValid = newPassword.trim().length > 1
-
-        if (!passwordValid) {
-            validationFeedback = 'Password cannot be empty or whitespace'
-        } else {
-            validationFeedback = undefined
-        }
-
-        return passwordValid
-    } else {
-        // TODO: Further validation
-        return true
-    }
-}
-
-function generateNewTotpKey () {
-    if (credential.kind === 'Totp') {
-        credential.key = Array.from({ length: 32 }, () => Math.floor(Math.random() * 255))
-    }
-}
-
-/**
- * Copies the TOTP URI to the system clipboard if it is defined.
- *
- * @return {Promise<void>} A promise that resolves when the TOTP URI has been copied to the clipboard.
- */
-async function copyTotpUri () : Promise<void> {
-    if (totpUri === undefined) {
-        return
+    interface Props {
+        credential: UserAuthCredential;
+        username: string;
+        save: () => void;
+        cancel: () => void;
     }
 
-    const { clipboard } = navigator
-    return clipboard.writeText(totpUri)
-}
+    let {
+        credential = $bindable(),
+        username,
+        save,
+        cancel,
+    }: Props = $props()
+    let visible = $state(true)
+    let newPassword = $state('')
+    let field: HTMLInputElement|undefined = $state()
+    let qrImage: HTMLImageElement|undefined = $state()
+    let totpUri: string|undefined = $state()
+    let totpValidationValue: string|undefined = $state()
+    let validationFeedback: string|undefined = $state()
+    let totpValid = $state(false)
+    let passwordValid = $state(false)
 
-function _cancel () {
-    visible = false
-    cancel()
-}
+    export const totp = $state(new OTPAuth.TOTP({
+        issuer: 'Warpgate',
+        digits: 6,
+        period: 30,
+        algorithm: 'SHA1',
+    }))
 
-onMount(() => {
-    setTimeout(() => {
-        field?.focus()
-    })
-})
+    function _save () {
 
-
-/**
- * Generates a TOTP (Time-based One-Time Password) secret key encoded in base32.
- *
- * @param {UserTotpCredential} cred - The credential containing a key for TOTP generation.
- * @return {string} The base32 encoded TOTP secret key.
- */
-function encodeTotpSecret (cred: UserTotpCredential) : string {
-    return base32Encode(new Uint8Array(cred.key), 'RFC4648')
-}
-
-$: {
-    if (credential.kind === 'Totp') {
-        if (!credential.key.length) {
-            generateNewTotpKey()
-        }
-
-        totp.label = username
-        totp.secret = OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
-        totpUri = totp.toString()
-
-        QRCode.toDataURL(totpUri, (err: Error | null | undefined, imageUrl: string) => {
-            if (err) {
+        if (credential.kind === 'Password') {
+            if (!newPassword) {
                 return
             }
-            if (qrImage) {
-                qrImage.src = imageUrl
+            credential.hash = newPassword
+        }
+        if (credential.kind === 'PublicKey') {
+            if (credential.key.includes(' ')) {
+                const parts = credential.key.split(' ').filter(x => x)
+                credential.key = `${parts[0]} ${parts[1]}`
             }
-        })
+        }
+        visible = false
+        save()
     }
 
-    _validate()
-}
+    function _validate () : boolean {
+        console.debug(`Validating credentials of kind "${credential.kind}"`)
+
+        if (credential.kind === 'Totp' && totpValidationValue) {
+            totp.secret ??= OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
+            totpValid = totp.validate({ token: totpValidationValue, window: 1 }) !== null
+
+            if (!totpValid) {
+                validationFeedback = 'The TOTP code is not valid'
+            } else {
+                validationFeedback = undefined
+            }
+
+            return totpValid
+        } else if (credential.kind === 'Password') {
+            passwordValid = newPassword.trim().length > 1
+
+            if (!passwordValid) {
+                validationFeedback = 'Password cannot be empty or whitespace'
+            } else {
+                validationFeedback = undefined
+            }
+
+            return passwordValid
+        } else {
+            // TODO: Further validation
+            return true
+        }
+    }
+
+    function generateNewTotpKey () {
+        if (credential.kind === 'Totp') {
+            credential.key = Array.from({ length: 32 }, () => Math.floor(Math.random() * 255))
+        }
+    }
+
+    /**
+    * Copies the TOTP URI to the system clipboard if it is defined.
+    *
+    * @return {Promise<void>} A promise that resolves when the TOTP URI has been copied to the clipboard.
+    */
+    async function copyTotpUri () : Promise<void> {
+        if (totpUri === undefined) {
+            return
+        }
+
+        const { clipboard } = navigator
+        return clipboard.writeText(totpUri)
+    }
+
+    function _cancel () {
+        visible = false
+        cancel()
+    }
+
+    onMount(() => {
+        setTimeout(() => {
+            field?.focus()
+        })
+    })
+
+
+    /**
+    * Generates a TOTP (Time-based One-Time Password) secret key encoded in base32.
+    *
+    * @param {UserTotpCredential} cred - The credential containing a key for TOTP generation.
+    * @return {string} The base32 encoded TOTP secret key.
+    */
+    function encodeTotpSecret (cred: UserTotpCredential) : string {
+        return base32Encode(new Uint8Array(cred.key), 'RFC4648')
+    }
+
+    $effect(() => {
+        if (credential.kind === 'Totp') {
+            if (!credential.key.length) {
+                generateNewTotpKey()
+            }
+
+            totp.label = username
+            totp.secret = OTPAuth.Secret.fromBase32(encodeTotpSecret(credential))
+            totpUri = totp.toString()
+
+            QRCode.toDataURL(totpUri, (err: Error | null | undefined, imageUrl: string) => {
+                if (err) {
+                    return
+                }
+                if (qrImage) {
+                    qrImage.src = imageUrl
+                }
+            })
+        }
+
+        _validate()
+    })
 </script>
 
 <Modal toggle={cancel} isOpen={visible}>

@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Spinner } from '@sveltestrap/sveltestrap'
 
-let visible = false
+let visible = $state(false)
 
 setTimeout(() => {
     visible = true

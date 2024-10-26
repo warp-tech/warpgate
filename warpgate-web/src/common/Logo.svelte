@@ -1,14 +1,11 @@
 <script lang="ts">
-// eslint-disable-next-line import/no-duplicates
 import { onDestroy, onMount } from 'svelte'
-// eslint-disable-next-line import/no-duplicates
 import { get } from 'svelte/store'
 import { currentThemeFile } from 'theme'
 import logo from '../../public/assets/logo.svg?raw'
 
-let element: HTMLElement|undefined
+let element: HTMLElement|undefined = $state()
 
-// eslint-disable-next-line @typescript-eslint/max-params
 function colorize (r: number, g: number, b: number, dr: number, dg: number, db: number) {
     element?.querySelectorAll('path').forEach((p, idx) => {
         let d = idx

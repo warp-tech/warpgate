@@ -3,6 +3,7 @@ import { faCheck } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
 import { Button, Spinner, type Color } from '@sveltestrap/sveltestrap'
 
+// svelte-ignore non_reactive_update
 enum State {
     Normal = 'n',
     Progress = 'p',
@@ -10,30 +11,40 @@ enum State {
     Done = 'd'
 }
 
-export let click: CallableFunction
-export let color: Color | 'link' = 'secondary'
-export let disabled = false
-export let outline = false
-export let type = 'submit'
-let button: HTMLElement
-let lastWidth = 0
-let state = State.Normal
+interface Props {
+    click: CallableFunction
+    color?: Color | 'link'
+    disabled?: boolean
+    outline?: boolean
+    type?: 'button' | 'submit' | 'reset'
+    class?: string
+    children: () => any
+}
+
+let { children, click, color  = 'secondary', disabled = false, outline = false, type = 'submit', 'class': cls = '' }: Props = $props()
+
+let button: HTMLElement | undefined = $state()
+let lastWidth = $state(0)
+let st = $state(State.Normal)
 
 async function _click () {
+    if (!button) {
+        return
+    }
     lastWidth = button.offsetWidth
-    state = State.Progress
+    st = State.Progress
     setTimeout(() => {
-        if (state === State.Progress) {
-            state = State.ProgressWithSpinner
+        if (st === State.Progress) {
+            st = State.ProgressWithSpinner
         }
     }, 500)
     try {
         await click()
     } finally {
-        state = State.Done
+        st = State.Done
         setTimeout(() => {
-            if (state === State.Done) {
-                state = State.Normal
+            if (st === State.Done) {
+                st = State.Normal
                 lastWidth = 0
             }
         }, 1000)
@@ -46,20 +57,20 @@ async function _click () {
     on:click={_click}
     bind:inner={button}
     style="min-width: {lastWidth}px"
-    class={$$props.class}
+    class={cls}
     outline={outline}
     color={color}
     type={type}
-    disabled={disabled || state === State.Progress || state === State.ProgressWithSpinner}
+    disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
 >
-    {#if state === State.Normal || state === State.Progress}
-        <slot />
+    {#if st === State.Normal || st === State.Progress}
+        {@render children?.()}
     {/if}
     <div class="overlay">
-        {#if state === State.ProgressWithSpinner}
+        {#if st === State.ProgressWithSpinner}
             <Spinner size="sm" />
         {/if}
-        {#if state === State.Done}
+        {#if st === State.Done}
             <Fa icon={faCheck} fw />
         {/if}
     </div>
