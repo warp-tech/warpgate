@@ -1,33 +1,44 @@
 <script lang="ts">
-    import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+    import { FormGroup } from '@sveltestrap/sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
+    import Alert from './Alert.svelte'
 
-    export let targetName: string|undefined
-    export let targetKind: TargetKind
-    export let targetExternalHost: string|undefined = undefined
-    export let username: string|undefined
-    export let ticketSecret: string|undefined = undefined
+    interface Props {
+        targetName?: string;
+        targetKind: TargetKind;
+        targetExternalHost?: string;
+        username?: string;
+        ticketSecret?: string;
+    }
 
-    $: opts = {
+    let {
+        targetName,
+        targetKind,
+        targetExternalHost = undefined,
+        username,
+        ticketSecret = undefined,
+    }: Props = $props()
+
+    let opts = $derived({
         targetName,
         username,
         serverInfo: $serverInfo,
         ticketSecret,
         targetExternalHost,
-    }
-    $: sshUsername = makeSSHUsername(opts)
-    $: exampleSSHCommand = makeExampleSSHCommand(opts)
-    $: mySQLUsername = makeMySQLUsername(opts)
-    $: exampleMySQLCommand = makeExampleMySQLCommand(opts)
-    $: exampleMySQLURI = makeExampleMySQLURI(opts)
-    $: postgreSQLUsername = makePostgreSQLUsername(opts)
-    $: examplePostgreSQLCommand = makeExamplePostgreSQLCommand(opts)
-    $: examplePostgreSQLURI = makeExamplePostgreSQLURI(opts)
-    $: targetURL = targetName ? makeTargetURL(opts) : ''
-    $: authHeader = `Authorization: Warpgate ${ticketSecret}`
+    })
+    let sshUsername = $derived(makeSSHUsername(opts))
+    let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
+    let mySQLUsername = $derived(makeMySQLUsername(opts))
+    let exampleMySQLCommand = $derived(makeExampleMySQLCommand(opts))
+    let exampleMySQLURI = $derived(makeExampleMySQLURI(opts))
+    let postgreSQLUsername = $derived(makePostgreSQLUsername(opts))
+    let examplePostgreSQLCommand = $derived(makeExamplePostgreSQLCommand(opts))
+    let examplePostgreSQLURI = $derived(makeExamplePostgreSQLURI(opts))
+    let targetURL = $derived(targetName ? makeTargetURL(opts) : '')
+    let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
 </script>
 
 {#if targetKind === TargetKind.Ssh}

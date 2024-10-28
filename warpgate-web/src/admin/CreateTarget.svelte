@@ -2,12 +2,13 @@
 import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-let error: string|null = null
-let name = ''
-let type: 'Http' | 'MySql' | 'Ssh' | 'Postgres' = 'Ssh'
+let error: string|null = $state(null)
+let name = $state('')
+let type: 'Http' | 'MySql' | 'Ssh' | 'Postgres' = $state('Ssh')
 
 async function create () {
     if (!name || !type) {

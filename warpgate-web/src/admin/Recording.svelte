@@ -1,14 +1,18 @@
 <script lang="ts">
 import { api, type Recording } from 'admin/lib/api'
-import { Alert } from '@sveltestrap/sveltestrap'
 import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
+import Alert from 'common/Alert.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { stringifyError } from 'common/errors'
 
-export let params = { id: '' }
+interface Props {
+    params: { id: string }
+}
 
-let error: string|null = null
-let recording: Recording|null = null
+let { params = { id: '' } }: Props = $props()
+
+let error: string|null = $state(null)
+let recording: Recording|null = $state(null)
 
 async function load () {
     recording = await api.getRecording(params)

@@ -17,46 +17,46 @@ init()
 
 const routes = {
     '/': wrap({
-        asyncComponent: () => import('./Home.svelte'),
+        asyncComponent: () => import('./Home.svelte') as any,
     }),
     '/sessions/:id': wrap({
-        asyncComponent: () => import('./Session.svelte'),
+        asyncComponent: () => import('./Session.svelte') as any,
     }),
     '/recordings/:id': wrap({
-        asyncComponent: () => import('./Recording.svelte'),
+        asyncComponent: () => import('./Recording.svelte') as any,
     }),
     '/tickets': wrap({
-        asyncComponent: () => import('./Tickets.svelte'),
+        asyncComponent: () => import('./Tickets.svelte') as any,
     }),
     '/tickets/create': wrap({
-        asyncComponent: () => import('./CreateTicket.svelte'),
+        asyncComponent: () => import('./CreateTicket.svelte') as any,
     }),
     '/config': wrap({
-        asyncComponent: () => import('./Config.svelte'),
+        asyncComponent: () => import('./Config.svelte') as any,
     }),
     '/targets/create': wrap({
-        asyncComponent: () => import('./CreateTarget.svelte'),
+        asyncComponent: () => import('./CreateTarget.svelte') as any,
     }),
     '/targets/:id': wrap({
-        asyncComponent: () => import('./Target.svelte'),
+        asyncComponent: () => import('./Target.svelte') as any,
     }),
     '/roles/create': wrap({
-        asyncComponent: () => import('./CreateRole.svelte'),
+        asyncComponent: () => import('./CreateRole.svelte') as any,
     }),
     '/roles/:id': wrap({
-        asyncComponent: () => import('./Role.svelte'),
+        asyncComponent: () => import('./Role.svelte') as any,
     }),
     '/users/create': wrap({
-        asyncComponent: () => import('./CreateUser.svelte'),
+        asyncComponent: () => import('./CreateUser.svelte') as any,
     }),
     '/users/:id': wrap({
-        asyncComponent: () => import('./User.svelte'),
+        asyncComponent: () => import('./User.svelte') as any,
     }),
     '/ssh': wrap({
-        asyncComponent: () => import('./SSH.svelte'),
+        asyncComponent: () => import('./SSH.svelte') as any,
     }),
     '/log': wrap({
-        asyncComponent: () => import('./Log.svelte'),
+        asyncComponent: () => import('./Log.svelte') as any,
     }),
 }
 </script>

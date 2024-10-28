@@ -2,11 +2,12 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-let error: string|null = null
-let username = ''
+let error: string|null = $state(null)
+let username = $state('')
 
 async function create () {
     if (!username) {

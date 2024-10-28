@@ -2,11 +2,12 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
+import Alert from 'common/Alert.svelte'
 
-let error: string|null = null
-let name = ''
+let error: string|null = $state(null)
+let name = $state('')
 
 async function create () {
     if (!name) {
@@ -36,7 +37,7 @@ async function create () {
 </div>
 
 <FormGroup floating label="Name">
-    <input class="form-control" bind:value={name} />
+    <input class="form-control" bind:value={name} required />
 </FormGroup>
 
 <AsyncButton

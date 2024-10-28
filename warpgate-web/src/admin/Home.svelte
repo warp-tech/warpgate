@@ -15,7 +15,7 @@
     let [showActiveOnly, showActiveOnly$] = autosave('sessions-list:show-active-only', false)
     let [showLoggedInOnly, showLoggedInOnly$] = autosave('sessions-list:show-logged-in-only', true)
 
-    let activeSessionCount: number|undefined
+    let activeSessionCount: number|undefined = $state()
 
     let socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/sessions/changes`)
     let sessionChanges$ = fromEvent(socket, 'message')
@@ -80,39 +80,43 @@
 {/if}
 
 <ItemList load={loadSessions} pageSize={100}>
-    <div slot="header" class="d-flex align-items-center mb-1 w-100">
-        <div class="ms-auto"></div>
-        <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
-        <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />
-    </div>
-
-    <a
-        slot="item" let:item={session}
-        class="list-group-item list-group-item-action"
-        href="/sessions/{session.id}"
-        use:link>
-        <div class="main">
-            <div class="icon" class:text-success={!session.ended}>
-                {#if !session.ended}
-                    <Fa icon={iconActive} fw />
-                {/if}
-            </div>
-            <div class="protocol text-muted me-2">{session.protocol}</div>
-            <strong>
-                {describeSession(session)}
-            </strong>
-
-            <div class="meta">
-                {#if session.ended }
-                    {formatDistance(new Date(session.started), new Date(session.ended))}
-                {/if}
-            </div>
-
-            <div class="meta ms-auto">
-                <RelativeDate date={session.started} />
-            </div>
+    {#snippet header()}
+        <div  class="d-flex align-items-center mb-1 w-100">
+            <div class="ms-auto"></div>
+            <Input class="ms-3" type="switch" label="Active only" bind:checked={$showActiveOnly} />
+            <Input class="ms-3" type="switch" label="Logged in only" bind:checked={$showLoggedInOnly} />
         </div>
-    </a>
+    {/snippet}
+
+    {#snippet item({ item: session })}
+        <a
+
+            class="list-group-item list-group-item-action"
+            href="/sessions/{session.id}"
+            use:link>
+            <div class="main">
+                <div class="icon" class:text-success={!session.ended}>
+                    {#if !session.ended}
+                        <Fa icon={iconActive} fw />
+                    {/if}
+                </div>
+                <div class="protocol text-muted me-2">{session.protocol}</div>
+                <strong>
+                    {describeSession(session)}
+                </strong>
+
+                <div class="meta">
+                    {#if session.ended }
+                        {formatDistance(new Date(session.started), new Date(session.ended))}
+                    {/if}
+                </div>
+
+                <div class="meta ms-auto">
+                    <RelativeDate date={session.started} />
+                </div>
+            </div>
+        </a>
+    {/snippet}
 </ItemList>
 
 <style lang="scss">

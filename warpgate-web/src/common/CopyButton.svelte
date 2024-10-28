@@ -1,62 +1,79 @@
 <script lang="ts">
-import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
-import Fa from 'svelte-fa'
-import { Button, type Color } from '@sveltestrap/sveltestrap'
-import copyTextToClipboard from 'copy-text-to-clipboard'
+    import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
+    import Fa from 'svelte-fa'
+    import { Button, type Color } from '@sveltestrap/sveltestrap'
+    import copyTextToClipboard from 'copy-text-to-clipboard'
 
-export let text: string
-export let disabled = false
-export let outline = false
-export let link = false
-export let color: Color | 'link' = 'link'
-let successVisible = false
-let button: HTMLElement
-
-async function _click () {
-    if (disabled) {
-        return
+    interface Props {
+        text: string;
+        disabled?: boolean;
+        outline?: boolean;
+        link?: boolean;
+        color?: Color | 'link';
+        class?: string;
+        children?: import('svelte').Snippet;
     }
-    successVisible = true
-    copyTextToClipboard(text)
-    setTimeout(() => {
-        successVisible = false
-    }, 2000)
-}
+
+    let {
+        text,
+        disabled = false,
+        outline = false,
+        link = false,
+        color = 'link',
+        'class': className = '',
+        children,
+    }: Props = $props()
+    let successVisible = $state(false)
+    let button: HTMLElement | undefined = $state()
+
+    async function _click () {
+        if (disabled) {
+            return
+        }
+        successVisible = true
+        copyTextToClipboard(text)
+        setTimeout(() => {
+            successVisible = false
+        }, 2000)
+    }
 
 </script>
 
 {#if link}
-    <!-- svelte-ignore a11y-invalid-attribute -->
+    <!-- svelte-ignore a11y_invalid_attribute -->
     <a
         href="#"
-        class={$$props.class}
+        class={className}
         class:disabled={disabled}
-        on:click|preventDefault={_click}
+        onclick={e => {
+            _click()
+            e.preventDefault()
+        }}
         bind:this={button}
     >
-        <slot>
+        {#if children}{@render children()}{:else}
             {#if successVisible}
                 Copied
             {:else}
                 Copy
             {/if}
-        </slot>
+        {/if}
     </a>
 {:else}
     <Button
-        class={$$props.class}
+        class={className}
         bind:inner={button}
         on:click={_click}
         outline={outline}
         color={color}
         disabled={disabled}
     >
-        <slot>
+        {#if children}{@render children()}{:else}
             {#if successVisible}
                 <Fa fw icon={faCheck} />
             {:else}
                 <Fa fw icon={faCopy} />
             {/if}
-        </slot>
+        {/if}
     </Button>
 {/if}
