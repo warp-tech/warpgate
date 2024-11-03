@@ -10,15 +10,21 @@ use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::Uri;
 use once_cell::sync::Lazy;
+use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
-use poem::{Body, IntoResponse, Request, Response};
+use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
 use url::Url;
 use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
 use warpgate_web::lookup_built_file;
 
+use crate::common::{SessionAuthorization, SessionExt};
 use crate::logging::{get_client_ip, log_request_result};
+
+static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
+static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
+    HeaderName::from_static("x-warpgate-authentication-type");
 
 trait SomeResponse {
     fn status(&self) -> http::StatusCode;
@@ -44,13 +50,13 @@ impl<B> SomeResponse for http::Response<B> {
 }
 
 trait SomeRequestBuilder {
-    fn header(self, k: HeaderName, v: String) -> Self;
+    fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
 }
 
 impl SomeRequestBuilder for reqwest::RequestBuilder {
     delegate! {
         to self {
-            fn header(self, k: HeaderName, v: String) -> Self;
+            fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
         }
     }
 }
@@ -58,7 +64,7 @@ impl SomeRequestBuilder for reqwest::RequestBuilder {
 impl SomeRequestBuilder for http::request::Builder {
     delegate! {
         to self {
-            fn header(self, k: HeaderName, v: String) -> Self;
+            fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
         }
     }
 }
@@ -227,6 +233,23 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B
     Ok(target)
 }
 
+async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
+    let session = <&Session>::from_request_without_body(req).await?;
+    if let Some(auth) = session.get_auth() {
+        target = target
+            .header(&X_WARPGATE_USERNAME, auth.username().into())
+            .header(
+                &X_WARPGATE_AUTHENTICATION_TYPE,
+                match auth {
+                    SessionAuthorization::Ticket { .. } => "ticket",
+                    SessionAuthorization::User { .. } => "user",
+                }
+                .into(),
+            );
+    }
+    Ok(target)
+}
+
 pub async fn proxy_normal_request(
     req: &Request,
     body: Body,
@@ -270,6 +293,7 @@ pub async fn proxy_normal_request(
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
     client_request = client_request.header(
@@ -394,6 +418,7 @@ async fn proxy_ws_inner(
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
     let (client, client_response) = connect_async_with_config(
