@@ -44,8 +44,8 @@ impl ProtocolServer for PostgresProtocolServer {
             let config = self.services.config.lock().await;
             let certificate_path = config
                 .paths_relative_to
-                .join(&config.store.mysql.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.mysql.key);
+                .join(&config.store.postgres.certificate);
+            let key_path = config.paths_relative_to.join(&config.store.postgres.key);
 
             TlsCertificateAndPrivateKey {
                 certificate: TlsCertificateBundle::from_file(&certificate_path)
