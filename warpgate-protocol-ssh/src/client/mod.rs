@@ -16,7 +16,7 @@ pub use error::SshClientError;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKey;
 use russh::{kex, Preferred, Sig};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};

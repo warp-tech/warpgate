@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use russh::client::{Msg, Session};
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKey;
 use russh::keys::PublicKeyBase64;
 use russh::Channel;
 use tokio::sync::mpsc::UnboundedSender;
@@ -70,7 +70,7 @@ impl russh::client::Handler for ClientHandler {
                 warn!(session=%self.session_id, "Host key is invalid!");
                 return Err(ClientHandlerError::ConnectionError(
                     ConnectionError::HostKeyMismatch {
-                        received_key_type: server_public_key.name().to_owned(),
+                        received_key_type: server_public_key.algorithm().to_string(),
                         received_key_base64: server_public_key.public_key_base64(),
                         known_key_type: key_type,
                         known_key_base64: key_base64,

@@ -19,6 +19,10 @@ members = [
 default-members = ["warpgate"]
 resolver = "2"
 
+[workspace.dependencies]
+# russh = { version = "0.47.0-beta.2" }
+russh = { version = "0.47.0-beta.2" , path = "../russh/russh"}
+
 [profile.release]
 lto = true
 panic = "abort"

@@ -60,8 +60,8 @@ impl ProtocolServer for SSHProtocolServer {
         while let Some(event) = handles.event_rx.recv().await {
             match event {
                 RCEvent::HostKeyUnknown(key, reply) => {
-                    println!("\nHost key ({}): {}", key.name(), key.public_key_base64());
-                    println!("There is no trusted {} key for this host.", key.name());
+                    println!("\nHost key ({}): {}", key.algorithm().as_str(), key.public_key_base64());
+                    println!("There is no trusted {} key for this host.", key.algorithm().as_str());
 
                     match self
                         .services

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use russh::keys::{Algorithm, HashAlg};
 use russh::{MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
@@ -34,10 +35,14 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             event_buffer_size: 100,
             preferred: Preferred {
                 key: Cow::Borrowed(&[
-                    russh::keys::key::ED25519,
-                    russh::keys::key::RSA_SHA2_256,
-                    russh::keys::key::RSA_SHA2_512,
-                    russh::keys::key::SSH_RSA,
+                    Algorithm::Ed25519,
+                    Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha512),
+                    },
+                    Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha256),
+                    },
+                    Algorithm::Rsa { hash: None },
                 ]),
                 ..<_>::default()
             },
@@ -108,7 +113,15 @@ async fn _run_stream<R>(
 where
     R: AsyncRead + AsyncWrite + Unpin + Debug + Send + 'static,
 {
-    let session = russh::server::run_stream(config, socket, handler).await?;
-    session.await?;
-    Ok(())
+    let ret = async move {
+        let session = russh::server::run_stream(config, socket, handler).await?;
+        session.await?;
+        Ok(())
+    }.await;
+
+    if let Err(ref error) = ret {
+        error!(%error, "Session failed");
+    }
+
+    ret
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKey;
 use russh::keys::PublicKeyBase64;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
@@ -35,7 +35,7 @@ impl KnownHosts {
         let entries = KnownHost::Entity::find()
             .filter(KnownHost::Column::Host.eq(host))
             .filter(KnownHost::Column::Port.eq(port))
-            .filter(KnownHost::Column::KeyType.eq(key.name()))
+            .filter(KnownHost::Column::KeyType.eq(key.algorithm().as_str()))
             .all(&*db)
             .await?;
 
@@ -64,7 +64,7 @@ impl KnownHosts {
             id: Set(Uuid::new_v4()),
             host: Set(host.to_owned()),
             port: Set(port.into()),
-            key_type: Set(key.name().to_owned()),
+            key_type: Set(key.algorithm().to_string()),
             key_base64: Set(key.public_key_base64()),
         };
 

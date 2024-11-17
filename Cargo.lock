@@ -452,12 +452,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit-vec"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,9 +1052,9 @@ dependencies = [
 
 [[package]]
 name = "delegate"
-version = "0.12.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e018fccbeeb50ff26562ece792ed06659b9c2dae79ece77c4456bb10d9bf79b"
+checksum = "bc2323e10c92e1cf4d86e11538512e6dc03ceb586842970b6332af3d4046a046"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2764,11 +2758,9 @@ dependencies = [
 [[package]]
 name = "pageant"
 version = "0.0.1-beta.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c8ca7f786256e4d89f369656546b1f504cfd2d5ec796f0b99600919dd993723"
 dependencies = [
  "bytes",
- "delegate 0.12.0",
+ "delegate 0.13.1",
  "futures",
  "rand",
  "thiserror",
@@ -3690,19 +3682,19 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c536b90d8e2468d8dedc8de2369383c101325e23fffa3a30de713032862a11d4"
+version = "0.47.0-beta.2"
 dependencies = [
  "aes",
  "aes-gcm",
  "async-trait",
  "bitflags 2.6.0",
  "byteorder",
+ "bytes",
  "cbc",
  "chacha20",
  "ctr",
  "curve25519-dalek",
+ "delegate 0.13.1",
  "des",
  "digest",
  "elliptic-curve",
@@ -3726,6 +3718,7 @@ dependencies = [
  "russh-util",
  "sha1",
  "sha2",
+ "signature",
  "ssh-encoding",
  "ssh-key",
  "subtle",
@@ -3735,25 +3728,23 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fadd2c0ab350e21c66556f94ee06f766d8bdae3213857ba7610bfd8e10e51880"
+version = "0.8.0-beta.2"
 dependencies = [
  "libc",
+ "ssh-encoding",
  "winapi",
 ]
 
 [[package]]
 name = "russh-keys"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e3db166c8678c824627c2c46f619ed5ce4ae33f38a35403c62f6ab8f3985867"
+version = "0.47.0-beta.2"
 dependencies = [
  "aes",
  "async-trait",
  "bcrypt-pbkdf",
  "block-padding",
  "byteorder",
+ "bytes",
  "cbc",
  "ctr",
  "data-encoding",
@@ -3787,6 +3778,7 @@ dependencies = [
  "serde",
  "sha1",
  "sha2",
+ "signature",
  "spki",
  "ssh-encoding",
  "ssh-key",
@@ -3794,7 +3786,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "typenum",
- "yasna",
  "zeroize",
 ]
 
@@ -3819,8 +3810,6 @@ dependencies = [
 [[package]]
 name = "russh-util"
 version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63aeb9d2b74f8f38befdc0c5172d5ffcf58f3d2ffcb423f3b6cdfe2c2d747b80"
 dependencies = [
  "chrono",
  "tokio",
@@ -4800,8 +4789,6 @@ dependencies = [
 [[package]]
 name = "ssh-cipher"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caac132742f0d33c3af65bfcde7f6aa8f62f0e991d80db99149eb9d44708784f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4817,10 +4804,9 @@ dependencies = [
 [[package]]
 name = "ssh-encoding"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb9242b9ef4108a78e8cd1a2c98e193ef372437f8c22be363075233321dd4a15"
 dependencies = [
  "base64ct",
+ "bytes",
  "pem-rfc7468",
  "sha2",
 ]
@@ -4828,8 +4814,6 @@ dependencies = [
 [[package]]
 name = "ssh-key"
 version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca9b366a80cf18bb6406f4cf4d10aebfb46140a8c0c33f666a144c5c76ecbafc"
 dependencies = [
  "bcrypt-pbkdf",
  "ed25519-dalek",
@@ -4840,6 +4824,7 @@ dependencies = [
  "rand_core",
  "rsa",
  "sec1",
+ "sha1",
  "sha2",
  "signature",
  "ssh-cipher",
@@ -6426,8 +6411,6 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 dependencies = [
- "bit-vec",
- "num-bigint",
  "time",
 ]
 
