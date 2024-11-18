@@ -22,7 +22,7 @@ pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
     let key_path = path.join("host-ed25519");
     if !key_path.exists() {
         info!("Generating Ed25519 host key");
-        let key = KeyPair::generate_ed25519().context("Failed to generate Ed25519 host key")?;
+        let key = KeyPair::generate_ed25519();
         let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
@@ -71,7 +71,7 @@ pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {
     let key_path = path.join("client-ed25519");
     if !key_path.exists() {
         info!("Generating Ed25519 client key");
-        let key = KeyPair::generate_ed25519().context("Failed to generate Ed25519 client key")?;
+        let key = KeyPair::generate_ed25519();
         let f = File::create(&key_path)?;
         encode_pkcs8_pem(&key, f)?;
     }
