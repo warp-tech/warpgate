@@ -123,6 +123,9 @@ pub struct SshConfig {
 
     #[serde(default = "_default_ssh_inactivity_timeout", with = "humantime_serde")]
     pub inactivity_timeout: Duration,
+
+    #[serde(default)]
+    pub keepalive_interval: Option<Duration>,
 }
 
 impl Default for SshConfig {
@@ -134,6 +137,7 @@ impl Default for SshConfig {
             host_key_verification: Default::default(),
             external_port: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
+            keepalive_interval: None,
         }
     }
 }
