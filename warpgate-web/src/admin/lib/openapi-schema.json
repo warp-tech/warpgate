@@ -1107,6 +1107,113 @@
         },
         "operationId": "get_logs"
       }
+    },
+    "/users/{user_id}/credentials/passwords": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingPasswordCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_password_credentials"
+      }
+    },
+    "/credentials/passwords": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPasswordCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPasswordCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_password_credential"
+      }
+    },
+    "/users/{user_id}/credentials/passwords/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_password_credential"
+      }
     }
   },
   "components": {
@@ -1154,6 +1261,18 @@
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "ExistingPasswordCredential": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "GetLogsRequest": {
         "type": "object",
@@ -1209,6 +1328,22 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "NewPasswordCredential": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "password"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "password": {
             "type": "string"
           }
         }

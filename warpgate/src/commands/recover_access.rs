@@ -3,7 +3,7 @@ use dialoguer::theme::ColorfulTheme;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use tracing::*;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{User as UserConfig, UserPasswordCredential};
+use warpgate_common::{Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, User};
 
@@ -46,9 +46,11 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
         }
     };
 
-    let password = dialoguer::Password::with_theme(&theme)
-        .with_prompt(format!("New password for {}", user.username))
-        .interact()?;
+    let password = Secret::new(
+        dialoguer::Password::with_theme(&theme)
+            .with_prompt(format!("New password for {}", user.username))
+            .interact()?,
+    );
 
     if !dialoguer::Confirm::with_theme(&theme)
             .default(true)
@@ -59,7 +61,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
 
     PasswordCredential::ActiveModel {
         user_id: Set(user.id),
-        ..UserPasswordCredential::from_password(password).into()
+        ..UserPasswordCredential::from_password(&password).into()
     }
     .insert(&*db)
     .await?;

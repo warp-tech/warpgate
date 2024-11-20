@@ -37,11 +37,31 @@ impl Related<super::User::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-impl From<Model> for UserAuthCredential {
+pub struct StrictModel {
+    pub id: Uuid,
+    pub credential: UserPasswordCredential,
+}
+
+impl From<Model> for StrictModel {
+    fn from(model: Model) -> Self {
+        Self {
+            id: model.id,
+            credential: model.clone().into(),
+        }
+    }
+}
+
+impl From<Model> for UserPasswordCredential {
     fn from(credential: Model) -> Self {
-        Self::Password(UserPasswordCredential {
-            hash: credential.argon_hash.into(),
-        })
+        UserPasswordCredential {
+            hash: credential.argon_hash.to_owned().into(),
+        }
+    }
+}
+
+impl From<Model> for UserAuthCredential {
+    fn from(model: Model) -> Self {
+        Self::Password(model.into())
     }
 }
 

@@ -262,25 +262,27 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    let admin_password = if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
-        if let Some(admin_password) = admin_password {
-            admin_password.to_owned()
-        } else {
-            if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
-                admin_password
+    let admin_password = Secret::new(
+        if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
+            if let Some(admin_password) = admin_password {
+                admin_password.to_owned()
             } else {
-                error!(
+                if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
+                    admin_password
+                } else {
+                    error!(
                     "You must supply the admin password either through the --admin-password option"
                 );
-                error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
-                std::process::exit(1);
+                    error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
+                    std::process::exit(1);
+                }
             }
-        }
-    } else {
-        dialoguer::Password::with_theme(&theme)
-            .with_prompt("Set a password for the Warpgate admin user")
-            .interact()?
-    };
+        } else {
+            dialoguer::Password::with_theme(&theme)
+                .with_prompt("Set a password for the Warpgate admin user")
+                .interact()?
+        },
+    );
 
     // ---
 
@@ -328,7 +330,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
         PasswordCredential::ActiveModel {
             user_id: Set(admin_user.id),
-            ..UserPasswordCredential::from_password(admin_password).into()
+            ..UserPasswordCredential::from_password(&admin_password).into()
         }
         .insert(&*db)
         .await?;

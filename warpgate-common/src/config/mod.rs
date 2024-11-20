@@ -41,9 +41,9 @@ pub struct UserPasswordCredential {
 }
 
 impl UserPasswordCredential {
-    pub fn from_password(password: String) -> Self {
+    pub fn from_password(password: &Secret<String>) -> Self {
         Self {
-            hash: Secret::new(hash_password(&password)),
+            hash: Secret::new(hash_password(&password.expose_secret())),
         }
     }
 }
