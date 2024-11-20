@@ -12,7 +12,7 @@ mod ssh_keys;
 mod targets;
 mod tickets_detail;
 mod tickets_list;
-mod users;
+pub mod users;
 
 pub fn get() -> impl OpenApi {
     (

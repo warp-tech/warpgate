@@ -28,6 +28,10 @@ reqwest = { version = "0.12", features = [
     "rustls-tls-native-roots",
     "stream",
 ], default-features = false }
+sea-orm = { version = "0.12", features = [
+    "runtime-tokio-rustls",
+    "macros",
+], default-features = false }
 serde = "1.0"
 serde_json = "1.0"
 tokio = { version = "1.20", features = ["tracing", "signal"] }

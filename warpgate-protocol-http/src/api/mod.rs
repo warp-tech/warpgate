@@ -6,6 +6,7 @@ pub mod info;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;
 pub mod targets_list;
+mod profile;
 
 pub fn get() -> impl OpenApi {
     (
@@ -14,5 +15,6 @@ pub fn get() -> impl OpenApi {
         targets_list::Api,
         sso_provider_list::Api,
         sso_provider_detail::Api,
+        profile::Api,
     )
 }

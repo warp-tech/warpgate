@@ -69,6 +69,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let session_storage =
             SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())));
         let session_store = SessionStore::new();
+        let db = self.services.db.clone();
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -167,7 +168,8 @@ impl ProtocolServer for HTTPProtocolServer {
             .with(CookieHostMiddleware::new())
             .data(self.services.clone())
             .data(session_store.clone())
-            .data(session_storage);
+            .data(session_storage)
+            .data(db);
 
         tokio::spawn(async move {
             loop {

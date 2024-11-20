@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.10.2"
+    "version": "0.11.0"
   },
   "servers": [
     {
@@ -388,6 +388,60 @@
         },
         "operationId": "start_sso"
       }
+    },
+    "/profile": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileData"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_profile"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileData"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "update_profile"
+      }
     }
   },
   "components": {
@@ -431,6 +485,16 @@
             "type": "string"
           }
         }
+      },
+      "CredentialKind": {
+        "type": "string",
+        "enum": [
+          "Password",
+          "PublicKey",
+          "Totp",
+          "Sso",
+          "WebUserApproval"
+        ]
       },
       "Info": {
         "type": "object",
@@ -522,6 +586,37 @@
           }
         }
       },
+      "ProfileData": {
+        "type": "object",
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserAuthCredential"
+            }
+          },
+          "credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          }
+        }
+      },
+      "ProfileDataRequest": {
+        "type": "object",
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserAuthCredential"
+            }
+          }
+        }
+      },
       "SsoProviderDescription": {
         "type": "object",
         "required": [
@@ -597,6 +692,200 @@
           },
           "external_host": {
             "type": "string"
+          }
+        }
+      },
+      "UserAuthCredential": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserPasswordCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserTotpCredential"
+          },
+          {
+            "$ref": "#/components/schemas/UserAuthCredential_UserSsoCredential"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/UserAuthCredential_UserPasswordCredential",
+            "PublicKey": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential",
+            "Totp": "#/components/schemas/UserAuthCredential_UserTotpCredential",
+            "Sso": "#/components/schemas/UserAuthCredential_UserSsoCredential"
+          }
+        }
+      },
+      "UserAuthCredential_UserPasswordCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserPasswordCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserPublicKeyCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "PublicKey"
+                ],
+                "example": "PublicKey"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserPublicKeyCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserSsoCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Sso"
+                ],
+                "example": "Sso"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserSsoCredential"
+          }
+        ]
+      },
+      "UserAuthCredential_UserTotpCredential": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Totp"
+                ],
+                "example": "Totp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/UserTotpCredential"
+          }
+        ]
+      },
+      "UserPasswordCredential": {
+        "type": "object",
+        "required": [
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          }
+        }
+      },
+      "UserPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRequireCredentialsPolicy": {
+        "type": "object",
+        "properties": {
+          "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "ssh": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mysql": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      },
+      "UserSsoCredential": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "UserTotpCredential": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
           }
         }
       }
