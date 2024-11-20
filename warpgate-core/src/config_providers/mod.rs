@@ -1,10 +1,8 @@
 mod db;
-mod file;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use db::DatabaseConfigProvider;
-pub use file::FileConfigProvider;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;

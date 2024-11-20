@@ -1,6 +1,7 @@
 mod defaults;
 mod target;
 
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
 
 use crate::auth::CredentialKind;
+use crate::helpers::hash::hash_password;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
@@ -37,6 +39,15 @@ pub enum UserAuthCredential {
 pub struct UserPasswordCredential {
     pub hash: Secret<String>,
 }
+
+impl UserPasswordCredential {
+    pub fn from_password(password: String) -> Self {
+        Self {
+            hash: Secret::new(hash_password(&password)),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
@@ -80,10 +91,23 @@ pub struct User {
     #[serde(default)]
     pub id: Uuid,
     pub username: String,
-    pub credentials: Vec<UserAuthCredential>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct UserDetails {
+    pub inner: User,
+    pub credentials: Vec<UserAuthCredential>,
     pub roles: Vec<String>,
+}
+
+impl Deref for UserDetails {
+    type Target = User;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
@@ -316,18 +340,6 @@ pub enum ConfigProviderKind {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateConfigStore {
     #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<Target>,
-
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub users: Vec<User>,
-
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub roles: Vec<Role>,
-
-    #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
     #[serde(default)]
@@ -361,9 +373,6 @@ pub struct WarpgateConfigStore {
 impl Default for WarpgateConfigStore {
     fn default() -> Self {
         Self {
-            targets: vec![],
-            users: vec![],
-            roles: vec![],
             sso_providers: vec![],
             recordings: <_>::default(),
             external_host: None,

@@ -5745,6 +5745,7 @@ dependencies = [
 name = "warpgate-db-entities"
 version = "0.11.0"
 dependencies = [
+ "bytes",
  "chrono",
  "poem-openapi",
  "sea-orm",
@@ -5759,8 +5760,10 @@ name = "warpgate-db-migrations"
 version = "0.11.0"
 dependencies = [
  "chrono",
+ "data-encoding",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
  "serde_json",
  "tokio",
  "uuid",

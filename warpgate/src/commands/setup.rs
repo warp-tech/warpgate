@@ -12,14 +12,13 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
-use warpgate_common::helpers::hash::hash_password;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig, UserAuthCredential,
+    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::Services;
-use warpgate_db_entities::{Role, User, UserRoleAssignment};
+use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
@@ -319,11 +318,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 let values = User::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
-                    credentials: Set(serde_json::to_value(vec![UserAuthCredential::Password(
-                        UserPasswordCredential {
-                            hash: Secret::new(hash_password(&admin_password)),
-                        },
-                    )])?),
                     credential_policy: Set(serde_json::to_value(
                         None::<UserRequireCredentialsPolicy>,
                     )?),
@@ -331,6 +325,13 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 values.insert(&*db).await.map_err(WarpgateError::from)?
             }
         };
+
+        PasswordCredential::ActiveModel {
+            user_id: Set(admin_user.id),
+            ..UserPasswordCredential::from_password(admin_password).into()
+        }
+        .insert(&*db)
+        .await?;
 
         if UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(admin_user.id))

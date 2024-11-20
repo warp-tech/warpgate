@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -11,11 +10,12 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{
-    ConfigProviderKind, TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError,
+     TargetOptions, TargetWebAdminOptions,
+    WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{
-    LogEntry, Role, Target, TargetRoleAssignment, User, UserRoleAssignment,
+    LogEntry, Role, Target, TargetRoleAssignment,
 };
 use warpgate_db_migrations::migrate_database;
 
@@ -64,7 +64,7 @@ pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection
 
 pub async fn populate_db(
     db: &mut DatabaseConnection,
-    config: &mut WarpgateConfig,
+    _config: &mut WarpgateConfig,
 ) -> Result<(), WarpgateError> {
     use sea_orm::ActiveValue::Set;
     use warpgate_db_entities::{Recording, Session};
@@ -88,8 +88,6 @@ pub async fn populate_db(
         .exec(db)
         .await
         .map_err(WarpgateError::from)?;
-
-    let db_was_empty = Role::Entity::find().all(&*db).await?.is_empty();
 
     let admin_role = match Role::Entity::find()
         .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
@@ -143,140 +141,6 @@ pub async fn populate_db(
         };
         values.insert(&*db).await.map_err(WarpgateError::from)?;
     }
-
-    if db_was_empty && config.store.config_provider == ConfigProviderKind::Database {
-        migrate_config_into_db(db, config).await?;
-    } else if !config.store.targets.is_empty() {
-        warn!("Warpgate is now using the database for its configuration, but you still have leftover configuration in the config file.");
-        warn!("Configuration changes in the config file will be ignored.");
-        warn!("Remove `targets` and `roles` keys from the config to disable this warning.");
-    }
-
-    Ok(())
-}
-
-async fn migrate_config_into_db(
-    db: &mut DatabaseConnection,
-    config: &mut WarpgateConfig,
-) -> Result<(), WarpgateError> {
-    use sea_orm::ActiveValue::Set;
-    info!("Migrating config file into the database");
-
-    let mut role_lookup = HashMap::new();
-
-    for role_config in config.store.roles.iter() {
-        let role = match Role::Entity::find()
-            .filter(Role::Column::Name.eq(role_config.name.clone()))
-            .all(db)
-            .await?
-            .first()
-        {
-            Some(x) => x.to_owned(),
-            None => {
-                let values = Role::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    name: Set(role_config.name.clone()),
-                };
-                info!("Migrating role {}", role_config.name);
-                values.insert(&*db).await.map_err(WarpgateError::from)?
-            }
-        };
-        role_lookup.insert(role_config.name.clone(), role.id);
-    }
-    config.store.roles = vec![];
-
-    for target_config in config.store.targets.iter() {
-        if TargetKind::WebAdmin == (&target_config.options).into() {
-            continue;
-        }
-        let target = match Target::Entity::find()
-            .filter(Target::Column::Kind.ne(TargetKind::WebAdmin))
-            .filter(Target::Column::Name.eq(target_config.name.clone()))
-            .all(db)
-            .await?
-            .first()
-        {
-            Some(x) => x.to_owned(),
-            None => {
-                let values = Target::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    name: Set(target_config.name.clone()),
-                    kind: Set((&target_config.options).into()),
-                    options: Set(serde_json::to_value(target_config.options.clone())
-                        .map_err(WarpgateError::from)?),
-                };
-
-                info!("Migrating target {}", target_config.name);
-                values.insert(&*db).await.map_err(WarpgateError::from)?
-            }
-        };
-
-        for role_name in target_config.allow_roles.iter() {
-            if let Some(role_id) = role_lookup.get(role_name) {
-                if TargetRoleAssignment::Entity::find()
-                    .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
-                    .filter(TargetRoleAssignment::Column::RoleId.eq(*role_id))
-                    .all(db)
-                    .await?
-                    .is_empty()
-                {
-                    let values = TargetRoleAssignment::ActiveModel {
-                        target_id: Set(target.id),
-                        role_id: Set(*role_id),
-                        ..Default::default()
-                    };
-                    values.insert(&*db).await.map_err(WarpgateError::from)?;
-                }
-            }
-        }
-    }
-    config.store.targets = vec![];
-
-    for user_config in config.store.users.iter() {
-        let user = match User::Entity::find()
-            .filter(User::Column::Username.eq(user_config.username.clone()))
-            .all(db)
-            .await?
-            .first()
-        {
-            Some(x) => x.to_owned(),
-            None => {
-                let values = User::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    username: Set(user_config.username.clone()),
-                    credentials: Set(serde_json::to_value(user_config.credentials.clone())
-                        .map_err(WarpgateError::from)?),
-                    credential_policy: Set(serde_json::to_value(
-                        user_config.credential_policy.clone(),
-                    )
-                    .map_err(WarpgateError::from)?),
-                };
-
-                info!("Migrating user {}", user_config.username);
-                values.insert(&*db).await.map_err(WarpgateError::from)?
-            }
-        };
-
-        for role_name in user_config.roles.iter() {
-            if let Some(role_id) = role_lookup.get(role_name) {
-                if UserRoleAssignment::Entity::find()
-                    .filter(UserRoleAssignment::Column::UserId.eq(user.id))
-                    .filter(UserRoleAssignment::Column::RoleId.eq(*role_id))
-                    .all(db)
-                    .await?
-                    .is_empty()
-                {
-                    let values = UserRoleAssignment::ActiveModel {
-                        user_id: Set(user.id),
-                        role_id: Set(*role_id),
-                        ..Default::default()
-                    };
-                    values.insert(&*db).await.map_err(WarpgateError::from)?;
-                }
-            }
-        }
-    }
-    config.store.users = vec![];
 
     Ok(())
 }

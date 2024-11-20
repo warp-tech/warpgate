@@ -10,6 +10,7 @@ mod m00005_create_log_entry;
 mod m00006_add_session_protocol;
 mod m00007_targets_and_roles;
 mod m00008_users;
+mod m00009_credential_models;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00006_add_session_protocol::Migration),
             Box::new(m00007_targets_and_roles::Migration),
             Box::new(m00008_users::Migration),
+            Box::new(m00009_credential_models::Migration),
         ]
     }
 }

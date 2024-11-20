@@ -16,11 +16,10 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Role as RoleConfig, Target as TargetConfig, User as UserConfig, UserAuthCredential,
-    UserPasswordCredential, UserPublicKeyCredential, UserSsoCredential, UserTotpCredential,
-    WarpgateError,
+    Role, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
+    UserSsoCredential, UserTotpCredential, WarpgateError,
 };
-use warpgate_db_entities::{Role, Target, User, UserRoleAssignment};
+use warpgate_db_entities as entities;
 
 use super::ConfigProvider;
 
@@ -36,29 +35,28 @@ impl DatabaseConfigProvider {
 
 #[async_trait]
 impl ConfigProvider for DatabaseConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<UserConfig>, WarpgateError> {
+    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
         let db = self.db.lock().await;
 
-        let users = User::Entity::find()
-            .order_by_asc(User::Column::Username)
+        let users = entities::User::Entity::find()
+            .order_by_asc(entities::User::Column::Username)
             .all(&*db)
             .await?;
 
-        let users: Result<Vec<UserConfig>, _> = users.into_iter().map(|t| t.try_into()).collect();
+        let users: Result<Vec<User>, _> = users.into_iter().map(|t| t.try_into()).collect();
 
         Ok(users?)
     }
 
-    async fn list_targets(&mut self) -> Result<Vec<TargetConfig>, WarpgateError> {
+    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
         let db = self.db.lock().await;
 
-        let targets = Target::Entity::find()
-            .order_by_asc(Target::Column::Name)
+        let targets = entities::Target::Entity::find()
+            .order_by_asc(entities::Target::Column::Name)
             .all(&*db)
             .await?;
 
-        let targets: Result<Vec<TargetConfig>, _> =
-            targets.into_iter().map(|t| t.try_into()).collect();
+        let targets: Result<Vec<Target>, _> = targets.into_iter().map(|t| t.try_into()).collect();
 
         Ok(targets?)
     }
@@ -70,8 +68,8 @@ impl ConfigProvider for DatabaseConfigProvider {
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
         let db = self.db.lock().await;
 
-        let user_model = User::Entity::find()
-            .filter(User::Column::Username.eq(username))
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
             .one(&*db)
             .await?;
 
@@ -80,7 +78,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let user: UserConfig = user_model.try_into()?;
+        let user = user_model.load_details(&*db).await?;
 
         let supported_credential_types: HashSet<CredentialKind> = user
             .credentials
@@ -92,7 +90,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             supported_credential_types: supported_credential_types.clone(),
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
-        if let Some(req) = user.credential_policy {
+        if let Some(req) = user.credential_policy.clone() {
             let mut policy = PerProtocolCredentialPolicy {
                 default: default_policy,
                 protocols: HashMap::new(),
@@ -147,6 +145,8 @@ impl ConfigProvider for DatabaseConfigProvider {
         &mut self,
         client_credential: &AuthCredential,
     ) -> Result<Option<String>, WarpgateError> {
+        let db = self.db.lock().await;
+
         let AuthCredential::Sso {
             provider: client_provider,
             email: client_email,
@@ -155,23 +155,23 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        Ok(self
-            .list_users()
+        let Some(cred) = entities::SsoCredential::Entity::find()
+            .filter(
+                entities::SsoCredential::Column::Email.eq(client_email).and(
+                    entities::SsoCredential::Column::Provider
+                        .eq(client_provider)
+                        .or(entities::SsoCredential::Column::Provider.is_null()),
+                ),
+            )
+            .one(&*db)
             .await?
-            .iter()
-            .find(|x| {
-                for cred in x.credentials.iter() {
-                    if let UserAuthCredential::Sso(UserSsoCredential { provider, email }) = cred {
-                        if provider.as_ref().unwrap_or(client_provider) == client_provider
-                            && email == client_email
-                        {
-                            return true;
-                        }
-                    }
-                }
-                false
-            })
-            .map(|x| x.username.clone()))
+        else {
+            return Ok(None);
+        };
+
+        let user = cred.find_related(entities::User::Entity).one(&*db).await?;
+
+        Ok(user.map(|x| x.username))
     }
 
     async fn validate_credential(
@@ -181,8 +181,8 @@ impl ConfigProvider for DatabaseConfigProvider {
     ) -> Result<bool, WarpgateError> {
         let db = self.db.lock().await;
 
-        let user_model = User::Entity::find()
-            .filter(User::Column::Username.eq(username))
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
             .one(&*db)
             .await?;
 
@@ -191,7 +191,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(false);
         };
 
-        let user: UserConfig = user_model.try_into()?;
+        let user_details = user_model.load_details(&*db).await?;
 
         match client_credential {
             AuthCredential::PublicKey {
@@ -199,48 +199,59 @@ impl ConfigProvider for DatabaseConfigProvider {
                 public_key_bytes,
             } => {
                 let base64_bytes = BASE64.encode(public_key_bytes);
+                let openssh_public_key = format!("{kind} {base64_bytes}");
+                debug!(
+                    username = &user_details.username[..],
+                    "Client key: {}", openssh_public_key
+                );
 
-                let client_key = format!("{kind} {base64_bytes}");
-                debug!(username = &user.username[..], "Client key: {}", client_key);
-
-                return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::PublicKey(UserPublicKeyCredential {
-                        key: ref user_key,
-                    }) => &client_key == user_key.expose_secret(),
-                    _ => false,
-                }));
+                return Ok(user_details
+                    .credentials
+                    .iter()
+                    .any(|credential| match credential {
+                        UserAuthCredential::PublicKey(UserPublicKeyCredential {
+                            key: ref user_key,
+                        }) => &openssh_public_key == user_key.expose_secret(),
+                        _ => false,
+                    }));
             }
             AuthCredential::Password(client_password) => {
-                return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Password(UserPasswordCredential {
-                        hash: ref user_password_hash,
-                    }) => verify_password_hash(
-                        client_password.expose_secret(),
-                        user_password_hash.expose_secret(),
-                    )
-                    .unwrap_or_else(|e| {
-                        error!(
-                            username = &user.username[..],
-                            "Error verifying password hash: {}", e
-                        );
-                        false
-                    }),
-                    _ => false,
-                }))
+                return Ok(user_details
+                    .credentials
+                    .iter()
+                    .any(|credential| match credential {
+                        UserAuthCredential::Password(UserPasswordCredential {
+                            hash: ref user_password_hash,
+                        }) => verify_password_hash(
+                            client_password.expose_secret(),
+                            user_password_hash.expose_secret(),
+                        )
+                        .unwrap_or_else(|e| {
+                            error!(
+                                username = &user_details.username[..],
+                                "Error verifying password hash: {}", e
+                            );
+                            false
+                        }),
+                        _ => false,
+                    }))
             }
             AuthCredential::Otp(client_otp) => {
-                return Ok(user.credentials.iter().any(|credential| match credential {
-                    UserAuthCredential::Totp(UserTotpCredential {
-                        key: ref user_otp_key,
-                    }) => verify_totp(client_otp.expose_secret(), user_otp_key),
-                    _ => false,
-                }))
+                return Ok(user_details
+                    .credentials
+                    .iter()
+                    .any(|credential| match credential {
+                        UserAuthCredential::Totp(UserTotpCredential {
+                            key: ref user_otp_key,
+                        }) => verify_totp(client_otp.expose_secret(), user_otp_key),
+                        _ => false,
+                    }))
             }
             AuthCredential::Sso {
                 provider: client_provider,
                 email: client_email,
             } => {
-                for credential in user.credentials.iter() {
+                for credential in user_details.credentials.iter() {
                     if let UserAuthCredential::Sso(UserSsoCredential {
                         ref provider,
                         ref email,
@@ -266,13 +277,13 @@ impl ConfigProvider for DatabaseConfigProvider {
     ) -> Result<bool, WarpgateError> {
         let db = self.db.lock().await;
 
-        let target_model: Option<Target::Model> = Target::Entity::find()
-            .filter(Target::Column::Name.eq(target_name))
+        let target_model = entities::Target::Entity::find()
+            .filter(entities::Target::Column::Name.eq(target_name))
             .one(&*db)
             .await?;
 
-        let user_model = User::Entity::find()
-            .filter(User::Column::Username.eq(username))
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
             .one(&*db)
             .await?;
 
@@ -287,20 +298,20 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         let target_roles: HashSet<String> = target_model
-            .find_related(Role::Entity)
+            .find_related(entities::Role::Entity)
             .all(&*db)
             .await?
             .into_iter()
-            .map(Into::<RoleConfig>::into)
+            .map(Into::<Role>::into)
             .map(|x| x.name)
             .collect();
 
         let user_roles: HashSet<String> = user_model
-            .find_related(Role::Entity)
+            .find_related(entities::Role::Entity)
             .all(&*db)
             .await?
             .into_iter()
-            .map(Into::<RoleConfig>::into)
+            .map(Into::<Role>::into)
             .map(|x| x.name)
             .collect();
 
@@ -317,8 +328,8 @@ impl ConfigProvider for DatabaseConfigProvider {
     ) -> Result<(), WarpgateError> {
         let db = self.db.lock().await;
 
-        let user = User::Entity::find()
-            .filter(User::Column::Username.eq(username))
+        let user = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
             .one(&*db)
             .await
             .map_err(WarpgateError::from)?
@@ -326,7 +337,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let managed_role_names = match managed_role_names {
             Some(x) => x,
-            None => Role::Entity::find()
+            None => entities::Role::Entity::find()
                 .all(&*db)
                 .await?
                 .into_iter()
@@ -335,16 +346,16 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         for role_name in managed_role_names.into_iter() {
-            let role = Role::Entity::find()
-                .filter(Role::Column::Name.eq(role_name.clone()))
+            let role = entities::Role::Entity::find()
+                .filter(entities::Role::Column::Name.eq(role_name.clone()))
                 .one(&*db)
                 .await
                 .map_err(WarpgateError::from)?
                 .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
 
-            let assignment = UserRoleAssignment::Entity::find()
-                .filter(UserRoleAssignment::Column::UserId.eq(user.id))
-                .filter(UserRoleAssignment::Column::RoleId.eq(role.id))
+            let assignment = entities::UserRoleAssignment::Entity::find()
+                .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
+                .filter(entities::UserRoleAssignment::Column::RoleId.eq(role.id))
                 .one(&*db)
                 .await
                 .map_err(WarpgateError::from)?;
@@ -352,7 +363,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
-                    let values = UserRoleAssignment::ActiveModel {
+                    let values = entities::UserRoleAssignment::ActiveModel {
                         user_id: Set(user.id),
                         role_id: Set(role.id),
                         ..Default::default()
