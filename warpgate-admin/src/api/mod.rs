@@ -10,6 +10,7 @@ mod roles;
 mod sessions_detail;
 pub mod sessions_list;
 mod ssh_keys;
+mod sso_credentials;
 mod targets;
 mod tickets_detail;
 mod tickets_list;
@@ -34,5 +35,6 @@ pub fn get() -> impl OpenApi {
             password_credentials::ListApi,
             password_credentials::DetailApi,
         ),
+        (sso_credentials::ListApi, sso_credentials::DetailApi),
     )
 }

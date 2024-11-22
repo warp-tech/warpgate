@@ -1,6 +1,6 @@
 <script lang="ts">
     import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type Role, type User, type UserRequireCredentialsPolicy } from 'admin/lib/api'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingSsoCredential, type User, type UserRequireCredentialsPolicy } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Fa from 'svelte-fa'
@@ -10,9 +10,12 @@
     import UserCredentialModal from './UserCredentialModal.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/Alert.svelte'
-    import CreatePasswordModal from './CreatePasswordModal.svelte';
+    import CreatePasswordModal from './CreatePasswordModal.svelte'
+    import SsoCredentialModal from './SsoCredentialModal.svelte'
 
-    type ExistingCredential = { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
+    type ExistingCredential =
+        { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
+        | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
 
     interface Props {
         userId: string
@@ -23,12 +26,18 @@
     let credentials: ExistingCredential[] = $state([])
 
     let creatingPassword = $state(false)
+    let editingSsoCredential = $state(false)
+    let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
+
     // let editingCredential: UserAuthCredential|undefined = $state()
+
+    const loadPromise = load()
 
     async function load () {
         try {
             await Promise.all([
                 loadPasswords(),
+                loadSso(),
             ])
         } catch (err) {
             error = await stringifyError(err)
@@ -37,7 +46,14 @@
 
     async function loadPasswords () {
         credentials.push(...(await api.getPasswordCredentials({ userId })).map(c => ({
-            kind: 'Password' as const,
+            kind: CredentialKind.Password,
+            ...c,
+        })))
+    }
+
+    async function loadSso () {
+        credentials.push(...(await api.getSsoCredentials({ userId })).map(c => ({
+            kind: CredentialKind.Sso,
             ...c,
         })))
     }
@@ -50,12 +66,18 @@
                 userId,
             })
         }
+        if (credential.kind === CredentialKind.Sso) {
+            await api.deleteSsoCredential({
+                id: credential.id,
+                userId,
+            })
+        }
     }
 
     async function createPassword (password: string) {
         const credential = await api.createPasswordCredential({
+            userId,
             newPasswordCredential: {
-                userId,
                 password,
             },
         })
@@ -63,6 +85,33 @@
             kind: CredentialKind.Password,
             ...credential,
         })
+    }
+
+    async function saveSsoCredential (provider: string|null, email: string) {
+        if (editingSsoCredentialInstance) {
+            const credential = await api.updateSsoCredential({
+                userId,
+                id: editingSsoCredentialInstance.id,
+                newSsoCredential: {
+                    provider: provider ?? undefined,
+                    email,
+                },
+            })
+            credentials.push({
+                kind: CredentialKind.Sso,
+                ...credential,
+            })
+        } else {
+            await api.createSsoCredential({
+                userId,
+                newSsoCredential: {
+                    provider:provider ?? undefined,
+                    email,
+                },
+            })
+        }
+        editingSsoCredential = false
+        editingSsoCredentialInstance = null
     }
 
     // function abbreviatePublicKey (key: string) {
@@ -113,13 +162,14 @@
         kind: 'Totp',
         key: [],
     }}>Add OTP</Button>
-    <Button size="sm" color="link" on:click={() => editingCredential = {
-        kind: 'Sso',
-        email: '',
-    }}>Add SSO</Button> -->
+-->
+    <Button size="sm" color="link" on:click={() => {
+        editingSsoCredentialInstance = null
+        editingSsoCredential = true
+    }}>Add SSO</Button>
 </div>
 
-{#await load()}
+{#await loadPromise}
 <DelayedSpinner />
 {:then}
 
@@ -139,25 +189,31 @@
             <Fa fw icon={faMobileScreen} />
             <span class="type">One-time password</span>
         {/if}
-        {#if credential.kind === 'Sso'}
+        -->
+        {#if credential.kind === CredentialKind.Sso}
             <Fa fw icon={faIdBadge} />
             <span class="type">Single sign-on</span>
             <span class="text-muted ms-2">
                 {credential.email}
                 {#if credential.provider} ({credential.provider}){/if}
             </span>
-        {/if} -->
+        {/if}
 
         <span class="ms-auto"></span>
-        <!-- <a
+        {#if credential.kind !== CredentialKind.Password}
+        <a
             class="ms-2"
             href={''}
             onclick={e => {
-                editingCredential = credential
+                if (credential.kind === CredentialKind.Sso) {
+                    editingSsoCredentialInstance = credential
+                    editingSsoCredential = true
+                }
                 e.preventDefault()
             }}>
             Change
-        </a> -->
+        </a>
+        {/if}
         <a
             class="ms-2"
             href={''}
@@ -186,10 +242,20 @@
 />
 {/if} -->
 
+{#if creatingPassword}
 <CreatePasswordModal
     bind:isOpen={creatingPassword}
     create={createPassword}
 />
+{/if}
+
+{#if editingSsoCredential}
+<SsoCredentialModal
+    bind:isOpen={editingSsoCredential}
+    instance={editingSsoCredentialInstance}
+    save={saveSsoCredential}
+/>
+{/if}
 
 <style lang="scss">
     .credential {

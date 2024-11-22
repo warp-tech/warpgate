@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserSsoCredential};
@@ -37,11 +38,27 @@ impl Related<super::User::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-impl From<Model> for UserAuthCredential {
+impl From<Model> for UserSsoCredential {
     fn from(credential: Model) -> Self {
-        Self::Sso(UserSsoCredential {
+        UserSsoCredential {
             provider: credential.provider,
             email: credential.email,
-        })
+        }
+    }
+}
+
+impl From<Model> for UserAuthCredential {
+    fn from(model: Model) -> Self {
+        Self::Sso(model.into())
+    }
+}
+
+impl From<UserSsoCredential> for ActiveModel {
+    fn from(credential: UserSsoCredential) -> Self {
+        Self {
+            provider: Set(credential.provider),
+            email: Set(credential.email),
+            ..Default::default()
+        }
     }
 }

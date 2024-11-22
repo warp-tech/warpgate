@@ -1139,10 +1139,21 @@
           }
         },
         "operationId": "get_password_credentials"
-      }
-    },
-    "/credentials/passwords": {
+      },
       "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json; charset=utf-8": {
@@ -1160,16 +1171,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/ExistingPasswordCredential"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -1213,6 +1214,166 @@
           }
         },
         "operationId": "delete_password_credential"
+      }
+    },
+    "/users/{user_id}/credentials/sso": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingSsoCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_sso_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSsoCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingSsoCredential"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_sso_credential"
+      }
+    },
+    "/users/{user_id}/credentials/sso/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSsoCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingSsoCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "update_sso_credential"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_sso_credential"
       }
     }
   },
@@ -1271,6 +1432,25 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "ExistingSsoCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
           }
         }
       },
@@ -1335,15 +1515,24 @@
       "NewPasswordCredential": {
         "type": "object",
         "required": [
-          "user_id",
           "password"
         ],
         "properties": {
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "password": {
+            "type": "string"
+          }
+        }
+      },
+      "NewSsoCredential": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "email": {
             "type": "string"
           }
         }

@@ -30,6 +30,7 @@
         }
         isOpen = false
         create(password)
+        password = ''
     }
 
     function _validate () : boolean {

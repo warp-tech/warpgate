@@ -19,7 +19,6 @@ struct ExistingPasswordCredential {
 
 #[derive(Object)]
 struct NewPasswordCredential {
-    user_id: Uuid,
     password: Secret<String>,
 }
 
@@ -69,7 +68,7 @@ impl ListApi {
     }
 
     #[oai(
-        path = "/credentials/passwords",
+        path = "/users/:user_id/credentials/passwords",
         method = "post",
         operation_id = "create_password_credential"
     )]
@@ -77,12 +76,13 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewPasswordCredential>,
+        user_id: Path<Uuid>,
     ) -> poem::Result<CreatePasswordCredentialResponse> {
         let db = db.lock().await;
 
         let object = PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
-            user_id: Set(body.user_id),
+            user_id: Set(*user_id),
             ..PasswordCredential::ActiveModel::from(UserPasswordCredential::from_password(
                 &body.password,
             ))
@@ -98,7 +98,7 @@ impl ListApi {
 }
 
 #[derive(ApiResponse)]
-enum DeletePasswordCredentialResponse {
+enum DeleteCredentialResponse {
     #[oai(status = 204)]
     Deleted,
     #[oai(status = 404)]
@@ -119,21 +119,21 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-    ) -> poem::Result<DeletePasswordCredentialResponse> {
+    ) -> poem::Result<DeleteCredentialResponse> {
         let db = db.lock().await;
 
-        let Some(role) = PasswordCredential::Entity::find_by_id(id.0)
+        let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
             .one(&*db)
             .await
             .map_err(poem::error::InternalServerError)?
         else {
-            return Ok(DeletePasswordCredentialResponse::NotFound);
+            return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        role.delete(&*db)
+        model.delete(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
-        Ok(DeletePasswordCredentialResponse::Deleted)
+        Ok(DeleteCredentialResponse::Deleted)
     }
 }
