@@ -89,25 +89,24 @@
 
     async function saveSsoCredential (provider: string|null, email: string) {
         if (editingSsoCredentialInstance) {
-            const credential = await api.updateSsoCredential({
+            editingSsoCredentialInstance.provider = provider ?? undefined
+            editingSsoCredentialInstance.email = email
+            await api.updateSsoCredential({
                 userId,
                 id: editingSsoCredentialInstance.id,
+                newSsoCredential: editingSsoCredentialInstance,
+            })
+        } else {
+            const credential = await api.createSsoCredential({
+                userId,
                 newSsoCredential: {
-                    provider: provider ?? undefined,
+                    provider:provider ?? undefined,
                     email,
                 },
             })
             credentials.push({
                 kind: CredentialKind.Sso,
                 ...credential,
-            })
-        } else {
-            await api.createSsoCredential({
-                userId,
-                newSsoCredential: {
-                    provider:provider ?? undefined,
-                    email,
-                },
             })
         }
         editingSsoCredential = false
