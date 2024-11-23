@@ -51,6 +51,7 @@ impl Related<super::SsoCredential::Entity> for Entity {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
+#[allow(clippy::enum_variant_names)]
 pub enum Relation {
     OtpCredentials,
     PasswordCredentials,

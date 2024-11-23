@@ -247,6 +247,7 @@ impl MigrationTrait for Migration {
 
         let users = User::Entity::find().all(db).await?;
         for user in users {
+            #[allow(clippy::unwrap_used)]
             let credentials: Vec<UserAuthCredential> =
                 serde_json::from_value(user.credentials).unwrap();
             for credential in credentials {
