@@ -39,6 +39,10 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         search: Query<Option<String>>,
     ) -> poem::Result<GetTargetsResponse> {
+        let RequestAuthorization::Session(auth) = *auth else {
+            return Ok(GetTargetsResponse::Ok(Json(vec![])));
+        };
+
         let mut targets = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?

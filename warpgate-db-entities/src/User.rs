@@ -102,7 +102,7 @@ impl Model {
     ) -> Result<UserDetails, WarpgateError> {
         let roles: Vec<String> = self
             .find_related(Role::Entity)
-            .all(&*db)
+            .all(db)
             .await?
             .into_iter()
             .map(Into::<warpgate_common::Role>::into)
