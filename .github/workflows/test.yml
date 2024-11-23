@@ -38,7 +38,7 @@ jobs:
         working-directory: tests
         run: |
           sudo apt install -y gnome-keyring
-          pip3 install keyring==23.8.2 poetry==1.8.3
+          pip3 install keyring==25.5.0 poetry==1.8.3
           poetry install
 
       - name: Run
