@@ -5,13 +5,15 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel,
-    ModelTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
+    Set,
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{UserSsoCredential, WarpgateError};
 use warpgate_db_entities::SsoCredential;
+
+use super::TokenSecurityScheme;
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -78,6 +80,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetSsoCredentialsResponse> {
         let db = db.lock().await;
 
@@ -102,6 +105,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<CreateSsoCredentialResponse> {
         let db = db.lock().await;
 
@@ -141,6 +145,7 @@ impl DetailApi {
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<UpdateSsoCredentialResponse> {
         let db = db.lock().await;
 
@@ -169,6 +174,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteCredentialResponse> {
         let db = db.lock().await;
 

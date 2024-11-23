@@ -10,12 +10,12 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::{hash_password, parse_hash};
 use warpgate_common::{
-    Role as RoleConfig, User as UserConfig, UserAuthCredential, UserRequireCredentialsPolicy,
-    WarpgateError,
+    Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
+
+use super::TokenSecurityScheme;
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -50,6 +50,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetUsersResponse> {
         let db = db.lock().await;
 
@@ -73,6 +74,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateUserRequest>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<CreateUserResponse> {
         if body.username.is_empty() {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
@@ -83,8 +85,10 @@ impl ListApi {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(body.username.clone()),
-            credential_policy: Set(serde_json::to_value(UserRequireCredentialsPolicy::default())
-                .map_err(WarpgateError::from)?),
+            credential_policy: Set(
+                serde_json::to_value(UserRequireCredentialsPolicy::default())
+                    .map_err(WarpgateError::from)?,
+            ),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -129,6 +133,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetUserResponse> {
         let db = db.lock().await;
 
@@ -151,6 +156,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<UserDataRequest>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<UpdateUserResponse> {
         let db = db.lock().await;
 
@@ -164,8 +170,6 @@ impl DetailApi {
 
         let mut model: User::ActiveModel = user.into();
         model.username = Set(body.username.clone());
-        // TODO model.credentials = Set(serde_json::to_value(process_credentials(&body.credentials))
-            // .map_err(WarpgateError::from)?);
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
@@ -184,6 +188,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteUserResponse> {
         let db = db.lock().await;
 
@@ -206,18 +211,6 @@ impl DetailApi {
             .map_err(poem::error::InternalServerError)?;
         Ok(DeleteUserResponse::Deleted)
     }
-}
-
-fn process_credentials(credentials: &[UserAuthCredential]) -> Vec<UserAuthCredential> {
-    let mut credentials: Vec<UserAuthCredential> = credentials.into();
-    for credential in credentials.iter_mut() {
-        if let UserAuthCredential::Password(ref mut c) = credential {
-            if parse_hash(c.hash.expose_secret()).is_err() {
-                c.hash = hash_password(c.hash.expose_secret()).into();
-            }
-        }
-    }
-    credentials
 }
 
 #[derive(ApiResponse)]
@@ -257,6 +250,7 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetUserRolesResponse> {
         let db = db.lock().await;
 
@@ -285,6 +279,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<AddUserRoleResponse> {
         let db = db.lock().await;
 
@@ -320,6 +315,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteUserRoleResponse> {
         let db = db.lock().await;
 

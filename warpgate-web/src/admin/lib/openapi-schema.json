@@ -69,6 +69,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_sessions"
       },
       "delete": {
@@ -77,6 +82,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "close_all_sessions"
       }
     },
@@ -110,6 +120,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_session"
       }
     },
@@ -143,6 +158,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_session_recordings"
       }
     },
@@ -169,6 +189,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "close_session"
       }
     },
@@ -202,6 +227,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_recording"
       }
     },
@@ -234,6 +264,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_roles"
       },
       "post": {
@@ -269,6 +304,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_role"
       }
     },
@@ -302,6 +342,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_role"
       },
       "put": {
@@ -346,6 +391,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_role"
       },
       "delete": {
@@ -373,7 +423,224 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_role"
+      }
+    },
+    "/tickets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ticket"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_tickets"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketAndSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_ticket"
+      }
+    },
+    "/tickets/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ticket"
+      }
+    },
+    "/ssh/known-hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_known_hosts"
+      }
+    },
+    "/ssh/known-hosts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ssh_known_host"
+      }
+    },
+    "/ssh/own-keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_own_keys"
+      }
+    },
+    "/logs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GetLogsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_logs"
       }
     },
     "/targets": {
@@ -405,6 +672,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_targets"
       },
       "post": {
@@ -440,6 +712,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_target"
       }
     },
@@ -473,6 +750,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_target"
       },
       "put": {
@@ -517,6 +799,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_target"
       },
       "delete": {
@@ -544,6 +831,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_target"
       }
     },
@@ -580,6 +872,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_target_roles"
       }
     },
@@ -617,6 +914,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "add_target_role"
       },
       "delete": {
@@ -655,6 +957,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_target_role"
       }
     },
@@ -687,6 +994,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_users"
       },
       "post": {
@@ -722,6 +1034,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_user"
       }
     },
@@ -755,6 +1072,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_user"
       },
       "put": {
@@ -796,6 +1118,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_user"
       },
       "delete": {
@@ -820,6 +1147,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_user"
       }
     },
@@ -856,6 +1188,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_user_roles"
       }
     },
@@ -893,6 +1230,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "add_user_role"
       },
       "delete": {
@@ -928,184 +1270,12 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_user_role"
-      }
-    },
-    "/tickets": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Ticket"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_tickets"
-      },
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json; charset=utf-8": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTicketRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/TicketAndSecret"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "operationId": "create_ticket"
-      }
-    },
-    "/tickets/{id}": {
-      "delete": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "operationId": "delete_ticket"
-      }
-    },
-    "/ssh/known-hosts": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SSHKnownHost"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_ssh_known_hosts"
-      }
-    },
-    "/ssh/known-hosts/{id}": {
-      "delete": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "operationId": "delete_ssh_known_host"
-      }
-    },
-    "/ssh/own-keys": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SSHKey"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_ssh_own_keys"
-      }
-    },
-    "/logs": {
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json; charset=utf-8": {
-              "schema": {
-                "$ref": "#/components/schemas/GetLogsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/LogEntry"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "operationId": "get_logs"
       }
     },
     "/users/{user_id}/credentials/passwords": {
@@ -1138,6 +1308,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_password_credentials"
       },
       "post": {
@@ -1176,6 +1351,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_password_credential"
       }
     },
@@ -1213,6 +1393,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_password_credential"
       }
     },
@@ -1246,6 +1431,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_sso_credentials"
       },
       "post": {
@@ -1284,6 +1474,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_sso_credential"
       }
     },
@@ -1324,7 +1519,7 @@
           "required": true
         },
         "responses": {
-          "204": {
+          "200": {
             "description": "",
             "content": {
               "application/json; charset=utf-8": {
@@ -1338,6 +1533,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_sso_credential"
       },
       "delete": {
@@ -1373,6 +1573,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_sso_credential"
       }
     },
@@ -1406,6 +1611,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_public_key_credentials"
       },
       "post": {
@@ -1444,6 +1654,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_public_key_credential"
       }
     },
@@ -1484,7 +1699,7 @@
           "required": true
         },
         "responses": {
-          "204": {
+          "200": {
             "description": "",
             "content": {
               "application/json; charset=utf-8": {
@@ -1498,6 +1713,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_public_key_credential"
       },
       "delete": {
@@ -1533,7 +1753,135 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_public_key_credential"
+      }
+    },
+    "/users/{user_id}/credentials/otp": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingOtpCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_otp_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOtpCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingOtpCredential"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_otp_credential"
+      }
+    },
+    "/users/{user_id}/credentials/otp/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_otp_credential"
       }
     }
   },
@@ -1582,6 +1930,18 @@
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "ExistingOtpCredential": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "ExistingPasswordCredential": {
         "type": "object",
@@ -1685,6 +2045,21 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "NewOtpCredential": {
+        "type": "object",
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
           }
         }
       },
@@ -2393,6 +2768,13 @@
             }
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "TokenSecurityScheme": {
+        "type": "apiKey",
+        "name": "X-Warpgate-Token",
+        "in": "header"
       }
     }
   }

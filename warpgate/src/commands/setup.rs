@@ -294,7 +294,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("Saved into {}", cli.config.display());
 
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone()).await?;
+    let services = Services::new(config.clone(), None).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
@@ -330,6 +330,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
         PasswordCredential::ActiveModel {
             user_id: Set(admin_user.id),
+            id: Set(Uuid::new_v4()),
             ..UserPasswordCredential::from_password(&admin_password).into()
         }
         .insert(&*db)

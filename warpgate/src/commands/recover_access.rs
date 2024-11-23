@@ -2,6 +2,7 @@ use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
@@ -14,7 +15,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
     assert_interactive_terminal();
 
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone()).await?;
+    let services = Services::new(config.clone(), None).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
@@ -61,6 +62,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
 
     PasswordCredential::ActiveModel {
         user_id: Set(user.id),
+        id: Set(Uuid::new_v4()),
         ..UserPasswordCredential::from_password(&password).into()
     }
     .insert(&*db)

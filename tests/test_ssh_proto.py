@@ -6,15 +6,7 @@ import time
 import pytest
 from textwrap import dedent
 
-from tests.api_client import (
-    api_add_role_to_target,
-    api_add_role_to_user,
-    api_admin_session,
-    api_create_role,
-    api_create_target,
-    api_create_user,
-)
-
+from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
 from .util import wait_port, alloc_port
 
@@ -41,41 +33,38 @@ def setup_user_and_target(
     wait_port(ssh_port)
 
     url = f"https://localhost:{wg.http_port}"
-    with api_admin_session(url) as session:
-        role = api_create_role(url, session, {"name": f"role-{uuid4()}"})
-        user = api_create_user(
-            url,
-            session,
-            {
-                "username": f"user-{uuid4()}",
-                "credentials": [
-                    {
-                        "kind": "Password",
-                        "hash": "123",
-                    },
-                    {
-                        "kind": "PublicKey",
-                        "key": open("ssh-keys/id_ed25519.pub").read().strip(),
-                    },
-                ],
-            },
+    with admin_client(url) as api:
+        role = api.create_role(
+            sdk.RoleDataRequest(name=f"role-{uuid4()}"),
         )
-        api_add_role_to_user(url, session, user["id"], role["id"])
-        ssh_target = api_create_target(
-            url,
-            session,
-            {
-                "name": f"ssh-{uuid4()}",
-                "options": {
-                    "kind": "Ssh",
-                    "host": "localhost",
-                    "port": ssh_port,
-                    "username": "root",
-                    "auth": {"kind": "PublicKey"},
-                },
-            },
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+        api.create_password_credential(
+            user.id, sdk.NewPasswordCredential(password="123")
         )
-        api_add_role_to_target(url, session, ssh_target["id"], role["id"])
+        api.create_public_key_credential(
+            user.id,
+            sdk.NewPublicKeyCredential(
+                openssh_public_key=wg_c_ed25519_pubkey.read_text().strip()
+            ),
+        )
+        api.add_user_role(user.id, role.id)
+        ssh_target = api.create_target(
+            sdk.TargetDataRequest(
+                name=f"ssh-{uuid4()}",
+                options=sdk.TargetOptions(
+                    sdk.TargetOptionsTargetSSHOptions(
+                        kind="Ssh",
+                        host="localhost",
+                        port=ssh_port,
+                        username="root",
+                        auth=sdk.SSHTargetAuth(
+                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                        ),
+                    )
+                ),
+            )
+        )
+        api.add_target_role(ssh_target.id, role.id)
         return user, ssh_target
 
 
@@ -91,7 +80,7 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             *common_args,
@@ -117,7 +106,7 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-tt",
@@ -142,7 +131,7 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-v",
@@ -167,7 +156,7 @@ class Test:
         )
         local_port = alloc_port()
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-v",
@@ -200,7 +189,7 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
         pf_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-v",
@@ -212,7 +201,7 @@ class Test:
         )
         time.sleep(5)
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-v",
@@ -241,7 +230,7 @@ class Test:
             f"""
             set timeout {timeout - 5}
 
-            spawn ssh -tt {user['username']}:{ssh_target['name']}@localhost -p {shared_wg.ssh_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password
+            spawn ssh -tt {user.username}:{ssh_target.name}@localhost -p {shared_wg.ssh_port} -o StrictHostKeychecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password
 
             expect "password:"
             sleep 0.5
@@ -278,7 +267,7 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
         ssh_client = processes.start_ssh_client(
-            f"{user['username']}:{ssh_target['name']}@localhost",
+            f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-tt",
@@ -308,7 +297,7 @@ class Test:
                     "-P",
                     str(shared_wg.ssh_port),
                     "-o",
-                    f"User={user['username']}:{ssh_target['name']}",
+                    f"User={user.username}:{ssh_target.name}",
                     "-o",
                     "IdentitiesOnly=yes",
                     "-o",

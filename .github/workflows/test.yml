@@ -22,10 +22,11 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
-      - name: Build admin UI
+      - name: Build UI
         run: |
           just yarn --network-timeout 1000000000
           just openapi
+          just yarn openapi:tests-sdk
           just yarn build
 
       - name: Build images

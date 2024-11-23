@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserTotpCredential};
@@ -36,10 +37,25 @@ impl Related<super::User::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-impl From<Model> for UserAuthCredential {
+impl From<Model> for UserTotpCredential {
     fn from(credential: Model) -> Self {
-        Self::Totp(UserTotpCredential {
+        UserTotpCredential {
             key: credential.secret_key.into(),
-        })
+        }
+    }
+}
+
+impl From<Model> for UserAuthCredential {
+    fn from(model: Model) -> Self {
+        Self::Totp(model.into())
+    }
+}
+
+impl From<UserTotpCredential> for ActiveModel {
+    fn from(credential: UserTotpCredential) -> Self {
+        Self {
+            secret_key: Set(credential.key.expose_secret().clone()),
+            ..Default::default()
+        }
     }
 }

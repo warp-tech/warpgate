@@ -1,12 +1,8 @@
 from pathlib import Path
-import subprocess
 from textwrap import dedent
 from uuid import uuid4
 
-from .api_client import (
-    api_admin_session,
-    api_create_target,
-)
+from .api_client import admin_client, sdk
 
 from .conftest import ProcessManager, WarpgateProcess
 from .util import alloc_port, wait_port
@@ -26,25 +22,29 @@ class Test:
         wait_port(ssh_port)
 
         url = f"https://localhost:{shared_wg.http_port}"
-        with api_admin_session(url) as session:
-            ssh_target = api_create_target(
-                url,
-                session,
-                {
-                    "name": f"ssh-{uuid4()}",
-                    "options": {
-                        "kind": "Ssh",
-                        "host": "localhost",
-                        "port": ssh_port,
-                        "username": "root",
-                        "auth": {"kind": "PublicKey"},
-                    },
-                },
+        with admin_client(url) as api:
+            ssh_target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            host="localhost",
+                            port=ssh_port,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
+                                    kind="PublicKey"
+                                )
+                            ),
+                        )
+                    ),
+                )
             )
 
         wg = processes.start_wg(
             share_with=shared_wg,
-            args=["test-target", ssh_target["name"]],
+            args=["test-target", ssh_target.name],
         )
         wg.process.wait(timeout=timeout)
         assert wg.process.returncode == 0
@@ -58,23 +58,27 @@ class Test:
         ssh_port = alloc_port()
 
         url = f"https://localhost:{shared_wg.http_port}"
-        with api_admin_session(url) as session:
-            ssh_target = api_create_target(
-                url,
-                session,
-                {
-                    "name": f"ssh-{uuid4()}",
-                    "options": {
-                        "kind": "Ssh",
-                        "host": "localhost",
-                        "port": ssh_port,
-                        "username": "root",
-                        "auth": {"kind": "PublicKey"},
-                    },
-                },
+        with admin_client(url) as api:
+            ssh_target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            host="localhost",
+                            port=ssh_port,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
+                                    kind="PublicKey"
+                                )
+                            ),
+                        )
+                    ),
+                )
             )
         wg = processes.start_wg(
-            args=["test-target", ssh_target["name"]],
+            args=["test-target", ssh_target.name],
             share_with=shared_wg,
         )
         wg.process.wait(timeout=timeout)

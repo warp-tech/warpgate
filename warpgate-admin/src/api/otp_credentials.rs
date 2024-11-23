@@ -9,37 +9,47 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{Secret, UserPasswordCredential, WarpgateError};
-use warpgate_db_entities::PasswordCredential;
+use warpgate_common::{UserTotpCredential, WarpgateError};
+use warpgate_db_entities::OtpCredential;
 
 use super::TokenSecurityScheme;
 
 #[derive(Object)]
-struct ExistingPasswordCredential {
+struct ExistingOtpCredential {
     id: Uuid,
 }
 
 #[derive(Object)]
-struct NewPasswordCredential {
-    password: Secret<String>,
+struct NewOtpCredential {
+    secret_key: Vec<u8>,
 }
 
-impl From<PasswordCredential::Model> for ExistingPasswordCredential {
-    fn from(credential: PasswordCredential::Model) -> Self {
-        Self { id: credential.id }
+impl From<OtpCredential::Model> for ExistingOtpCredential {
+    fn from(credential: OtpCredential::Model) -> Self {
+        Self {
+            id: credential.id,
+        }
+    }
+}
+
+impl From<&NewOtpCredential> for UserTotpCredential {
+    fn from(credential: &NewOtpCredential) -> Self {
+        Self {
+            key: credential.secret_key.clone().into(),
+        }
     }
 }
 
 #[derive(ApiResponse)]
-enum GetPasswordCredentialsResponse {
+enum GetOtpCredentialsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<ExistingPasswordCredential>>),
+    Ok(Json<Vec<ExistingOtpCredential>>),
 }
 
 #[derive(ApiResponse)]
-enum CreatePasswordCredentialResponse {
+enum CreateOtpCredentialResponse {
     #[oai(status = 201)]
-    Created(Json<ExistingPasswordCredential>),
+    Created(Json<ExistingOtpCredential>),
 }
 
 pub struct ListApi;
@@ -47,57 +57,53 @@ pub struct ListApi;
 #[OpenApi]
 impl ListApi {
     #[oai(
-        path = "/users/:user_id/credentials/passwords",
+        path = "/users/:user_id/credentials/otp",
         method = "get",
-        operation_id = "get_password_credentials"
+        operation_id = "get_otp_credentials"
     )]
     async fn api_get_all(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetPasswordCredentialsResponse> {
+    ) -> poem::Result<GetOtpCredentialsResponse> {
         let db = db.lock().await;
 
-        let objects = PasswordCredential::Entity::find()
-            .filter(PasswordCredential::Column::UserId.eq(*user_id))
+        let objects = OtpCredential::Entity::find()
+            .filter(OtpCredential::Column::UserId.eq(*user_id))
             .all(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
 
-        Ok(GetPasswordCredentialsResponse::Ok(Json(
+        Ok(GetOtpCredentialsResponse::Ok(Json(
             objects.into_iter().map(Into::into).collect(),
         )))
     }
 
     #[oai(
-        path = "/users/:user_id/credentials/passwords",
+        path = "/users/:user_id/credentials/otp",
         method = "post",
-        operation_id = "create_password_credential"
+        operation_id = "create_otp_credential"
     )]
     async fn api_create(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        body: Json<NewPasswordCredential>,
+        body: Json<NewOtpCredential>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreatePasswordCredentialResponse> {
+    ) -> poem::Result<CreateOtpCredentialResponse> {
         let db = db.lock().await;
 
-        let object = PasswordCredential::ActiveModel {
+        let object = OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            ..PasswordCredential::ActiveModel::from(UserPasswordCredential::from_password(
-                &body.password,
-            ))
+            ..OtpCredential::ActiveModel::from(UserTotpCredential::from(&*body))
         }
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
 
-        Ok(CreatePasswordCredentialResponse::Created(Json(
-            object.into(),
-        )))
+        Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
 }
 
@@ -114,9 +120,9 @@ pub struct DetailApi;
 #[OpenApi]
 impl DetailApi {
     #[oai(
-        path = "/users/:user_id/credentials/passwords/:id",
+        path = "/users/:user_id/credentials/otp/:id",
         method = "delete",
-        operation_id = "delete_password_credential"
+        operation_id = "delete_otp_credential"
     )]
     async fn api_delete(
         &self,
@@ -127,8 +133,8 @@ impl DetailApi {
     ) -> poem::Result<DeleteCredentialResponse> {
         let db = db.lock().await;
 
-        let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
-            .filter(PasswordCredential::Column::UserId.eq(*user_id))
+        let Some(role) = OtpCredential::Entity::find_by_id(id.0)
+            .filter(OtpCredential::Column::UserId.eq(*user_id))
             .one(&*db)
             .await
             .map_err(poem::error::InternalServerError)?
@@ -136,7 +142,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        model.delete(&*db)
+        role.delete(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
         Ok(DeleteCredentialResponse::Deleted)

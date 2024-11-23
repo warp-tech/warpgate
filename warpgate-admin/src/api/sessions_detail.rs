@@ -10,6 +10,8 @@ use uuid::Uuid;
 use warpgate_core::{SessionSnapshot, State};
 use warpgate_db_entities::{Recording, Session};
 
+use super::TokenSecurityScheme;
+
 pub struct Api;
 
 #[allow(clippy::large_enum_variant)]
@@ -42,6 +44,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetSessionResponse> {
         let db = db.lock().await;
 
@@ -65,6 +68,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetSessionRecordingsResponse> {
         let db = db.lock().await;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
@@ -85,6 +89,7 @@ impl Api {
         &self,
         state: Data<&Arc<Mutex<State>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<CloseSessionResponse> {
         let state = state.lock().await;
 

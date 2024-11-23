@@ -1,18 +1,19 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
-import { CredentialKind, type User, type UserRequireCredentialsPolicy } from './lib/api'
+import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
+    import type { ExistingCredential } from './CredentialEditor.svelte'
 
 interface Props {
-    user: User;
-    value: UserRequireCredentialsPolicy;
-    possibleCredentials: Set<CredentialKind>;
-    protocolId: 'http' | 'ssh' | 'mysql' | 'postgres';
+    value: UserRequireCredentialsPolicy
+    possibleCredentials: Set<CredentialKind>
+    existingCredentials: ExistingCredential[]
+    protocolId: 'http' | 'ssh' | 'mysql' | 'postgres'
 }
 
 let {
-    user,
     value = $bindable(),
     possibleCredentials,
+    existingCredentials,
     protocolId,
 }: Props = $props()
 
@@ -27,7 +28,7 @@ const labels = {
 let isAny = $state(false)
 const validCredentials = $derived.by(() => {
     let vc = new Set<CredentialKind>()
-    vc = new Set(user.credentials.map(x => x.kind as CredentialKind))
+    vc = new Set(existingCredentials.map(x => x.kind as CredentialKind))
     vc.add(CredentialKind.WebUserApproval)
     return vc
 })
@@ -59,7 +60,7 @@ function toggle (type: CredentialKind) {
 
 <div class="d-flex wrapper">
     <Input
-        id={'policy-editor-' + user.username + protocolId}
+        id={'policy-editor-' + protocolId}
         type="switch"
         bind:checked={isAny}
         label="Any credential"
@@ -69,7 +70,7 @@ function toggle (type: CredentialKind) {
         {#each [...validCredentials] as type}
             {#if possibleCredentials.has(type)}
                 <Input
-                    id={'policy-editor-' + user.username + protocolId + type}
+                    id={'policy-editor-' + protocolId + type}
                     type="switch"
                     checked={value[protocolId]?.includes(type)}
                     label={labels[type]}

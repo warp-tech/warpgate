@@ -70,7 +70,11 @@ pub(crate) enum Commands {
     /// Show Warpgate's SSH client keys
     ClientKeys,
     /// Run Warpgate
-    Run,
+    Run {
+        /// An API token that automatically maps to the first admin user
+        #[clap(long)]
+        admin_token: Option<String>,
+    },
     /// Create a password hash for use in the config file
     Check,
     /// Test the connection to a target host
@@ -91,7 +95,7 @@ async fn _main() -> Result<()> {
     init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
 
     match &cli.command {
-        Commands::Run => crate::commands::run::command(&cli).await,
+        Commands::Run { admin_token } => crate::commands::run::command(&cli, admin_token.clone()).await,
         Commands::Check => crate::commands::check::command(&cli).await,
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await

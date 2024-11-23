@@ -15,10 +15,8 @@ async function create () {
     }
     try {
         const user = await api.createUser({
-            userDataRequest: {
+            createUserRequest: {
                 username,
-                credentials: [],
-                credentialPolicy: {},
             },
         })
         replace(`/users/${user.id}`)
