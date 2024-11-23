@@ -70,7 +70,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
 
-        let session_storage =make_session_storage();
+        let session_storage = make_session_storage();
         let session_store = SessionStore::new();
 
         let cache_bust = || {

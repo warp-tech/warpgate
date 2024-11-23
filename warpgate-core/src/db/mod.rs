@@ -9,14 +9,9 @@ use sea_orm::{
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{
-     TargetOptions, TargetWebAdminOptions,
-    WarpgateConfig, WarpgateError,
-};
+use warpgate_common::{TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{
-    LogEntry, Role, Target, TargetRoleAssignment,
-};
+use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
 use warpgate_db_migrations::migrate_database;
 
 use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};

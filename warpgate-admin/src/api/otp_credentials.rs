@@ -26,9 +26,7 @@ struct NewOtpCredential {
 
 impl From<OtpCredential::Model> for ExistingOtpCredential {
     fn from(credential: OtpCredential::Model) -> Self {
-        Self {
-            id: credential.id,
-        }
+        Self { id: credential.id }
     }
 }
 

@@ -136,7 +136,8 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        model.delete(&*db)
+        model
+            .delete(&*db)
             .await
             .map_err(poem::error::InternalServerError)?;
         Ok(DeleteCredentialResponse::Deleted)

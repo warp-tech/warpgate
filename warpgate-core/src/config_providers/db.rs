@@ -78,7 +78,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let user = user_model.load_details(&*db).await?;
+        let user = user_model.load_details(&db).await?;
 
         let supported_credential_types: HashSet<CredentialKind> = user
             .credentials
@@ -191,7 +191,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(false);
         };
 
-        let user_details = user_model.load_details(&*db).await?;
+        let user_details = user_model.load_details(&db).await?;
 
         match client_credential {
             AuthCredential::PublicKey {

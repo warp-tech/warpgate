@@ -95,7 +95,9 @@ async fn _main() -> Result<()> {
     init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
 
     match &cli.command {
-        Commands::Run { admin_token } => crate::commands::run::command(&cli, admin_token.clone()).await,
+        Commands::Run { admin_token } => {
+            crate::commands::run::command(&cli, admin_token.clone()).await
+        }
         Commands::Check => crate::commands::check::command(&cli).await,
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await

@@ -96,10 +96,7 @@ impl TryFrom<Model> for User {
 }
 
 impl Model {
-    pub async fn load_details(
-        self,
-        db: &DatabaseConnection,
-    ) -> Result<UserDetails, WarpgateError> {
+    pub async fn load_details(self, db: &DatabaseConnection) -> Result<UserDetails, WarpgateError> {
         let roles: Vec<String> = self
             .find_related(Role::Entity)
             .all(db)
@@ -111,32 +108,28 @@ impl Model {
 
         let mut credentials = vec![];
         credentials.extend(
-            self
-                .find_related(OtpCredential::Entity)
+            self.find_related(OtpCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.into()),
         );
         credentials.extend(
-            self
-                .find_related(PasswordCredential::Entity)
+            self.find_related(PasswordCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.into()),
         );
         credentials.extend(
-            self
-                .find_related(SsoCredential::Entity)
+            self.find_related(SsoCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.into()),
         );
         credentials.extend(
-            self
-                .find_related(PublicKeyCredential::Entity)
+            self.find_related(PublicKeyCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
