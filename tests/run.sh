@@ -6,4 +6,4 @@ cargo llvm-cov clean --workspace
 cargo llvm-cov --no-cfg-coverage-nightly --no-report --workspace --all-features -- --skip agent
 cd tests
 RUST_BACKTRACE=1 ENABLE_COVERAGE=1 poetry run pytest $@
-cargo llvm-cov --no-run --hide-instantiations --html
+cargo llvm-cov report --html

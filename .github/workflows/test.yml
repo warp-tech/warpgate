@@ -45,7 +45,7 @@ jobs:
         working-directory: tests
         run: |
           TIMEOUT=120 poetry run ./run.sh
-          cargo llvm-cov --no-run --hide-instantiations --lcov > coverage.lcov
+          cargo llvm-cov report --lcov > coverage.lcov
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
