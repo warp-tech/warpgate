@@ -5,7 +5,7 @@ description = ""
 authors = ["Your Name <you@example.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.10"
 pytest = "^7.1.2"
 psutil = "^5.9.1"
 pyotp = "^2.6.0"
@@ -20,7 +20,7 @@ openapi-client = { path = "./api_sdk", develop = true }
 [tool.poetry.dev-dependencies]
 flake8 = "^5.0.2"
 pytest = "^7.1.2"
-black = "^22.10.0"
+black = "^24"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
