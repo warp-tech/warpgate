@@ -1,21 +1,19 @@
 <script lang="ts">
-    import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingSsoCredential, type User, type UserRequireCredentialsPolicy } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
+    import { faIdBadge, faKey, faKeyboard } from '@fortawesome/free-solid-svg-icons'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential } from 'admin/lib/api'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Fa from 'svelte-fa'
-    import { replace } from 'svelte-spa-router'
-    import { Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import AuthPolicyEditor from './AuthPolicyEditor.svelte'
-    import UserCredentialModal from './UserCredentialModal.svelte'
+    import { Button } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/Alert.svelte'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
+    import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
 
     type ExistingCredential =
         { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
         | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
+        | { kind: typeof CredentialKind.PublicKey } & ExistingPublicKeyCredential
 
     interface Props {
         userId: string
@@ -28,8 +26,8 @@
     let creatingPassword = $state(false)
     let editingSsoCredential = $state(false)
     let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
-
-    // let editingCredential: UserAuthCredential|undefined = $state()
+    let editingPublicKeyCredential = $state(false)
+    let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
 
     const loadPromise = load()
 
@@ -38,6 +36,7 @@
             await Promise.all([
                 loadPasswords(),
                 loadSso(),
+                loadPublicKeys(),
             ])
         } catch (err) {
             error = await stringifyError(err)
@@ -58,6 +57,14 @@
         })))
     }
 
+    async function loadPublicKeys () {
+        credentials.push(...(await api.getPublicKeyCredentials({ userId })).map(c => ({
+            kind: CredentialKind.PublicKey,
+            ...c,
+        })))
+    }
+
+
     async function deleteCredential (credential: ExistingCredential) {
         credentials = credentials.filter(c => c !== credential)
         if (credential.kind === CredentialKind.Password) {
@@ -68,6 +75,12 @@
         }
         if (credential.kind === CredentialKind.Sso) {
             await api.deleteSsoCredential({
+                id: credential.id,
+                userId,
+            })
+        }
+        if (credential.kind === CredentialKind.PublicKey) {
+            await api.deletePublicKeyCredential({
                 id: credential.id,
                 userId,
             })
@@ -113,9 +126,33 @@
         editingSsoCredentialInstance = null
     }
 
-    // function abbreviatePublicKey (key: string) {
-    //     return key.slice(0, 16) + '...' + key.slice(-8)
-    // }
+    async function savePublicKeyCredential (opensshPublicKey: string) {
+        if (editingPublicKeyCredentialInstance) {
+            editingPublicKeyCredentialInstance.opensshPublicKey = opensshPublicKey
+            await api.updatePublicKeyCredential({
+                userId,
+                id: editingPublicKeyCredentialInstance.id,
+                newPublicKeyCredential: editingPublicKeyCredentialInstance,
+            })
+        } else {
+            const credential = await api.createPublicKeyCredential({
+                userId,
+                newPublicKeyCredential: {
+                    opensshPublicKey,
+                },
+            })
+            credentials.push({
+                kind: CredentialKind.PublicKey,
+                ...credential,
+            })
+        }
+        editingPublicKeyCredential = false
+        editingPublicKeyCredentialInstance = null
+    }
+
+    function abbreviatePublicKey (key: string) {
+        return key.slice(0, 16) + '...' + key.slice(-8)
+    }
 
     // function saveCredential () {
     //     if (!editingCredential || !user) {
@@ -152,12 +189,11 @@
     <Button size="sm" color="link" on:click={() => creatingPassword = true}>
         Add password
     </Button>
-    <!--
-    <Button size="sm" color="link" on:click={() => editingCredential = {
-        kind: 'PublicKey',
-        key: '',
+    <Button size="sm" color="link" on:click={() => {
+        editingPublicKeyCredentialInstance = null
+        editingPublicKeyCredential = true
     }}>Add public key</Button>
-    <Button size="sm" color="link" on:click={() => editingCredential = {
+    <!--<Button size="sm" color="link" on:click={() => editingCredential = {
         kind: 'Totp',
         key: [],
     }}>Add OTP</Button>
@@ -179,12 +215,12 @@
             <Fa fw icon={faKeyboard} />
             <span class="type">Password</span>
         {/if}
-        <!-- {#if credential.kind === 'PublicKey'}
+        {#if credential.kind === 'PublicKey'}
             <Fa fw icon={faKey} />
             <span class="type">Public key</span>
-            <span class="text-muted ms-2">{abbreviatePublicKey(credential.key)}</span>
+            <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
         {/if}
-        {#if credential.kind === 'Totp'}
+        <!-- {#if credential.kind === 'Totp'}
             <Fa fw icon={faMobileScreen} />
             <span class="type">One-time password</span>
         {/if}
@@ -207,6 +243,10 @@
                 if (credential.kind === CredentialKind.Sso) {
                     editingSsoCredentialInstance = credential
                     editingSsoCredential = true
+                }
+                if (credential.kind === CredentialKind.PublicKey) {
+                    editingPublicKeyCredentialInstance = credential
+                    editingPublicKeyCredential = true
                 }
                 e.preventDefault()
             }}>
@@ -253,6 +293,14 @@
     bind:isOpen={editingSsoCredential}
     instance={editingSsoCredentialInstance}
     save={saveSsoCredential}
+/>
+{/if}
+
+{#if editingPublicKeyCredential}
+<PublicKeyCredentialModal
+    bind:isOpen={editingPublicKeyCredential}
+    instance={editingPublicKeyCredentialInstance}
+    save={savePublicKeyCredential}
 />
 {/if}
 

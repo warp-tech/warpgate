@@ -5,6 +5,7 @@ mod known_hosts_list;
 mod logs;
 mod pagination;
 mod password_credentials;
+mod public_key_credentials;
 pub mod recordings_detail;
 mod roles;
 mod sessions_detail;
@@ -36,5 +37,9 @@ pub fn get() -> impl OpenApi {
             password_credentials::DetailApi,
         ),
         (sso_credentials::ListApi, sso_credentials::DetailApi),
+        (
+            public_key_credentials::ListApi,
+            public_key_credentials::DetailApi,
+        ),
     )
 }

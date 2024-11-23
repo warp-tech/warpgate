@@ -27,7 +27,7 @@
     }: Props = $props()
 
     let provider: string|null = $state(null)
-    let email: string|null = $state('')
+    let email: string = $state('')
     let validated = $state(false)
 
     function _save () {

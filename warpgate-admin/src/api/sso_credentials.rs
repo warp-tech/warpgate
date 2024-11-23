@@ -59,7 +59,7 @@ enum CreateSsoCredentialResponse {
 
 #[derive(ApiResponse)]
 enum UpdateSsoCredentialResponse {
-    #[oai(status = 204)]
+    #[oai(status = 200)]
     Updated(Json<ExistingSsoCredential>),
     #[oai(status = 404)]
     NotFound,

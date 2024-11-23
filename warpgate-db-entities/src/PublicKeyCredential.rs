@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserPublicKeyCredential};
@@ -36,10 +37,25 @@ impl Related<super::User::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-impl From<Model> for UserAuthCredential {
+impl From<Model> for UserPublicKeyCredential {
     fn from(credential: Model) -> Self {
-        Self::PublicKey(UserPublicKeyCredential {
+        UserPublicKeyCredential {
             key: credential.openssh_public_key.into(),
-        })
+        }
+    }
+}
+
+impl From<Model> for UserAuthCredential {
+    fn from(model: Model) -> Self {
+        Self::PublicKey(model.into())
+    }
+}
+
+impl From<UserPublicKeyCredential> for ActiveModel {
+    fn from(credential: UserPublicKeyCredential) -> Self {
+        Self {
+            openssh_public_key: Set(credential.key.expose_secret().clone()),
+            ..Default::default()
+        }
     }
 }

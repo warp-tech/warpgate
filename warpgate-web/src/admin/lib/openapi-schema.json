@@ -1324,7 +1324,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "204": {
             "description": "",
             "content": {
               "application/json; charset=utf-8": {
@@ -1374,6 +1374,166 @@
           }
         },
         "operationId": "delete_sso_credential"
+      }
+    },
+    "/users/{user_id}/credentials/public-keys": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_public_key_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_public_key_credential"
+      }
+    },
+    "/users/{user_id}/credentials/public-keys/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "update_public_key_credential"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_public_key_credential"
       }
     }
   },
@@ -1432,6 +1592,22 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "ExistingPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "openssh_public_key"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "openssh_public_key": {
+            "type": "string"
           }
         }
       },
@@ -1519,6 +1695,17 @@
         ],
         "properties": {
           "password": {
+            "type": "string"
+          }
+        }
+      },
+      "NewPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "openssh_public_key"
+        ],
+        "properties": {
+          "openssh_public_key": {
             "type": "string"
           }
         }
