@@ -35,7 +35,7 @@ class Test:
             api.create_public_key_credential(
                 user.id,
                 sdk.NewPublicKeyCredential(
-                    openssh_public_key=wg_c_ed25519_pubkey.read_text().strip()
+                    openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
                 ),
             )
             api.create_otp_credential(
