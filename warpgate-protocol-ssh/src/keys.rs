@@ -31,7 +31,7 @@ pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
 
     let key_path = path.join("host-rsa");
     if !key_path.exists() {
-        info!("Generating RSA host key");
+        info!("Generating RSA host key (this can take a bit)");
         let key = PrivateKey::random(
             &mut OsRng,
             Algorithm::Rsa {
@@ -77,7 +77,7 @@ pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {
 
     let key_path = path.join("client-rsa");
     if !key_path.exists() {
-        info!("Generating RSA client key");
+        info!("Generating RSA client key (this can take a bit)");
         let key = PrivateKey::random(
             &mut OsRng,
             Algorithm::Rsa {
