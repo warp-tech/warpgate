@@ -14,7 +14,7 @@ use warpgate_common::{Role as RoleConfig, WarpgateError};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Role;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct RoleDataRequest {
@@ -44,7 +44,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -67,7 +67,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<CreateRoleResponse, WarpgateError> {
         use warpgate_db_entities::Role;
 
@@ -125,7 +125,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -143,7 +143,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -167,7 +167,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         let db = db.lock().await;
 

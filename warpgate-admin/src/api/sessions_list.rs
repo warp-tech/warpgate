@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use warpgate_core::{SessionSnapshot, State};
 
 use super::pagination::{PaginatedResponse, PaginationParams};
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -39,7 +39,7 @@ impl Api {
         limit: Query<Option<u64>>,
         active_only: Query<Option<bool>>,
         logged_in_only: Query<Option<bool>>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
 
@@ -76,7 +76,7 @@ impl Api {
         &self,
         state: Data<&Arc<Mutex<State>>>,
         session: &Session,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> poem::Result<CloseAllSessionsResponse> {
         let state = state.lock().await;
 

@@ -49,7 +49,10 @@
         email = instance.email
     }
 }}>
-    <Form {validated} on:submit={_save}>
+    <Form {validated} on:submit={e => {
+        _save()
+        e.preventDefault()
+    }}>
         <ModalHeader toggle={_cancel}>
             Single sign-on
         </ModalHeader>

@@ -13,7 +13,7 @@ use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::Ticket;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -52,7 +52,7 @@ impl Api {
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
@@ -70,7 +70,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateTicketRequest>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> poem::Result<CreateTicketResponse> {
         use warpgate_db_entities::Ticket;
 

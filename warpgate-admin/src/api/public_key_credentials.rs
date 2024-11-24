@@ -13,7 +13,7 @@ use uuid::Uuid;
 use warpgate_common::{UserPublicKeyCredential, WarpgateError};
 use warpgate_db_entities::PublicKeyCredential;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct ExistingPublicKeyCredential {
@@ -76,7 +76,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -100,7 +100,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -142,7 +142,7 @@ impl DetailApi {
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -173,7 +173,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 

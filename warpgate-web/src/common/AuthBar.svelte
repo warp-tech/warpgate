@@ -5,7 +5,6 @@ import Fa from 'svelte-fa'
 import { api } from 'gateway/lib/api'
 import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from '@sveltestrap/sveltestrap'
-    import { link } from 'svelte-spa-router';
 
 async function logout () {
     await api.logout()
@@ -21,7 +20,7 @@ async function singleLogout () {
 
 {#if $serverInfo?.username}
     <div class="ms-auto">
-        <a use:link href="/profile">
+        <a href="/#/profile">
             {$serverInfo.username}
         </a>
         {#if $serverInfo.authorizedViaTicket}

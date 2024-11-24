@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -31,7 +31,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
         let db = db.lock().await;

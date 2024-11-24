@@ -13,7 +13,7 @@ use uuid::Uuid;
 use warpgate_common::{UserSsoCredential, WarpgateError};
 use warpgate_db_entities::SsoCredential;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -80,7 +80,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -104,7 +104,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -144,7 +144,7 @@ impl DetailApi {
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -173,7 +173,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 

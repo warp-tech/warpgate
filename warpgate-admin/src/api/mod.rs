@@ -24,6 +24,18 @@ pub mod users;
 #[allow(dead_code)]
 pub struct TokenSecurityScheme(ApiKey);
 
+#[derive(SecurityScheme)]
+#[oai(ty = "api_key", key_name = "warpgate-http-session", key_in = "cookie")]
+#[allow(dead_code)]
+pub struct CookieSecurityScheme(ApiKey);
+
+#[derive(SecurityScheme)]
+#[allow(dead_code)]
+pub enum AnySecurityScheme {
+    Token(TokenSecurityScheme),
+    Cookie(CookieSecurityScheme),
+}
+
 pub fn get() -> impl OpenApi {
     (
         (sessions_list::Api, sessions_detail::Api),

@@ -11,7 +11,7 @@ use warpgate_common::WarpgateError;
 use warpgate_core::{SessionSnapshot, State};
 use warpgate_db_entities::{Recording, Session};
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -45,7 +45,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetSessionResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -66,7 +66,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetSessionRecordingsResponse, WarpgateError> {
         let db = db.lock().await;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
@@ -86,7 +86,7 @@ impl Api {
         &self,
         state: Data<&Arc<Mutex<State>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<CloseSessionResponse, WarpgateError> {
         let state = state.lock().await;
 

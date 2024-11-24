@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::KnownHost;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -28,7 +28,7 @@ impl Api {
     async fn api_ssh_get_all_known_hosts(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
 

@@ -350,7 +350,7 @@
 {#if editingPublicKeyCredential}
 <PublicKeyCredentialModal
     bind:isOpen={editingPublicKeyCredential}
-    instance={editingPublicKeyCredentialInstance}
+    instance={editingPublicKeyCredentialInstance ?? undefined}
     save={savePublicKeyCredential}
 />
 {/if}

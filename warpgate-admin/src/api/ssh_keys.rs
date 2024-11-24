@@ -8,7 +8,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use warpgate_common::{WarpgateConfig, WarpgateError};
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -34,7 +34,7 @@ impl Api {
     async fn api_ssh_get_own_keys(
         &self,
         config: Data<&Arc<Mutex<WarpgateConfig>>>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
         let config = config.lock().await;
         let keys = warpgate_protocol_ssh::load_client_keys(&config)?;

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::LogEntry;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -37,7 +37,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 
