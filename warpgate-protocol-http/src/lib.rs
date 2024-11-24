@@ -23,7 +23,7 @@ use logging::{get_client_ip, log_request_error, log_request_result, span_for_req
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig, TcpListener};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::session::{CookieConfig, MemoryStorage, ServerSession, Session};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -53,6 +53,10 @@ impl HTTPProtocolServer {
     }
 }
 
+fn make_session_storage() -> SharedSessionStorage {
+    SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
+}
+
 #[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: SocketAddr) -> Result<()> {
@@ -66,8 +70,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
 
-        let session_storage =
-            SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())));
+        let session_storage = make_session_storage();
         let session_store = SessionStore::new();
         let db = self.services.db.clone();
 
@@ -217,7 +220,9 @@ impl ProtocolServer for HTTPProtocolServer {
                 "Not an HTTP target".to_owned(),
             ));
         };
-        let request = poem::Request::builder().uri_str("http://host/").finish();
+
+        let mut request = poem::Request::builder().uri_str("http://host/").finish();
+        request.extensions_mut().insert(Session::default());
         crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;

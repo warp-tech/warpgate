@@ -14,6 +14,8 @@ use warpgate_common::{Role as RoleConfig, WarpgateError};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Role;
 
+use super::TokenSecurityScheme;
+
 #[derive(Object)]
 struct RoleDataRequest {
     name: String,
@@ -42,6 +44,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetRolesResponse> {
         let db = db.lock().await;
 
@@ -67,6 +70,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<CreateRoleResponse> {
         use warpgate_db_entities::Role;
 
@@ -124,6 +128,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetRoleResponse> {
         let db = db.lock().await;
 
@@ -144,6 +149,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<UpdateRoleResponse> {
         let db = db.lock().await;
 
@@ -174,6 +180,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteRoleResponse> {
         let db = db.lock().await;
 

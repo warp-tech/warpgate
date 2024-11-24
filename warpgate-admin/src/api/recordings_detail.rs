@@ -19,6 +19,8 @@ use uuid::Uuid;
 use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 
+use super::TokenSecurityScheme;
+
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -40,6 +42,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
         let db = db.lock().await;
 

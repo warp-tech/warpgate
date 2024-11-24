@@ -2,14 +2,7 @@ import os
 import subprocess
 from uuid import uuid4
 
-from .api_client import (
-    api_admin_session,
-    api_create_target,
-    api_create_user,
-    api_create_role,
-    api_add_role_to_user,
-    api_add_role_to_target,
-)
+from .api_client import admin_client, sdk
 from .conftest import WarpgateProcess, ProcessManager
 from .util import wait_port
 
@@ -23,41 +16,28 @@ class Test:
     ):
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        with api_admin_session(url) as session:
-            role = api_create_role(url, session, {"name": f"role-{uuid4()}"})
-            user = api_create_user(
-                url,
-                session,
-                {
-                    "username": f"user-{uuid4()}",
-                    "credentials": [
-                        {
-                            "kind": "Password",
-                            "hash": "123",
-                        },
-                    ],
-                },
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="123")
             )
-            api_add_role_to_user(url, session, user["id"], role["id"])
-            target = api_create_target(
-                url,
-                session,
-                {
-                    "name": f"posgresq-{uuid4()}",
-                    "options": {
-                        "kind": "Postgres",
-                        "host": "localhost",
-                        "port": db_port,
-                        "username": "user",
-                        "password": "123",
-                        "tls": {
-                            "mode": "Preferred",
-                            "verify": False,
-                        },
-                    },
-                },
-            )
-            api_add_role_to_target(url, session, target["id"], role["id"])
+            api.add_user_role(user.id, role.id)
+            target = api.create_target(sdk.TargetDataRequest(
+                name=f"postgres-{uuid4()}",
+                options=sdk.TargetOptions(sdk.TargetOptionsTargetPostgresOptions(
+                    kind="Postgres",
+                    host="localhost",
+                    port=db_port,
+                    username="user",
+                    password="123",
+                    tls=sdk.Tls(
+                        mode=sdk.TlsMode.PREFERRED,
+                        verify=False,
+                    ),
+                )),
+            ))
+            api.add_target_role(target.id, role.id)
 
         wait_port(db_port, recv=False)
         wait_port(shared_wg.postgres_port, recv=False)
@@ -66,7 +46,7 @@ class Test:
             [
                 "psql",
                 "--user",
-                f"{user['username']}#{target['name']}",
+                f"{user.username}#{target.name}",
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -84,7 +64,7 @@ class Test:
             [
                 "psql",
                 "--user",
-                f"{user['username']}#{target['name']}",
+                f"{user.username}#{target.name}",
                 "--host",
                 "127.0.0.1",
                 "--port",

@@ -11,6 +11,21 @@
   ],
   "tags": [],
   "paths": {
+    "/__stub__": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "__stub__"
+      }
+    },
     "/auth/login": {
       "post": {
         "requestBody": {
@@ -888,6 +903,13 @@
             }
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "TokenSecurityScheme": {
+        "type": "apiKey",
+        "name": "X-Warpgate-Token",
+        "in": "header"
       }
     }
   }

@@ -16,12 +16,12 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
 
-pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
+pub(crate) async fn command(cli: &crate::Cli, admin_token: Option<String>) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     info!(%version, "Warpgate");
 
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone()).await?;
+    let services = Services::new(config.clone(), admin_token).await?;
 
     install_database_logger(services.db.clone());
 

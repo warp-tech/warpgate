@@ -29,6 +29,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
+            keepalive_interval: config.store.ssh.keepalive_interval,
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
             keys: load_host_keys(&config)?,
             event_buffer_size: 100,
