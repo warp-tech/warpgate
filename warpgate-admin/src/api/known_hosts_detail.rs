@@ -6,6 +6,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::WarpgateError;
 
 use super::TokenSecurityScheme;
 pub struct Api;
@@ -31,21 +32,15 @@ impl Api {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteSSHKnownHostResponse> {
+    ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
         let db = db.lock().await;
 
-        let known_host = KnownHost::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let known_host = KnownHost::Entity::find_by_id(id.0).one(&*db).await?;
 
         match known_host {
             Some(known_host) => {
-                known_host
-                    .delete(&*db)
-                    .await
-                    .map_err(poem::error::InternalServerError)?;
+                known_host.delete(&*db).await?;
                 Ok(DeleteSSHKnownHostResponse::Deleted)
             }
             None => Ok(DeleteSSHKnownHostResponse::NotFound),

@@ -128,7 +128,7 @@ pub async fn api_get_recording_tcpdump(
     let recording = Recording::Entity::find_by_id(id.0)
         .one(&*db)
         .await
-        .map_err(poem::error::InternalServerError)?;
+        .map_err(InternalServerError)?;
 
     let Some(recording) = recording else {
         return Err(NotFoundError.into());

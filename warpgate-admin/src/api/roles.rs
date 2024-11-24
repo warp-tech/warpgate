@@ -45,7 +45,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetRolesResponse> {
+    ) -> Result<GetRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
@@ -55,10 +55,7 @@ impl ListApi {
             roles = roles.filter(Role::Column::Name.like(search));
         }
 
-        let roles = roles
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let roles = roles.all(&*db).await?;
 
         Ok(GetRolesResponse::Ok(Json(
             roles.into_iter().map(Into::into).collect(),
@@ -71,7 +68,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreateRoleResponse> {
+    ) -> Result<CreateRoleResponse, WarpgateError> {
         use warpgate_db_entities::Role;
 
         if body.name.is_empty() {
@@ -129,13 +126,10 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetRoleResponse> {
+    ) -> Result<GetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let role = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
 
         Ok(match role {
             Some(role) => GetRoleResponse::Ok(Json(role.into())),
@@ -150,14 +144,10 @@ impl DetailApi {
         body: Json<RoleDataRequest>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<UpdateRoleResponse> {
+    ) -> Result<UpdateRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(role) = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
@@ -167,10 +157,7 @@ impl DetailApi {
 
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
-        let role = model
-            .update(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let role = model.update(&*db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))
     }
@@ -181,14 +168,10 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteRoleResponse> {
+    ) -> Result<DeleteRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(role) = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
 
@@ -196,9 +179,7 @@ impl DetailApi {
             return Ok(DeleteRoleResponse::Forbidden);
         }
 
-        role.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)
     }
 }

@@ -64,14 +64,13 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetOtpCredentialsResponse> {
+    ) -> Result<GetOtpCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
         let objects = OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(*user_id))
             .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+            .await?;
 
         Ok(GetOtpCredentialsResponse::Ok(Json(
             objects.into_iter().map(Into::into).collect(),
@@ -89,7 +88,7 @@ impl ListApi {
         body: Json<NewOtpCredential>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreateOtpCredentialResponse> {
+    ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let object = OtpCredential::ActiveModel {
@@ -128,21 +127,18 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteCredentialResponse> {
+    ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let Some(role) = OtpCredential::Entity::find_by_id(id.0)
             .filter(OtpCredential::Column::UserId.eq(*user_id))
             .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
+            .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        role.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        role.delete(&*db).await?;
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

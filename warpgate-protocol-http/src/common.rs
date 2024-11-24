@@ -1,6 +1,7 @@
 use core::str;
 use std::sync::Arc;
 
+use anyhow::Context;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
@@ -115,6 +116,15 @@ impl SessionAuthorization {
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
     AdminToken,
+}
+
+impl RequestAuthorization {
+    pub fn username(&self) -> Option<&String> {
+        match self {
+            Self::Session(auth) => Some(auth.username()),
+            Self::AdminToken => None,
+        }
+    }
 }
 
 async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
@@ -261,16 +271,20 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {
-    let session_middleware =
-        Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
-    let session = <&Session>::from_request_without_body(req).await?;
+pub async fn authorize_session(req: &Request, username: String) -> Result<(), WarpgateError> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await
+        .context("SessionStore not in request")?;
+    let session = <&Session>::from_request_without_body(req)
+        .await
+        .context("Session not in request")?;
 
     let server_handle = session_middleware
         .lock()
         .await
         .create_handle_for(req)
-        .await?;
+        .await
+        .context("create_handle_for")?;
     server_handle
         .lock()
         .await

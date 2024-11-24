@@ -77,14 +77,13 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetPublicKeyCredentialsResponse> {
+    ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
             .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+            .await?;
 
         Ok(GetPublicKeyCredentialsResponse::Ok(Json(
             objects.into_iter().map(Into::into).collect(),
@@ -102,7 +101,7 @@ impl ListApi {
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreatePublicKeyCredentialResponse> {
+    ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let object = PublicKeyCredential::ActiveModel {
@@ -144,7 +143,7 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<UpdatePublicKeyCredentialResponse> {
+    ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let model = PublicKeyCredential::ActiveModel {
@@ -160,7 +159,7 @@ impl DetailApi {
                 model.into(),
             ))),
             Err(DbErr::RecordNotFound(_)) => Ok(UpdatePublicKeyCredentialResponse::NotFound),
-            Err(e) => Err(poem::error::InternalServerError(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -175,21 +174,18 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteCredentialResponse> {
+    ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(role) = PublicKeyCredential::Entity::find_by_id(id.0)
+        let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
             .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
+            .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        role.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        model.delete(&*db).await?;
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

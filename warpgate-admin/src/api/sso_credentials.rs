@@ -81,14 +81,13 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetSsoCredentialsResponse> {
+    ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
             .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+            .await?;
 
         Ok(GetSsoCredentialsResponse::Ok(Json(
             objects.into_iter().map(Into::into).collect(),
@@ -106,7 +105,7 @@ impl ListApi {
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreateSsoCredentialResponse> {
+    ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let object = SsoCredential::ActiveModel {
@@ -146,7 +145,7 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<UpdateSsoCredentialResponse> {
+    ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let model = SsoCredential::ActiveModel {
@@ -160,7 +159,7 @@ impl DetailApi {
         match model {
             Ok(model) => Ok(UpdateSsoCredentialResponse::Updated(Json(model.into()))),
             Err(DbErr::RecordNotFound(_)) => Ok(UpdateSsoCredentialResponse::NotFound),
-            Err(e) => Err(poem::error::InternalServerError(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -175,21 +174,18 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteCredentialResponse> {
+    ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))
             .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
+            .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        role.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        role.delete(&*db).await?;
         Ok(DeleteCredentialResponse::Deleted)
     }
 }
