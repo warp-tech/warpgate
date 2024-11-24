@@ -7,7 +7,7 @@ version = "0.11.0"
 [dependencies]
 anyhow = { version = "1.0", features = ["std"] }
 async-trait = "0.1"
-bytes = "1.4"
+bytes.workspace = true
 chrono = { version = "0.4", default-features = false }
 futures = "0.3"
 hex = "0.4"
@@ -24,14 +24,14 @@ poem-openapi = { version = "5.1", features = [
     "uuid",
     "static-files",
 ] }
-russh = { version = "0.46.0", features = ["legacy-ed25519-pkcs8-parser"] }
+russh.workspace = true
 rust-embed = "8.3"
 sea-orm = { version = "0.12", features = [
     "runtime-tokio-rustls",
     "macros",
 ], default-features = false }
-serde = "1.0"
-serde_json = "1.0"
+serde.workspace = true
+serde_json.workspace = true
 thiserror = "1.0"
 tokio = { version = "1.20", features = ["tracing"] }
 tracing = "0.1"

@@ -22,10 +22,11 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
-      - name: Build admin UI
+      - name: Build UI
         run: |
           just yarn --network-timeout 1000000000
           just openapi
+          just yarn openapi:tests-sdk
           just yarn build
 
       - name: Build images
@@ -37,14 +38,14 @@ jobs:
         working-directory: tests
         run: |
           sudo apt install -y gnome-keyring
-          pip3 install keyring==23.8.2 poetry==1.1.14
+          pip3 install keyring==24 poetry==1.8.3
           poetry install
 
       - name: Run
         working-directory: tests
         run: |
           TIMEOUT=120 poetry run ./run.sh
-          cargo llvm-cov --no-run --hide-instantiations --lcov > coverage.lcov
+          cargo llvm-cov report --lcov > coverage.lcov
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master

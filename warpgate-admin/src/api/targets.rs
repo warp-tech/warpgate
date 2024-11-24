@@ -15,6 +15,8 @@ use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{Role, Target, TargetRoleAssignment};
 
+use super::TokenSecurityScheme;
+
 #[derive(Object)]
 struct TargetDataRequest {
     name: String,
@@ -44,6 +46,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetTargetsResponse> {
         let db = db.lock().await;
 
@@ -68,6 +71,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<CreateTargetResponse> {
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
@@ -133,6 +137,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetTargetResponse> {
         let db = db.lock().await;
 
@@ -157,6 +162,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<UpdateTargetResponse> {
         let db = db.lock().await;
 
@@ -195,6 +201,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteTargetResponse> {
         let db = db.lock().await;
 
@@ -263,6 +270,7 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetTargetRolesResponse> {
         let db = db.lock().await;
 
@@ -291,6 +299,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<AddTargetRoleResponse> {
         let db = db.lock().await;
 
@@ -326,6 +335,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteTargetRoleResponse> {
         let db = db.lock().await;
 

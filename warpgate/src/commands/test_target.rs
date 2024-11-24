@@ -7,7 +7,7 @@ use crate::config::load_config;
 
 pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone()).await?;
+    let services = Services::new(config.clone(), None).await?;
 
     let Some(target) = services
         .config_provider

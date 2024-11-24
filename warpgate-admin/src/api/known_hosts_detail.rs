@@ -6,6 +6,8 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use super::TokenSecurityScheme;
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -28,6 +30,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<DeleteSSHKnownHostResponse> {
         use warpgate_db_entities::KnownHost;
         let db = db.lock().await;

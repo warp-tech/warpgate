@@ -7,6 +7,8 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use warpgate_db_entities::KnownHost;
 
+use super::TokenSecurityScheme;
+
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -25,6 +27,7 @@ impl Api {
     async fn api_ssh_get_all_known_hosts(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetSSHKnownHostsResponse> {
         use warpgate_db_entities::KnownHost;
 

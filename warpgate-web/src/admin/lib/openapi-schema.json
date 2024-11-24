@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.10.2"
+    "version": "0.11.0"
   },
   "servers": [
     {
@@ -69,6 +69,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_sessions"
       },
       "delete": {
@@ -77,6 +82,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "close_all_sessions"
       }
     },
@@ -110,6 +120,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_session"
       }
     },
@@ -143,6 +158,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_session_recordings"
       }
     },
@@ -169,6 +189,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "close_session"
       }
     },
@@ -202,6 +227,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_recording"
       }
     },
@@ -234,6 +264,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_roles"
       },
       "post": {
@@ -269,6 +304,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_role"
       }
     },
@@ -302,6 +342,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_role"
       },
       "put": {
@@ -346,6 +391,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_role"
       },
       "delete": {
@@ -373,7 +423,224 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_role"
+      }
+    },
+    "/tickets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ticket"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_tickets"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketAndSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_ticket"
+      }
+    },
+    "/tickets/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ticket"
+      }
+    },
+    "/ssh/known-hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_known_hosts"
+      }
+    },
+    "/ssh/known-hosts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ssh_known_host"
+      }
+    },
+    "/ssh/own-keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_own_keys"
+      }
+    },
+    "/logs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GetLogsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_logs"
       }
     },
     "/targets": {
@@ -405,6 +672,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_targets"
       },
       "post": {
@@ -440,6 +712,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_target"
       }
     },
@@ -473,6 +750,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_target"
       },
       "put": {
@@ -517,6 +799,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_target"
       },
       "delete": {
@@ -544,6 +831,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_target"
       }
     },
@@ -580,6 +872,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_target_roles"
       }
     },
@@ -617,6 +914,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "add_target_role"
       },
       "delete": {
@@ -655,6 +957,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_target_role"
       }
     },
@@ -687,6 +994,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_users"
       },
       "post": {
@@ -694,7 +1006,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/UserDataRequest"
+                "$ref": "#/components/schemas/CreateUserRequest"
               }
             }
           },
@@ -722,6 +1034,11 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "create_user"
       }
     },
@@ -755,6 +1072,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_user"
       },
       "put": {
@@ -796,6 +1118,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "update_user"
       },
       "delete": {
@@ -820,6 +1147,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_user"
       }
     },
@@ -856,6 +1188,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "get_user_roles"
       }
     },
@@ -893,6 +1230,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "add_user_role"
       },
       "delete": {
@@ -928,11 +1270,29 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
         "operationId": "delete_user_role"
       }
     },
-    "/tickets": {
+    "/users/{user_id}/credentials/passwords": {
       "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -941,21 +1301,39 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Ticket"
+                    "$ref": "#/components/schemas/ExistingPasswordCredential"
                   }
                 }
               }
             }
           }
         },
-        "operationId": "get_tickets"
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_password_credentials"
       },
       "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/CreateTicketRequest"
+                "$ref": "#/components/schemas/NewPasswordCredential"
               }
             }
           },
@@ -967,28 +1345,34 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/TicketAndSecret"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ExistingPasswordCredential"
                 }
               }
             }
           }
         },
-        "operationId": "create_ticket"
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_password_credential"
       }
     },
-    "/tickets/{id}": {
+    "/users/{user_id}/credentials/passwords/{id}": {
       "delete": {
         "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
           {
             "name": "id",
             "schema": {
@@ -1009,34 +1393,19 @@
             "description": ""
           }
         },
-        "operationId": "delete_ticket"
-      }
-    },
-    "/ssh/known-hosts": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SSHKnownHost"
-                  }
-                }
-              }
-            }
+        "security": [
+          {
+            "TokenSecurityScheme": []
           }
-        },
-        "operationId": "get_ssh_known_hosts"
+        ],
+        "operationId": "delete_password_credential"
       }
     },
-    "/ssh/known-hosts/{id}": {
-      "delete": {
+    "/users/{user_id}/credentials/sso": {
+      "get": {
         "parameters": [
           {
-            "name": "id",
+            "name": "user_id",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -1048,19 +1417,6 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": ""
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "operationId": "delete_ssh_known_host"
-      }
-    },
-    "/ssh/own-keys": {
-      "get": {
-        "responses": {
           "200": {
             "description": "",
             "content": {
@@ -1068,23 +1424,95 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SSHKey"
+                    "$ref": "#/components/schemas/ExistingSsoCredential"
                   }
                 }
               }
             }
           }
         },
-        "operationId": "get_ssh_own_keys"
-      }
-    },
-    "/logs": {
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_sso_credentials"
+      },
       "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/GetLogsRequest"
+                "$ref": "#/components/schemas/NewSsoCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingSsoCredential"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_sso_credential"
+      }
+    },
+    "/users/{user_id}/credentials/sso/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSsoCredential"
               }
             }
           },
@@ -1096,16 +1524,364 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
+                  "$ref": "#/components/schemas/ExistingSsoCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "update_sso_credential"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_sso_credential"
+      }
+    },
+    "/users/{user_id}/credentials/public-keys": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/LogEntry"
+                    "$ref": "#/components/schemas/ExistingPublicKeyCredential"
                   }
                 }
               }
             }
           }
         },
-        "operationId": "get_logs"
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_public_key_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_public_key_credential"
+      }
+    },
+    "/users/{user_id}/credentials/public-keys/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "update_public_key_credential"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_public_key_credential"
+      }
+    },
+    "/users/{user_id}/credentials/otp": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingOtpCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "get_otp_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOtpCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingOtpCredential"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "create_otp_credential"
+      }
+    },
+    "/users/{user_id}/credentials/otp/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_otp_credential"
       }
     }
   },
@@ -1134,6 +1910,17 @@
           }
         }
       },
+      "CreateUserRequest": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "CredentialKind": {
         "type": "string",
         "enum": [
@@ -1143,6 +1930,65 @@
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "ExistingOtpCredential": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExistingPasswordCredential": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExistingPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "openssh_public_key"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "openssh_public_key": {
+            "type": "string"
+          }
+        }
+      },
+      "ExistingSsoCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
       },
       "GetLogsRequest": {
         "type": "object",
@@ -1198,6 +2044,57 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "NewOtpCredential": {
+        "type": "object",
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
+          }
+        }
+      },
+      "NewPasswordCredential": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "NewPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "openssh_public_key"
+        ],
+        "properties": {
+          "openssh_public_key": {
+            "type": "string"
+          }
+        }
+      },
+      "NewSsoCredential": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "email": {
             "type": "string"
           }
         }
@@ -1814,9 +2711,7 @@
         "type": "object",
         "required": [
           "id",
-          "username",
-          "credentials",
-          "roles"
+          "username"
         ],
         "properties": {
           "id": {
@@ -1826,177 +2721,22 @@
           "username": {
             "type": "string"
           },
-          "credentials": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserAuthCredential"
-            }
-          },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
-      },
-      "UserAuthCredential": {
-        "type": "object",
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/UserAuthCredential_UserPasswordCredential"
-          },
-          {
-            "$ref": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential"
-          },
-          {
-            "$ref": "#/components/schemas/UserAuthCredential_UserTotpCredential"
-          },
-          {
-            "$ref": "#/components/schemas/UserAuthCredential_UserSsoCredential"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "kind",
-          "mapping": {
-            "Password": "#/components/schemas/UserAuthCredential_UserPasswordCredential",
-            "PublicKey": "#/components/schemas/UserAuthCredential_UserPublicKeyCredential",
-            "Totp": "#/components/schemas/UserAuthCredential_UserTotpCredential",
-            "Sso": "#/components/schemas/UserAuthCredential_UserSsoCredential"
-          }
-        }
-      },
-      "UserAuthCredential_UserPasswordCredential": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "Password"
-                ],
-                "example": "Password"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/UserPasswordCredential"
-          }
-        ]
-      },
-      "UserAuthCredential_UserPublicKeyCredential": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "PublicKey"
-                ],
-                "example": "PublicKey"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/UserPublicKeyCredential"
-          }
-        ]
-      },
-      "UserAuthCredential_UserSsoCredential": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "Sso"
-                ],
-                "example": "Sso"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/UserSsoCredential"
-          }
-        ]
-      },
-      "UserAuthCredential_UserTotpCredential": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "Totp"
-                ],
-                "example": "Totp"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/UserTotpCredential"
-          }
-        ]
       },
       "UserDataRequest": {
         "type": "object",
         "required": [
-          "username",
-          "credentials"
+          "username"
         ],
         "properties": {
           "username": {
             "type": "string"
           },
-          "credentials": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserAuthCredential"
-            }
-          },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
-          }
-        }
-      },
-      "UserPasswordCredential": {
-        "type": "object",
-        "required": [
-          "hash"
-        ],
-        "properties": {
-          "hash": {
-            "type": "string"
-          }
-        }
-      },
-      "UserPublicKeyCredential": {
-        "type": "object",
-        "required": [
-          "key"
-        ],
-        "properties": {
-          "key": {
-            "type": "string"
           }
         }
       },
@@ -2028,35 +2768,13 @@
             }
           }
         }
-      },
-      "UserSsoCredential": {
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "provider": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          }
-        }
-      },
-      "UserTotpCredential": {
-        "type": "object",
-        "required": [
-          "key"
-        ],
-        "properties": {
-          "key": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8"
-            }
-          }
-        }
+      }
+    },
+    "securitySchemes": {
+      "TokenSecurityScheme": {
+        "type": "apiKey",
+        "name": "X-Warpgate-Token",
+        "in": "header"
       }
     }
   }

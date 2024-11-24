@@ -9,6 +9,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_db_entities::LogEntry;
 
+use super::TokenSecurityScheme;
+
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -34,6 +36,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
+        _auth: TokenSecurityScheme,
     ) -> poem::Result<GetLogsResponse> {
         use warpgate_db_entities::LogEntry;
 
