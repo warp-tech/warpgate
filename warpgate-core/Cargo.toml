@@ -39,7 +39,7 @@ serde_json.workspace = true
 thiserror = "1.0"
 tokio = { version = "1.20", features = ["tracing"] }
 totp-rs = { version = "5.0", features = ["otpauth"] }
-tracing = "0.1"
+tracing.workspace = true
 tracing-core = "0.1"
 tracing-subscriber = "0.3"
 url = "2.2"
