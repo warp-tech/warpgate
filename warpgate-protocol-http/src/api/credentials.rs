@@ -6,9 +6,9 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
 };
 use uuid::Uuid;
-use warpgate_common::{User, UserRequireCredentialsPolicy, WarpgateError};
+use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
-use warpgate_db_entities::{self as entities, PublicKeyCredential};
+use warpgate_db_entities::{self as entities, PasswordCredential, PublicKeyCredential};
 
 use crate::common::{endpoint_auth, RequestAuthorization};
 
@@ -19,6 +19,58 @@ enum PasswordState {
     Unset,
     Set,
     MultipleSet,
+}
+
+#[derive(Object)]
+struct ExistingSsoCredential {
+    id: Uuid,
+    provider: Option<String>,
+    email: String,
+}
+
+impl From<entities::SsoCredential::Model> for ExistingSsoCredential {
+    fn from(credential: entities::SsoCredential::Model) -> Self {
+        Self {
+            id: credential.id,
+            provider: credential.provider,
+            email: credential.email,
+        }
+    }
+}
+
+#[derive(Object)]
+struct ChangePasswordRequest {
+    password: String,
+}
+
+#[derive(ApiResponse)]
+enum ChangePasswordResponse {
+    #[oai(status = 201)]
+    Done(Json<PasswordState>),
+    #[oai(status = 401)]
+    Unauthorized,
+}
+
+#[derive(Object)]
+pub struct CredentialsState {
+    password: PasswordState,
+    otp: Vec<ExistingOtpCredential>,
+    public_keys: Vec<ExistingPublicKeyCredential>,
+    sso: Vec<ExistingSsoCredential>,
+    credential_policy: UserRequireCredentialsPolicy,
+}
+
+#[derive(ApiResponse)]
+enum CredentialsStateResponse {
+    #[oai(status = 200)]
+    Ok(Json<CredentialsState>),
+    #[oai(status = 401)]
+    Unauthorized,
+}
+
+#[derive(Object)]
+struct NewPublicKeyCredential {
+    openssh_public_key: String,
 }
 
 #[derive(Object)]
@@ -44,57 +96,6 @@ impl From<entities::PublicKeyCredential::Model> for ExistingPublicKeyCredential 
         }
     }
 }
-
-#[derive(Object)]
-struct ExistingOtpCredential {
-    id: Uuid,
-}
-
-impl From<entities::OtpCredential::Model> for ExistingOtpCredential {
-    fn from(credential: entities::OtpCredential::Model) -> Self {
-        Self { id: credential.id }
-    }
-}
-
-#[derive(Object)]
-struct ExistingSsoCredential {
-    id: Uuid,
-    provider: Option<String>,
-    email: String,
-}
-
-impl From<entities::SsoCredential::Model> for ExistingSsoCredential {
-    fn from(credential: entities::SsoCredential::Model) -> Self {
-        Self {
-            id: credential.id,
-            provider: credential.provider,
-            email: credential.email,
-        }
-    }
-}
-
-#[derive(Object)]
-struct NewPublicKeyCredential {
-    openssh_public_key: String,
-}
-
-#[derive(Object)]
-pub struct CredentialsState {
-    password: PasswordState,
-    otp: Vec<ExistingOtpCredential>,
-    public_keys: Vec<ExistingPublicKeyCredential>,
-    sso: Vec<ExistingSsoCredential>,
-    credential_policy: UserRequireCredentialsPolicy,
-}
-
-#[derive(ApiResponse)]
-enum CredentialsStateResponse {
-    #[oai(status = 200)]
-    Ok(Json<CredentialsState>),
-    #[oai(status = 401)]
-    Unauthorized,
-}
-
 #[derive(ApiResponse)]
 enum CreatePublicKeyCredentialResponse {
     #[oai(status = 201)]
@@ -111,6 +112,30 @@ enum DeleteCredentialResponse {
     Unauthorized,
     #[oai(status = 404)]
     NotFound,
+}
+
+#[derive(Object)]
+struct NewOtpCredential {
+    secret_key: Vec<u8>,
+}
+
+#[derive(Object)]
+struct ExistingOtpCredential {
+    id: Uuid,
+}
+
+impl From<entities::OtpCredential::Model> for ExistingOtpCredential {
+    fn from(credential: entities::OtpCredential::Model) -> Self {
+        Self { id: credential.id }
+    }
+}
+
+#[derive(ApiResponse)]
+enum CreateOtpCredentialResponse {
+    #[oai(status = 201)]
+    Created(Json<ExistingOtpCredential>),
+    #[oai(status = 401)]
+    Unauthorized,
 }
 
 async fn get_user(
@@ -170,7 +195,6 @@ impl Api {
             .find_related(entities::PublicKeyCredential::Entity)
             .all(&*db)
             .await?;
-
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
                 0 => PasswordState::Unset,
@@ -185,12 +209,53 @@ impl Api {
     }
 
     #[oai(
+        path = "/profile/credentials/password",
+        method = "post",
+        operation_id = "change_my_password",
+        transform = "endpoint_auth"
+    )]
+    async fn api_change_password(
+        &self,
+        auth: Data<&RequestAuthorization>,
+        services: Data<&Services>,
+        body: Json<ChangePasswordRequest>,
+    ) -> Result<ChangePasswordResponse, WarpgateError> {
+        let db = services.db.lock().await;
+
+        let Some(user_model) = get_user(&*auth, &*db).await? else {
+            return Ok(ChangePasswordResponse::Unauthorized);
+        };
+
+        let new_credential = entities::PasswordCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_model.id),
+            ..PasswordCredential::ActiveModel::from(UserPasswordCredential::from_password(
+                &body.password.clone().into(),
+            ))
+        }
+        .insert(&*db)
+        .await
+        .map_err(WarpgateError::from)?;
+
+        entities::PasswordCredential::Entity::find()
+            .filter(
+                entities::PasswordCredential::Column::UserId
+                    .eq(user_model.id)
+                    .and(entities::PasswordCredential::Column::Id.ne(new_credential.id)),
+            )
+            .all(&*db)
+            .await?;
+
+        Ok(ChangePasswordResponse::Done(Json(PasswordState::Set)))
+    }
+
+    #[oai(
         path = "/profile/credentials/public-keys",
         method = "post",
         operation_id = "add_my_public_key",
         transform = "endpoint_auth"
     )]
-    async fn api_create(
+    async fn api_create_pk(
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
@@ -222,7 +287,7 @@ impl Api {
         operation_id = "delete_my_public_key",
         transform = "endpoint_auth"
     )]
-    async fn api_delete(
+    async fn api_delete_pk(
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
@@ -237,6 +302,80 @@ impl Api {
         let Some(model) = user_model
             .find_related(entities::PublicKeyCredential::Entity)
             .filter(entities::PublicKeyCredential::Column::Id.eq(id.0))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        model.delete(&*db).await?;
+        Ok(DeleteCredentialResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/profile/credentials/otp",
+        method = "post",
+        operation_id = "add_my_otp",
+        transform = "endpoint_auth"
+    )]
+    async fn api_create_otp(
+        &self,
+        auth: Data<&RequestAuthorization>,
+        services: Data<&Services>,
+        body: Json<NewOtpCredential>,
+    ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
+        let db = services.db.lock().await;
+
+        let Some(user_model) = get_user(&*auth, &*db).await? else {
+            return Ok(CreateOtpCredentialResponse::Unauthorized);
+        };
+
+        let mut user: User = user_model.clone().try_into()?;
+
+        let object = entities::OtpCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_model.id),
+            secret_key: Set(body.secret_key.clone()),
+        }
+        .insert(&*db)
+        .await
+        .map_err(WarpgateError::from)?;
+
+        let details = user_model.load_details(&*db).await?;
+        user.credential_policy = Some(
+            user.credential_policy
+                .unwrap_or_default()
+                .upgrade_to_otp(details.credentials.as_slice()),
+        );
+
+        entities::User::ActiveModel::try_from(user)?
+            .update(&*db)
+            .await?;
+
+        Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
+    }
+
+    #[oai(
+        path = "/profile/credentials/otp/:id",
+        method = "delete",
+        operation_id = "delete_my_otp",
+        transform = "endpoint_auth"
+    )]
+    async fn api_delete_otp(
+        &self,
+        auth: Data<&RequestAuthorization>,
+        services: Data<&Services>,
+        id: Path<Uuid>,
+    ) -> Result<DeleteCredentialResponse, WarpgateError> {
+        let db = services.db.lock().await;
+
+        let Some(user_model) = get_user(&*auth, &*db).await? else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+
+        let Some(model) = user_model
+            .find_related(entities::OtpCredential::Entity)
+            .filter(entities::OtpCredential::Column::Id.eq(id.0))
             .one(&*db)
             .await?
         else {

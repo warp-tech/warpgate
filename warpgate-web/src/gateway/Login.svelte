@@ -154,6 +154,7 @@ async function startSSO (provider: SsoProviderDescription) {
                     onkeypress={onInputKey}
                     name="otp"
                     autofocus
+                    inputmode="numeric"
                     disabled={busy}
                     class="form-control" />
             </FormGroup>

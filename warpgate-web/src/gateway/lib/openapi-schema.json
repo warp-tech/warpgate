@@ -424,6 +424,36 @@
         "operationId": "get_my_credentials"
       }
     },
+    "/profile/credentials/password": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "change_my_password"
+      }
+    },
     "/profile/credentials/public-keys": {
       "post": {
         "requestBody": {
@@ -482,6 +512,65 @@
         },
         "operationId": "delete_my_public_key"
       }
+    },
+    "/profile/credentials/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOtpCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingOtpCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "add_my_otp"
+      }
+    },
+    "/profile/credentials/otp/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_otp"
+      }
     }
   },
   "components": {
@@ -522,6 +611,17 @@
             "$ref": "#/components/schemas/ApiAuthState"
           },
           "identification_string": {
+            "type": "string"
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
             "type": "string"
           }
         }
@@ -674,6 +774,21 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "NewOtpCredential": {
+        "type": "object",
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
           }
         }
       },

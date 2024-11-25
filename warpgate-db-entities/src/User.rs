@@ -1,5 +1,6 @@
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
@@ -141,6 +142,18 @@ impl Model {
             inner: self.try_into()?,
             roles,
             credentials,
+        })
+    }
+}
+
+impl TryFrom<User> for ActiveModel {
+    type Error = WarpgateError;
+
+    fn try_from(user: User) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: Set(user.id),
+            username: Set(user.username),
+            credential_policy: Set(serde_json::to_value(&user.credential_policy)?),
         })
     }
 }

@@ -86,6 +86,52 @@ pub struct UserRequireCredentialsPolicy {
     pub postgres: Option<Vec<CredentialKind>>,
 }
 
+impl UserRequireCredentialsPolicy {
+    #[must_use]
+    pub fn upgrade_to_otp(&self, with_existing_credentials: &[UserAuthCredential]) -> Self {
+        let mut copy = self.clone();
+
+        if let Some(policy) = &mut copy.http {
+            policy.push(CredentialKind::Totp);
+        } else {
+            // Upgrade to OTP only if there is a password credential
+            let mut kinds = vec![];
+            if with_existing_credentials
+                .iter()
+                .find(|c| c.kind() == CredentialKind::Password)
+                .is_some()
+            {
+                kinds.push(CredentialKind::Password);
+            }
+            if kinds.len() > 0 {
+                kinds.push(CredentialKind::Totp);
+                copy.http = Some(kinds);
+            }
+        }
+
+        if let Some(policy) = &mut copy.ssh {
+            policy.push(CredentialKind::Totp);
+        } else {
+            // Upgrade to OTP only if there is a password or public key credential
+            let mut kinds = vec![];
+            if with_existing_credentials
+                .iter()
+                .find(|c| {
+                    c.kind() == CredentialKind::Password || c.kind() == CredentialKind::PublicKey
+                })
+                .is_some()
+            {
+                kinds.push(CredentialKind::Password);
+            }
+            if kinds.len() > 0 {
+                kinds.push(CredentialKind::Totp);
+                copy.ssh = Some(kinds);
+            }
+        }
+        copy
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct User {
     #[serde(default)]
