@@ -77,7 +77,7 @@ async function create () {
 
     <a
         class="btn btn-secondary"
-        href="/tickets"
+        href="/config/tickets"
         use:link
     >Done</a>
 {:else}

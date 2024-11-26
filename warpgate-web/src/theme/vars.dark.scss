@@ -69,3 +69,6 @@ $code-color: #84f1fe;
 
 @import "bootstrap/scss/variables";
 @import "./vars.common.scss";
+
+$link-underline-color: rgba($link-color, .5);
+$link-hover-underline-color: rgba($link-hover-color, .75);

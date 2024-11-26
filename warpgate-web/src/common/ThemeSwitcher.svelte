@@ -5,7 +5,7 @@
     import { get } from 'svelte/store'
 
     import { currentTheme, setCurrentTheme } from 'theme'
-    import Tooltip from './Tooltip.svelte'
+    import Tooltip from './sveltestrap-s5-ports/Tooltip.svelte'
 
     function toggle () {
         if (get(currentTheme) === 'auto') {

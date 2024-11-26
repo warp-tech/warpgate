@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, type Ticket } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
-import RelativeDate from './RelativeDate.svelte'
+import RelativeDate from '../RelativeDate.svelte'
 import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 import { stringifyError } from 'common/errors'
@@ -38,7 +38,7 @@ async function deleteTicket (ticket: Ticket) {
         {/if}
         <a
             class="btn btn-outline-secondary ms-auto"
-            href="/tickets/create"
+            href="/config/tickets/create"
             use:link>
             Create a ticket
         </a>

@@ -29,16 +29,6 @@
 
 @import "theme";
 
-a {
-    text-decoration-color: rgba($link-color, .5);
-    text-underline-offset: 2px;
-
-    &:hover, &.active {
-        color: $link-hover-color;
-        text-decoration-color: rgba($link-hover-color, .75);
-    }
-}
-
 header {
     border-bottom: 1px solid rgba($body-color, .5);
 }

@@ -25,15 +25,6 @@ const routes = {
     '/recordings/:id': wrap({
         asyncComponent: () => import('./Recording.svelte') as any,
     }),
-    '/tickets': wrap({
-        asyncComponent: () => import('./Tickets.svelte') as any,
-    }),
-    '/tickets/create': wrap({
-        asyncComponent: () => import('./CreateTicket.svelte') as any,
-    }),
-    '/config': wrap({
-        asyncComponent: () => import('./Config.svelte') as any,
-    }),
     '/targets/create': wrap({
         asyncComponent: () => import('./CreateTarget.svelte') as any,
     }),
@@ -52,14 +43,32 @@ const routes = {
     '/users/:id': wrap({
         asyncComponent: () => import('./User.svelte') as any,
     }),
-    '/ssh': wrap({
-        asyncComponent: () => import('./SSH.svelte') as any,
-    }),
     '/log': wrap({
         asyncComponent: () => import('./Log.svelte') as any,
     }),
-    '/parameters': wrap({
-        asyncComponent: () => import('./Parameters.svelte') as any,
+    '/config': wrap({
+        asyncComponent: () => import('./config/Config.svelte') as any,
+    }),
+    '/config/parameters': wrap({
+        asyncComponent: () => import('./config/Parameters.svelte') as any,
+    }),
+    '/config/users': wrap({
+        asyncComponent: () => import('./config/Users.svelte') as any,
+    }),
+    '/config/roles': wrap({
+        asyncComponent: () => import('./config/Roles.svelte') as any,
+    }),
+    '/config/targets': wrap({
+        asyncComponent: () => import('./config/Targets.svelte') as any,
+    }),
+    '/config/ssh': wrap({
+        asyncComponent: () => import('./config/SSHKeys.svelte') as any,
+    }),
+    '/config/tickets': wrap({
+        asyncComponent: () => import('./config/Tickets.svelte') as any,
+    }),
+    '/config/tickets/create': wrap({
+        asyncComponent: () => import('./CreateTicket.svelte') as any,
     }),
 }
 </script>
@@ -77,8 +86,6 @@ const routes = {
             {#if $serverInfo?.username}
                 <a use:link use:active href="/">Sessions</a>
                 <a use:link use:active href="/config">Config</a>
-                <a use:link use:active href="/tickets">Tickets</a>
-                <a use:link use:active href="/ssh">SSH</a>
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <AuthBar />

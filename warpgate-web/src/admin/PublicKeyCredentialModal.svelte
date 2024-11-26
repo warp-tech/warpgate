@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingPublicKeyCredential } from './lib/api'
 
     interface Props {

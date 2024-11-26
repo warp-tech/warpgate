@@ -109,3 +109,37 @@ input:-webkit-autofill:focus {
         width: map.get($grid-breakpoints, "md");
     }
 }
+
+a {
+    text-decoration-color: var(--wg-link-underline-color);
+    text-underline-offset: 2px;
+
+    &:hover, &.active {
+        text-decoration-color: var(--wg-link-hover-underline-color);
+    }
+}
+
+
+// Make these vars reusable from everywhere
+body {
+    --bs-list-group-color: #{$list-group-color};
+    --bs-list-group-bg: #{$list-group-bg};
+    --bs-list-group-border-color: #{$list-group-border-color};
+    --bs-list-group-border-width: #{$list-group-border-width};
+    --bs-list-group-border-radius: #{$list-group-border-radius};
+    --bs-list-group-item-padding-x: #{$list-group-item-padding-x};
+    --bs-list-group-item-padding-y: #{$list-group-item-padding-y};
+    --bs-list-group-action-color: #{$list-group-action-color};
+    --bs-list-group-action-hover-color: #{$list-group-action-hover-color};
+    --bs-list-group-action-hover-bg: #{$list-group-hover-bg};
+    --bs-list-group-action-active-color: #{$list-group-action-active-color};
+    --bs-list-group-action-active-bg: #{$list-group-action-active-bg};
+    --bs-list-group-disabled-color: #{$list-group-disabled-color};
+    --bs-list-group-disabled-bg: #{$list-group-disabled-bg};
+    --bs-list-group-active-color: #{$list-group-active-color};
+    --bs-list-group-active-bg: #{$list-group-active-bg};
+    --bs-list-group-active-border-color: #{$list-group-active-border-color};
+
+    --wg-link-underline-color: #{$link-underline-color};
+    --wg-link-hover-underline-color: #{$link-hover-underline-color};
+}

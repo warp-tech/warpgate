@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import QRCode from 'qrcode'
     import * as OTPAuth from 'otpauth'
     import base32Encode from 'base32-encode'

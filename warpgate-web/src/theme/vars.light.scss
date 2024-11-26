@@ -26,3 +26,6 @@ $form-check-input-border: 2px solid rgba(#000, .25);
 @import "./vars.common.scss";
 
 $text-muted: $gray-500;
+
+$link-underline-color: rgba($body-color, 0.25);
+$link-hover-underline-color: $body-color;

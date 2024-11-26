@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingSsoCredential } from './lib/api'
     import { api } from 'gateway/lib/api'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
