@@ -11,7 +11,6 @@
 
     import ModalHeader from 'common/ModalHeader.svelte'
     import { type ExistingPublicKeyCredential } from './lib/api'
-    import { preventDefault } from 'svelte/legacy';
 
     interface Props {
         isOpen: boolean

@@ -98,12 +98,11 @@ impl UserRequireCredentialsPolicy {
             let mut kinds = vec![];
             if with_existing_credentials
                 .iter()
-                .find(|c| c.kind() == CredentialKind::Password)
-                .is_some()
+                .any(|c| c.kind() == CredentialKind::Password)
             {
                 kinds.push(CredentialKind::Password);
             }
-            if kinds.len() > 0 {
+            if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
                 copy.http = Some(kinds);
             }
@@ -123,7 +122,7 @@ impl UserRequireCredentialsPolicy {
             {
                 kinds.push(CredentialKind::Password);
             }
-            if kinds.len() > 0 {
+            if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
                 copy.ssh = Some(kinds);
             }

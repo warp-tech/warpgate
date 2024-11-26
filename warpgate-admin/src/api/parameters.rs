@@ -42,7 +42,7 @@ impl Api {
         _auth: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
-        let parameters = Parameters::Entity::get(&*db).await?;
+        let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
@@ -63,7 +63,7 @@ impl Api {
         let db = services.db.lock().await;
 
         let mut am = Parameters::ActiveModel {
-            id: Set(Parameters::Entity::get(&*db).await?.id),
+            id: Set(Parameters::Entity::get(&db).await?.id),
             ..Default::default()
         };
 

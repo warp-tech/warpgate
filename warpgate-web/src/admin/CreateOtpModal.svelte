@@ -14,7 +14,7 @@
     import * as OTPAuth from 'otpauth'
     import base32Encode from 'base32-encode'
     import Fa from 'svelte-fa'
-    import { faClipboard, faRefresh } from '@fortawesome/free-solid-svg-icons'
+    import { faRefresh } from '@fortawesome/free-solid-svg-icons'
     import CopyButton from 'common/CopyButton.svelte'
 
     interface Props {
