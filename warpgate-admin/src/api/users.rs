@@ -15,7 +15,7 @@ use warpgate_common::{
 };
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -50,8 +50,8 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetUsersResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetUsersResponse, WarpgateError> {
         let db = db.lock().await;
 
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
@@ -74,8 +74,8 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateUserRequest>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreateUserResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<CreateUserResponse, WarpgateError> {
         if body.username.is_empty() {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
@@ -133,21 +133,15 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetUserResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetUserResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(user) = User::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetUserResponse::NotFound);
         };
 
-        Ok(GetUserResponse::Ok(Json(
-            user.try_into().map_err(poem::error::InternalServerError)?,
-        )))
+        Ok(GetUserResponse::Ok(Json(user.try_into()?)))
     }
 
     #[oai(path = "/users/:id", method = "put", operation_id = "update_user")]
@@ -156,15 +150,11 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<UserDataRequest>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<UpdateUserResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<UpdateUserResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(user) = User::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
         };
 
@@ -173,10 +163,7 @@ impl DetailApi {
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
-        let user = model
-            .update(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let user = model.update(&*db).await?;
 
         Ok(UpdateUserResponse::Ok(Json(
             user.try_into().map_err(WarpgateError::from)?,
@@ -188,27 +175,20 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteUserResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<DeleteUserResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(user) = User::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
             .exec(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+            .await?;
 
-        user.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        user.delete(&*db).await?;
         Ok(DeleteUserResponse::Deleted)
     }
 }
@@ -250,8 +230,8 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetUserRolesResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetUserRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
@@ -279,8 +259,8 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<AddUserRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<AddUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
         if !UserRoleAssignment::Entity::find()
@@ -315,23 +295,15 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteUserRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(_user) = User::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
-        let Some(_role) = Role::Entity::find_by_id(role_id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(_role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 

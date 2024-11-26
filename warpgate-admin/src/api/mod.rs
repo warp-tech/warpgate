@@ -17,12 +17,25 @@ mod sso_credentials;
 mod targets;
 mod tickets_detail;
 mod tickets_list;
-mod users;
+pub mod users;
+mod parameters;
 
 #[derive(SecurityScheme)]
 #[oai(ty = "api_key", key_name = "X-Warpgate-Token", key_in = "header")]
 #[allow(dead_code)]
 pub struct TokenSecurityScheme(ApiKey);
+
+#[derive(SecurityScheme)]
+#[oai(ty = "api_key", key_name = "warpgate-http-session", key_in = "cookie")]
+#[allow(dead_code)]
+pub struct CookieSecurityScheme(ApiKey);
+
+#[derive(SecurityScheme)]
+#[allow(dead_code)]
+pub enum AnySecurityScheme {
+    Token(TokenSecurityScheme),
+    Cookie(CookieSecurityScheme),
+}
 
 pub fn get() -> impl OpenApi {
     (
@@ -45,5 +58,6 @@ pub fn get() -> impl OpenApi {
             public_key_credentials::DetailApi,
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
+        parameters::Api,
     )
 }

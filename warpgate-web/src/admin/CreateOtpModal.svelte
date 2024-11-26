@@ -14,7 +14,8 @@
     import * as OTPAuth from 'otpauth'
     import base32Encode from 'base32-encode'
     import Fa from 'svelte-fa'
-    import { faClipboard, faRefresh } from '@fortawesome/free-solid-svg-icons'
+    import { faRefresh } from '@fortawesome/free-solid-svg-icons'
+    import CopyButton from 'common/CopyButton.svelte'
 
     interface Props {
         isOpen: boolean
@@ -64,20 +65,6 @@
     }
 
     /**
-    * Copies the TOTP URI to the system clipboard if it is defined.
-    *
-    * @return {Promise<void>} A promise that resolves when the TOTP URI has been copied to the clipboard.
-    */
-    async function copyTotpUri () : Promise<void> {
-        if (totpUri === undefined) {
-            return
-        }
-
-        const { clipboard } = navigator
-        return clipboard.writeText(totpUri)
-    }
-
-    /**
     * Generates a TOTP (Time-based One-Time Password) secret key encoded in base32.
     *
     * @param {UserTotpCredential} cred - The credential containing a key for TOTP generation.
@@ -122,27 +109,24 @@
 </script>
 
 <Modal toggle={_cancel} isOpen={isOpen} on:open={() => field?.focus()}>
-    <Form {validated} on:submit={_save}>
+    <Form {validated} on:submit={e => {
+        _save()
+        e.preventDefault()
+    }}>
         <ModalHeader toggle={_cancel}>
-            Password
+            One-time password
         </ModalHeader>
         <ModalBody>
-            <div class="row">
-                <div class="col-12 col-md-6">
-                    <img class="qr" bind:this={qrImage} alt="OTP QR code" />
-                </div>
-                <div class="col-12 col-md-6">
-                    <Button outline class="d-flex align-items-center" color="link" on:click={generateNewTotpKey}>
-                        <Fa class="me-2" fw icon={faRefresh} />
-                        Reset secret key
-                    </Button>
-                    <Button outline class="d-flex align-items-center" color="link" on:click={copyTotpUri}>
-                        <Fa class="me-2" fw icon={faClipboard} />
-                        Copy raw value
-                    </Button>
-                </div>
+            <img class="qr mb-3" bind:this={qrImage} alt="OTP QR code" />
+
+            <div class="d-flex justify-content-center mb-4">
+                <Button outline class="d-flex align-items-center" color="link" on:click={generateNewTotpKey}>
+                    <Fa class="me-2" fw icon={faRefresh} />
+                    Regenerate
+                </Button>
+                <CopyButton outline class="d-flex align-items-center" color="link" text={totpUri!} label={'Copy URI'} />
             </div>
-            <FormGroup floating label="Paste TOTP code for validation" class="mt-3">
+            <FormGroup floating label="Paste the generated OTP code" class="mt-3">
                 <Input
                     required
                     bind:feedback={validationFeedback}
@@ -150,6 +134,7 @@
                     valid={totpValid}
                     invalid={!totpValid}
                     pattern={'\\d{6}'}
+                    inputmode="numeric"
                     on:change={_validate}
                     on:keyup={_validate} />
             </FormGroup>
@@ -158,7 +143,7 @@
             <div class="d-flex">
                 <Button
                     class="ms-auto"
-                    disabled={!_validate}
+                    disabled={!totpValid}
                     outline
                     on:click={() => validated = true}
                 >Create</Button>
@@ -173,3 +158,12 @@
         </ModalFooter>
     </Form>
 </Modal>
+
+<style lang="scss">
+    .qr {
+        border-radius: 5px;
+        max-width: 200px;
+        margin: auto;
+        display: block;
+    }
+</style>

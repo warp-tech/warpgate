@@ -28,11 +28,15 @@ reqwest = { version = "0.12", features = [
     "rustls-tls-native-roots",
     "stream",
 ], default-features = false }
+sea-orm = { version = "0.12", features = [
+    "runtime-tokio-rustls",
+    "macros",
+], default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.20", features = ["tracing", "signal"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-tracing = "0.1"
+tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-core = { version = "*", path = "../warpgate-core" }

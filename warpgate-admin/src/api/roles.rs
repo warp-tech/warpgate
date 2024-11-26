@@ -14,7 +14,7 @@ use warpgate_common::{Role as RoleConfig, WarpgateError};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Role;
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct RoleDataRequest {
@@ -44,8 +44,8 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetRolesResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
@@ -55,10 +55,7 @@ impl ListApi {
             roles = roles.filter(Role::Column::Name.like(search));
         }
 
-        let roles = roles
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let roles = roles.all(&*db).await?;
 
         Ok(GetRolesResponse::Ok(Json(
             roles.into_iter().map(Into::into).collect(),
@@ -70,8 +67,8 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<CreateRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<CreateRoleResponse, WarpgateError> {
         use warpgate_db_entities::Role;
 
         if body.name.is_empty() {
@@ -128,14 +125,11 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<GetRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let role = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
 
         Ok(match role {
             Some(role) => GetRoleResponse::Ok(Json(role.into())),
@@ -149,15 +143,11 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<RoleDataRequest>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<UpdateRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<UpdateRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(role) = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
@@ -167,10 +157,7 @@ impl DetailApi {
 
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
-        let role = model
-            .update(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let role = model.update(&*db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))
     }
@@ -180,15 +167,11 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
-    ) -> poem::Result<DeleteRoleResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<DeleteRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
-        let Some(role) = Role::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?
-        else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
 
@@ -196,9 +179,7 @@ impl DetailApi {
             return Ok(DeleteRoleResponse::Forbidden);
         }
 
-        role.delete(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)
     }
 }

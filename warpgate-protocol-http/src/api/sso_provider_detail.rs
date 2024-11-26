@@ -6,6 +6,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
 use tracing::*;
+use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
@@ -49,7 +50,7 @@ impl Api {
         services: Data<&Services>,
         name: Path<String>,
         next: Query<Option<String>>,
-    ) -> poem::Result<StartSsoResponse> {
+    ) -> Result<StartSsoResponse, WarpgateError> {
         let config = services.config.lock().await;
 
         let name = name.0;
@@ -68,10 +69,7 @@ impl Api {
 
         let client = SsoClient::new(provider_config.provider.clone());
 
-        let sso_req = client
-            .start_login(return_url.to_string())
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let sso_req = client.start_login(return_url.to_string()).await?;
 
         let url = sso_req.auth_url().to_string();
         session.set(
@@ -80,10 +78,7 @@ impl Api {
                 provider: name,
                 request: sso_req,
                 next_url: next.0.clone(),
-                supports_single_logout: client
-                    .supports_single_logout()
-                    .await
-                    .map_err(poem::error::InternalServerError)?,
+                supports_single_logout: client.supports_single_logout().await?,
             },
         );
 

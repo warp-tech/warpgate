@@ -14,7 +14,7 @@
 
     interface Props {
         isOpen: boolean
-        instance: ExistingPublicKeyCredential|null
+        instance?: ExistingPublicKeyCredential
         save: (opensshPublicKey: string) => void
     }
 
@@ -51,7 +51,10 @@
     }
     field?.focus()
 }}>
-    <Form {validated} on:submit={_save}>
+    <Form {validated} on:submit={e => {
+        _save()
+        e.preventDefault()
+    }}>
         <ModalHeader toggle={_cancel}>
             Public key
         </ModalHeader>

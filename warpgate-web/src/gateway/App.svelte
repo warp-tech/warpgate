@@ -42,6 +42,10 @@ const routes = {
         },
         conditions: [requireLogin],
     }),
+    '/profile': wrap({
+        asyncComponent: () => import('./Profile.svelte') as any,
+        conditions: [requireLogin],
+    }),
     '/login': wrap({
         asyncComponent: () => import('./Login.svelte') as any,
     }),

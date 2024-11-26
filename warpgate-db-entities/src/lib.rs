@@ -14,3 +14,4 @@ pub mod TargetRoleAssignment;
 pub mod Ticket;
 pub mod User;
 pub mod UserRoleAssignment;
+pub mod Parameters;

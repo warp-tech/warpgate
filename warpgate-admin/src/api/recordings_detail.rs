@@ -19,7 +19,7 @@ use uuid::Uuid;
 use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 
-use super::TokenSecurityScheme;
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -42,7 +42,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: TokenSecurityScheme,
+        _auth: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
         let db = db.lock().await;
 
@@ -128,7 +128,7 @@ pub async fn api_get_recording_tcpdump(
     let recording = Recording::Entity::find_by_id(id.0)
         .one(&*db)
         .await
-        .map_err(poem::error::InternalServerError)?;
+        .map_err(InternalServerError)?;
 
     let Some(recording) = recording else {
         return Err(NotFoundError.into());

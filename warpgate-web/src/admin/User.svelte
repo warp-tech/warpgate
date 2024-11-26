@@ -68,7 +68,7 @@
 </script>
 
 {#await load()}
-<DelayedSpinner />
+    <DelayedSpinner />
 {:then}
 {#if user}
 <div class="page-summary-bar">
@@ -96,11 +96,11 @@
             class="list-group-item list-group-item-action d-flex align-items-center"
         >
             <Input
-            id="role-{role.id}"
-            class="mb-0 me-2"
-            type="switch"
-            on:change={() => toggleRole(role)}
-            checked={roleIsAllowed[role.id]} />
+                id="role-{role.id}"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => toggleRole(role)}
+                checked={roleIsAllowed[role.id]} />
             <div>{role.name}</div>
         </label>
     {/each}

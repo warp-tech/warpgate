@@ -5,13 +5,14 @@
     import copyTextToClipboard from 'copy-text-to-clipboard'
 
     interface Props {
-        text: string;
-        disabled?: boolean;
-        outline?: boolean;
-        link?: boolean;
-        color?: Color | 'link';
-        class?: string;
-        children?: import('svelte').Snippet;
+        text: string
+        disabled?: boolean
+        outline?: boolean
+        link?: boolean
+        color?: Color | 'link'
+        class?: string
+        label?: string
+        children?: () => any
     }
 
     let {
@@ -20,6 +21,7 @@
         outline = false,
         link = false,
         color = 'link',
+        label,
         'class': className = '',
         children,
     }: Props = $props()
@@ -73,6 +75,9 @@
                 <Fa fw icon={faCheck} />
             {:else}
                 <Fa fw icon={faCopy} />
+            {/if}
+            {#if label}
+                <span class="ms-2">{label}</span>
             {/if}
         {/if}
     </Button>

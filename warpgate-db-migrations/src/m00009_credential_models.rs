@@ -1,6 +1,7 @@
 use credential_enum::UserAuthCredential;
 use sea_orm::{ActiveModelTrait, EntityTrait, Schema, Set};
 use sea_orm_migration::prelude::*;
+use tracing::error;
 use uuid::Uuid;
 
 use super::m00008_users::user as User;
@@ -248,8 +249,15 @@ impl MigrationTrait for Migration {
         let users = User::Entity::find().all(db).await?;
         for user in users {
             #[allow(clippy::unwrap_used)]
-            let credentials: Vec<UserAuthCredential> =
-                serde_json::from_value(user.credentials).unwrap();
+            let Ok(credentials) =
+                serde_json::from_value::<Vec<UserAuthCredential>>(user.credentials.clone())
+            else {
+                error!(
+                    "Failed to parse credentials for user {}, value was {:?}",
+                    user.id, user.credentials
+                );
+                continue;
+            };
             for credential in credentials {
                 match credential {
                     UserAuthCredential::Password(password) => {

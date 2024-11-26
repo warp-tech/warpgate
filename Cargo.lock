@@ -5682,6 +5682,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
+ "russh-keys",
  "rustls 0.23.12",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
@@ -5778,6 +5779,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -5799,6 +5801,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest 0.12.7",
+ "sea-orm",
  "serde",
  "serde_json",
  "tokio",
