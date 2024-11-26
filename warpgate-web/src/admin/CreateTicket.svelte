@@ -7,7 +7,7 @@ import { link } from 'svelte-spa-router'
 import { FormGroup } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let targets: Target[]|undefined = $state()

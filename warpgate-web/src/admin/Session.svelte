@@ -9,7 +9,7 @@ import { link } from 'svelte-spa-router'
 import LogViewer from './LogViewer.svelte'
 import RelativeDate from './RelativeDate.svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { id: string }

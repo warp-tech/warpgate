@@ -11,7 +11,7 @@ import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let username = $state('')

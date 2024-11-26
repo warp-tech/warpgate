@@ -5,7 +5,7 @@ import RelativeDate from './RelativeDate.svelte'
 import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|undefined = $state()
 let tickets: Ticket[]|undefined = $state()

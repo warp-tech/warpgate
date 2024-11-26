@@ -2,7 +2,7 @@
     import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { stringifyError } from 'common/errors'
     import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'

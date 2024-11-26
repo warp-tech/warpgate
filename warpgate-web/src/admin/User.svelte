@@ -5,7 +5,7 @@
     import { replace } from 'svelte-spa-router'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from './CredentialEditor.svelte'
 
     interface Props {

@@ -11,7 +11,7 @@ import { replace } from 'svelte-spa-router'
 import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { id: string };

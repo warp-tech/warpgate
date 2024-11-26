@@ -13,7 +13,7 @@
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'

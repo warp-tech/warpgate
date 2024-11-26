@@ -7,7 +7,7 @@ import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let redirecting = false
 let serverInfoPromise = reloadServerInfo()

@@ -5,7 +5,7 @@ import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
 import { onDestroy, onMount } from 'svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     filters: {

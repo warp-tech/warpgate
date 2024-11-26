@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api, type Recording } from 'admin/lib/api'
 import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { stringifyError } from 'common/errors'
 

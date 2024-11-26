@@ -3,7 +3,7 @@ import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/a
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import RelativeDate from 'admin/RelativeDate.svelte'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { stateId: string };
