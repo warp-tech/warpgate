@@ -725,7 +725,8 @@
           "version",
           "ports",
           "authorized_via_ticket",
-          "authorized_via_sso_with_single_logout"
+          "authorized_via_sso_with_single_logout",
+          "own_credential_management_allowed"
         ],
         "properties": {
           "version": {
@@ -747,6 +748,9 @@
             "type": "boolean"
           },
           "authorized_via_sso_with_single_logout": {
+            "type": "boolean"
+          },
+          "own_credential_management_allowed": {
             "type": "boolean"
           }
         }

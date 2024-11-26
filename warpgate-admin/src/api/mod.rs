@@ -18,6 +18,7 @@ mod targets;
 mod tickets_detail;
 mod tickets_list;
 pub mod users;
+mod parameters;
 
 #[derive(SecurityScheme)]
 #[oai(ty = "api_key", key_name = "X-Warpgate-Token", key_in = "header")]
@@ -57,5 +58,6 @@ pub fn get() -> impl OpenApi {
             public_key_credentials::DetailApi,
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
+        parameters::Api,
     )
 }

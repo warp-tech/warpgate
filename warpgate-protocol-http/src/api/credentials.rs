@@ -1,4 +1,6 @@
+use http::StatusCode;
 use poem::web::Data;
+use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -8,7 +10,7 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
-use warpgate_db_entities::{self as entities, PasswordCredential, PublicKeyCredential};
+use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
 
 use crate::common::{endpoint_auth, RequestAuthorization};
 
@@ -138,6 +140,22 @@ enum CreateOtpCredentialResponse {
     Unauthorized,
 }
 
+pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
+    e.around(|ep, req| async move {
+        let services = Data::<&Services>::from_request_without_body(&req).await?;
+        let parameters = Parameters::Entity::get(&*services.db.lock().await)
+            .await
+            .map_err(WarpgateError::from)?;
+        if !parameters.allow_own_credential_management {
+            return Ok(poem::Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body("Credential management is disabled")
+                .into_response());
+        }
+        Ok(endpoint_auth(ep).call(req).await?.into_response())
+    })
+}
+
 async fn get_user(
     auth: &RequestAuthorization,
     db: &DatabaseConnection,
@@ -163,7 +181,7 @@ impl Api {
         path = "/profile/credentials",
         method = "get",
         operation_id = "get_my_credentials",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_get_credentials_state(
         &self,
@@ -212,7 +230,7 @@ impl Api {
         path = "/profile/credentials/password",
         method = "post",
         operation_id = "change_my_password",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_change_password(
         &self,
@@ -253,7 +271,7 @@ impl Api {
         path = "/profile/credentials/public-keys",
         method = "post",
         operation_id = "add_my_public_key",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_create_pk(
         &self,
@@ -285,7 +303,7 @@ impl Api {
         path = "/profile/credentials/public-keys/:id",
         method = "delete",
         operation_id = "delete_my_public_key",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_delete_pk(
         &self,
@@ -316,7 +334,7 @@ impl Api {
         path = "/profile/credentials/otp",
         method = "post",
         operation_id = "add_my_otp",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_create_otp(
         &self,
@@ -359,7 +377,7 @@ impl Api {
         path = "/profile/credentials/otp/:id",
         method = "delete",
         operation_id = "delete_my_otp",
-        transform = "endpoint_auth"
+        transform = "parameters_based_auth"
     )]
     async fn api_delete_otp(
         &self,

@@ -4,7 +4,9 @@ use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
+use warpgate_common::WarpgateError;
 use warpgate_core::Services;
+use warpgate_db_entities::Parameters;
 
 use crate::common::{SessionAuthorization, SessionExt};
 
@@ -27,6 +29,7 @@ pub struct Info {
     ports: PortsInfo,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
+    own_credential_management_allowed: bool,
 }
 
 #[derive(ApiResponse)]
@@ -43,7 +46,7 @@ impl Api {
         req: &Request,
         session: &Session,
         services: Data<&Services>,
-    ) -> poem::Result<InstanceInfoResponse> {
+    ) -> Result<InstanceInfoResponse, WarpgateError> {
         let config = services.config.lock().await;
         let external_host = config
             .construct_external_url(Some(req), None)
@@ -51,6 +54,8 @@ impl Api {
             .as_ref()
             .and_then(|x| x.host())
             .map(|x| x.to_string());
+
+        let parameters = Parameters::Entity::get(&*services.db.lock().await).await?;
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -95,6 +100,7 @@ impl Api {
                     postgres: None,
                 }
             },
+            own_credential_management_allowed: parameters.allow_own_credential_management,
         })))
     }
 }

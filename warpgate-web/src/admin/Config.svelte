@@ -37,6 +37,16 @@
 
 <div class="row">
     <div class="col-12 col-lg-6 mb-4 pe-4">
+        <div class="list-group list-group-flush mb-3">
+            <a
+                class="list-group-item list-group-item-action"
+                href="/parameters"
+                use:link
+            >
+                <strong>Global parameters</strong>
+            </a>
+        </div>
+
         <div class="page-summary-bar">
             <h1>Targets</h1>
             <a

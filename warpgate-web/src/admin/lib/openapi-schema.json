@@ -2027,6 +2027,57 @@
         ],
         "operationId": "delete_otp_credential"
       }
+    },
+    "/parameters": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParameterValues"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_parameters"
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ParameterUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_parameters"
+      }
     }
   },
   "components": {
@@ -2264,6 +2315,25 @@
           "total": {
             "type": "integer",
             "format": "uint64"
+          }
+        }
+      },
+      "ParameterUpdate": {
+        "type": "object",
+        "properties": {
+          "allow_own_credential_management": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ParameterValues": {
+        "type": "object",
+        "required": [
+          "allow_own_credential_management"
+        ],
+        "properties": {
+          "allow_own_credential_management": {
+            "type": "boolean"
           }
         }
       },
