@@ -419,6 +419,15 @@ impl RemoteClient {
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
                 ]),
+                key: Cow::Borrowed(&[
+                    russh::keys::key::ED25519,
+                    russh::keys::key::ECDSA_SHA2_NISTP256,
+                    russh::keys::key::ECDSA_SHA2_NISTP384,
+                    russh::keys::key::ECDSA_SHA2_NISTP521,
+                    russh::keys::key::RSA_SHA2_256,
+                    russh::keys::key::RSA_SHA2_512,
+                    russh::keys::key::SSH_RSA,
+                ]),
                 ..<_>::default()
             }
         } else {
