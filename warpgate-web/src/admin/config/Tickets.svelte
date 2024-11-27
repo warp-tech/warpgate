@@ -32,7 +32,7 @@ async function deleteTicket (ticket: Ticket) {
 {#if tickets }
     <div class="page-summary-bar">
         {#if tickets.length }
-            <h1>Access tickets: {tickets.length}</h1>
+            <h1>access tickets: <span class="counter">{tickets.length}</span></h1>
         {:else}
             <h1>No tickets created yet</h1>
         {/if}

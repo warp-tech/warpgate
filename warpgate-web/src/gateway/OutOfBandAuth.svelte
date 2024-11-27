@@ -52,7 +52,7 @@ async function reject () {
 {:then}
 {#if authState}
     <div class="page-summary-bar">
-        <h1>Authorization request</h1>
+        <h1>authorization request</h1>
     </div>
 
     <div class="mb-5">

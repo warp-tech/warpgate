@@ -79,7 +79,7 @@ async function create () {
 
 
 <div class="page-summary-bar">
-    <h1>Add a target</h1>
+    <h1>add a target</h1>
 </div>
 
 <FormGroup floating label="Name">

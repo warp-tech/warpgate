@@ -4,10 +4,10 @@ import { wrap } from 'svelte-spa-router/wrap'
 import { get } from 'svelte/store'
 import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
 import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+import Brand from 'common/Brand.svelte'
 
 let redirecting = false
 let serverInfoPromise = reloadServerInfo()
@@ -69,7 +69,7 @@ init()
     {:else}
         <div class="d-flex align-items-center mt-5 mb-5">
             <a class="logo" href="/@warpgate">
-                <Logo />
+                <Brand />
             </a>
 
             <AuthBar />
@@ -95,10 +95,5 @@ init()
     .container {
         width: 500px;
         max-width: 100vw;
-    }
-
-    .logo {
-        width: 5rem;
-        margin: 0 -0.5rem;
     }
 </style>

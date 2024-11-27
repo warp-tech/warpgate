@@ -75,7 +75,7 @@ onDestroy(() => clearInterval(interval))
 {#if session}
     <div class="page-summary-bar">
         <div>
-            <h1>Session</h1>
+            <h1>session</h1>
             <div>
                 <strong class="me-2">
                     {#if session.username}

@@ -30,7 +30,7 @@ load().catch(async e => {
 
 
 <div class="page-summary-bar">
-    <h1>Session recording</h1>
+    <h1>session recording</h1>
 </div>
 
 {#if !recording && !error}

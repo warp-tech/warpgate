@@ -5,9 +5,9 @@ import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
+import Brand from 'common/Brand.svelte'
 
 async function init () {
     await reloadServerInfo()
@@ -78,16 +78,15 @@ const routes = {
 {:then}
     <div class="app container">
         <header>
-            <a href="/@warpgate" class="d-flex">
-                <div class="logo">
-                    <Logo />
-                </div>
+            <a href="/@warpgate" class="d-flex logo-link me-2">
+                <Brand />
             </a>
             {#if $serverInfo?.username}
                 <a use:link use:active href="/">Sessions</a>
                 <a use:link use:active href="/config">Config</a>
                 <a use:link use:active href="/log">Log</a>
             {/if}
+            <span class="ms-3"></span>
             <AuthBar />
         </header>
         <main>
@@ -104,16 +103,16 @@ const routes = {
 {/await}
 
 <style lang="scss">
+    @media (max-width: 767px) {
+        .logo-link {
+            display: none !important;
+        }
+    }
+
     .app {
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-    }
-
-    .logo {
-        width: 40px;
-        padding-top: 2px;
-        display: flex;
     }
 
     header, footer {
@@ -130,12 +129,14 @@ const routes = {
         padding: 10px 0;
         margin: 10px 0 20px;
 
-        a, .logo {
+        a {
             font-size: 1.5rem;
+            margin-right: 15px;
         }
+    }
 
-        a:not(:first-child) {
-            margin-left: 15px;
-        }
+    .logo-link {
+        text-decoration: none;
+        margin-right: 30px;
     }
 </style>

@@ -58,7 +58,7 @@ async function create () {
 
 {#if result}
     <div class="page-summary-bar">
-        <h1>Ticket created</h1>
+        <h1>ticket created</h1>
     </div>
 
     <Alert color="warning" fade={false}>
@@ -83,7 +83,7 @@ async function create () {
 {:else}
 <div class="narrow-page">
     <div class="page-summary-bar">
-        <h1>Create an access ticket</h1>
+        <h1>create an access ticket</h1>
     </div>
 
     {#if users}

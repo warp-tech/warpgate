@@ -208,25 +208,23 @@ async function startSSO (provider: SsoProviderDescription) {
 
     {#await ssoProvidersPromise then ssoProviders}
         {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
-            <div class="mt-5">
+            <div class="mt-5 sso-buttons">
                 {#each ssoProviders as ssoProvider}
                     <button
-                        class="btn d-flex align-items-center w-100 mb-2 btn-outline-primary"
+                        class="btn btn-outline-primary"
                         disabled={busy}
                         onclick={() => startSSO(ssoProvider)}
                     >
-                        <span class="m-auto">
-                            {#if ssoProvider.kind === SsoProviderKind.Google}
-                                <Fa fw class="me-2" icon={faGoogle} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Azure}
-                                <Fa fw class="me-2" icon={faMicrosoft} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Apple}
-                                <Fa fw class="me-2" icon={faApple} />
-                            {/if}
-                            {ssoProvider.label}
-                        </span>
+                        {#if ssoProvider.kind === SsoProviderKind.Google}
+                            <Fa fw class="me-2" icon={faGoogle} />
+                        {/if}
+                        {#if ssoProvider.kind === SsoProviderKind.Azure}
+                            <Fa fw class="me-2" icon={faMicrosoft} />
+                        {/if}
+                        {#if ssoProvider.kind === SsoProviderKind.Apple}
+                            <Fa fw class="me-2" icon={faApple} />
+                        {/if}
+                        {ssoProvider.label}
                     </button>
                 {/each}
             </div>
@@ -242,3 +240,23 @@ async function startSSO (provider: SsoProviderDescription) {
         </button>
     {/if}
 {/await}
+
+<style lang="scss">
+    h1 {
+        font-size: 3rem;
+    }
+
+    .sso-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.85rem 1rem;
+
+        button {
+            flex: 1 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-wrap: nowrap;
+        }
+    }
+</style>

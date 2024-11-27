@@ -16,7 +16,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Users</h1>
+    <h1>users</h1>
     <a
         class="btn btn-outline-secondary ms-auto"
         href="/users/create"

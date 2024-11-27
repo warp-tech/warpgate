@@ -52,7 +52,18 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     margin: 0.25rem 0 1.5rem;
 
     h1 {
+        font-family: 'Poppins';
+        font-weight: 700;
+        font-size: 2.5rem;
         margin: 0;
+    }
+
+    .counter {
+        display: inline-block;
+        padding: 0px 10px;
+        background: var(--bs-body-color);
+        color: var(--bs-body-bg);
+        border-radius: 5px;
     }
 }
 

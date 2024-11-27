@@ -17,7 +17,7 @@
 
 
 <div class="page-summary-bar mt-4">
-    <h1>Roles</h1>
+    <h1>roles</h1>
     <a
         class="btn btn-outline-secondary ms-auto"
         href="/roles/create"

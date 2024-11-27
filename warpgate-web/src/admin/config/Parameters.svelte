@@ -19,7 +19,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Global parameters</h1>
+    <h1>global parameters</h1>
 </div>
 
 {#await load()}

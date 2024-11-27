@@ -1,4 +1,6 @@
 import '@fontsource/work-sans'
+// import '@fontsource/poppins/800.css'
+import './fonts.css'
 
 import { get, writable } from 'svelte/store'
 

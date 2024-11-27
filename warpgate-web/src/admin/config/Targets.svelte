@@ -16,7 +16,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Targets</h1>
+    <h1>targets</h1>
     <a
         class="btn btn-outline-secondary ms-auto"
         href="/targets/create"

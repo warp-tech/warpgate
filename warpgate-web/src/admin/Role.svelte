@@ -49,7 +49,7 @@ async function remove () {
     <div class="page-summary-bar">
         <div>
             <h1>{role!.name}</h1>
-            <div class="text-muted">Role</div>
+            <div class="text-muted">role</div>
         </div>
     </div>
 
