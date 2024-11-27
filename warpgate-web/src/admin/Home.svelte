@@ -70,8 +70,8 @@
             <span>active sessions:</span> <span class="counter">{activeSessionCount}</span>
         </h1>
         <div class="ms-auto">
-            <AsyncButton outline click={closeAllSesssions}>
-                Close all sessions
+            <AsyncButton color="warning" click={closeAllSesssions}>
+                Close all
             </AsyncButton>
         </div>
     {:else}

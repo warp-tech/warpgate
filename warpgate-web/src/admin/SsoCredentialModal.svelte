@@ -88,13 +88,11 @@
                 <Button
                     type="submit"
                     class="ms-auto"
-                    outline
                     on:click={() => validated = true}
                 >Save</Button>
 
                 <Button
                     class="ms-2"
-                    outline
                     color="danger"
                     on:click={_cancel}
                 >Cancel</Button>

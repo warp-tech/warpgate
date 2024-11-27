@@ -1,5 +1,5 @@
 <script lang="ts">
-import { faCheck } from '@fortawesome/free-solid-svg-icons'
+import { faCheck, faTimes } from '@fortawesome/free-solid-svg-icons'
 import Fa from 'svelte-fa'
 import { Button, Spinner, type Color } from '@sveltestrap/sveltestrap'
 
@@ -8,7 +8,8 @@ enum State {
     Normal = 'n',
     Progress = 'p',
     ProgressWithSpinner = 'ps',
-    Done = 'd'
+    Done = 'd',
+    Failed = 'f'
 }
 
 interface Props {
@@ -40,10 +41,12 @@ async function _click () {
     }, 500)
     try {
         await click()
-    } finally {
         st = State.Done
+    } catch {
+        st = State.Failed
+    } finally {
         setTimeout(() => {
-            if (st === State.Done) {
+            if (st === State.Done || st === State.Failed) {
                 st = State.Normal
                 lastWidth = 0
             }
@@ -56,7 +59,7 @@ async function _click () {
 <Button
     on:click={_click}
     bind:inner={button}
-    style="min-width: {lastWidth}px"
+    style="min-width: {lastWidth}px; min-height: 40px;"
     class={cls}
     outline={outline}
     color={color}
@@ -73,5 +76,18 @@ async function _click () {
         {#if st === State.Done}
             <Fa icon={faCheck} fw />
         {/if}
+        {#if st === State.Failed}
+            <Fa icon={faTimes} fw />
+        {/if}
     </div>
 </Button>
+
+<style lang="scss">
+    .overlay {
+        margin: auto;
+
+        :global(svg) {
+            margin: auto;
+        }
+    }
+</style>

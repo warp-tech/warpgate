@@ -19,7 +19,7 @@
 <div class="page-summary-bar mt-4">
     <h1>roles</h1>
     <a
-        class="btn btn-outline-secondary ms-auto"
+        class="btn btn-secondary ms-auto"
         href="/roles/create"
         use:link>
         Add a role

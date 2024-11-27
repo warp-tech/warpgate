@@ -37,7 +37,7 @@ async function deleteTicket (ticket: Ticket) {
             <h1>No tickets created yet</h1>
         {/if}
         <a
-            class="btn btn-outline-secondary ms-auto"
+            class="btn btn-secondary ms-auto"
             href="/config/tickets/create"
             use:link>
             Create a ticket

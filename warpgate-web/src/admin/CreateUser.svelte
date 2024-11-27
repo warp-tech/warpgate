@@ -41,6 +41,5 @@ async function create () {
 </FormGroup>
 
 <AsyncButton
-    outline
     click={create}
 >Create user</AsyncButton>

@@ -5,10 +5,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <div>
-        <h1>{$serverInfo!.username}</h1>
-        <div class="text-muted">User</div>
-    </div>
+    <h1>{$serverInfo!.username}</h1>
 </div>
 
 {#if $serverInfo}

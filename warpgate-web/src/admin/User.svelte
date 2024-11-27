@@ -115,13 +115,11 @@
 <div class="d-flex">
     <AsyncButton
         class="ms-auto"
-        outline
         click={update}
     >Update</AsyncButton>
 
     <AsyncButton
         class="ms-2"
-        outline
         color="danger"
         click={remove}
     >Remove</AsyncButton>

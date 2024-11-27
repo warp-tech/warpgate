@@ -184,8 +184,8 @@ async function startSSO (provider: SsoProviderDescription) {
             </FormGroup>
 
             <AsyncButton
-                outline
                 class="d-flex align-items-center"
+                color="primary"
                 type="submit"
                 disabled={busy}
                 click={login}
@@ -211,7 +211,7 @@ async function startSSO (provider: SsoProviderDescription) {
             <div class="mt-5 sso-buttons">
                 {#each ssoProviders as ssoProvider}
                     <button
-                        class="btn btn-outline-primary"
+                        class="btn btn-secondary"
                         disabled={busy}
                         onclick={() => startSSO(ssoProvider)}
                     >
@@ -233,7 +233,7 @@ async function startSSO (provider: SsoProviderDescription) {
 
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
         <button
-            class="btn w-100 mt-3 btn-outline-secondary"
+            class="btn w-100 mt-3 btn-secondary"
             onclick={cancel}
         >
             Cancel

@@ -78,7 +78,7 @@ const routes = {
 {:then}
     <div class="app container">
         <header>
-            <a href="/@warpgate" class="d-flex logo-link me-2">
+            <a href="/@warpgate" class="d-flex logo-link me-4">
                 <Brand />
             </a>
             {#if $serverInfo?.username}
@@ -133,10 +133,5 @@ const routes = {
             font-size: 1.5rem;
             margin-right: 15px;
         }
-    }
-
-    .logo-link {
-        text-decoration: none;
-        margin-right: 30px;
     }
 </style>

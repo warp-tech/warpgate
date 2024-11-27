@@ -1,5 +1,38 @@
 @use "sass:map";
 
+@mixin button-variant(
+  $background,
+  $border,
+  $color: color-contrast($background),
+  $hover-background: if($color == $color-contrast-dark, shade-color($background, $btn-hover-bg-shade-amount), tint-color($background, $btn-hover-bg-tint-amount)),
+  $hover-border: if($color == $color-contrast-dark, shade-color($border, $btn-hover-border-shade-amount), tint-color($border, $btn-hover-border-tint-amount)),
+  $hover-color: color-contrast($hover-background),
+  $active-background: if($color == $color-contrast-dark, shade-color($background, $btn-active-bg-shade-amount), tint-color($background, $btn-active-bg-tint-amount)),
+  $active-border: if($color == $color-contrast-dark, shade-color($border, $btn-active-border-shade-amount), tint-color($border, $btn-active-border-tint-amount)),
+  $active-color: color-contrast($active-background),
+  $disabled-background: $background,
+  $disabled-border: $border,
+  $disabled-color: $btn-disabled-color,
+  $text-color: if($color == $color-contrast-light, shade-color($background, $btn-color-shade-amount), tint-color($background, $btn-color-tint-amount))
+) {
+  $real-background: if($color == $color-contrast-dark, shade-color($background, $btn-bg-shade-amount), tint-color($background, $btn-bg-tint-amount));
+  $real-color: if($color == $color-contrast-light, shade-color($background, $btn-color-shade-amount), tint-color($background, $btn-color-tint-amount));
+  --#{$prefix}btn-color: #{$real-color};
+  --#{$prefix}btn-bg: #{$real-background};
+  --#{$prefix}btn-border-color: #{if($color == $color-contrast-dark, shade-color($background, $btn-border-shade-amount), tint-color($background, $btn-border-tint-amount))};
+  --#{$prefix}btn-hover-color: #{$hover-color};
+  --#{$prefix}btn-hover-bg: #{$hover-background};
+  --#{$prefix}btn-hover-border-color: #{$hover-border};
+  --#{$prefix}btn-focus-shadow-rgb: #{to-rgb(mix($color, $border, 15%))};
+  --#{$prefix}btn-active-color: #{$active-color};
+  --#{$prefix}btn-active-bg: #{$active-background};
+  --#{$prefix}btn-active-border-color: #{$active-border};
+  --#{$prefix}btn-active-shadow: #{$btn-active-box-shadow};
+  --#{$prefix}btn-disabled-color: #{$disabled-color};
+  --#{$prefix}btn-disabled-bg: #{$real-background};
+  --#{$prefix}btn-disabled-border-color: #{$real-background};
+}
+
 // Layout & components
 @import "bootstrap/scss/root";
 @import "bootstrap/scss/reboot";

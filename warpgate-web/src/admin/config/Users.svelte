@@ -18,7 +18,7 @@
 <div class="page-summary-bar">
     <h1>users</h1>
     <a
-        class="btn btn-outline-secondary ms-auto"
+        class="btn btn-secondary ms-auto"
         href="/users/create"
         use:link>
         Add a user

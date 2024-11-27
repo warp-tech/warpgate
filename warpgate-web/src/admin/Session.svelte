@@ -97,7 +97,7 @@ onDestroy(() => clearInterval(interval))
         </div>
         {#if !session.ended}
             <div class="ms-auto">
-                <AsyncButton outline click={close}>
+                <AsyncButton color="warning" click={close}>
                     Close now
                 </AsyncButton>
             </div>

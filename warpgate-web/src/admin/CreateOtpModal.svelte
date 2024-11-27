@@ -120,11 +120,11 @@
             <img class="qr mb-3" bind:this={qrImage} alt="OTP QR code" />
 
             <div class="d-flex justify-content-center mb-4">
-                <Button outline class="d-flex align-items-center" color="link" on:click={generateNewTotpKey}>
+                <Button class="d-flex align-items-center me-3" on:click={generateNewTotpKey}>
                     <Fa class="me-2" fw icon={faRefresh} />
                     Regenerate
                 </Button>
-                <CopyButton outline class="d-flex align-items-center" color="link" text={totpUri!} label={'Copy URI'} />
+                <CopyButton class="d-flex align-items-center" color="secondary" text={totpUri!} label={'Copy URI'} />
             </div>
             <FormGroup floating label="Paste the generated OTP code" class="mt-3">
                 <Input
@@ -144,13 +144,11 @@
                 <Button
                     class="ms-auto"
                     disabled={!totpValid}
-                    outline
                     on:click={() => validated = true}
                 >Create</Button>
 
                 <Button
                     class="ms-2"
-                    outline
                     color="danger"
                     on:click={_cancel}
                 >Cancel</Button>

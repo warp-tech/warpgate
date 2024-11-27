@@ -93,7 +93,6 @@ async function reject () {
                 Authorize
             </AsyncButton>
             <AsyncButton
-                outline
                 color="secondary"
                 class="d-flex align-items-center ms-2"
                 click={reject}
