@@ -7,7 +7,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00010_parameters"
+        "m00011_rsa_key_algos"
     }
 }
 
