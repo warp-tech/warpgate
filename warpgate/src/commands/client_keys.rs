@@ -1,5 +1,4 @@
 use anyhow::Result;
-use warpgate_protocol_ssh::helpers::PublicKeyAsOpenSSH;
 
 use crate::config::load_config;
 
@@ -10,7 +9,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     println!("(add these to your target's authorized_keys file)");
     println!();
     for key in keys {
-        println!("{}", key.as_openssh());
+        println!("{}", key.public_key().to_openssh()?);
     }
     Ok(())
 }

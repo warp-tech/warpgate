@@ -35,11 +35,16 @@ impl From<PublicKeyCredential::Model> for ExistingPublicKeyCredential {
     }
 }
 
-impl From<&NewPublicKeyCredential> for UserPublicKeyCredential {
-    fn from(credential: &NewPublicKeyCredential) -> Self {
-        Self {
-            key: credential.openssh_public_key.clone().into(),
-        }
+impl TryFrom<&NewPublicKeyCredential> for UserPublicKeyCredential {
+    type Error = WarpgateError;
+
+    fn try_from(credential: &NewPublicKeyCredential) -> Result<Self, WarpgateError> {
+        let key = russh::keys::PublicKey::from_openssh(&credential.openssh_public_key)
+            .map_err(russh::keys::Error::from)?;
+
+        Ok(Self {
+            key: key.to_openssh().map_err(russh::keys::Error::from)?.into(),
+        })
     }
 }
 
@@ -107,7 +112,7 @@ impl ListApi {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::from(&*body))
+            ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
         }
         .insert(&*db)
         .await
@@ -149,7 +154,7 @@ impl DetailApi {
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
-            ..<_>::from(UserPublicKeyCredential::from(&*body))
+            ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }
         .update(&*db)
         .await;
