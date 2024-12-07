@@ -1,5 +1,6 @@
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use sea_orm_migration::prelude::*;
+use tracing::error;
 
 use crate::m00009_credential_models::public_key_credential as PKC;
 
@@ -19,8 +20,13 @@ impl MigrationTrait for Migration {
         let connection = manager.get_connection();
         let creds = PKC::Entity::find().all(connection).await?;
         for cred in creds.into_iter() {
-            let parsed = russh_keys::PublicKey::from_openssh(&cred.openssh_public_key)
-                .map_err(|e| DbErr::Custom(format!("Failed to parse public key: {e}")))?;
+            let parsed = match russh_keys::PublicKey::from_openssh(&cred.openssh_public_key) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    error!("Failed to parse public key '{cred:?}': {e}");
+                    continue;
+                }
+            };
             let serialized = parsed
                 .to_openssh()
                 .map_err(|e| DbErr::Custom(format!("Failed to serialize public key: {e}")))?;
