@@ -1,5 +1,6 @@
 import { shellEscape } from 'gateway/lib/shellEscape'
 import type { Info } from 'gateway/lib/api'
+import { CredentialKind } from 'admin/lib/api'
 
 export interface ConnectionOptions {
     targetName?: string
@@ -57,4 +58,11 @@ export function makeTargetURL (opt: ConnectionOptions): string {
         return `${location.protocol}//${host}/?warpgate-ticket=${opt.ticketSecret}`
     }
     return `${location.protocol}//${host}/?warpgate-target=${opt.targetName}`
+}
+
+export const possibleCredentials: Record<string, Set<CredentialKind>> = {
+    ssh: new Set([CredentialKind.Password, CredentialKind.PublicKey, CredentialKind.Totp, CredentialKind.WebUserApproval]),
+    http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
+    mysql: new Set([CredentialKind.Password]),
+    postgres: new Set([CredentialKind.Password]),
 }

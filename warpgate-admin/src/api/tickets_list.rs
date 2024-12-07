@@ -10,7 +10,10 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::WarpgateError;
 use warpgate_db_entities::Ticket;
+
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -49,14 +52,12 @@ impl Api {
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    ) -> poem::Result<GetTicketsResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
         let db = db.lock().await;
-        let tickets = Ticket::Entity::find()
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let tickets = Ticket::Entity::find().all(&*db).await?;
         let tickets = tickets
             .into_iter()
             .map(Into::into)
@@ -69,6 +70,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateTicketRequest>,
+        _auth: AnySecurityScheme,
     ) -> poem::Result<CreateTicketResponse> {
         use warpgate_db_entities::Ticket;
 

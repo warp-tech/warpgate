@@ -32,7 +32,7 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
-            keys: load_host_keys(&config)?,
+            keys: vec![load_host_keys(&config)?],
             event_buffer_size: 100,
             preferred: Preferred {
                 key: Cow::Borrowed(&[
@@ -118,7 +118,8 @@ where
         let session = russh::server::run_stream(config, socket, handler).await?;
         session.await?;
         Ok(())
-    }.await;
+    }
+    .await;
 
     if let Err(ref error) = ret {
         error!(%error, "Session failed");

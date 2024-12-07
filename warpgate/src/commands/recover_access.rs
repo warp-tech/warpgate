@@ -2,11 +2,11 @@ use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::helpers::hash::hash_password;
-use warpgate_common::{Secret, User as UserConfig, UserAuthCredential, UserPasswordCredential};
+use warpgate_common::{Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
-use warpgate_db_entities::User;
+use warpgate_db_entities::{PasswordCredential, User};
 
 use crate::commands::common::assert_interactive_terminal;
 use crate::config::load_config;
@@ -15,7 +15,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
     assert_interactive_terminal();
 
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone()).await?;
+    let services = Services::new(config.clone(), None).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
@@ -47,9 +47,11 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
         }
     };
 
-    let password = dialoguer::Password::with_theme(&theme)
-        .with_prompt(format!("New password for {}", user.username))
-        .interact()?;
+    let password = Secret::new(
+        dialoguer::Password::with_theme(&theme)
+            .with_prompt(format!("New password for {}", user.username))
+            .interact()?,
+    );
 
     if !dialoguer::Confirm::with_theme(&theme)
             .default(true)
@@ -58,22 +60,25 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
                 std::process::exit(0);
             }
 
-    user.credentials
-        .push(UserAuthCredential::Password(UserPasswordCredential {
-            hash: Secret::new(hash_password(&password)),
-        }));
+    PasswordCredential::ActiveModel {
+        user_id: Set(user.id),
+        id: Set(Uuid::new_v4()),
+        ..UserPasswordCredential::from_password(&password).into()
+    }
+    .insert(&*db)
+    .await?;
+
     user.credential_policy
         .get_or_insert_with(Default::default)
         .http = Some(vec![CredentialKind::Password]);
 
-    let model = User::ActiveModel {
+    User::ActiveModel {
         id: Set(user.id),
-        credentials: Set(serde_json::to_value(&user.credentials)?),
         credential_policy: Set(serde_json::to_value(Some(&user.credential_policy))?),
         ..Default::default()
-    };
-
-    model.update(&*db).await?;
+    }
+    .update(&*db)
+    .await?;
 
     info!("All done. You can now log in");
 

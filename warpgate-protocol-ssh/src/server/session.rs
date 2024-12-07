@@ -764,7 +764,7 @@ impl ServerSession {
             RCEvent::HostKeyReceived(key) => {
                 self.emit_service_message(&format!(
                     "Host key ({}): {}",
-                    key.algorithm().as_str(),
+                    key.algorithm(),
                     key.public_key_base64()
                 ))
                 .await?;
@@ -863,7 +863,7 @@ impl ServerSession {
 
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
-            key.algorithm().as_str()
+            key.algorithm()
         ))
         .await?;
         self.emit_service_message("Trust this key? (y/n)").await?;
@@ -1185,29 +1185,24 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
 
-        dbg!();
         if let Ok(true) = self
             .try_validate_public_key_offer(
                 &selector,
                 Some(AuthCredential::PublicKey {
-                    kind: key.algorithm().to_string(),
+                    kind: key.algorithm(),
                     public_key_bytes: Bytes::from(key.public_key_bytes()),
                 }),
             )
             .await
         {
-        dbg!();
-        return russh::server::Auth::Accept;
+            return russh::server::Auth::Accept;
         }
-        dbg!();
 
         let selector: AuthSelector = ssh_username.expose_secret().into();
         match self.try_auth_lazy(&selector, None).await {
-            Ok(AuthResult::Need(kinds)) => {
-        dbg!();
-                russh::server::Auth::Reject {
+            Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
-            }},
+            },
             _ => russh::server::Auth::Reject {
                 proceed_with_methods: None,
             },
@@ -1231,7 +1226,7 @@ impl ServerSession {
             .try_auth_lazy(
                 &selector,
                 Some(AuthCredential::PublicKey {
-                    kind: key.algorithm().to_string(),
+                    kind: key.algorithm(),
                     public_key_bytes: Bytes::from(key.public_key_bytes()),
                 }),
             )

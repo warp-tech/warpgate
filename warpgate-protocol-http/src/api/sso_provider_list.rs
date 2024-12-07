@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
+use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
@@ -93,7 +94,7 @@ impl Api {
     async fn api_get_all_sso_providers(
         &self,
         services: Data<&Services>,
-    ) -> poem::Result<GetSsoProvidersResponse> {
+    ) -> Result<GetSsoProvidersResponse, WarpgateError> {
         let mut providers = services.config.lock().await.store.sso_providers.clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
@@ -120,7 +121,7 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         code: Query<Option<String>>,
-    ) -> poem::Result<Response<ReturnToSsoResponse>> {
+    ) -> Result<Response<ReturnToSsoResponse>, WarpgateError> {
         let url = self
             .api_return_to_sso_get_common(req, session, services, &code)
             .await?
@@ -140,13 +141,12 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         data: Form<ReturnToSsoFormData>,
-    ) -> poem::Result<ReturnToSsoPostResponse> {
+    ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
         let url = self
             .api_return_to_sso_get_common(req, session, services, &data.code)
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
-        let serialized_url =
-            serde_json::to_string(&url).map_err(poem::error::InternalServerError)?;
+        let serialized_url = serde_json::to_string(&url)?;
         Ok(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
                 "<!doctype html>\n
@@ -169,7 +169,7 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         code: &Option<String>,
-    ) -> poem::Result<Result<String, String>> {
+    ) -> Result<Result<String, String>, WarpgateError> {
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
@@ -180,11 +180,7 @@ impl Api {
             ));
         };
 
-        let response = context
-            .request
-            .verify_code((*code).clone())
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let response = context.request.verify_code((*code).clone()).await?;
 
         if !response.email_verified.unwrap_or(true) {
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));
@@ -293,7 +289,7 @@ impl Api {
         session: &Session,
         services: Data<&Services>,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
-    ) -> poem::Result<StartSloResponse> {
+    ) -> Result<StartSloResponse, WarpgateError> {
         let Some(state) = session.get_sso_login_state() else {
             return Ok(StartSloResponse::NotInSsoSession);
         };
@@ -313,10 +309,7 @@ impl Api {
         };
 
         let client = SsoClient::new(provider_config.provider.clone());
-        let logout_url = client
-            .logout(state.token, return_url)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let logout_url = client.logout(state.token, return_url).await?;
 
         logout(session, session_middleware.lock().await.deref_mut());
 

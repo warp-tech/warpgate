@@ -17,7 +17,8 @@ use warpgate_core::Services;
 
 use super::common::logout;
 use crate::common::{
-    authorize_session, endpoint_auth, get_auth_state_for_request, SessionAuthorization, SessionExt,
+    authorize_session, endpoint_auth, get_auth_state_for_request, RequestAuthorization,
+    SessionAuthorization, SessionExt,
 };
 use crate::session::SessionStore;
 
@@ -267,7 +268,7 @@ impl Api {
     async fn api_auth_state(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
         let state_arc = get_auth_state(&id, &services, auth.map(|x| x.0)).await;
@@ -286,7 +287,7 @@ impl Api {
     async fn api_approve_auth(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
         let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
@@ -314,7 +315,7 @@ impl Api {
     async fn api_reject_auth(
         &self,
         services: Data<&Services>,
-        auth: Option<Data<&SessionAuthorization>>,
+        auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
         let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
@@ -329,11 +330,11 @@ impl Api {
 async fn get_auth_state(
     id: &Uuid,
     services: &Services,
-    auth: Option<&SessionAuthorization>,
+    auth: Option<&RequestAuthorization>,
 ) -> Option<Arc<Mutex<AuthState>>> {
     let store = services.auth_state_store.lock().await;
 
-    let SessionAuthorization::User(username) = auth? else {
+    let RequestAuthorization::Session(SessionAuthorization::User(username)) = auth? else {
         return None;
     };
 

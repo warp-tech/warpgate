@@ -29,7 +29,6 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::helpers::PublicKeyAsOpenSSH;
 use crate::keys::load_client_keys;
 use crate::ForwardedTcpIpParams;
 
@@ -37,7 +36,7 @@ use crate::ForwardedTcpIpParams;
 pub enum ConnectionError {
     #[error("Host key mismatch")]
     HostKeyMismatch {
-        received_key_type: String,
+        received_key_type: russh::keys::Algorithm,
         received_key_base64: String,
         known_key_type: String,
         known_key_base64: String,
@@ -419,6 +418,25 @@ impl RemoteClient {
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
                 ]),
+                key: Cow::Borrowed(&[
+                    russh::keys::Algorithm::Ed25519,
+                    russh::keys::Algorithm::Ecdsa {
+                        curve: russh::keys::EcdsaCurve::NistP256,
+                    },
+                    russh::keys::Algorithm::Ecdsa {
+                        curve: russh::keys::EcdsaCurve::NistP384,
+                    },
+                    russh::keys::Algorithm::Ecdsa {
+                        curve: russh::keys::EcdsaCurve::NistP521,
+                    },
+                    russh::keys::Algorithm::Rsa {
+                        hash: Some(russh::keys::HashAlg::Sha256),
+                    },
+                    russh::keys::Algorithm::Rsa {
+                        hash: Some(russh::keys::HashAlg::Sha512),
+                    },
+                    russh::keys::Algorithm::Rsa { hash: None },
+                ]),
                 ..<_>::default()
             }
         } else {
@@ -488,7 +506,7 @@ impl RemoteClient {
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {
-                                let key_str = key.as_openssh();
+                                let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
                                 auth_result = session
                                     .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
                                     .await?;

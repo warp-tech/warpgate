@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.10.2"
+    "version": "0.11.0"
   },
   "servers": [
     {
@@ -11,6 +11,21 @@
   ],
   "tags": [],
   "paths": {
+    "/__stub__": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
+        "operationId": "__stub__"
+      }
+    },
     "/auth/login": {
       "post": {
         "requestBody": {
@@ -388,6 +403,174 @@
         },
         "operationId": "start_sso"
       }
+    },
+    "/profile/credentials": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_credentials"
+      }
+    },
+    "/profile/credentials/password": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "change_my_password"
+      }
+    },
+    "/profile/credentials/public-keys": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "add_my_public_key"
+      }
+    },
+    "/profile/credentials/public-keys/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_public_key"
+      }
+    },
+    "/profile/credentials/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOtpCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingOtpCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "add_my_otp"
+      }
+    },
+    "/profile/credentials/otp/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_otp"
+      }
     }
   },
   "components": {
@@ -432,13 +615,118 @@
           }
         }
       },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "CredentialKind": {
+        "type": "string",
+        "enum": [
+          "Password",
+          "PublicKey",
+          "Totp",
+          "Sso",
+          "WebUserApproval"
+        ]
+      },
+      "CredentialsState": {
+        "type": "object",
+        "required": [
+          "password",
+          "otp",
+          "public_keys",
+          "sso",
+          "credential_policy"
+        ],
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/PasswordState"
+          },
+          "otp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingOtpCredential"
+            }
+          },
+          "public_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+            }
+          },
+          "sso": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingSsoCredential"
+            }
+          },
+          "credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          }
+        }
+      },
+      "ExistingOtpCredential": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExistingPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ExistingSsoCredential": {
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
       "Info": {
         "type": "object",
         "required": [
           "version",
           "ports",
           "authorized_via_ticket",
-          "authorized_via_sso_with_single_logout"
+          "authorized_via_sso_with_single_logout",
+          "own_credential_management_allowed"
         ],
         "properties": {
           "version": {
@@ -460,6 +748,9 @@
             "type": "boolean"
           },
           "authorized_via_sso_with_single_logout": {
+            "type": "boolean"
+          },
+          "own_credential_management_allowed": {
             "type": "boolean"
           }
         }
@@ -490,6 +781,32 @@
           }
         }
       },
+      "NewOtpCredential": {
+        "type": "object",
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
+          }
+        }
+      },
+      "NewPublicKeyCredential": {
+        "type": "object",
+        "required": [
+          "openssh_public_key"
+        ],
+        "properties": {
+          "openssh_public_key": {
+            "type": "string"
+          }
+        }
+      },
       "OtpLoginRequest": {
         "type": "object",
         "required": [
@@ -500,6 +817,14 @@
             "type": "string"
           }
         }
+      },
+      "PasswordState": {
+        "type": "string",
+        "enum": [
+          "Unset",
+          "Set",
+          "MultipleSet"
+        ]
       },
       "PortsInfo": {
         "type": "object",
@@ -599,6 +924,42 @@
             "type": "string"
           }
         }
+      },
+      "UserRequireCredentialsPolicy": {
+        "type": "object",
+        "properties": {
+          "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "ssh": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mysql": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "AnySecurityScheme": {
+        "type": "apiKey",
+        "name": "X-Warpgate-Token",
+        "in": "header"
       }
     }
   }

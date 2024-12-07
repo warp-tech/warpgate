@@ -6,6 +6,9 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::WarpgateError;
+
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -29,21 +32,16 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-    ) -> poem::Result<DeleteTicketResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<DeleteTicketResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
         let db = db.lock().await;
 
-        let ticket = Ticket::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let ticket = Ticket::Entity::find_by_id(id.0).one(&*db).await?;
 
         match ticket {
             Some(ticket) => {
-                ticket
-                    .delete(&*db)
-                    .await
-                    .map_err(poem::error::InternalServerError)?;
+                ticket.delete(&*db).await?;
                 Ok(DeleteTicketResponse::Deleted)
             }
             None => Ok(DeleteTicketResponse::NotFound),

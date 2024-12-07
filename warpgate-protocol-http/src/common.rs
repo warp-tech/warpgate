@@ -1,6 +1,8 @@
+use core::str;
 use std::sync::Arc;
 
-use http::StatusCode;
+use anyhow::Context;
+use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
@@ -21,6 +23,7 @@ static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
+static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
@@ -103,17 +106,34 @@ pub enum SessionAuthorization {
 impl SessionAuthorization {
     pub fn username(&self) -> &String {
         match self {
-            SessionAuthorization::User(username) => username,
-            SessionAuthorization::Ticket { username, .. } => username,
+            Self::User(username) => username,
+            Self::Ticket { username, .. } => username,
         }
     }
 }
 
-async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Result<bool> {
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RequestAuthorization {
+    Session(SessionAuthorization),
+    AdminToken,
+}
+
+impl RequestAuthorization {
+    pub fn username(&self) -> Option<&String> {
+        match self {
+            Self::Session(auth) => Some(auth.username()),
+            Self::AdminToken => None,
+        }
+    }
+}
+
+async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
     let services = Data::<&Services>::from_request_without_body(req).await?;
 
-    let SessionAuthorization::User(username) = auth else {
-        return Ok(false);
+    let username = match auth {
+        RequestAuthorization::Session(SessionAuthorization::User(username)) => username,
+        RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
+        RequestAuthorization::AdminToken => return Ok(true),
     };
 
     let mut config_provider = services.config_provider.lock().await;
@@ -133,7 +153,7 @@ async fn is_user_admin(req: &Request, auth: &SessionAuthorization) -> poem::Resu
 
 pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth = Data::<&SessionAuthorization>::from_request_without_body(&req).await?;
+        let auth = Data::<&RequestAuthorization>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
         }
@@ -143,7 +163,7 @@ pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
 
 pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
-        let auth = Data::<&SessionAuthorization>::from_request_without_body(&req).await?;
+        let auth = Data::<&RequestAuthorization>::from_request_without_body(&req).await?;
         let session = <&Session>::from_request_without_body(&req).await?;
         if is_user_admin(&req, &auth).await? {
             return Ok(ep.call(req).await?.into_response());
@@ -158,11 +178,28 @@ pub async fn _inner_auth<E: Endpoint + 'static>(
     req: Request,
 ) -> poem::Result<Option<E::Output>> {
     let session = <&Session>::from_request_without_body(&req).await?;
+    let services = Data::<&Services>::from_request_without_body(&req).await?;
 
-    Ok(match session.get_auth() {
-        Some(auth) => Some(ep.data(auth).call(req).await?),
-        _ => None,
-    })
+    let auth = match session.get_auth() {
+        Some(auth) => RequestAuthorization::Session(auth),
+        None => match req.headers().get(&X_WARPGATE_TOKEN) {
+            Some(token_from_header) => {
+                if Some(
+                    token_from_header
+                        .to_str()
+                        .map_err(poem::error::BadRequest)?,
+                ) == services.admin_token.lock().await.as_deref()
+                {
+                    RequestAuthorization::AdminToken
+                } else {
+                    return Ok(None);
+                }
+            }
+            None => return Ok(None),
+        },
+    };
+
+    Ok(Some(ep.data(auth).call(req).await?))
 }
 
 pub fn endpoint_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint<Output = E::Output> {
@@ -234,16 +271,20 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(req: &Request, username: String) -> poem::Result<()> {
-    let session_middleware =
-        Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
-    let session = <&Session>::from_request_without_body(req).await?;
+pub async fn authorize_session(req: &Request, username: String) -> Result<(), WarpgateError> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await
+        .context("SessionStore not in request")?;
+    let session = <&Session>::from_request_without_body(req)
+        .await
+        .context("Session not in request")?;
 
     let server_handle = session_middleware
         .lock()
         .await
         .create_handle_for(req)
-        .await?;
+        .await
+        .context("create_handle_for")?;
     server_handle
         .lock()
         .await

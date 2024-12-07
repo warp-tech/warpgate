@@ -7,7 +7,10 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::WarpgateError;
 use warpgate_db_entities::LogEntry;
+
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -34,7 +37,8 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-    ) -> poem::Result<GetLogsResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 
         let db = db.lock().await;
@@ -64,10 +68,7 @@ impl Api {
             );
         }
 
-        let logs = q
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let logs = q.all(&*db).await?;
         let logs = logs
             .into_iter()
             .map(Into::into)

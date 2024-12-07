@@ -5,7 +5,10 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
+use warpgate_common::WarpgateError;
 use warpgate_db_entities::KnownHost;
+
+use super::AnySecurityScheme;
 
 pub struct Api;
 
@@ -25,14 +28,12 @@ impl Api {
     async fn api_ssh_get_all_known_hosts(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    ) -> poem::Result<GetSSHKnownHostsResponse> {
+        _auth: AnySecurityScheme,
+    ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
 
         let db = db.lock().await;
-        let hosts = KnownHost::Entity::find()
-            .all(&*db)
-            .await
-            .map_err(poem::error::InternalServerError)?;
+        let hosts = KnownHost::Entity::find().all(&*db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }
 }

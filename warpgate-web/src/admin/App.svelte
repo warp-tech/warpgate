@@ -58,6 +58,9 @@ const routes = {
     '/log': wrap({
         asyncComponent: () => import('./Log.svelte') as any,
     }),
+    '/parameters': wrap({
+        asyncComponent: () => import('./Parameters.svelte') as any,
+    }),
 }
 </script>
 

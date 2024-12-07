@@ -1351,6 +1351,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "324a1be68054ef05ad64b861cc9eaf1d623d2d8cb25b4bf2cb9cdd902b4bf253"
 dependencies = [
  "crc32fast",
+ "libz-sys",
  "miniz_oxide",
 ]
 
@@ -2274,6 +2275,17 @@ name = "libsqlite3-sys"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf4e226dcd58b4be396f7bd3c20da8fdee2911400705297ba7d2d7cc2c30f716"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2d16453e800a8cf6dd2fc3eb4bc99b786a9b90c663b8559a5b1a041bf89e472"
 dependencies = [
  "cc",
  "pkg-config",
@@ -3695,9 +3707,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.47.0-beta.3"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b1b7509713826aa4895dfbde63c765695c5677633b6cbfc50e0487657d9c57b"
+checksum = "56f55e7b5bf741cf24420c25b3c1981de52530981d20d484778c35834942b58c"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3744,9 +3756,9 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.8.0-beta.2"
+version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728b3bffc3f8c6f0faa13a069a2544a2c533a4910966ee2f7c3b66960f139c73"
+checksum = "4d8e7e854e1a87e4be00fa287c98cad23faa064d0464434beaa9f014ec3baa98"
 dependencies = [
  "libc",
  "ssh-encoding",
@@ -3755,9 +3767,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.47.0-beta.2"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de8d284b9b30f8503347ee55303c6943d0d8eb6b4e8a436a1d2fb3b7da66c592"
+checksum = "fed9bf3da16ad2892a44b840e40483010295bfc8fda8134650c381654cb1ef36"
 dependencies = [
  "aes",
  "async-trait",
@@ -3829,9 +3841,9 @@ dependencies = [
 
 [[package]]
 name = "russh-util"
-version = "0.46.0"
+version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63aeb9d2b74f8f38befdc0c5172d5ffcf58f3d2ffcb423f3b6cdfe2c2d747b80"
+checksum = "92c7dd577958c0cefbc8f8a2c05c48c88c42e2fdb760dbe9b96ae31d4de97a1f"
 dependencies = [
  "chrono",
  "tokio",
@@ -5682,6 +5694,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
+ "russh-keys",
  "rustls 0.23.12",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
@@ -5757,6 +5770,7 @@ dependencies = [
 name = "warpgate-db-entities"
 version = "0.11.0"
 dependencies = [
+ "bytes",
  "chrono",
  "poem-openapi",
  "sea-orm",
@@ -5771,10 +5785,14 @@ name = "warpgate-db-migrations"
 version = "0.11.0"
 dependencies = [
  "chrono",
+ "data-encoding",
+ "russh-keys",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -5796,6 +5814,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest 0.12.7",
+ "sea-orm",
  "serde",
  "serde_json",
  "tokio",
@@ -5818,6 +5837,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "flate2",
  "mysql_common",
  "once_cell",
  "password-hash 0.2.1",

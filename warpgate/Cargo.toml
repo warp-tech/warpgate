@@ -9,22 +9,22 @@ ansi_term = "0.12"
 anyhow = { version = "1.0", features = ["backtrace"] }
 async-trait = "0.1"
 atty = "0.2"
-bytes = "1.4"
+bytes.workspace = true
 clap = { version = "4.0", features = ["derive"] }
 config = { version = "0.13", features = ["yaml"], default-features = false }
 console = { version = "0.15", default-features = false }
 console-subscriber = { version = "0.1", optional = true }
-data-encoding = "2.3"
+data-encoding.workspace = true
 dialoguer = "0.10"
 futures = "0.3"
 notify = "5.1"
 rcgen = { version = "0.10", features = ["zeroize"] }
-serde_json = "1.0"
+serde_json.workspace = true
 serde_yaml = "0.9"
 sea-orm = { version = "0.12.2", default-features = false }
 time = "0.3"
 tokio = { version = "1.20", features = ["tracing", "signal", "macros"] }
-tracing = "0.1"
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",
     "local-time",
