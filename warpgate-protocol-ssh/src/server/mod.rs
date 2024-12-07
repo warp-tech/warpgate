@@ -31,14 +31,18 @@ pub async fn run_server(services: Services, address: SocketAddr) -> Result<()> {
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
-            keys: load_host_keys(&config)?,
+            keys: vec![load_host_keys(&config)?],
             event_buffer_size: 100,
             preferred: Preferred {
                 key: Cow::Borrowed(&[
-                    russh::keys::key::ED25519,
-                    russh::keys::key::RSA_SHA2_256,
-                    russh::keys::key::RSA_SHA2_512,
-                    russh::keys::key::SSH_RSA,
+                    russh::keys::Algorithm::Ed25519,
+                    russh::keys::Algorithm::Rsa {
+                        hash: Some(russh::keys::HashAlg::Sha256),
+                    },
+                    russh::keys::Algorithm::Rsa {
+                        hash: Some(russh::keys::HashAlg::Sha512),
+                    },
+                    russh::keys::Algorithm::Rsa { hash: None },
                 ]),
                 ..<_>::default()
             },

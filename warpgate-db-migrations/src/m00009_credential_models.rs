@@ -74,7 +74,7 @@ pub mod password_credential {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-mod public_key_credential {
+pub mod public_key_credential {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 

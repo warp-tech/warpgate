@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKey;
 use russh::server::{Auth, Handle, Msg, Session};
 use russh::{Channel, ChannelId, Pty, Sig};
 use tokio::sync::mpsc::UnboundedSender;
@@ -111,9 +111,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)
+            session.channel_success(channel)?
         } else {
-            session.channel_failure(channel)
+            session.channel_failure(channel)?
         }
 
         Ok(())
@@ -153,7 +153,7 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         let _ = rx.await;
-        session.channel_success(channel);
+        session.channel_success(channel)?;
         Ok(())
     }
 
@@ -170,9 +170,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)
+            session.channel_success(channel)?
         } else {
-            session.channel_failure(channel)
+            session.channel_failure(channel)?
         }
 
         Ok(())
@@ -181,7 +181,7 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey_offered(
         &mut self,
         user: &str,
-        key: &russh::keys::key::PublicKey,
+        key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
@@ -200,7 +200,7 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        key: &russh::keys::key::PublicKey,
+        key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
@@ -363,9 +363,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)
+            session.channel_success(channel)?
         } else {
-            session.channel_failure(channel)
+            session.channel_failure(channel)?
         }
 
         Ok(())

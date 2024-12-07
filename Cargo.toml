@@ -24,8 +24,8 @@ bytes = "1.4"
 data-encoding = "2.3"
 serde = "1.0"
 serde_json = "1.0"
-russh = { version = "0.46.0", features = ["legacy-ed25519-pkcs8-parser"] }
-russh-keys = { version = "0.46.0", features = ["legacy-ed25519-pkcs8-parser"] }
+russh = { version = "0.48.1" }
+russh-keys = { version = "0.48.1" }
 tracing = "0.1"
 
 [profile.release]

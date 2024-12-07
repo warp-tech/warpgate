@@ -21,6 +21,7 @@ sea-orm = { version = "0.12", features = [
 sea-orm-migration = { version = "0.12", default-features = false, features = [
     "cli",
 ] }
+russh-keys.workspace = true
 tracing.workspace = true
 uuid = { version = "1.3", features = ["v4", "serde"] }
 serde_json.workspace = true

@@ -41,8 +41,8 @@ impl Api {
 
         let keys = keys
             .into_iter()
-            .map(|k| SSHKey {
-                kind: k.name().to_owned(),
+            .map(|k: russh::keys::PrivateKey| SSHKey {
+                kind: k.algorithm().to_string(),
                 public_key_base64: k.public_key_base64(),
             })
             .collect();
