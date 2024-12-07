@@ -1,5 +1,6 @@
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
@@ -66,18 +67,22 @@ impl RelationTrait for Relation {
             Self::OtpCredentials => Entity::has_many(super::OtpCredential::Entity)
                 .from(Column::Id)
                 .to(super::OtpCredential::Column::UserId)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
             Self::PasswordCredentials => Entity::has_many(super::PasswordCredential::Entity)
                 .from(Column::Id)
                 .to(super::PasswordCredential::Column::UserId)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
             Self::PublicKeyCredentials => Entity::has_many(super::PublicKeyCredential::Entity)
                 .from(Column::Id)
                 .to(super::PublicKeyCredential::Column::UserId)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
             Self::SsoCredentials => Entity::has_many(super::SsoCredential::Entity)
                 .from(Column::Id)
                 .to(super::SsoCredential::Column::UserId)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
         }
     }
