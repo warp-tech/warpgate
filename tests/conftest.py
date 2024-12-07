@@ -184,7 +184,7 @@ class ProcessManager:
         stderr=None,
         stdout=None,
     ) -> WarpgateProcess:
-        args = args or ["run", "--admin-token", "token-value"]
+        args = args or ["run", "--enable-admin-token"]
 
         if share_with:
             config_path = share_with.config_path
@@ -230,6 +230,7 @@ class ProcessManager:
                 env={
                     **os.environ,
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
+                    "WARPGATE_ADMIN_TOKEN": "token-value",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
