@@ -16,9 +16,16 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
 
-pub(crate) async fn command(cli: &crate::Cli, admin_token: Option<String>) -> Result<()> {
+pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     info!(%version, "Warpgate");
+
+    let admin_token = enable_admin_token.then(|| {
+        std::env::var("WARPGATE_ADMIN_TOKEN").unwrap_or_else(|_| {
+            error!("`WARPGATE_ADMIN_TOKEN` env variable must set when using --enable-admin-token");
+            std::process::exit(1);
+        })
+    });
 
     let config = load_config(&cli.config, true)?;
     let services = Services::new(config.clone(), admin_token).await?;
