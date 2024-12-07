@@ -166,7 +166,7 @@ async fn get_user(
 
     let Some(user_model) = entities::User::Entity::find()
         .filter(entities::User::Column::Username.eq(username))
-        .one(&*db)
+        .one(db)
         .await?
     else {
         return Ok(None);
@@ -190,7 +190,7 @@ impl Api {
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(*auth, &*db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
         };
 

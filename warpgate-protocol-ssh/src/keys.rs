@@ -56,7 +56,7 @@ pub fn load_host_keys(config: &WarpgateConfig) -> Result<PrivateKey, russh::keys
 
     let key_path = path.join("host-rsa");
 
-    Ok(load_secret_key(key_path, None)?)
+    load_secret_key(key_path, None)
 }
 
 pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {

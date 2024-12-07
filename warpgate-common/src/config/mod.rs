@@ -113,13 +113,9 @@ impl UserRequireCredentialsPolicy {
         } else {
             // Upgrade to OTP only if there is a password or public key credential
             let mut kinds = vec![];
-            if with_existing_credentials
-                .iter()
-                .find(|c| {
-                    c.kind() == CredentialKind::Password || c.kind() == CredentialKind::PublicKey
-                })
-                .is_some()
-            {
+            if with_existing_credentials.iter().any(|c| {
+                c.kind() == CredentialKind::Password || c.kind() == CredentialKind::PublicKey
+            }) {
                 kinds.push(CredentialKind::Password);
             }
             if !kinds.is_empty() {
