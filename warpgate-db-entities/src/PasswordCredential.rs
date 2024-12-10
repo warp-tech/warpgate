@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
@@ -24,6 +25,7 @@ impl RelationTrait for Relation {
             Self::User => Entity::belongs_to(super::User::Entity)
                 .from(Column::UserId)
                 .to(super::User::Column::Id)
+                .on_delete(ForeignKeyAction::Cascade)
                 .into(),
         }
     }

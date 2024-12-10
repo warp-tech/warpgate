@@ -8,6 +8,7 @@ use super::m00008_users::user as User;
 
 pub mod otp_credential {
     use sea_orm::entity::prelude::*;
+    use sea_orm::sea_query::ForeignKeyAction;
     use uuid::Uuid;
 
     use crate::m00008_users::user as User;
@@ -32,6 +33,7 @@ pub mod otp_credential {
                 Self::User => Entity::belongs_to(User::Entity)
                     .from(Column::UserId)
                     .to(User::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .into(),
             }
         }
@@ -42,6 +44,7 @@ pub mod otp_credential {
 
 pub mod password_credential {
     use sea_orm::entity::prelude::*;
+    use sea_orm::sea_query::ForeignKeyAction;
     use uuid::Uuid;
 
     use crate::m00008_users::user as User;
@@ -66,6 +69,7 @@ pub mod password_credential {
                 Self::User => Entity::belongs_to(User::Entity)
                     .from(Column::UserId)
                     .to(User::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .into(),
             }
         }
@@ -76,6 +80,7 @@ pub mod password_credential {
 
 pub mod public_key_credential {
     use sea_orm::entity::prelude::*;
+    use sea_orm::sea_query::ForeignKeyAction;
     use uuid::Uuid;
 
     use crate::m00008_users::user as User;
@@ -100,6 +105,7 @@ pub mod public_key_credential {
                 Self::User => Entity::belongs_to(User::Entity)
                     .from(Column::UserId)
                     .to(User::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .into(),
             }
         }
@@ -110,6 +116,7 @@ pub mod public_key_credential {
 
 mod sso_credential {
     use sea_orm::entity::prelude::*;
+    use sea_orm::sea_query::ForeignKeyAction;
     use uuid::Uuid;
 
     use crate::m00008_users::user as User;
@@ -135,6 +142,7 @@ mod sso_credential {
                 Self::User => Entity::belongs_to(User::Entity)
                     .from(Column::UserId)
                     .to(User::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .into(),
             }
         }

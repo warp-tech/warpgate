@@ -25,10 +25,14 @@ common_args = [
 
 
 def setup_user_and_target(
-    processes: ProcessManager, wg: WarpgateProcess, wg_c_ed25519_pubkey
+    processes: ProcessManager,
+    wg: WarpgateProcess,
+    warpgate_client_key,
+    extra_config='',
 ):
     ssh_port = processes.start_ssh_server(
-        trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        trusted_keys=[warpgate_client_key.read_text()],
+        extra_config=extra_config,
     )
     wait_port(ssh_port)
 
@@ -315,3 +319,50 @@ class Test:
             )
 
             assert "root:x:0:0:root" in open(f + "/passwd").read()
+
+    def test_insecure_protos(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_rsa_pubkey,
+        shared_wg: WarpgateProcess,
+    ):
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_rsa_pubkey,
+            extra_config='''
+            PubkeyAcceptedKeyTypes=ssh-rsa
+            ''',
+        )
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            "echo", "123",
+            password="123",
+            stderr=subprocess.PIPE,
+        )
+
+        ssh_client.wait(timeout=timeout)
+        assert ssh_client.returncode != 0
+
+        ssh_target.options.actual_instance.allow_insecure_algos = True
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            api.update_target(ssh_target.id, sdk.TargetDataRequest(
+                name=ssh_target.name,
+                options=ssh_target.options,
+            ))
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            "echo", "123",
+            password="123",
+        )
+
+        stdout, _ = ssh_client.communicate(timeout=timeout)
+        assert b"123\n" == stdout
