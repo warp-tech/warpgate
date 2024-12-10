@@ -29,8 +29,7 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::keys::load_client_keys;
-use crate::ForwardedTcpIpParams;
+use crate::{load_all_usable_private_keys, ForwardedTcpIpParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -504,11 +503,14 @@ impl RemoteClient {
                         }
                         SSHTargetAuth::PublicKey(_) => {
                             #[allow(clippy::explicit_auto_deref)]
-                            let keys = load_client_keys(&*self.services.config.lock().await)?;
+                            let keys = load_all_usable_private_keys(&*self.services.config.lock().await, ssh_options.allow_insecure_algos.unwrap_or(false))?;
                             for key in keys.into_iter() {
                                 let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
                                 auth_result = session
-                                    .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
+                                    .authenticate_publickey(
+                                        ssh_options.username.clone(),
+                                        key
+                                    )
                                     .await?;
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
