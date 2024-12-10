@@ -47,7 +47,7 @@
     "otpauth": "^9.3.5",
     "qrcode": "^1.5.4",
     "sass": "~1.82",
-    "svelte": "^5.10.0",
+    "svelte": "^5.10.1",
     "svelte-check": "^4.1.1",
     "svelte-fa": "^4.0.3",
     "svelte-intersection-observer": "^1.0.0",

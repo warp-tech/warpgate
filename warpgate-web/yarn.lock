@@ -3349,10 +3349,10 @@ svelte-spa-router@^4.0.1:
   dependencies:
     regexparam "2.0.2"
 
-svelte@^5.10.0:
-  version "5.10.0"
-  resolved "https://registry.yarnpkg.com/svelte/-/svelte-5.10.0.tgz#820243da6b7e05ecb0bc74861674adcc0d16f15f"
-  integrity sha512-jGJFpB9amHLLQZBbAuQ6csH7WlTvGx4cO4wSSNcgGcx9vDGMTCZzTREf6/wKhVUQDoK+GapgvLQPZHa3e9MOAA==
+svelte@^5.10.1:
+  version "5.10.1"
+  resolved "https://registry.yarnpkg.com/svelte/-/svelte-5.10.1.tgz#51c931af68bf8e16c60f34653ca5ae717351b586"
+  integrity sha512-JOBw4VStdoP/Iw93vrzGAOUWdV4Gk8hCuprvTwjbdMZG3GyYxbLogR56XqrO2M7E6PifoPkwDphXu0s49R2wvw==
   dependencies:
     "@ampproject/remapping" "^2.3.0"
     "@jridgewell/sourcemap-codec" "^1.5.0"
