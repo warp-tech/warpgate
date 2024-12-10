@@ -60,7 +60,7 @@
     "ua-parser-js": "^1.0.39",
     "vite": "^5.4.11",
     "vite-plugin-checker": "^0.8.0",
-    "vite-tsconfig-paths": "^4.3.2"
+    "vite-tsconfig-paths": "^5.1.4"
   },
   "dependencies": {
     "@stylistic/eslint-plugin": "^2.12.0",
