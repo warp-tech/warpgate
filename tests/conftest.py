@@ -83,7 +83,7 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[]):
+    def start_ssh_server(self, trusted_keys=[], extra_config=''):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
@@ -105,6 +105,8 @@ class ProcessManager:
                 PermitRootLogin yes
                 HostKey /ssh-keys/id_ed25519
                 Subsystem	sftp	/usr/lib/ssh/sftp-server
+                LogLevel DEBUG3
+                {extra_config}
                 """
             )
         )
@@ -366,6 +368,11 @@ def shared_wg(processes: ProcessManager):
 @pytest.fixture(scope="session")
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / "ssh-keys/wg/client-ed25519.pub"
+
+
+@pytest.fixture(scope="session")
+def wg_c_rsa_pubkey():
+    return Path(os.getcwd()) / "ssh-keys/wg/client-rsa.pub"
 
 
 @pytest.fixture(scope="session")

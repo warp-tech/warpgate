@@ -98,7 +98,15 @@ pub fn load_client_keys(config: &WarpgateConfig) -> Result<Vec<KeyPair>, russh::
     keys.push(load_and_maybe_resave_ed25519_key(key_path)?);
 
     let key_path = path.join("client-rsa");
-    keys.push(load_secret_key(key_path, None)?);
+    let key = load_secret_key(key_path, None)?;
+
+    #[allow(clippy::unwrap_used)]
+    {
+        // unwrap only fails for non-RSA keys
+        keys.push(key.with_signature_hash(SignatureHash::SHA2_512).unwrap());
+        keys.push(key.with_signature_hash(SignatureHash::SHA2_256).unwrap());
+        keys.push(key.with_signature_hash(SignatureHash::SHA1).unwrap());
+    }
 
     Ok(keys)
 }

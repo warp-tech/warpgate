@@ -497,6 +497,11 @@ impl RemoteClient {
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             for key in keys.into_iter() {
+                                // Skip insecure RSA key signature algo
+                                if Preferred::default().key.iter().find(|x| x.0 == key.name()).is_none() && !ssh_options.allow_insecure_algos.unwrap_or(false) {
+                                    continue
+                                }
+
                                 let key_str = key.as_openssh();
                                 auth_result = session
                                     .authenticate_publickey(ssh_options.username.clone(), Arc::new(key))
