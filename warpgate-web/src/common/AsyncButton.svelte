@@ -32,6 +32,15 @@ async function _click () {
     if (!button) {
         return
     }
+
+    const parentForm = button.closest<HTMLFormElement>('form')
+    if (parentForm) {
+        parentForm.classList.add('was-validated')
+        if (!parentForm.checkValidity()) {
+            return
+        }
+    }
+
     lastWidth = button.offsetWidth
     st = State.Progress
     setTimeout(() => {

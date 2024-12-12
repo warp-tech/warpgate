@@ -56,7 +56,7 @@ async function update () {
 async function remove () {
     if (confirm(`Delete target ${target!.name}?`)) {
         await api.deleteTarget(target!)
-        replace('/config')
+        replace('/config/targets')
     }
 }
 
@@ -190,7 +190,7 @@ async function toggleRole (role: Role) {
             <Input
                 class="mb-0 me-2"
                 type="switch"
-                label="Allow insecure SSH algorithms (e.g. for older networks devices)"
+                label="Allow insecure SSH algorithms (e.g. for older network devices)"
                 bind:checked={target.options.allowInsecureAlgos} />
         </div>
 
@@ -268,6 +268,7 @@ async function toggleRole (role: Role) {
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
         click={update}
     >Update configuration</AsyncButton>

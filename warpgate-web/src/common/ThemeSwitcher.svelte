@@ -18,7 +18,7 @@
     }
 </script>
 
-<Button color="link" on:click={toggle} id="button" title="Switch theme">
+<Button color="link" on:click={toggle} id="button" title="Switch theme" class="pe-0">
     {#if $currentTheme === 'dark'}
     <Fa fw icon={faMoon} />
     {:else if $currentTheme === 'light'}

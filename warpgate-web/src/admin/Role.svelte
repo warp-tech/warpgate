@@ -38,7 +38,7 @@ async function update () {
 async function remove () {
     if (confirm(`Delete role ${role!.name}?`)) {
         await api.deleteRole(role!)
-        replace('/config')
+        replace('/config/roles')
     }
 }
 </script>
@@ -64,6 +64,7 @@ async function remove () {
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
         click={update}
     >Update</AsyncButton>

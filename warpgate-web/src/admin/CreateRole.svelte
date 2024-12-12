@@ -2,7 +2,7 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { FormGroup } from '@sveltestrap/sveltestrap'
+import { Form, FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
 import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
@@ -10,9 +10,6 @@ let error: string|null = $state(null)
 let name = $state('')
 
 async function create () {
-    if (!name) {
-        return
-    }
     try {
         const role = await api.createRole({
             roleDataRequest: {
@@ -36,10 +33,13 @@ async function create () {
     <h1>add a role</h1>
 </div>
 
-<FormGroup floating label="Name">
-    <input class="form-control" bind:value={name} required />
-</FormGroup>
+<Form>
+    <FormGroup floating label="Name">
+        <input class="form-control" bind:value={name} required />
+    </FormGroup>
 
-<AsyncButton
-    click={create}
->Create role</AsyncButton>
+    <AsyncButton
+        color="primary"
+        click={create}
+    >Create role</AsyncButton>
+</Form>

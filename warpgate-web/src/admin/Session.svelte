@@ -81,7 +81,7 @@
     <div class="page-summary-bar">
         <div>
             <h1>session</h1>
-            <div class="d-flex mt-1">
+            <div class="d-flex align-items-center mt-1">
                 <Tooltip delay="500" target="usernameBadge" animation>Authenticated user</Tooltip>
                 <Tooltip delay="500" target="targetBadge" animation>Selected target</Tooltip>
 

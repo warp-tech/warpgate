@@ -46,7 +46,7 @@
     async function remove () {
         if (confirm(`Delete user ${user!.username}?`)) {
             await api.deleteUser(user!)
-            replace('/config')
+            replace('/config/users')
         }
     }
 
@@ -114,6 +114,7 @@
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
         click={update}
     >Update</AsyncButton>

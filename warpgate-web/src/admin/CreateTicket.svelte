@@ -119,6 +119,7 @@ async function create () {
     </FormGroup>
 
     <AsyncButton
+    color="primary"
         click={create}
     >Create ticket</AsyncButton>
 </div>
