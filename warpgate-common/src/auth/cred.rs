@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use poem_openapi::Enum;
+use russh_keys::Algorithm;
 use serde::{Deserialize, Serialize};
 
 use crate::Secret;
@@ -23,7 +24,7 @@ pub enum AuthCredential {
     Otp(Secret<String>),
     Password(Secret<String>),
     PublicKey {
-        kind: String,
+        kind: Algorithm,
         public_key_bytes: Bytes,
     },
     Sso {

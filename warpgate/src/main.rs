@@ -71,11 +71,11 @@ pub(crate) enum Commands {
     ClientKeys,
     /// Run Warpgate
     Run {
-        /// An API token that automatically maps to the first admin user
-        #[clap(long)]
-        admin_token: Option<String>,
+        /// Enable an API token (passed via the `WARPGATE_ADMIN_TOKEN` env var) that automatically maps to the first admin user
+        #[clap(long, action=ArgAction::SetTrue)]
+        enable_admin_token: bool,
     },
-    /// Create a password hash for use in the config file
+    /// Perform basic config checks
     Check,
     /// Test the connection to a target host
     TestTarget {
@@ -95,8 +95,8 @@ async fn _main() -> Result<()> {
     init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
 
     match &cli.command {
-        Commands::Run { admin_token } => {
-            crate::commands::run::command(&cli, admin_token.clone()).await
+        Commands::Run { enable_admin_token } => {
+            crate::commands::run::command(&cli, *enable_admin_token).await
         }
         Commands::Check => crate::commands::check::command(&cli).await,
         Commands::TestTarget { target_name } => {

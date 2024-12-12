@@ -6,6 +6,7 @@ mod known_hosts_list;
 mod logs;
 mod otp_credentials;
 mod pagination;
+mod parameters;
 mod password_credentials;
 mod public_key_credentials;
 pub mod recordings_detail;
@@ -18,7 +19,6 @@ mod targets;
 mod tickets_detail;
 mod tickets_list;
 pub mod users;
-mod parameters;
 
 #[derive(SecurityScheme)]
 #[oai(ty = "api_key", key_name = "X-Warpgate-Token", key_in = "header")]
