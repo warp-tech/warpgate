@@ -75,7 +75,7 @@ pub(crate) enum Commands {
         #[clap(long, action=ArgAction::SetTrue)]
         enable_admin_token: bool,
     },
-    /// Create a password hash for use in the config file
+    /// Perform basic config checks
     Check,
     /// Test the connection to a target host
     TestTarget {
