@@ -1,22 +1,18 @@
 <script lang="ts">
-    import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
-    import Fa from "svelte-fa";
-import { link } from "svelte-spa-router";
+    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import Fa from 'svelte-fa'
+    import { link } from 'svelte-spa-router'
 
     interface Props {
         title: string
         description?: string
         href: string
-        // useLink?: boolean
-        // icon?: string
-        // children?: () => any
     }
 
     let {
         title,
         description,
         href,
-        // useLink = false,
     }: Props = $props()
 </script>
 
@@ -43,7 +39,7 @@ import { link } from "svelte-spa-router";
         display: flex;
         width: 100%;
         text-decoration: none;
-        padding: 1rem 2rem;
+        padding: 1rem 1.5rem;
         border-radius: var(--bs-border-radius);
         align-items: center;
 

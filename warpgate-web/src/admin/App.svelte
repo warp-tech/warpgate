@@ -8,6 +8,8 @@ import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
 import Brand from 'common/Brand.svelte'
+    import { Button } from '@sveltestrap/sveltestrap';
+    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte';
 
 async function init () {
     await reloadServerInfo()
@@ -72,6 +74,18 @@ const routes = {
     }),
 }
 </script>
+
+<Button color="primary">Primary</Button>
+<Button color="secondary">Secondary</Button>
+<Button color="success">Success</Button>
+<Button color="info">Info</Button>
+<Button color="warning">Warning</Button>
+
+<Badge color="primary">Primary</Badge>
+<Badge color="secondary">Secondary</Badge>
+<Badge color="success">Success</Badge>
+<Badge color="info">Info</Badge>
+<Badge color="warning">Warning</Badge>
 
 {#await init()}
     <DelayedSpinner />
