@@ -12,8 +12,7 @@ use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
-use russh::keys::key::{PublicKey, SignatureHash};
-use russh::keys::PublicKeyBase64;
+use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::{CryptoVec, MethodSet, Sig};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
@@ -765,7 +764,7 @@ impl ServerSession {
             RCEvent::HostKeyReceived(key) => {
                 self.emit_service_message(&format!(
                     "Host key ({}): {}",
-                    key.name(),
+                    key.algorithm(),
                     key.public_key_base64()
                 ))
                 .await?;
@@ -864,7 +863,7 @@ impl ServerSession {
 
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
-            key.name()
+            key.algorithm()
         ))
         .await?;
         self.emit_service_message("Trust this key? (y/n)").await?;
@@ -1179,47 +1178,24 @@ impl ServerSession {
             .map_err(anyhow::Error::from)
     }
 
-    fn _get_public_keys_from_of(&self, key: PublicKey) -> Vec<PublicKey> {
-        let mut keys = vec![key.clone()];
-        // Try all supported hash algorithms
-        if let PublicKey::RSA { key, hash } = &key {
-            for h in [
-                SignatureHash::SHA1,
-                SignatureHash::SHA2_256,
-                SignatureHash::SHA2_512,
-            ] {
-                if &h != hash {
-                    keys.push(PublicKey::RSA {
-                        key: key.clone(),
-                        hash: h,
-                    });
-                }
-            }
-        }
-        keys
-    }
-
     async fn _auth_publickey_offer(
         &mut self,
         ssh_username: Secret<String>,
         key: PublicKey,
     ) -> russh::server::Auth {
-        let keys = self._get_public_keys_from_of(key);
         let selector: AuthSelector = ssh_username.expose_secret().into();
 
-        for key in keys {
-            if let Ok(true) = self
-                .try_validate_public_key_offer(
-                    &selector,
-                    Some(AuthCredential::PublicKey {
-                        kind: key.name().to_string(),
-                        public_key_bytes: Bytes::from(key.public_key_bytes()),
-                    }),
-                )
-                .await
-            {
-                return russh::server::Auth::Accept;
-            }
+        if let Ok(true) = self
+            .try_validate_public_key_offer(
+                &selector,
+                Some(AuthCredential::PublicKey {
+                    kind: key.algorithm(),
+                    public_key_bytes: Bytes::from(key.public_key_bytes()),
+                }),
+            )
+            .await
+        {
+            return russh::server::Auth::Accept;
         }
 
         let selector: AuthSelector = ssh_username.expose_secret().into();
@@ -1246,23 +1222,15 @@ impl ServerSession {
             key.public_key_base64()
         );
 
-        let keys = self._get_public_keys_from_of(key);
-
-        let mut result = Ok(AuthResult::Rejected);
-        for key in keys {
-            result = self
-                .try_auth_lazy(
-                    &selector,
-                    Some(AuthCredential::PublicKey {
-                        kind: key.name().to_string(),
-                        public_key_bytes: Bytes::from(key.public_key_bytes()),
-                    }),
-                )
-                .await;
-            if let Ok(AuthResult::Accepted { .. }) = result {
-                break;
-            }
-        }
+        let result = self
+            .try_auth_lazy(
+                &selector,
+                Some(AuthCredential::PublicKey {
+                    kind: key.algorithm(),
+                    public_key_bytes: Bytes::from(key.public_key_bytes()),
+                }),
+            )
+            .await;
 
         match result {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,

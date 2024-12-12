@@ -3,6 +3,7 @@
 pub mod KnownHost;
 pub mod LogEntry;
 pub mod OtpCredential;
+pub mod Parameters;
 pub mod PasswordCredential;
 pub mod PublicKeyCredential;
 pub mod Recording;
@@ -14,4 +15,3 @@ pub mod TargetRoleAssignment;
 pub mod Ticket;
 pub mod User;
 pub mod UserRoleAssignment;
-pub mod Parameters;
