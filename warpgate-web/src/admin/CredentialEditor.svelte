@@ -253,7 +253,7 @@
         {/if}
         {#if credential.kind === 'PublicKey'}
             <Fa fw icon={faKey} />
-            <span class="type">Public key</span>
+            <span class="type">{credential.opensshPublicKeyTitle}</span>
             <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
         {/if}
         {#if credential.kind === 'Totp'}
