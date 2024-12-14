@@ -158,6 +158,7 @@ impl DetailApi {
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
+            openssh_public_key_title: Set(body.openssh_public_key_title.clone()),
             ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }
         .update(&*db)

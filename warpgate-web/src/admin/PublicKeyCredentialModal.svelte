@@ -4,7 +4,6 @@
         Form,
         FormGroup,
         Input,
-        Label,
         Modal,
         ModalBody,
         ModalFooter,
@@ -49,6 +48,7 @@
 
 <Modal toggle={_cancel} isOpen={isOpen} on:open={() => {
     if (instance) {
+        opensshPublicKeyTitle = instance.opensshPublicKeyTitle
         opensshPublicKey = instance.opensshPublicKey
     }
     field?.focus()
