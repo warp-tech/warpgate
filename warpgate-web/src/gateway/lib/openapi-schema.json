@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "servers": [
     {
@@ -799,9 +799,13 @@
       "NewPublicKeyCredential": {
         "type": "object",
         "required": [
+          "openssh_public_key_title",
           "openssh_public_key"
         ],
         "properties": {
+          "openssh_public_key_title": {
+            "type": "string"
+          },
           "openssh_public_key": {
             "type": "string"
           }

@@ -184,7 +184,9 @@
         editingSsoCredentialInstance = null
     }
 
-    async function savePublicKeyCredential (opensshPublicKey: string) {
+    async function savePublicKeyCredential (opensshPublicKeyTitle: string, opensshPublicKey: string) {
+        // TODO: If it is an existing key, update it
+        //      Otherwise, create a new one
         if (editingPublicKeyCredentialInstance) {
             editingPublicKeyCredentialInstance.opensshPublicKey = opensshPublicKey
             await api.updatePublicKeyCredential({
@@ -196,6 +198,7 @@
             const credential = await api.createPublicKeyCredential({
                 userId,
                 newPublicKeyCredential: {
+                    opensshPublicKeyTitle,
                     opensshPublicKey,
                 },
             })

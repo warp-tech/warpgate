@@ -72,6 +72,7 @@ enum CredentialsStateResponse {
 
 #[derive(Object)]
 struct NewPublicKeyCredential {
+    openssh_public_key_title: String,
     openssh_public_key: String,
 }
 
@@ -288,6 +289,7 @@ impl Api {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
+            openssh_public_key_title: Set(body.openssh_public_key_title.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }
         .insert(&*db)

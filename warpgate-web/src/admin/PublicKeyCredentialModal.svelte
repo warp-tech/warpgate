@@ -4,6 +4,7 @@
         Form,
         FormGroup,
         Input,
+        Label,
         Modal,
         ModalBody,
         ModalFooter,
@@ -15,7 +16,7 @@
     interface Props {
         isOpen: boolean
         instance?: ExistingPublicKeyCredential
-        save: (opensshPublicKey: string) => void
+        save: (opensshPublicKeyTitle: string, opensshPublicKey: string) => void
     }
 
     let {
@@ -25,11 +26,12 @@
     }: Props = $props()
 
     let field: HTMLInputElement|undefined = $state()
+    let opensshPublicKeyTitle: string = $state('')
     let opensshPublicKey: string = $state('')
     let validated = $state(false)
 
     function _save () {
-        if (!opensshPublicKey) {
+        if (!opensshPublicKey || !opensshPublicKeyTitle) {
             return
         }
         if (opensshPublicKey.includes(' ')) {
@@ -37,7 +39,7 @@
             opensshPublicKey = `${parts[0]} ${parts[1]}`
         }
         isOpen = false
-        save(opensshPublicKey)
+        save(opensshPublicKeyTitle, opensshPublicKey)
     }
 
     function _cancel () {
@@ -56,9 +58,16 @@
         e.preventDefault()
     }}>
         <ModalHeader toggle={_cancel}>
-            Public key
+            Add new SSH Public Key
         </ModalHeader>
         <ModalBody>
+            <FormGroup floating label="Title">
+                <Input
+                    bind:inner={field}
+                    type="text"
+                    required
+                    bind:value={opensshPublicKeyTitle} />
+            </FormGroup>
             <FormGroup floating label="Public key in OpenSSH format">
                 <Input
                     style="font-family: monospace; height: 15rem"
