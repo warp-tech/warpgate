@@ -18,13 +18,13 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct ExistingPublicKeyCredential {
     id: Uuid,
-    openssh_public_key_title: String,
+    label: String,
     openssh_public_key: String,
 }
 
 #[derive(Object)]
 struct NewPublicKeyCredential {
-    openssh_public_key_title: String,
+    label: String,
     openssh_public_key: String,
 }
 
@@ -32,7 +32,7 @@ impl From<PublicKeyCredential::Model> for ExistingPublicKeyCredential {
     fn from(credential: PublicKeyCredential::Model) -> Self {
         Self {
             id: credential.id,
-            openssh_public_key_title: credential.openssh_public_key_title,
+            label: credential.label,
             openssh_public_key: credential.openssh_public_key,
         }
     }
@@ -115,7 +115,7 @@ impl ListApi {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            openssh_public_key_title: Set(body.openssh_public_key_title.clone()),
+            label: Set(body.label.clone()),
             ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
         }
         .insert(&*db)
@@ -158,7 +158,7 @@ impl DetailApi {
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
-            openssh_public_key_title: Set(body.openssh_public_key_title.clone()),
+            label: Set(body.label.clone()),
             ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }
         .update(&*db)

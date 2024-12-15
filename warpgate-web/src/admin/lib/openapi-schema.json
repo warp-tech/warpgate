@@ -2154,7 +2154,7 @@
         "type": "object",
         "required": [
           "id",
-          "openssh_public_key_title",
+          "label",
           "openssh_public_key"
         ],
         "properties": {
@@ -2162,7 +2162,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "openssh_public_key_title": {
+          "label": {
             "type": "string"
           },
           "openssh_public_key": {
@@ -2276,11 +2276,11 @@
       "NewPublicKeyCredential": {
         "type": "object",
         "required": [
-          "openssh_public_key_title",
+          "label",
           "openssh_public_key"
         ],
         "properties": {
-          "openssh_public_key_title": {
+          "label": {
             "type": "string"
           },
           "openssh_public_key": {

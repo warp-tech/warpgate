@@ -11,7 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
-    pub openssh_public_key_title: String,
+    pub label: String,
     pub openssh_public_key: String,
 }
 

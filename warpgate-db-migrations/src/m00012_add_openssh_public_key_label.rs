@@ -4,7 +4,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00012_add_openssh_public_key_title"
+        "m00012_add_openssh_public_key_label"
     }
 }
 
@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(public_key_credential::Entity)
                     .add_column(
-                        ColumnDef::new(Alias::new("openssh_public_key_title"))
+                        ColumnDef::new(Alias::new("label"))
                             .string()
                             .not_null()
                     ).to_owned()
@@ -31,7 +31,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(public_key_credential::Entity)
-                    .drop_column(Alias::new("openssh_public_key_title"))
+                    .drop_column(Alias::new("label"))
                     .to_owned(),
             )
             .await

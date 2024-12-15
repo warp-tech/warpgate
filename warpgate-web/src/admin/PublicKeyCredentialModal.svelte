@@ -15,7 +15,7 @@
     interface Props {
         isOpen: boolean
         instance?: ExistingPublicKeyCredential
-        save: (opensshPublicKeyTitle: string, opensshPublicKey: string) => void
+        save: (label: string, opensshPublicKey: string) => void
     }
 
     let {
@@ -25,12 +25,12 @@
     }: Props = $props()
 
     let field: HTMLInputElement|undefined = $state()
-    let opensshPublicKeyTitle: string = $state('')
+    let label: string = $state('')
     let opensshPublicKey: string = $state('')
     let validated = $state(false)
 
     function _save () {
-        if (!opensshPublicKey || !opensshPublicKeyTitle) {
+        if (!opensshPublicKey || !label) {
             return
         }
         if (opensshPublicKey.includes(' ')) {
@@ -38,7 +38,7 @@
             opensshPublicKey = `${parts[0]} ${parts[1]}`
         }
         isOpen = false
-        save(opensshPublicKeyTitle, opensshPublicKey)
+        save(label, opensshPublicKey)
     }
 
     function _cancel () {
@@ -48,7 +48,7 @@
 
 <Modal toggle={_cancel} isOpen={isOpen} on:open={() => {
     if (instance) {
-        opensshPublicKeyTitle = instance.opensshPublicKeyTitle
+        label = instance.label
         opensshPublicKey = instance.opensshPublicKey
     }
     field?.focus()
@@ -58,15 +58,15 @@
         e.preventDefault()
     }}>
         <ModalHeader toggle={_cancel}>
-            Add new SSH Public Key
+            Add an SSH public key
         </ModalHeader>
         <ModalBody>
-            <FormGroup floating label="Title">
+            <FormGroup floating label="Label">
                 <Input
                     bind:inner={field}
                     type="text"
                     required
-                    bind:value={opensshPublicKeyTitle} />
+                    bind:value={label} />
             </FormGroup>
             <FormGroup floating label="Public key in OpenSSH format">
                 <Input
