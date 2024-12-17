@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api } from 'gateway/lib/api'
 import { onMount } from 'svelte'
-import logo from '../../public/favicon.svg'
+import logo from '../../public/assets/favicon.svg'
 
 let ready = false
 let menuVisible = false

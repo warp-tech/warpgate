@@ -1,7 +1,5 @@
 import '@fontsource/work-sans'
 import './fonts.css'
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import _ from '../../public/favicon.svg?raw' // include it in the dist
 
 import { get, writable } from 'svelte/store'
 
