@@ -3,7 +3,7 @@
     import { type Target, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
-    import { TargetKind } from 'gateway/lib/api';
+    import { TargetKind } from 'gateway/lib/api'
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({

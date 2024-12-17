@@ -8,8 +8,6 @@ import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
 import Brand from 'common/Brand.svelte'
-    import { Button } from '@sveltestrap/sveltestrap';
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte';
 
 async function init () {
     await reloadServerInfo()

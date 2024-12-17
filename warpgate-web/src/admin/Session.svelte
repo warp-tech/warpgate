@@ -12,9 +12,9 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Fa from 'svelte-fa'
     import { faUser } from '@fortawesome/free-regular-svg-icons'
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte';
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons';
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte';
+    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 
     interface Props {
         params: { id: string }
