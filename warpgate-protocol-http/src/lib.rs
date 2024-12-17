@@ -103,6 +103,10 @@ impl ProtocolServer for HTTPProtocolServer {
                     .nest("/api/swagger", ui)
                     .nest("/api", api_service.with(cache_bust()))
                     .nest("/api/openapi.json", spec)
+                    .nest(
+                        "/assets/favicon.svg",
+                        EmbeddedFileEndpoint::<Assets>::new("favicon.svg").with(cache_static()),
+                    )
                     .nest_no_strip(
                         "/assets",
                         EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),

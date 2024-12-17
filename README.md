@@ -1,7 +1,7 @@
 <br/>
 
 <p align="center">
-<img src="warpgate-web/public/assets/logo.svg" width="100" />
+<img src="warpgate-web/public/assets/brand.svg" width="100" />
 </p>
 <br/>
 <p align="center">

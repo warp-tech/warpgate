@@ -148,7 +148,7 @@
         <span class="ms-auto"></span>
         <Button size="sm" color="link" on:click={() => {
             creatingPublicKeyCredential = true
-        }}>Add new</Button>
+        }}>Add key</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">

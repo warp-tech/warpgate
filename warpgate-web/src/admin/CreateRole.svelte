@@ -33,13 +33,15 @@ async function create () {
     <h1>add a role</h1>
 </div>
 
-<Form>
-    <FormGroup floating label="Name">
-        <input class="form-control" bind:value={name} required />
-    </FormGroup>
+<div class="narrow-page">
+    <Form>
+        <FormGroup floating label="Name">
+            <input class="form-control" bind:value={name} required />
+        </FormGroup>
 
-    <AsyncButton
-        color="primary"
-        click={create}
-    >Create role</AsyncButton>
-</Form>
+        <AsyncButton
+            color="primary"
+            click={create}
+        >Create role</AsyncButton>
+    </Form>
+</div>

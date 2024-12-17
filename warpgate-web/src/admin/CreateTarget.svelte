@@ -81,35 +81,37 @@
     <h1>add a target</h1>
 </div>
 
-<Form>
-    <!-- svelte-ignore a11y_label_has_associated_control -->
-    <label class="mb-2">Type</label>
-    <ButtonGroup class="w-100 mb-3">
-        <Button
-            active={type === TargetKind.Ssh}
-            on:click={() => type = TargetKind.Ssh}
-        >SSH</Button>
-        <Button
-            active={type === TargetKind.Http}
-            on:click={() => type = TargetKind.Http}
-        >HTTP</Button>
-        <Button
-            active={type === TargetKind.MySql}
-            on:click={() => type = TargetKind.MySql}
-        >MySQL</Button>
-        <Button
-            active={type === TargetKind.Postgres}
-            on:click={() => type = TargetKind.Postgres}
-        >PostgreSQL</Button>
-    </ButtonGroup>
+<div class="narrow-page">
+    <Form>
+        <!-- svelte-ignore a11y_label_has_associated_control -->
+        <label class="mb-2">Type</label>
+        <ButtonGroup class="w-100 mb-3">
+            <Button
+                active={type === TargetKind.Ssh}
+                on:click={() => type = TargetKind.Ssh}
+            >SSH</Button>
+            <Button
+                active={type === TargetKind.Http}
+                on:click={() => type = TargetKind.Http}
+            >HTTP</Button>
+            <Button
+                active={type === TargetKind.MySql}
+                on:click={() => type = TargetKind.MySql}
+            >MySQL</Button>
+            <Button
+                active={type === TargetKind.Postgres}
+                on:click={() => type = TargetKind.Postgres}
+            >PostgreSQL</Button>
+        </ButtonGroup>
 
-    <FormGroup floating label="Name">
-        <input class="form-control" required bind:value={name} />
-    </FormGroup>
+        <FormGroup floating label="Name">
+            <input class="form-control" required bind:value={name} />
+        </FormGroup>
 
-    <AsyncButton
-    color="primary"
+        <AsyncButton
+        color="primary"
 
-        click={create}
-    >Create target</AsyncButton>
-</Form>
+            click={create}
+        >Create target</AsyncButton>
+    </Form>
+</div>

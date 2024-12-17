@@ -19,17 +19,30 @@ $green:   #417106 !default;
 $teal:    #20c997 !default;
 $cyan:    #0e6b7e !default;
 
+// $primary: $blue;
 $secondary: #506579;
-
-$form-check-input-border: 2px solid rgba(#000, .25);
 
 $btn-disabled-color: #969696;
 
 
+$form-switch-color: $secondary;
+// $form-check-color: $primary;
+$form-check-input-border: 2px solid rgba(#000, .25);
+
 @import "bootstrap/scss/variables";
 @import "./vars.common.scss";
+
+$form-check-color: $primary;
 
 $text-muted: $gray-500;
 
 $link-underline-color: rgba($body-color, 0.25);
 $link-hover-underline-color: $body-color;
+
+
+$form-check-input-width: 1.3em;
+$form-switch-width: 2.5em;
+$form-switch-padding-start:       3em;
+
+$form-check-input-checked-border-color:   tint-color($form-check-color, $btn-active-border-tint-amount);
+$form-check-input-checked-bg-color:       tint-color($form-check-color, $btn-active-bg-tint-amount);

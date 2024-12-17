@@ -80,7 +80,7 @@ init()
         </main>
 
         <footer class="mt-5">
-            <span class="me-auto">
+            <span class="me-auto ms-3">
                 v{$serverInfo?.version}
             </span>
             <ThemeSwitcher />

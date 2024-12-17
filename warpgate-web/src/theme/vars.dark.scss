@@ -27,15 +27,12 @@ $info: $blue;
 
 $component-active-bg: $primary;
 
-$input-bg: #ffffff08;
+$input-bg: #1c1c24;
 $input-border-color: #ced4da40;
 $input-color: #ccc;
-$input-focus-bg: #ffffff08;
+$input-focus-bg: #1b1b22;
 $input-focus-border-color: tint-color($component-active-bg, 25%) ;
 $input-disabled-bg: $input-bg;
-
-$form-check-input-border: 2px solid $input-border-color;
-$form-switch-color: $input-color;
 
 $input-btn-focus-color-opacity: .25;
 $input-btn-border-width: 2px;
@@ -68,8 +65,21 @@ $alert-color-scale: 0%;
 
 $code-color: #84f1fe;
 
+$form-check-input-border: 2px solid $input-border-color;
+$form-switch-color: $secondary;
+$form-check-color: $primary;
+
 @import "bootstrap/scss/variables";
 @import "./vars.common.scss";
 
 $link-underline-color: rgba($link-color, .5);
 $link-hover-underline-color: rgba($link-hover-color, .75);
+
+
+
+$form-check-input-width: 1.3em;
+$form-switch-width: 2.5em;
+$form-switch-padding-start:       3em;
+
+$form-check-input-checked-border-color:   shade-color($form-check-color, $btn-active-border-shade-amount);
+$form-check-input-checked-bg-color:       shade-color($form-check-color, $btn-active-bg-shade-amount);

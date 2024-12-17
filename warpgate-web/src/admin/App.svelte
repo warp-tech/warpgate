@@ -96,7 +96,7 @@ const routes = {
         </main>
 
         <footer class="mt-5">
-            <span class="me-auto">
+            <span class="me-auto ms-3">
                 v{$serverInfo?.version}
             </span>
             <ThemeSwitcher />
@@ -128,7 +128,7 @@ const routes = {
     header {
         display: flex;
         align-items: center;
-        padding: 10px 0;
+        padding: 7px 0;
         margin: 10px 0 20px;
 
         a {
