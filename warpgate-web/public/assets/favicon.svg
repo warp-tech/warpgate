@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24mm"
+   height="24mm"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg914"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs911" />
+  <g
+     id="layer1">
+    <path
+       style="fill:#14141c;fill-opacity:1;fill-rule:evenodd;stroke:#311a1a;stroke-width:1.41432;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:0;paint-order:markers fill stroke"
+       id="rect1026"
+       width="22.627413"
+       height="22.529339"
+       x="0.71679527"
+       y="0.74948686"
+       d="M 4.9501286,0.74948686 H 19.110875 A 4.2333333,4.2333333 45 0 1 23.344208,4.9828202 V 19.045492 a 4.2333333,4.2333333 135 0 1 -4.233333,4.233334 l -14.1607464,0 A 4.2333333,4.2333333 45 0 1 0.71679527,19.045492 V 4.9828202 A 4.2333333,4.2333333 135 0 1 4.9501286,0.74948686 Z" />
+    <g
+       id="g2449"
+       transform="matrix(1.1046419,0,0,1.1046419,-1.0038918,1.1276169)">
+      <path
+         d="M 14.272807,6.1286052 11.233242,13.558105 H 9.0424929 L 8.5829469,8.6686052 6.6294929,13.558105 h -2.19075 L 3.6577289,6.1286052 h 1.93675 l 0.266153,5.4080798 2.12568,-5.4080798 h 1.9896666 l 0.4672355,5.4080798 1.882264,-5.4080798 z"
+         style="font-weight:bold;font-size:40px;line-height:1.25;font-family:Poppins;-inkscape-font-specification:'Poppins Bold';white-space:pre;fill:#bfcce7;fill-opacity:1;stroke-width:0.264583"
+         id="path11089" />
+      <path
+         d="m 17.634794,12.245775 h -2.772833 l -0.536128,1.31233 h -1.894417 l 3.206895,-7.4294998 h 2.0955 l 2.169438,7.4294998 h -1.915583 z m -0.368131,-1.397 -0.730842,-2.7199198 -1.100074,2.7199198 z"
+         style="font-weight:bold;font-size:40px;line-height:1.25;font-family:Poppins;-inkscape-font-specification:'Poppins Bold';white-space:pre;fill:#bfcce7;fill-opacity:1;stroke-width:0.264583"
+         id="path11091" />
+    </g>
+  </g>
+</svg>

@@ -5,7 +5,7 @@ import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { replace } from 'svelte-spa-router'
 import { FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { id: string };
@@ -38,7 +38,7 @@ async function update () {
 async function remove () {
     if (confirm(`Delete role ${role!.name}?`)) {
         await api.deleteRole(role!)
-        replace('/config')
+        replace('/config/roles')
     }
 }
 </script>
@@ -49,7 +49,7 @@ async function remove () {
     <div class="page-summary-bar">
         <div>
             <h1>{role!.name}</h1>
-            <div class="text-muted">Role</div>
+            <div class="text-muted">role</div>
         </div>
     </div>
 
@@ -64,14 +64,13 @@ async function remove () {
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
-        outline
         click={update}
     >Update</AsyncButton>
 
     <AsyncButton
         class="ms-2"
-        outline
         color="danger"
         click={remove}
     >Remove</AsyncButton>

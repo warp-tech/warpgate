@@ -4,7 +4,7 @@
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
-    import Alert from './Alert.svelte'
+    import Alert from './sveltestrap-s5-ports/Alert.svelte'
 
     interface Props {
         targetName?: string;

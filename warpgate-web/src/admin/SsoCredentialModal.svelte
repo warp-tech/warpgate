@@ -9,10 +9,10 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingSsoCredential } from './lib/api'
     import { api } from 'gateway/lib/api'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
     interface Props {
         isOpen: boolean
@@ -88,13 +88,11 @@
                 <Button
                     type="submit"
                     class="ms-auto"
-                    outline
                     on:click={() => validated = true}
                 >Save</Button>
 
                 <Button
                     class="ms-2"
-                    outline
                     color="danger"
                     on:click={_cancel}
                 >Cancel</Button>

@@ -5,9 +5,9 @@ import Router, { link } from 'svelte-spa-router'
 import active from 'svelte-spa-router/active'
 import { wrap } from 'svelte-spa-router/wrap'
 import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-import Logo from 'common/Logo.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import AuthBar from 'common/AuthBar.svelte'
+import Brand from 'common/Brand.svelte'
 
 async function init () {
     await reloadServerInfo()
@@ -24,15 +24,6 @@ const routes = {
     }),
     '/recordings/:id': wrap({
         asyncComponent: () => import('./Recording.svelte') as any,
-    }),
-    '/tickets': wrap({
-        asyncComponent: () => import('./Tickets.svelte') as any,
-    }),
-    '/tickets/create': wrap({
-        asyncComponent: () => import('./CreateTicket.svelte') as any,
-    }),
-    '/config': wrap({
-        asyncComponent: () => import('./Config.svelte') as any,
     }),
     '/targets/create': wrap({
         asyncComponent: () => import('./CreateTarget.svelte') as any,
@@ -52,14 +43,32 @@ const routes = {
     '/users/:id': wrap({
         asyncComponent: () => import('./User.svelte') as any,
     }),
-    '/ssh': wrap({
-        asyncComponent: () => import('./SSH.svelte') as any,
-    }),
     '/log': wrap({
         asyncComponent: () => import('./Log.svelte') as any,
     }),
-    '/parameters': wrap({
-        asyncComponent: () => import('./Parameters.svelte') as any,
+    '/config': wrap({
+        asyncComponent: () => import('./config/Config.svelte') as any,
+    }),
+    '/config/parameters': wrap({
+        asyncComponent: () => import('./config/Parameters.svelte') as any,
+    }),
+    '/config/users': wrap({
+        asyncComponent: () => import('./config/Users.svelte') as any,
+    }),
+    '/config/roles': wrap({
+        asyncComponent: () => import('./config/Roles.svelte') as any,
+    }),
+    '/config/targets': wrap({
+        asyncComponent: () => import('./config/Targets.svelte') as any,
+    }),
+    '/config/ssh': wrap({
+        asyncComponent: () => import('./config/SSHKeys.svelte') as any,
+    }),
+    '/config/tickets': wrap({
+        asyncComponent: () => import('./config/Tickets.svelte') as any,
+    }),
+    '/config/tickets/create': wrap({
+        asyncComponent: () => import('./CreateTicket.svelte') as any,
     }),
 }
 </script>
@@ -69,18 +78,15 @@ const routes = {
 {:then}
     <div class="app container">
         <header>
-            <a href="/@warpgate" class="d-flex">
-                <div class="logo">
-                    <Logo />
-                </div>
+            <a href="/@warpgate" class="d-flex logo-link me-4">
+                <Brand />
             </a>
             {#if $serverInfo?.username}
                 <a use:link use:active href="/">Sessions</a>
                 <a use:link use:active href="/config">Config</a>
-                <a use:link use:active href="/tickets">Tickets</a>
-                <a use:link use:active href="/ssh">SSH</a>
                 <a use:link use:active href="/log">Log</a>
             {/if}
+            <span class="ms-3"></span>
             <AuthBar />
         </header>
         <main>
@@ -88,7 +94,7 @@ const routes = {
         </main>
 
         <footer class="mt-5">
-            <span class="me-auto">
+            <span class="me-auto ms-3">
                 v{$serverInfo?.version}
             </span>
             <ThemeSwitcher />
@@ -97,16 +103,16 @@ const routes = {
 {/await}
 
 <style lang="scss">
+    @media (max-width: 767px) {
+        .logo-link {
+            display: none !important;
+        }
+    }
+
     .app {
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-    }
-
-    .logo {
-        width: 40px;
-        padding-top: 2px;
-        display: flex;
     }
 
     header, footer {
@@ -120,15 +126,12 @@ const routes = {
     header {
         display: flex;
         align-items: center;
-        padding: 10px 0;
+        padding: 7px 0;
         margin: 10px 0 20px;
 
-        a, .logo {
+        a {
             font-size: 1.5rem;
-        }
-
-        a:not(:first-child) {
-            margin-left: 15px;
+            margin-right: 15px;
         }
     }
 </style>

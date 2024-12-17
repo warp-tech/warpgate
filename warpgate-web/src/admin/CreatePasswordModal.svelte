@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 
     interface Props {
         isOpen: boolean
@@ -48,7 +48,7 @@
             Password
         </ModalHeader>
         <ModalBody>
-            <FormGroup floating class="mt-3" label="Enter a new password">
+            <FormGroup floating label="Enter a new password">
                 <Input
                     bind:inner={field}
                     type="password"
@@ -61,13 +61,11 @@
             <div class="d-flex">
                 <Button
                     class="ms-auto"
-                    outline
                     on:click={() => validated = true}
                 >Create</Button>
 
                 <Button
                     class="ms-2"
-                    outline
                     color="danger"
                     on:click={_cancel}
                 >Cancel</Button>

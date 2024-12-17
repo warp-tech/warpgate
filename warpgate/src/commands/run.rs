@@ -27,7 +27,14 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         })
     });
 
-    let config = load_config(&cli.config, true)?;
+    let config = match load_config(&cli.config, true) {
+        Ok(config) => config,
+        Err(error) => {
+            error!(?error, "Failed to load config file");
+            std::process::exit(1);
+        }
+    };
+
     let services = Services::new(config.clone(), admin_token).await?;
 
     install_database_logger(services.db.clone());

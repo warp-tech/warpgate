@@ -18,6 +18,7 @@
     "openapi": "yarn run openapi:schema:admin && yarn run openapi:schema:gateway && yarn run openapi:client:admin && yarn run openapi:client:gateway"
   },
   "devDependencies": {
+    "@fontsource/poppins": "^5.1.0",
     "@fontsource/work-sans": "^4.5.12",
     "@fortawesome/free-brands-svg-icons": "^6.7.1",
     "@fortawesome/free-regular-svg-icons": "^6.7.1",
@@ -46,7 +47,7 @@
     "format-duration": "^3.0.2",
     "otpauth": "^9.3.5",
     "qrcode": "^1.5.4",
-    "sass": "~1.82",
+    "sass": "1.78",
     "svelte": "^5.11.0",
     "svelte-check": "^4.1.1",
     "svelte-fa": "^4.0.3",

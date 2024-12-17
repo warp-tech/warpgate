@@ -1,6 +1,6 @@
 <script lang="ts">
 import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 import CopyButton from 'common/CopyButton.svelte'
 import { stringifyError } from 'common/errors'
 

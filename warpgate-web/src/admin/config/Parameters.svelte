@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Input } from '@sveltestrap/sveltestrap'
     import { api, type ParameterValues } from 'admin/lib/api'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
 
@@ -19,7 +19,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Global parameters</h1>
+    <h1>global parameters</h1>
 </div>
 
 {#await load()}

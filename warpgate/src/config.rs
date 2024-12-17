@@ -10,10 +10,6 @@ use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
-    if secure {
-        secure_file(path).context("Could not secure config")?;
-    }
-
     let mut store: serde_yaml::Value = Config::builder()
         .add_source(File::from(path))
         .add_source(Environment::with_prefix("WARPGATE"))
@@ -21,6 +17,10 @@ pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
         .context("Could not load config")?
         .try_deserialize()
         .context("Could not parse YAML")?;
+
+    if secure {
+        secure_file(path).context("Could not secure config")?;
+    }
 
     check_and_migrate_config(&mut store);
 

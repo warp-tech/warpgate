@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/ModalHeader.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingPublicKeyCredential } from './lib/api'
 
     interface Props {
@@ -74,13 +74,11 @@
                 <Button
                     type="submit"
                     class="ms-auto"
-                    outline
                     on:click={() => validated = true}
                 >Save</Button>
 
                 <Button
                     class="ms-2"
-                    outline
                     color="danger"
                     on:click={_cancel}
                 >Cancel</Button>

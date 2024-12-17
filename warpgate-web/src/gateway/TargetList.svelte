@@ -8,7 +8,7 @@ import Fa from 'svelte-fa'
 import { Modal, ModalBody } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
-import ModalHeader from 'common/ModalHeader.svelte'
+import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
