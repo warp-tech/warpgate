@@ -2,17 +2,14 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { FormGroup } from '@sveltestrap/sveltestrap'
+import { Form, FormGroup } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let username = $state('')
 
 async function create () {
-    if (!username) {
-        return
-    }
     try {
         const user = await api.createUser({
             createUserRequest: {
@@ -33,14 +30,17 @@ async function create () {
 
 
 <div class="page-summary-bar">
-    <h1>Add a user</h1>
+    <h1>add a user</h1>
 </div>
+<div class="narrow-page">
+    <Form>
+        <FormGroup floating label="Username">
+            <input class="form-control" required bind:value={username} />
+        </FormGroup>
 
-<FormGroup floating label="Username">
-    <input class="form-control" bind:value={username} />
-</FormGroup>
-
-<AsyncButton
-    outline
-    click={create}
->Create user</AsyncButton>
+        <AsyncButton
+        color="primary"
+            click={create}
+        >Create user</AsyncButton>
+    </Form>
+</div>

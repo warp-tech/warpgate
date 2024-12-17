@@ -1,7 +1,7 @@
 <script lang="ts">
 import { api } from 'gateway/lib/api'
 import { onMount } from 'svelte'
-import logo from '../../public/assets/logo.svg'
+import logo from '../../public/assets/favicon.svg'
 
 let ready = false
 let menuVisible = false
@@ -67,8 +67,10 @@ async function logout () {
     class:wg-hidden={!ready}
     style="left: {position.x * 100}%; top: {position.y * 100}%"
 >
-    <button
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <img
         class="menu-toggle"
+        src={logo} alt="Warpgate"
         on:mouseup|stopPropagation|preventDefault={() => {
             if (!dragging) {
                 menuVisible = !menuVisible
@@ -76,15 +78,13 @@ async function logout () {
                 stopDragging()
             }
         }}
-        on:mousemove={e => {
+        on:mousedown|preventDefault
+        on:mousemove|preventDefault={e => {
             if (e.buttons && !dragging) {
                 startDragging(e)
             }
         }}
     >
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <img class="logo" src={logo} alt="Warpgate" on:mousedown|preventDefault />
-    </button>
 
     {#if menuVisible}
         <div class="menu">
@@ -103,21 +103,20 @@ async function logout () {
 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
 
-        &.wg-hidden button {
+        &.wg-hidden > img.menu-toggle {
             opacity: 0;
         }
 
-        > button.menu-toggle {
+        > img.menu-toggle {
             transition: 0.5s ease-out opacity;
             opacity: 1;
+            cursor: pointer;
 
             width: 40px;
             height: 40px;
 
-            border-radius: 7px;
-            border: 1px solid rgba(128, 128, 128, .25);
-            background: rgba(255, 255, 255, .5);
-            backdrop-filter: blur(4px);
+            border: none;
+            padding: 0;
         }
 
         .menu {

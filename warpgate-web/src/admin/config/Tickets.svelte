@@ -1,11 +1,11 @@
 <script lang="ts">
 import { api, type Ticket } from 'admin/lib/api'
 import { link } from 'svelte-spa-router'
-import RelativeDate from './RelativeDate.svelte'
+import RelativeDate from '../RelativeDate.svelte'
 import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|undefined = $state()
 let tickets: Ticket[]|undefined = $state()
@@ -32,13 +32,13 @@ async function deleteTicket (ticket: Ticket) {
 {#if tickets }
     <div class="page-summary-bar">
         {#if tickets.length }
-            <h1>Access tickets: {tickets.length}</h1>
+            <h1>access tickets: <span class="counter">{tickets.length}</span></h1>
         {:else}
             <h1>No tickets created yet</h1>
         {/if}
         <a
-            class="btn btn-outline-secondary ms-auto"
-            href="/tickets/create"
+            class="btn btn-primary ms-auto"
+            href="/config/tickets/create"
             use:link>
             Create a ticket
         </a>

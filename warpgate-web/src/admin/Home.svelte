@@ -61,20 +61,21 @@
     _reloadSessions()
     const interval = setInterval(_reloadSessions, 1000000)
     onDestroy(() => clearInterval(interval))
-
 </script>
 
 {#if activeSessionCount !== undefined}
 <div class="page-summary-bar">
     {#if activeSessionCount }
-        <h1>Sessions right now: {activeSessionCount}</h1>
+        <h1>
+            <span>active sessions:</span> <span class="counter">{activeSessionCount}</span>
+        </h1>
         <div class="ms-auto">
-            <AsyncButton outline click={closeAllSesssions}>
-                Close all sessions
+            <AsyncButton color="warning" click={closeAllSesssions}>
+                Close all
             </AsyncButton>
         </div>
     {:else}
-        <h1>No active sessions</h1>
+        <h1>no active sessions</h1>
     {/if}
 </div>
 {/if}

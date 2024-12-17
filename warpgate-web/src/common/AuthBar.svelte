@@ -45,7 +45,7 @@ async function singleLogout () {
             </DropdownMenu>
         </Dropdown>
     {:else}
-        <Button color="link" on:click={logout} title="Log out">
+        <Button color="link" on:click={logout} title="Log out" class="p-0 ms-2">
             <Fa icon={faSignOut} fw />
         </Button>
     {/if}

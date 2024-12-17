@@ -21,7 +21,7 @@ pub fn error_page(e: poem::Error) -> impl IntoResponse {
             }}
         </style>
         <main>
-            <img src="/@warpgate/assets/logo.svg" />
+            <img src="/@warpgate/assets/brand.svg" />
             <h1>Request failed</h1>
             <p>{e}</p>
         </main>

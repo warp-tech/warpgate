@@ -1,0 +1,7 @@
+@font-face {
+    font-family: 'Poppins';
+    font-style: normal;
+    font-display: block; /* changed */
+    font-weight: 700;
+    src: url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff2) format('woff2'), url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff) format('woff');
+}

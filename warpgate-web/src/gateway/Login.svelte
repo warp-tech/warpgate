@@ -11,7 +11,7 @@ import { reloadServerInfo } from 'gateway/lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let username = $state('')
@@ -184,8 +184,8 @@ async function startSSO (provider: SsoProviderDescription) {
             </FormGroup>
 
             <AsyncButton
-                outline
                 class="d-flex align-items-center"
+                color="primary"
                 type="submit"
                 disabled={busy}
                 click={login}
@@ -208,25 +208,23 @@ async function startSSO (provider: SsoProviderDescription) {
 
     {#await ssoProvidersPromise then ssoProviders}
         {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
-            <div class="mt-5">
+            <div class="mt-5 sso-buttons">
                 {#each ssoProviders as ssoProvider}
                     <button
-                        class="btn d-flex align-items-center w-100 mb-2 btn-outline-primary"
+                        class="btn btn-secondary"
                         disabled={busy}
                         onclick={() => startSSO(ssoProvider)}
                     >
-                        <span class="m-auto">
-                            {#if ssoProvider.kind === SsoProviderKind.Google}
-                                <Fa fw class="me-2" icon={faGoogle} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Azure}
-                                <Fa fw class="me-2" icon={faMicrosoft} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Apple}
-                                <Fa fw class="me-2" icon={faApple} />
-                            {/if}
-                            {ssoProvider.label}
-                        </span>
+                        {#if ssoProvider.kind === SsoProviderKind.Google}
+                            <Fa fw class="me-2" icon={faGoogle} />
+                        {/if}
+                        {#if ssoProvider.kind === SsoProviderKind.Azure}
+                            <Fa fw class="me-2" icon={faMicrosoft} />
+                        {/if}
+                        {#if ssoProvider.kind === SsoProviderKind.Apple}
+                            <Fa fw class="me-2" icon={faApple} />
+                        {/if}
+                        {ssoProvider.label}
                     </button>
                 {/each}
             </div>
@@ -235,10 +233,30 @@ async function startSSO (provider: SsoProviderDescription) {
 
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
         <button
-            class="btn w-100 mt-3 btn-outline-secondary"
+            class="btn w-100 mt-3 btn-secondary"
             onclick={cancel}
         >
             Cancel
         </button>
     {/if}
 {/await}
+
+<style lang="scss">
+    h1 {
+        font-size: 3rem;
+    }
+
+    .sso-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.85rem 1rem;
+
+        button {
+            flex: 1 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-wrap: nowrap;
+        }
+    }
+</style>
