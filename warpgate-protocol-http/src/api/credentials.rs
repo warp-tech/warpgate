@@ -72,6 +72,7 @@ enum CredentialsStateResponse {
 
 #[derive(Object)]
 struct NewPublicKeyCredential {
+    label: String,
     openssh_public_key: String,
 }
 
@@ -79,14 +80,19 @@ struct NewPublicKeyCredential {
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
+    abbreviated: String,
 }
 
 fn abbreviate_public_key(k: &str) -> String {
     let l = 10;
+    if k.len() <= l {
+        return k.to_string(); // Return the full key if it's shorter than or equal to `l`.
+    }
+
     format!(
         "{}...{}",
-        &k[..l.min(k.len())],
-        &k[(k.len() - l).max(l).min(k.len() - 1)..]
+        &k[..l.min(k.len())],                // Take the first `l` characters.
+        &k[k.len().saturating_sub(l)..]      // Take the last `l` characters safely.
     )
 }
 
@@ -94,7 +100,8 @@ impl From<entities::PublicKeyCredential::Model> for ExistingPublicKeyCredential 
     fn from(credential: entities::PublicKeyCredential::Model) -> Self {
         Self {
             id: credential.id,
-            label: abbreviate_public_key(&credential.openssh_public_key),
+            label: credential.label,
+            abbreviated: abbreviate_public_key(&credential.openssh_public_key),
         }
     }
 }
@@ -288,6 +295,7 @@ impl Api {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
+            label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }
         .insert(&*db)

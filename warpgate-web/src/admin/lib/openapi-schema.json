@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "servers": [
     {
@@ -2154,12 +2154,16 @@
         "type": "object",
         "required": [
           "id",
+          "label",
           "openssh_public_key"
         ],
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "label": {
+            "type": "string"
           },
           "openssh_public_key": {
             "type": "string"
@@ -2272,9 +2276,13 @@
       "NewPublicKeyCredential": {
         "type": "object",
         "required": [
+          "label",
           "openssh_public_key"
         ],
         "properties": {
+          "label": {
+            "type": "string"
+          },
           "openssh_public_key": {
             "type": "string"
           }

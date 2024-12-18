@@ -184,8 +184,9 @@
         editingSsoCredentialInstance = null
     }
 
-    async function savePublicKeyCredential (opensshPublicKey: string) {
+    async function savePublicKeyCredential (label: string, opensshPublicKey: string) {
         if (editingPublicKeyCredentialInstance) {
+            editingPublicKeyCredentialInstance.label = label
             editingPublicKeyCredentialInstance.opensshPublicKey = opensshPublicKey
             await api.updatePublicKeyCredential({
                 userId,
@@ -196,6 +197,7 @@
             const credential = await api.createPublicKeyCredential({
                 userId,
                 newPublicKeyCredential: {
+                    label,
                     opensshPublicKey,
                 },
             })
@@ -250,7 +252,7 @@
         {/if}
         {#if credential.kind === 'PublicKey'}
             <Fa fw icon={faKey} />
-            <span class="type">Public key</span>
+            <span class="type">{credential.label}</span>
             <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
         {/if}
         {#if credential.kind === 'Totp'}

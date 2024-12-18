@@ -48,6 +48,7 @@ def setup_user_and_target(
         api.create_public_key_credential(
             user.id,
             sdk.NewPublicKeyCredential(
+                label="Public Key",
                 openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
             ),
         )
