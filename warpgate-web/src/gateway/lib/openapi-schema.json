@@ -688,7 +688,8 @@
         "type": "object",
         "required": [
           "id",
-          "label"
+          "label",
+          "abbreviated"
         ],
         "properties": {
           "id": {
@@ -696,6 +697,9 @@
             "format": "uuid"
           },
           "label": {
+            "type": "string"
+          },
+          "abbreviated": {
             "type": "string"
           }
         }
