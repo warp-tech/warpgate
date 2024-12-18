@@ -31,9 +31,10 @@
         creds!.password = state
     }
 
-    async function createPublicKey (opensshPublicKey: string) {
+    async function createPublicKey (label: string, opensshPublicKey: string) {
         const credential = await api.addMyPublicKey({
             newPublicKeyCredential: {
+                label,
                 opensshPublicKey,
             },
         })
@@ -156,6 +157,7 @@
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
             <span class="label">{credential.label}</span>
+            <span class="text-muted ms-2">{credential.abbreviated}</span>
             <span class="ms-auto"></span>
             <a
                 class="hover-reveal ms-2"
