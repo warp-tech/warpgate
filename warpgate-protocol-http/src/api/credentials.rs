@@ -11,7 +11,7 @@ use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
-
+use chrono::{DateTime, Utc};
 use crate::common::{endpoint_auth, RequestAuthorization};
 
 pub struct Api;
@@ -80,6 +80,7 @@ struct NewPublicKeyCredential {
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
+    date_added: Option<DateTime<Utc>>,
     abbreviated: String,
 }
 
@@ -101,6 +102,7 @@ impl From<entities::PublicKeyCredential::Model> for ExistingPublicKeyCredential 
         Self {
             id: credential.id,
             label: credential.label,
+            date_added: credential.date_added,
             abbreviated: abbreviate_public_key(&credential.openssh_public_key),
         }
     }
@@ -295,6 +297,7 @@ impl Api {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
+            date_added: Set(Some(Utc::now())),
             label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }

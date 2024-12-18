@@ -4,6 +4,7 @@ use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserPublicKeyCredential};
+use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize)]
 #[sea_orm(table_name = "credentials_public_key")]
@@ -12,6 +13,7 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     pub label: String,
+    pub date_added: Option<DateTime<Utc>>,
     pub openssh_public_key: String,
 }
 

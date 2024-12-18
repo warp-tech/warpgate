@@ -699,6 +699,10 @@
           "label": {
             "type": "string"
           },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
           "abbreviated": {
             "type": "string"
           }

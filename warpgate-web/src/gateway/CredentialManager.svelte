@@ -156,15 +156,22 @@
         {#each creds.publicKeys as credential}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
-            <span class="label">{credential.label}</span>
-            <span class="text-muted ms-2">{credential.abbreviated}</span>
+            <div class="key-info">
+                <div>
+                    <span class="label">{credential.label}</span>
+                    <span class="text-muted ms-2">{credential.abbreviated}</span>
+                </div>
+                {#if credential.dateAdded}
+                    <div class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</div>
+                {/if}
+            </div>
             <span class="ms-auto"></span>
             <a
                 class="hover-reveal ms-2"
                 href={''}
                 onclick={e => {
-                    deletePublicKey(credential)
-                    e.preventDefault()
+                    deletePublicKey(credential);
+                    e.preventDefault();
                 }}
             >
                 Delete
@@ -228,7 +235,18 @@
 <style lang="scss">
     .credential {
         display: flex;
-        align-items: center;
+        align-items: flex-start; // Align items at the top
+        .key-info {
+            display: flex;
+            flex-direction: column; // Stack label, key, and date vertically
+            margin-left: 0.5rem;
+
+            .added-info {
+                font-size: 0.9rem; // Smaller font for subtlety
+                color: #6c757d; // Optional: A lighter muted color
+                margin-top: 0.25rem; // Add some spacing between the key and the date
+            }
+        }
 
         .label:not(:first-child) {
             margin-left: .5rem;
