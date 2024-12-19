@@ -20,9 +20,9 @@
   "devDependencies": {
     "@fontsource/poppins": "^5.1.0",
     "@fontsource/work-sans": "^4.5.12",
-    "@fortawesome/free-brands-svg-icons": "^6.7.1",
-    "@fortawesome/free-regular-svg-icons": "^6.7.1",
-    "@fortawesome/free-solid-svg-icons": "^6.7.1",
+    "@fortawesome/free-brands-svg-icons": "^6.7.2",
+    "@fortawesome/free-regular-svg-icons": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
     "@openapitools/openapi-generator-cli": "^2.15.3",
     "@otplib/plugin-base32-enc-dec": "^12.0.1",
     "@otplib/plugin-crypto-js": "^12.0.1",
@@ -37,7 +37,7 @@
     "bootstrap": "^5.3.3",
     "copy-text-to-clipboard": "^3.0.1",
     "date-fns": "^4.1.0",
-    "eslint": "^9.16.0",
+    "eslint": "^9.17.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-import-resolver-typescript": "^3.7.0",
     "eslint-plugin-import": "^2.31.0",
@@ -45,10 +45,10 @@
     "eslint-plugin-promise": "^7.2.1",
     "eslint-plugin-svelte": "^2.46.1",
     "format-duration": "^3.0.2",
-    "otpauth": "^9.3.5",
+    "otpauth": "^9.3.6",
     "qrcode": "^1.5.4",
-    "sass": "1.78",
-    "svelte": "^5.11.0",
+    "sass": "1.83",
+    "svelte": "^5.14.5",
     "svelte-check": "^4.1.1",
     "svelte-fa": "^4.0.3",
     "svelte-intersection-observer": "^1.0.0",
@@ -65,6 +65,6 @@
   },
   "dependencies": {
     "@stylistic/eslint-plugin": "^2.12.1",
-    "typescript-eslint": "^8.18.0"
+    "typescript-eslint": "^8.18.1"
   }
 }
