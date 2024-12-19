@@ -14,6 +14,7 @@ pub struct Model {
     pub user_id: Uuid,
     pub label: String,
     pub date_added: Option<DateTime<Utc>>,
+    pub last_used: Option<DateTime<Utc>>,
     pub openssh_public_key: String,
 }
 

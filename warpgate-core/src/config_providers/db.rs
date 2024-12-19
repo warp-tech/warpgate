@@ -20,6 +20,7 @@ use warpgate_common::{
     UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
+use chrono::{Utc};
 
 use super::ConfigProvider;
 
@@ -379,6 +380,55 @@ impl ConfigProvider for DatabaseConfigProvider {
             }
         }
 
+        Ok(())
+    }
+
+    async fn update_public_key_last_used(
+        &self,
+        credential: Option<AuthCredential>,
+    ) -> Result<(), WarpgateError> {
+        let db = self.db.lock().await;
+
+        let Some(AuthCredential::PublicKey {
+            kind,
+            public_key_bytes,
+        }) = credential
+        else {
+            error!("Invalid or missing public key credential");
+            return Err(WarpgateError::InvalidCredentialType);
+        };
+
+        // Encode public key and match it against the database
+        let base64_bytes = data_encoding::BASE64.encode(&public_key_bytes);
+        let openssh_public_key = format!("{kind} {base64_bytes}");
+
+        debug!("Attempting to update last_used for public key: {}", openssh_public_key);
+
+        // Find the public key credential
+        let public_key_credential = entities::PublicKeyCredential::Entity::find()
+            .filter(entities::PublicKeyCredential::Column::OpensshPublicKey.eq(openssh_public_key.clone()))
+            .one(&*db)
+            .await?;
+
+        let Some(public_key_credential) = public_key_credential else {
+            warn!("Public key not found in the database: {}", openssh_public_key);
+            return Ok(()); // Gracefully return if the key is not found
+        };
+
+        // Update the `last_used` (last used) timestamp
+        let mut active_model: entities::PublicKeyCredential::ActiveModel = 
+            public_key_credential.into();
+        active_model.last_used = Set(Some(Utc::now()));
+
+        active_model
+            .update(&*db)
+            .await
+            .map_err(|e| {
+                error!("Failed to update last_used for public key: {:?}", e);
+                WarpgateError::DatabaseError(e.into())
+            })?;
+
+        info!("Successfully updated last_used for public key: {}", openssh_public_key);
         Ok(())
     }
 }

@@ -164,6 +164,9 @@
                 {#if credential.dateAdded}
                     <div class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</div>
                 {/if}
+                {#if credential.lastUsed}
+                    <div class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</div>
+                {/if}
             </div>
             <span class="ms-auto"></span>
             <a

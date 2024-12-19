@@ -21,6 +21,7 @@ struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
     date_added: Option<DateTime<Utc>>,
+    last_used: Option<DateTime<Utc>>,
     openssh_public_key: String,
 }
 
@@ -35,6 +36,7 @@ impl From<PublicKeyCredential::Model> for ExistingPublicKeyCredential {
         Self {
             id: credential.id,
             date_added: credential.date_added,
+            last_used: credential.last_used,
             label: credential.label,
             openssh_public_key: credential.openssh_public_key,
         }
@@ -119,6 +121,7 @@ impl ListApi {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
             date_added: Set(Some(Utc::now())),
+            last_used: Set(None),
             label: Set(body.label.clone()),
             ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
         }

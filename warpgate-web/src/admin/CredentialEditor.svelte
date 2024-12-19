@@ -260,6 +260,10 @@
                 {#if credential.dateAdded}
                     <span class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</span>
                 {/if}
+                
+                {#if credential.lastUsed}
+                    <span class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</span>
+                {/if}
             </div>
         {/if}
         {#if credential.kind === 'Totp'}

@@ -81,6 +81,7 @@ struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
     date_added: Option<DateTime<Utc>>,
+    last_used: Option<DateTime<Utc>>,
     abbreviated: String,
 }
 
@@ -103,6 +104,7 @@ impl From<entities::PublicKeyCredential::Model> for ExistingPublicKeyCredential 
             id: credential.id,
             label: credential.label,
             date_added: credential.date_added,
+            last_used: credential.last_used,
             abbreviated: abbreviate_public_key(&credential.openssh_public_key),
         }
     }
@@ -298,6 +300,7 @@ impl Api {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
             date_added: Set(Some(Utc::now())),
+            last_used: Set(None),
             label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }
