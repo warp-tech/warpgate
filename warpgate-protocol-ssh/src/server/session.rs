@@ -1222,18 +1222,33 @@ impl ServerSession {
             key.public_key_base64()
         );
 
+        let key = Some(AuthCredential::PublicKey {
+            kind: key.algorithm(),
+            public_key_bytes: Bytes::from(key.public_key_bytes()),
+        });
+
         let result = self
             .try_auth_lazy(
                 &selector,
-                Some(AuthCredential::PublicKey {
-                    kind: key.algorithm(),
-                    public_key_bytes: Bytes::from(key.public_key_bytes()),
-                }),
+                key.clone(),
             )
             .await;
 
         match result {
-            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
+            Ok(AuthResult::Accepted { .. }) => {
+                // Update last_used timestamp
+                if let Err(err) = self
+                    .services
+                    .config_provider
+                    .lock()
+                    .await
+                    .update_public_key_last_used(key.clone())
+                    .await
+                {
+                    warn!(?err, "Failed to update last_used for public key");
+                }
+                russh::server::Auth::Accept
+            },
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(MethodSet::all()),
             },
