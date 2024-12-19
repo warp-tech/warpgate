@@ -13,7 +13,7 @@
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
@@ -265,6 +265,8 @@
                     <span class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</span>
                 {/if}
             </div>
+            <span class="type">{credential.label}</span>
+            <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
         {/if}
         {#if credential.kind === 'Totp'}
             <Fa fw icon={faMobileScreen} />

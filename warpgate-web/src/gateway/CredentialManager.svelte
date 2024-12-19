@@ -2,7 +2,7 @@
     import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { stringifyError } from 'common/errors'
     import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
@@ -149,7 +149,7 @@
         <span class="ms-auto"></span>
         <Button size="sm" color="link" on:click={() => {
             creatingPublicKeyCredential = true
-        }}>Add new</Button>
+        }}>Add key</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">
@@ -168,6 +168,8 @@
                     <div class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</div>
                 {/if}
             </div>
+            <span class="label">{credential.label}</span>
+            <span class="text-muted ms-2">{credential.abbreviated}</span>
             <span class="ms-auto"></span>
             <a
                 class="hover-reveal ms-2"

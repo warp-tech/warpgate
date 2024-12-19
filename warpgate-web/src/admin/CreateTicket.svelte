@@ -7,7 +7,7 @@ import { link } from 'svelte-spa-router'
 import { FormGroup } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let targets: Target[]|undefined = $state()
@@ -58,7 +58,7 @@ async function create () {
 
 {#if result}
     <div class="page-summary-bar">
-        <h1>Ticket created</h1>
+        <h1>ticket created</h1>
     </div>
 
     <Alert color="warning" fade={false}>
@@ -77,13 +77,13 @@ async function create () {
 
     <a
         class="btn btn-secondary"
-        href="/tickets"
+        href="/config/tickets"
         use:link
     >Done</a>
 {:else}
 <div class="narrow-page">
     <div class="page-summary-bar">
-        <h1>Create an access ticket</h1>
+        <h1>create an access ticket</h1>
     </div>
 
     {#if users}
@@ -119,7 +119,7 @@ async function create () {
     </FormGroup>
 
     <AsyncButton
-        outline
+    color="primary"
         click={create}
     >Create ticket</AsyncButton>
 </div>

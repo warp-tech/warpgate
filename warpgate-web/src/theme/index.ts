@@ -1,4 +1,5 @@
 import '@fontsource/work-sans'
+import './fonts.css'
 
 import { get, writable } from 'svelte/store'
 

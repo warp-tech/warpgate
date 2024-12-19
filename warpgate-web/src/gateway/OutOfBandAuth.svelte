@@ -3,7 +3,7 @@ import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/a
 import AsyncButton from 'common/AsyncButton.svelte'
 import DelayedSpinner from 'common/DelayedSpinner.svelte'
 import RelativeDate from 'admin/RelativeDate.svelte'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { stateId: string };
@@ -52,7 +52,7 @@ async function reject () {
 {:then}
 {#if authState}
     <div class="page-summary-bar">
-        <h1>Authorization request</h1>
+        <h1>authorization request</h1>
     </div>
 
     <div class="mb-5">
@@ -93,7 +93,6 @@ async function reject () {
                 Authorize
             </AsyncButton>
             <AsyncButton
-                outline
                 color="secondary"
                 class="d-flex align-items-center ms-2"
                 click={reject}

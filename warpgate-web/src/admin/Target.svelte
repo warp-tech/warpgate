@@ -11,7 +11,7 @@ import { replace } from 'svelte-spa-router'
 import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 import TlsConfiguration from './TlsConfiguration.svelte'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/Alert.svelte'
+import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 interface Props {
     params: { id: string };
@@ -56,7 +56,7 @@ async function update () {
 async function remove () {
     if (confirm(`Delete target ${target!.name}?`)) {
         await api.deleteTarget(target!)
-        replace('/config')
+        replace('/config/targets')
     }
 }
 
@@ -190,7 +190,7 @@ async function toggleRole (role: Role) {
             <Input
                 class="mb-0 me-2"
                 type="switch"
-                label="Allow insecure SSH algorithms (e.g. for older networks devices)"
+                label="Allow insecure SSH algorithms (e.g. for older network devices)"
                 bind:checked={target.options.allowInsecureAlgos} />
         </div>
 
@@ -268,14 +268,13 @@ async function toggleRole (role: Role) {
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
-        outline
         click={update}
     >Update configuration</AsyncButton>
 
     <AsyncButton
         class="ms-2"
-        outline
         color="danger"
         click={remove}
     >Remove</AsyncButton>

@@ -5,7 +5,7 @@
     import { replace } from 'svelte-spa-router'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/Alert.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from './CredentialEditor.svelte'
 
     interface Props {
@@ -46,7 +46,7 @@
     async function remove () {
         if (confirm(`Delete user ${user!.username}?`)) {
             await api.deleteUser(user!)
-            replace('/config')
+            replace('/config/users')
         }
     }
 
@@ -114,14 +114,13 @@
 
 <div class="d-flex">
     <AsyncButton
+    color="primary"
         class="ms-auto"
-        outline
         click={update}
     >Update</AsyncButton>
 
     <AsyncButton
         class="ms-2"
-        outline
         color="danger"
         click={remove}
     >Remove</AsyncButton>
