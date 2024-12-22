@@ -1227,12 +1227,7 @@ impl ServerSession {
             public_key_bytes: Bytes::from(key.public_key_bytes()),
         });
 
-        let result = self
-            .try_auth_lazy(
-                &selector,
-                key.clone(),
-            )
-            .await;
+        let result = self.try_auth_lazy(&selector, key.clone()).await;
 
         match result {
             Ok(AuthResult::Accepted { .. }) => {
@@ -1248,7 +1243,7 @@ impl ServerSession {
                     warn!(?err, "Failed to update last_used for public key");
                 }
                 russh::server::Auth::Accept
-            },
+            }
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(MethodSet::all()),
             },

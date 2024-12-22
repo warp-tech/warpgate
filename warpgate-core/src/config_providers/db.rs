@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use data_encoding::BASE64;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
@@ -20,7 +21,6 @@ use warpgate_common::{
     UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
-use chrono::{Utc};
 
 use super::ConfigProvider;
 
@@ -402,33 +402,38 @@ impl ConfigProvider for DatabaseConfigProvider {
         let base64_bytes = data_encoding::BASE64.encode(&public_key_bytes);
         let openssh_public_key = format!("{kind} {base64_bytes}");
 
-        debug!("Attempting to update last_used for public key: {}", openssh_public_key);
+        debug!(
+            "Attempting to update last_used for public key: {}",
+            openssh_public_key
+        );
 
         // Find the public key credential
         let public_key_credential = entities::PublicKeyCredential::Entity::find()
-            .filter(entities::PublicKeyCredential::Column::OpensshPublicKey.eq(openssh_public_key.clone()))
+            .filter(
+                entities::PublicKeyCredential::Column::OpensshPublicKey
+                    .eq(openssh_public_key.clone()),
+            )
             .one(&*db)
             .await?;
 
         let Some(public_key_credential) = public_key_credential else {
-            warn!("Public key not found in the database: {}", openssh_public_key);
+            warn!(
+                "Public key not found in the database: {}",
+                openssh_public_key
+            );
             return Ok(()); // Gracefully return if the key is not found
         };
 
         // Update the `last_used` (last used) timestamp
-        let mut active_model: entities::PublicKeyCredential::ActiveModel = 
+        let mut active_model: entities::PublicKeyCredential::ActiveModel =
             public_key_credential.into();
         active_model.last_used = Set(Some(Utc::now()));
 
-        active_model
-            .update(&*db)
-            .await
-            .map_err(|e| {
-                error!("Failed to update last_used for public key: {:?}", e);
-                WarpgateError::DatabaseError(e.into())
-            })?;
+        active_model.update(&*db).await.map_err(|e| {
+            error!("Failed to update last_used for public key: {:?}", e);
+            WarpgateError::DatabaseError(e.into())
+        })?;
 
-        info!("Successfully updated last_used for public key: {}", openssh_public_key);
         Ok(())
     }
 }

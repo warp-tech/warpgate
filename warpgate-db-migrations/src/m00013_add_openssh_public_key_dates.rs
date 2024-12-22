@@ -18,11 +18,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(public_key_credential::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("date_added"))
-                            .date_time()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(Alias::new("date_added")).date_time().null())
                     .to_owned(),
             )
             .await?;
@@ -32,11 +28,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(public_key_credential::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("last_used"))
-                            .date_time()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(Alias::new("last_used")).date_time().null())
                     .to_owned(),
             )
             .await?;

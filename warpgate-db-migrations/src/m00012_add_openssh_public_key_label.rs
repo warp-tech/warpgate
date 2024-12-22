@@ -21,9 +21,9 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Alias::new("label"))
                             .string()
                             .not_null()
-                            .default("Public Key")
+                            .default("Public Key"),
                     )
-                    .to_owned()
+                    .to_owned(),
             )
             .await
     }
@@ -38,5 +38,4 @@ impl MigrationTrait for Migration {
             )
             .await
     }
-
 }

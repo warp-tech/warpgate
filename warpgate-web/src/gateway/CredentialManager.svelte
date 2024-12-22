@@ -7,7 +7,6 @@
     import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
-    import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
@@ -114,9 +113,9 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">One-time passwords</h4>
         <span class="ms-auto"></span>
-        <Button size="sm" color="link" on:click={() => {
+        <a href={''} color="link" onclick={() => {
             creatingOtpCredential = true
-        }}>Add device</Button>
+        }}>Add device</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
@@ -126,7 +125,7 @@
             <span class="label">OTP device</span>
             <span class="ms-auto"></span>
             <a
-                class="hover-reveal ms-2"
+                class="ms-2"
                 href={''}
                 onclick={e => {
                     deleteOtp(credential)
@@ -148,9 +147,9 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <Button size="sm" color="link" on:click={() => {
+        <a href={''} color="link" onclick={() => {
             creatingPublicKeyCredential = true
-        }}>Add key</Button>
+        }}>Add key</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
@@ -164,7 +163,7 @@
             <span class="ms-auto"></span>
             <CredentialUsedStateBadge credential={credential} />
             <a
-                class="hover-reveal ms-2"
+                class="ms-2"
                 href={''}
                 onclick={e => {
                     deletePublicKey(credential)

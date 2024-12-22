@@ -226,10 +226,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    store.http.key = data_path
-        .join("tls.key.pem")
-        .to_string_lossy()
-        .to_string();
+    store.http.key = data_path.join("tls.key.pem").to_string_lossy().to_string();
 
     store.mysql.certificate = store.http.certificate.clone();
     store.mysql.key = store.http.key.clone();
@@ -239,10 +236,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    store.ssh.keys = data_path
-        .join("ssh-keys")
-        .to_string_lossy()
-        .to_string();
+    store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
 
     // ---
 
@@ -257,10 +251,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             .with_prompt("Do you want to record user sessions?")
             .interact()?;
     }
-    store.recordings.path = data_path
-        .join("recordings")
-        .to_string_lossy()
-        .to_string();
+    store.recordings.path = data_path.join("recordings").to_string_lossy().to_string();
 
     // ---
 

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use http::StatusCode;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
@@ -11,7 +12,7 @@ use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
-use chrono::{DateTime, Utc};
+
 use crate::common::{endpoint_auth, RequestAuthorization};
 
 pub struct Api;
@@ -93,8 +94,8 @@ fn abbreviate_public_key(k: &str) -> String {
 
     format!(
         "{}...{}",
-        &k[..l.min(k.len())],                // Take the first `l` characters.
-        &k[k.len().saturating_sub(l)..]      // Take the last `l` characters safely.
+        &k[..l.min(k.len())],            // Take the first `l` characters.
+        &k[k.len().saturating_sub(l)..]  // Take the last `l` characters safely.
     )
 }
 

@@ -277,7 +277,7 @@
 
         {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
         <a
-            class="ms-2 hover-reveal"
+            class="ms-2"
             href={''}
             onclick={e => {
                 if (credential.kind === CredentialKind.Sso) {

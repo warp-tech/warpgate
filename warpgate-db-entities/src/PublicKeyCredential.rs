@@ -1,10 +1,10 @@
+use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserPublicKeyCredential};
-use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize)]
 #[sea_orm(table_name = "credentials_public_key")]
