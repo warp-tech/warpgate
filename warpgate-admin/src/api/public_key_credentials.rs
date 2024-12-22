@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{UserPublicKeyCredential, WarpgateError};
 use warpgate_db_entities::PublicKeyCredential;
+use chrono::{DateTime, Utc};
 
 use super::AnySecurityScheme;
 
@@ -19,6 +20,8 @@ use super::AnySecurityScheme;
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
+    date_added: Option<DateTime<Utc>>,
+    last_used: Option<DateTime<Utc>>,
     openssh_public_key: String,
 }
 
@@ -32,6 +35,8 @@ impl From<PublicKeyCredential::Model> for ExistingPublicKeyCredential {
     fn from(credential: PublicKeyCredential::Model) -> Self {
         Self {
             id: credential.id,
+            date_added: credential.date_added,
+            last_used: credential.last_used,
             label: credential.label,
             openssh_public_key: credential.openssh_public_key,
         }
@@ -115,6 +120,8 @@ impl ListApi {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
+            date_added: Set(Some(Utc::now())),
+            last_used: Set(None),
             label: Set(body.label.clone()),
             ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
         }
@@ -158,6 +165,7 @@ impl DetailApi {
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
+            date_added: Set(Some(Utc::now())),
             label: Set(body.label.clone()),
             ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }

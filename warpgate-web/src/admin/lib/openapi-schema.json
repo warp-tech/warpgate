@@ -2165,6 +2165,14 @@
           "label": {
             "type": "string"
           },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
           "openssh_public_key": {
             "type": "string"
           }

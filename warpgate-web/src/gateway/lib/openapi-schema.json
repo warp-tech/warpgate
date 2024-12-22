@@ -699,6 +699,14 @@
           "label": {
             "type": "string"
           },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
           "abbreviated": {
             "type": "string"
           }

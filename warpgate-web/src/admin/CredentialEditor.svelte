@@ -252,6 +252,19 @@
         {/if}
         {#if credential.kind === 'PublicKey'}
             <Fa fw icon={faKey} />
+            <div class="key-info">
+                <div>
+                    <span class="label">{credential.label}</span>
+                    <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
+                </div>
+                {#if credential.dateAdded}
+                    <span class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</span>
+                {/if}
+                
+                {#if credential.lastUsed}
+                    <span class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</span>
+                {/if}
+            </div>
             <span class="type">{credential.label}</span>
             <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
         {/if}
@@ -360,9 +373,20 @@
 <style lang="scss">
     .credential {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
+        .key-info {
+            display: flex;
+            flex-direction: column;
+            margin-left: 0.5rem;
 
-        .type {
+            .added-info {
+                font-size: 0.9rem;
+                color: #6c757d;
+                margin-top: 0.25rem;
+            }
+        }
+
+        .label:not(:first-child) {
             margin-left: .5rem;
         }
 
