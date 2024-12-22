@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use http::StatusCode;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
@@ -80,6 +81,8 @@ struct NewPublicKeyCredential {
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
+    date_added: Option<DateTime<Utc>>,
+    last_used: Option<DateTime<Utc>>,
     abbreviated: String,
 }
 
@@ -91,8 +94,8 @@ fn abbreviate_public_key(k: &str) -> String {
 
     format!(
         "{}...{}",
-        &k[..l.min(k.len())],                // Take the first `l` characters.
-        &k[k.len().saturating_sub(l)..]      // Take the last `l` characters safely.
+        &k[..l.min(k.len())],            // Take the first `l` characters.
+        &k[k.len().saturating_sub(l)..]  // Take the last `l` characters safely.
     )
 }
 
@@ -101,6 +104,8 @@ impl From<entities::PublicKeyCredential::Model> for ExistingPublicKeyCredential 
         Self {
             id: credential.id,
             label: credential.label,
+            date_added: credential.date_added,
+            last_used: credential.last_used,
             abbreviated: abbreviate_public_key(&credential.openssh_public_key),
         }
     }
@@ -295,6 +300,8 @@ impl Api {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
+            date_added: Set(Some(Utc::now())),
+            last_used: Set(None),
             label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }

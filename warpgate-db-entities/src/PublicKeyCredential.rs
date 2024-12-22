@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
@@ -12,6 +13,8 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     pub label: String,
+    pub date_added: Option<DateTime<Utc>>,
+    pub last_used: Option<DateTime<Utc>>,
     pub openssh_public_key: String,
 }
 
