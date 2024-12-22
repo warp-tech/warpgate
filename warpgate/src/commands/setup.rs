@@ -108,8 +108,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 .interact_text()?
         }
     };
+    create_dir_all(&data_path)?;
+    let data_path = PathBuf::from(&data_path).canonicalize()?;
 
-    let db_path = PathBuf::from(&data_path).join("db");
+    let db_path = data_path.join("db");
     create_dir_all(&db_path)?;
     secure_directory(&db_path)?;
 
@@ -219,12 +221,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     }
 
-    store.http.certificate = PathBuf::from(&data_path)
+    store.http.certificate = data_path
         .join("tls.certificate.pem")
         .to_string_lossy()
         .to_string();
 
-    store.http.key = PathBuf::from(&data_path)
+    store.http.key = data_path
         .join("tls.key.pem")
         .to_string_lossy()
         .to_string();
@@ -237,7 +239,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     // ---
 
-    store.ssh.keys = PathBuf::from(&data_path)
+    store.ssh.keys = data_path
         .join("ssh-keys")
         .to_string_lossy()
         .to_string();
@@ -255,7 +257,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             .with_prompt("Do you want to record user sessions?")
             .interact()?;
     }
-    store.recordings.path = PathBuf::from(&data_path)
+    store.recordings.path = data_path
         .join("recordings")
         .to_string_lossy()
         .to_string();
