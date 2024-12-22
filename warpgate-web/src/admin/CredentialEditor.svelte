@@ -20,6 +20,7 @@
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
     import { possibleCredentials } from 'common/protocols'
+    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
 
     interface Props {
         userId: string
@@ -248,43 +249,35 @@
     <div class="list-group-item credential">
         {#if credential.kind === CredentialKind.Password }
             <Fa fw icon={faKeyboard} />
-            <span class="type">Password</span>
+            <span class="label me-auto">Password</span>
         {/if}
         {#if credential.kind === 'PublicKey'}
             <Fa fw icon={faKey} />
-            <div class="key-info">
-                <div>
-                    <span class="label">{credential.label}</span>
-                    <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
+            <div class="main me-auto">
+                <div class="label d-flex align-items-center">
+                    {credential.label}
                 </div>
-                {#if credential.dateAdded}
-                    <span class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</span>
-                {/if}
-                
-                {#if credential.lastUsed}
-                    <span class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</span>
-                {/if}
+                <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
             </div>
-            <span class="type">{credential.label}</span>
-            <span class="text-muted ms-2">{abbreviatePublicKey(credential.opensshPublicKey)}</span>
+            <CredentialUsedStateBadge credential={credential} />
+            <div class="me-2"></div>
         {/if}
         {#if credential.kind === 'Totp'}
             <Fa fw icon={faMobileScreen} />
-            <span class="type">One-time password</span>
+            <span class="label me-auto">One-time password</span>
         {/if}
         {#if credential.kind === CredentialKind.Sso}
             <Fa fw icon={faIdBadge} />
-            <span class="type">Single sign-on</span>
-            <span class="text-muted ms-2">
+            <span class="label">Single sign-on</span>
+            <span class="text-muted ms-2 me-auto">
                 {credential.email}
                 {#if credential.provider} ({credential.provider}){/if}
             </span>
         {/if}
 
-        <span class="ms-auto"></span>
         {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
         <a
-            class="ms-2"
+            class="ms-2 hover-reveal"
             href={''}
             onclick={e => {
                 if (credential.kind === CredentialKind.Sso) {
@@ -373,29 +366,10 @@
 <style lang="scss">
     .credential {
         display: flex;
-        align-items: flex-start;
-        .key-info {
-            display: flex;
-            flex-direction: column;
-            margin-left: 0.5rem;
+        align-items: center;
 
-            .added-info {
-                font-size: 0.9rem;
-                color: #6c757d;
-                margin-top: 0.25rem;
-            }
-        }
-
-        .label:not(:first-child) {
-            margin-left: .5rem;
-        }
-
-        a {
-            display: none;
-        }
-
-        &:hover a {
-            display: initial;
+        .label:not(:first-child), .main {
+            margin-left: .75rem;
         }
     }
 </style>

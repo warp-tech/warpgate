@@ -10,6 +10,7 @@
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
+    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
 
     let error: string|null = $state(null)
     let creds: CredentialsState | undefined = $state()
@@ -156,27 +157,18 @@
         {#each creds.publicKeys as credential}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
-            <div class="key-info">
-                <div>
-                    <span class="label">{credential.label}</span>
-                    <span class="text-muted ms-2">{credential.abbreviated}</span>
-                </div>
-                {#if credential.dateAdded}
-                    <div class="added-info">Added On: {new Date(credential.dateAdded).toLocaleString()}</div>
-                {/if}
-                {#if credential.lastUsed}
-                    <div class="added-info">Last Used: {new Date(credential.lastUsed).toLocaleString()}</div>
-                {/if}
+            <div class="main">
+                <div class="label">{credential.label}</div>
+                <small class="d-block text-muted">{credential.abbreviated}</small>
             </div>
-            <span class="label">{credential.label}</span>
-            <span class="text-muted ms-2">{credential.abbreviated}</span>
             <span class="ms-auto"></span>
+            <CredentialUsedStateBadge credential={credential} />
             <a
                 class="hover-reveal ms-2"
                 href={''}
                 onclick={e => {
-                    deletePublicKey(credential);
-                    e.preventDefault();
+                    deletePublicKey(credential)
+                    e.preventDefault()
                 }}
             >
                 Delete
@@ -240,29 +232,10 @@
 <style lang="scss">
     .credential {
         display: flex;
-        align-items: flex-start; // Align items at the top
-        .key-info {
-            display: flex;
-            flex-direction: column; // Stack label, key, and date vertically
-            margin-left: 0.5rem;
+        align-items: center;
 
-            .added-info {
-                font-size: 0.9rem; // Smaller font for subtlety
-                color: #6c757d; // Optional: A lighter muted color
-                margin-top: 0.25rem; // Add some spacing between the key and the date
-            }
-        }
-
-        .label:not(:first-child) {
-            margin-left: .5rem;
-        }
-
-        a.hover-reveal {
-            display: none;
-        }
-
-        &:hover a {
-            display: initial;
+        .label:not(:first-child), .main {
+            margin-left: .75rem;
         }
     }
 </style>
