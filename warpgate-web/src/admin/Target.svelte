@@ -1,85 +1,79 @@
 <script lang="ts">
-import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
-import { api, type Role, type Target, type User } from 'admin/lib/api'
-import AsyncButton from 'common/AsyncButton.svelte'
-import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-import DelayedSpinner from 'common/DelayedSpinner.svelte'
-import { TargetKind } from 'gateway/lib/api'
-import { serverInfo } from 'gateway/lib/store'
-import Fa from 'svelte-fa'
-import { replace } from 'svelte-spa-router'
-import { FormGroup, Input } from '@sveltestrap/sveltestrap'
-import TlsConfiguration from './TlsConfiguration.svelte'
-import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
+    import { api, type Role, type Target, type User } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import { TargetKind } from 'gateway/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
+    import { replace } from 'svelte-spa-router'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import TlsConfiguration from './TlsConfiguration.svelte'
+    import { stringifyError } from 'common/errors'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
-interface Props {
-    params: { id: string };
-}
+    interface Props {
+        params: { id: string };
+    }
 
-let { params }: Props = $props()
+    let { params }: Props = $props()
 
-let error: string|undefined = $state()
-let selectedUser: User|undefined = $state()
-let target: Target | undefined = $state()
-let allRoles: Role[] = $state([])
-let roleIsAllowed: Record<string, any> = $state({})
+    let error: string|undefined = $state()
+    let selectedUser: User|undefined = $state()
+    let target: Target | undefined = $state()
+    let roleIsAllowed: Record<string, any> = $state({})
 
-async function load () {
-    try {
+    async function init () {
         target = await api.getTarget({ id: params.id })
-    } catch (err) {
-        error = await stringifyError(err)
     }
-}
 
-async function loadRoles () {
-    allRoles = await api.getRoles()
-    const allowedRoles = await api.getTargetRoles(target!)
-    roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
-}
+    async function loadRoles () {
+        const allRoles = await api.getRoles()
+        const allowedRoles = await api.getTargetRoles(target!)
+        roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
+        return allRoles
+    }
 
-async function update () {
-    try {
-        if (target!.options.kind === 'Http') {
-            target!.options.externalHost = target!.options.externalHost || undefined
+    async function update () {
+        try {
+            if (target!.options.kind === 'Http') {
+                target!.options.externalHost = target!.options.externalHost || undefined
+            }
+            target = await api.updateTarget({
+                id: params.id,
+                targetDataRequest: target!,
+            })
+        } catch (err) {
+            error = await stringifyError(err)
         }
-        target = await api.updateTarget({
-            id: params.id,
-            targetDataRequest: target!,
-        })
-    } catch (err) {
-        error = await stringifyError(err)
     }
-}
 
-async function remove () {
-    if (confirm(`Delete target ${target!.name}?`)) {
-        await api.deleteTarget(target!)
-        replace('/config/targets')
+    async function remove () {
+        if (confirm(`Delete target ${target!.name}?`)) {
+            await api.deleteTarget(target!)
+            replace('/config/targets')
+        }
     }
-}
 
-async function toggleRole (role: Role) {
-    if (roleIsAllowed[role.id]) {
-        await api.deleteTargetRole({
-            id: target!.id,
-            roleId: role.id,
-        })
-        roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
-    } else {
-        await api.addTargetRole({
-            id: target!.id,
-            roleId: role.id,
-        })
-        roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
+    async function toggleRole (role: Role) {
+        if (roleIsAllowed[role.id]) {
+            await api.deleteTargetRole({
+                id: target!.id,
+                roleId: role.id,
+            })
+            roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
+        } else {
+            await api.addTargetRole({
+                id: target!.id,
+                roleId: role.id,
+            })
+            roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
+        }
     }
-}
 </script>
 
-{#await load()}
-    <DelayedSpinner />
-{:then}
+<Loadable promise={init()}>
 {#if target}
     <div class="page-summary-bar">
         <div>
@@ -107,21 +101,19 @@ async function toggleRole (role: Role) {
     <h4>Access instructions</h4>
 
     {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
-        {#await api.getUsers()}
-            <DelayedSpinner/>
-        {:then users}
-            <FormGroup floating label="Select a user">
-                <select bind:value={selectedUser} class="form-control">
-                    {#each users as user}
-                        <option value={user}>
-                            {user.username}
-                        </option>
-                    {/each}
-                </select>
-            </FormGroup>
-        {:catch _error}
-            <Alert color="danger">{_error}</Alert>
-        {/await}
+        <Loadable promise={api.getUsers()}>
+            {#snippet children(users)}
+                <FormGroup floating label="Select a user">
+                    <select bind:value={selectedUser} class="form-control">
+                        {#each users as user}
+                            <option value={user}>
+                                {user.username}
+                            </option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            {/snippet}
+        </Loadable>
     {/if}
 
     <ConnectionInstructions
@@ -241,26 +233,28 @@ async function toggleRole (role: Role) {
     {/if}
 
     <h4 class="mt-4">Allow access for roles</h4>
-    {#await loadRoles() then}
-        <div class="list-group list-group-flush mb-3">
-            {#each allRoles as role}
-                <label
-                    for="role-{role.id}"
-                    class="list-group-item list-group-item-action d-flex align-items-center"
-                >
-                    <Input
-                        id="role-{role.id}"
-                        class="mb-0 me-2"
-                        type="switch"
-                        on:change={() => toggleRole(role)}
-                        checked={roleIsAllowed[role.id]} />
-                    <div>{role.name}</div>
-                </label>
-            {/each}
-        </div>
-    {/await}
+    <Loadable promise={loadRoles()}>
+        {#snippet children(roles)}
+            <div class="list-group list-group-flush mb-3">
+                {#each roles as role}
+                    <label
+                        for="role-{role.id}"
+                        class="list-group-item list-group-item-action d-flex align-items-center"
+                    >
+                        <Input
+                            id="role-{role.id}"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => toggleRole(role)}
+                            checked={roleIsAllowed[role.id]} />
+                        <div>{role.name}</div>
+                    </label>
+                {/each}
+            </div>
+        {/snippet}
+    </Loadable>
 {/if}
-{/await}
+</Loadable>
 
 {#if error}
     <Alert color="danger">{error}</Alert>

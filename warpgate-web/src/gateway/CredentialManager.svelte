@@ -1,29 +1,25 @@
 <script lang="ts">
     import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { stringifyError } from 'common/errors'
     import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
-    let error: string|null = $state(null)
     let creds: CredentialsState | undefined = $state()
 
     let creatingPublicKeyCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
 
-    async function load () {
-        try {
-            creds = await api.getMyCredentials()
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+    const initPromise = init()
+
+    async function init () {
+        creds = await api.getMyCredentials()
     }
 
     async function changePassword (password: string) {
@@ -61,9 +57,7 @@
     }
 </script>
 
-{#await load()}
-    <DelayedSpinner />
-{:then}
+<Loadable promise={initPromise}>
 {#if creds}
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Password</h4>
@@ -200,11 +194,7 @@
     </div>
     {/if}
 {/if}
-{/await}
-
-{#if error}
-<Alert color="danger">{error}</Alert>
-{/if}
+</Loadable>
 
 {#if changingPassword}
 <CreatePasswordModal

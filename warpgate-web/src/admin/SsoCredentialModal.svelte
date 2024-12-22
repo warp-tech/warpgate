@@ -13,6 +13,7 @@
     import { type ExistingSsoCredential } from './lib/api'
     import { api } from 'gateway/lib/api'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         isOpen: boolean
@@ -64,24 +65,26 @@
                     bind:value={email} />
             </FormGroup>
 
-            {#await api.getSsoProviders() then providers}
-                {#if !providers.length}
+            <Loadable promise={api.getSsoProviders()}>
+                {#snippet children(providers)}
+                    {#if !providers.length}
                     <Alert color="warning">
                         You don't have any SSO providers configured. Add them to your config file first.
                     </Alert>
-                {/if}
-                <FormGroup floating label="SSO provider">
-                    <Input
-                        bind:value={provider}
-                        type="select"
-                    >
-                        <option value={null} selected>Any</option>
-                        {#each providers as provider}
+                    {/if}
+                    <FormGroup floating label="SSO provider">
+                        <Input
+                            bind:value={provider}
+                            type="select"
+                        >
+                            <option value={null} selected>Any</option>
+                            {#each providers as provider}
                             <option value={provider.name}>{provider.label ?? provider.name}</option>
-                        {/each}
-                    </Input>
-                </FormGroup>
-            {/await}
+                            {/each}
+                        </Input>
+                    </FormGroup>
+                {/snippet}
+            </Loadable>
         </ModalBody>
         <ModalFooter>
             <div class="d-flex">

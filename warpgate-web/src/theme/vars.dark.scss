@@ -6,8 +6,6 @@ $body-color: #c1c9e4;
 $font-family-sans-serif: "Work Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 $link-color: $body-color;
 $list-group-bg: transparent;
-$alert-border-radius: 0;
-$alert-border-scale: -30%;
 
 
 $blue:    #449fbe;
@@ -24,6 +22,7 @@ $primary: $blue;
 $secondary: #748d95;
 $light: transparent;
 $info: $blue;
+
 
 $component-active-bg: $primary;
 
@@ -83,3 +82,17 @@ $form-switch-padding-start:       3em;
 
 $form-check-input-checked-border-color:   shade-color($form-check-color, $btn-active-border-shade-amount);
 $form-check-input-checked-bg-color:       shade-color($form-check-color, $btn-active-bg-shade-amount);
+
+$primary-bg-subtle:       shade-color($primary, 80%);
+$secondary-bg-subtle:     shade-color($secondary, 80%);
+$success-bg-subtle:       shade-color($success, 80%);
+$info-bg-subtle:          shade-color($info, 80%);
+$warning-bg-subtle:       shade-color($warning, 80%);
+$danger-bg-subtle:        shade-color($danger, 80%);
+
+$primary-text-emphasis:   tint-color($primary, 60%);
+$secondary-text-emphasis: tint-color($secondary, 60%);
+$success-text-emphasis:   tint-color($success, 60%);
+$info-text-emphasis:      tint-color($info, 60%);
+$warning-text-emphasis:   tint-color($warning, 60%);
+$danger-text-emphasis:    tint-color($danger, 60%);

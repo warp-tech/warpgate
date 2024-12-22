@@ -1,19 +1,13 @@
 <script lang="ts">
     import { Input } from '@sveltestrap/sveltestrap'
     import { api, type ParameterValues } from 'admin/lib/api'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import { stringifyError } from 'common/errors'
+    import Loadable from 'common/Loadable.svelte'
 
     let parameters: ParameterValues | undefined = $state()
-    let error: string|null = $state(null)
+    const initPromise = init()
 
-    async function load () {
-        try {
-            parameters = await api.getParameters({})
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+    async function init () {
+        parameters = await api.getParameters({})
     }
 
 </script>
@@ -22,9 +16,7 @@
     <h1>global parameters</h1>
 </div>
 
-{#await load()}
-    <DelayedSpinner />
-{:then}
+<Loadable promise={initPromise}>
 {#if parameters}
     <label
         for="allowOwnCredentialManagement"
@@ -46,8 +38,4 @@
         <div>Allow users to manage their own credentials</div>
     </label>
 {/if}
-{/await}
-
-{#if error}
-    <Alert color="danger">{error}</Alert>
-{/if}
+</Loadable>

@@ -9,11 +9,8 @@
 <script lang="ts">
     import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
     import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
-    import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
@@ -21,6 +18,7 @@
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
     import { possibleCredentials } from 'common/protocols'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         userId: string
@@ -29,7 +27,6 @@
     }
     let { userId, username, credentialPolicy = $bindable() }: Props = $props()
 
-    let error: string|null = $state(null)
     let credentials: ExistingCredential[] = $state([])
 
     let creatingPassword = $state(false)
@@ -49,16 +46,12 @@
     ]
 
     async function load () {
-        try {
-            await Promise.all([
-                loadPasswords(),
-                loadSso(),
-                loadPublicKeys(),
-                loadOtp(),
-            ])
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+        await Promise.all([
+            loadPasswords(),
+            loadSso(),
+            loadPublicKeys(),
+            loadOtp(),
+        ])
     }
 
     async function loadPasswords () {
@@ -240,97 +233,89 @@
     }}>Add SSO</Button>
 </div>
 
-{#await loadPromise}
-<DelayedSpinner />
-{:then}
-
-<div class="list-group list-group-flush mb-3">
-    {#each credentials as credential}
-    <div class="list-group-item credential">
-        {#if credential.kind === CredentialKind.Password }
-            <Fa fw icon={faKeyboard} />
-            <span class="label me-auto">Password</span>
-        {/if}
-        {#if credential.kind === 'PublicKey'}
-            <Fa fw icon={faKey} />
-            <div class="main me-auto">
-                <div class="label d-flex align-items-center">
-                    {credential.label}
+<Loadable promise={loadPromise}>
+    <div class="list-group list-group-flush mb-3">
+        {#each credentials as credential}
+        <div class="list-group-item credential">
+            {#if credential.kind === CredentialKind.Password }
+                <Fa fw icon={faKeyboard} />
+                <span class="label me-auto">Password</span>
+            {/if}
+            {#if credential.kind === 'PublicKey'}
+                <Fa fw icon={faKey} />
+                <div class="main me-auto">
+                    <div class="label d-flex align-items-center">
+                        {credential.label}
+                    </div>
+                    <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
                 </div>
-                <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
-            </div>
-            <CredentialUsedStateBadge credential={credential} />
-            <div class="me-2"></div>
-        {/if}
-        {#if credential.kind === 'Totp'}
-            <Fa fw icon={faMobileScreen} />
-            <span class="label me-auto">One-time password</span>
-        {/if}
-        {#if credential.kind === CredentialKind.Sso}
-            <Fa fw icon={faIdBadge} />
-            <span class="label">Single sign-on</span>
-            <span class="text-muted ms-2 me-auto">
-                {credential.email}
-                {#if credential.provider} ({credential.provider}){/if}
-            </span>
-        {/if}
+                <CredentialUsedStateBadge credential={credential} />
+                <div class="me-2"></div>
+            {/if}
+            {#if credential.kind === 'Totp'}
+                <Fa fw icon={faMobileScreen} />
+                <span class="label me-auto">One-time password</span>
+            {/if}
+            {#if credential.kind === CredentialKind.Sso}
+                <Fa fw icon={faIdBadge} />
+                <span class="label">Single sign-on</span>
+                <span class="text-muted ms-2 me-auto">
+                    {credential.email}
+                    {#if credential.provider} ({credential.provider}){/if}
+                </span>
+            {/if}
 
-        {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
-        <a
-            class="ms-2"
-            href={''}
-            onclick={e => {
-                if (credential.kind === CredentialKind.Sso) {
-                    editingSsoCredentialInstance = credential
-                    editingSsoCredential = true
-                }
-                if (credential.kind === CredentialKind.PublicKey) {
-                    editingPublicKeyCredentialInstance = credential
-                    editingPublicKeyCredential = true
-                }
-                e.preventDefault()
-            }}>
-            Change
-        </a>
-        {/if}
-        <a
-            class="ms-2"
-            href={''}
-            onclick={e => {
-                deleteCredential(credential)
-                e.preventDefault()
-            }}>
-            Delete
-        </a>
-    </div>
-    {/each}
-</div>
-
-<h4>Auth policy</h4>
-<div class="list-group list-group-flush mb-3">
-    {#each policyProtocols as protocol}
-    <div class="list-group-item">
-        <div>
-            <strong>{protocol.name}</strong>
+            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
+            <a
+                class="ms-2"
+                href={''}
+                onclick={e => {
+                    if (credential.kind === CredentialKind.Sso) {
+                        editingSsoCredentialInstance = credential
+                        editingSsoCredential = true
+                    }
+                    if (credential.kind === CredentialKind.PublicKey) {
+                        editingPublicKeyCredentialInstance = credential
+                        editingPublicKeyCredential = true
+                    }
+                    e.preventDefault()
+                }}>
+                Change
+            </a>
+            {/if}
+            <a
+                class="ms-2"
+                href={''}
+                onclick={e => {
+                    deleteCredential(credential)
+                    e.preventDefault()
+                }}>
+                Delete
+            </a>
         </div>
-        {#if possibleCredentials[protocol.id]}
-            {@const _possibleCredentials = assertDefined(possibleCredentials[protocol.id])}
-            <AuthPolicyEditor
-                bind:value={credentialPolicy}
-                existingCredentials={credentials}
-                possibleCredentials={_possibleCredentials}
-                protocolId={protocol.id}
-            />
-        {/if}
+        {/each}
     </div>
-    {/each}
-</div>
 
-{/await}
-
-{#if error}
-    <Alert color="danger">{error}</Alert>
-{/if}
+    <h4>Auth policy</h4>
+    <div class="list-group list-group-flush mb-3">
+        {#each policyProtocols as protocol}
+        <div class="list-group-item">
+            <div>
+                <strong>{protocol.name}</strong>
+            </div>
+            {#if possibleCredentials[protocol.id]}
+                {@const _possibleCredentials = assertDefined(possibleCredentials[protocol.id])}
+                <AuthPolicyEditor
+                    bind:value={credentialPolicy}
+                    existingCredentials={credentials}
+                    possibleCredentials={_possibleCredentials}
+                    protocolId={protocol.id}
+                />
+            {/if}
+        </div>
+        {/each}
+    </div>
+</Loadable>
 
 {#if creatingPassword}
 <CreatePasswordModal

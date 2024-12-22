@@ -23,7 +23,6 @@
     interface Props {
         page?: number
         pageSize?: number|undefined
-        // eslint-disable-next-line no-undef
         load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
         showSearch?: boolean
         header?: import('svelte').Snippet<[any]>
@@ -73,7 +72,6 @@
     )
 
     const total = observe<number>(responses.pipe(map(x => x.total)), 0)
-    // eslint-disable-next-line no-undef
     const items = observe<T[]|null>(responses.pipe(map(x => x.items)), null)
 
     onDestroy(() => {

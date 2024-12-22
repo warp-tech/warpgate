@@ -1,12 +1,12 @@
 <script lang="ts">
     import { api, type Role, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { replace } from 'svelte-spa-router'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from './CredentialEditor.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         params: { id: string };
@@ -19,17 +19,15 @@
     let allRoles: Role[] = $state([])
     let roleIsAllowed: Record<string, any> = $state({})
 
-    async function load () {
-        try {
-            user = await api.getUser({ id: params.id })
-            user.credentialPolicy ??= {}
+    const initPromise = init()
 
-            allRoles = await api.getRoles()
-            const allowedRoles = await api.getUserRoles(user)
-            roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+    async function init () {
+        user = await api.getUser({ id: params.id })
+        user.credentialPolicy ??= {}
+
+        allRoles = await api.getRoles()
+        const allowedRoles = await api.getUserRoles(user)
+        roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
     }
 
     async function update () {
@@ -67,9 +65,7 @@
     }
 </script>
 
-{#await load()}
-    <DelayedSpinner />
-{:then}
+<Loadable promise={initPromise}>
 {#if user}
 <div class="page-summary-bar">
     <div>
@@ -106,7 +102,7 @@
     {/each}
 </div>
 {/if}
-{/await}
+</Loadable>
 
 {#if error}
     <Alert color="danger">{error}</Alert>

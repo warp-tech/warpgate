@@ -29,6 +29,7 @@ export default [
       },
       globals: {
           ...globals.browser,
+          T: false,
       },
     },
     rules: {

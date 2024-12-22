@@ -1,37 +1,37 @@
 <script lang="ts">
-import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
-import AsyncButton from 'common/AsyncButton.svelte'
-import DelayedSpinner from 'common/DelayedSpinner.svelte'
-import RelativeDate from 'admin/RelativeDate.svelte'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import RelativeDate from 'admin/RelativeDate.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
-interface Props {
-    params: { stateId: string };
-}
+    interface Props {
+        params: { stateId: string };
+    }
 
-let { params }: Props = $props()
+    let { params }: Props = $props()
 
-let authState: AuthStateResponseInternal | undefined = $state()
+    let authState: AuthStateResponseInternal | undefined = $state()
 
-async function reload () {
-    authState = await api.getAuthState({ id: params.stateId })
-}
+    async function reload () {
+        authState = await api.getAuthState({ id: params.stateId })
+    }
 
-async function init () {
-    await reload()
-}
+    async function init () {
+        await reload()
+    }
 
-async function approve () {
-    api.approveAuth({ id: params.stateId })
-    await reload()
-    window.close()
-}
+    async function approve () {
+        api.approveAuth({ id: params.stateId })
+        await reload()
+        window.close()
+    }
 
-async function reject () {
-    api.rejectAuth({ id: params.stateId })
-    await reload()
-    window.close()
-}
+    async function reject () {
+        api.rejectAuth({ id: params.stateId })
+        await reload()
+        window.close()
+    }
 </script>
 
 <style lang="scss">
@@ -47,9 +47,7 @@ async function reject () {
     }
 </style>
 
-{#await init()}
-    <DelayedSpinner />
-{:then}
+<Loadable promise={init()}>
 {#if authState}
     <div class="page-summary-bar">
         <h1>authorization request</h1>
@@ -102,4 +100,4 @@ async function reject () {
         </div>
     {/if}
 {/if}
-{/await}
+</Loadable>
