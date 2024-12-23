@@ -27,7 +27,7 @@
     "@otplib/plugin-base32-enc-dec": "^12.0.1",
     "@otplib/plugin-crypto-js": "^12.0.1",
     "@otplib/preset-browser": "^12.0.1",
-    "@sveltejs/vite-plugin-svelte": "^4.0.2",
+    "@sveltejs/vite-plugin-svelte": "^4.0.4",
     "@sveltestrap/sveltestrap": "^6.2.7",
     "@tsconfig/svelte": "^5.0.0",
     "@types/qrcode": "^1.5.0",
