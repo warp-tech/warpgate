@@ -45,7 +45,7 @@ function loadURL (url: string) {
 </script>
 
 <ItemList load={loadTargets} showSearch={true}>
-    {#snippet item({ item: target })}
+    {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item"
             href={

@@ -18,16 +18,18 @@
     import { observe } from 'svelte-observable'
     import { Input } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
-    import { onDestroy } from 'svelte'
+    import { onDestroy, type Snippet } from 'svelte'
+    import EmptyState from './EmptyState.svelte'
 
     interface Props {
         page?: number
         pageSize?: number|undefined
         load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
         showSearch?: boolean
-        header?: import('svelte').Snippet<[any]>
-        item?: import('svelte').Snippet<[any]>
-        footer?: import('svelte').Snippet<[any]>
+        header?: Snippet<[]>
+        item?: Snippet<[T]>
+        footer?: Snippet<[T[]]>
+        empty?: Snippet<[]>
     }
 
     let {
@@ -38,6 +40,7 @@
         header,
         item,
         footer,
+        empty,
     }: Props = $props()
 
     let filter = $state('')
@@ -95,7 +98,7 @@
     {#if showSearch}
         <Input bind:value={filter} placeholder="Search..." class="flex-grow-1 border-0" />
     {/if}
-    {@render header?.({ items })}
+    {@render header?.()}
 </div>
 {#await $items}
     <DelayedSpinner />
@@ -103,18 +106,20 @@
     {#if _items}
         <div class="list-group list-group-flush mb-3">
             {#each _items as _item}
-                {@render item?.({ item: _item })}
+                {@render item?.(_item)}
             {/each}
         </div>
-        {@render footer?.({ items: _items })}
+        {@render footer?.(_items)}
     {:else}
         <DelayedSpinner />
     {/if}
 
-    {#if filter && loaded && !_items?.length}
-        <em>
-            Nothing found
-        </em>
+    {#if loaded && !_items?.length}
+        {#if filter}
+            <EmptyState title="Nothing found" />
+        {:else}
+            {@render empty?.()}
+        {/if}
     {/if}
 {/await}
 

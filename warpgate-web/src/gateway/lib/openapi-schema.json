@@ -571,6 +571,86 @@
         },
         "operationId": "delete_my_otp"
       }
+    },
+    "/profile/api-tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingApiToken"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_api_tokens"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewApiToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenAndSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "create_api_token"
+      }
+    },
+    "/profile/api-tokens/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_api_token"
+      }
     }
   },
   "components": {
@@ -669,6 +749,32 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          }
+        }
+      },
+      "ExistingApiToken": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "created",
+          "expiry"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -790,6 +896,22 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "NewApiToken": {
+        "type": "object",
+        "required": [
+          "label",
+          "expiry"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -937,6 +1059,21 @@
             "$ref": "#/components/schemas/TargetKind"
           },
           "external_host": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenAndSecret": {
+        "type": "object",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/ExistingApiToken"
+          },
+          "secret": {
             "type": "string"
           }
         }

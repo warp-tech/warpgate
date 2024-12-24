@@ -4,13 +4,13 @@
     import DelayedSpinner from './DelayedSpinner.svelte'
     import { stringifyError } from './errors'
 
-    let { promise, children }: {
+    let { promise, children, data = $bindable() }: {
         promise: Promise<T>
+        data?: T,
         children: Snippet<[T]>
     } = $props()
 
     let loaded = $state(false)
-    let data: T | undefined = $state()
     let error: string | undefined = $state()
 
     $effect(() => {

@@ -4,6 +4,7 @@
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
+    import EmptyState from 'common/EmptyState.svelte'
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({
@@ -27,7 +28,13 @@
 </div>
 
 <ItemList load={getTargets} showSearch={true}>
-    {#snippet item({ item: target })}
+    {#snippet empty()}
+        <EmptyState
+            title="No targets yet"
+            hint="Targets are destinations on the internal network that your users will connect to"
+        />
+    {/snippet}
+    {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action"
             class:disabled={target.options.kind === TargetKind.WebAdmin}

@@ -106,7 +106,9 @@ async fn get_target_for_request(
                 });
             username
         }
-        RequestAuthorization::AdminToken => return Ok(None),
+        RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
+            return Ok(None)
+        }
     };
 
     if let Some(target_name) = selected_target_name {

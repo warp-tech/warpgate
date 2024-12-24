@@ -63,7 +63,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let admin_api_app = admin_api_app(&self.services).into_endpoint();
         let api_service = OpenApiService::new(
             crate::api::get(),
-            "Warpgate HTTP proxy",
+            "Warpgate user API",
             env!("CARGO_PKG_VERSION"),
         )
         .server("/@warpgate/api");

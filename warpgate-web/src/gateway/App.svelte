@@ -46,6 +46,14 @@
             asyncComponent: () => import('./Profile.svelte') as any,
             conditions: [requireLogin],
         }),
+        '/profile/api-tokens': wrap({
+            asyncComponent: () => import('./ProfileApiTokens.svelte') as any,
+            conditions: [requireLogin],
+        }),
+        '/profile/credentials': wrap({
+            asyncComponent: () => import('./ProfileCredentials.svelte') as any,
+            conditions: [requireLogin],
+        }),
         '/login': wrap({
             asyncComponent: () => import('./Login.svelte') as any,
         }),

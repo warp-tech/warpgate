@@ -89,7 +89,7 @@
         </div>
     {/snippet}
 
-    {#snippet item({ item: session })}
+    {#snippet item(session)}
         <a
 
             class="list-group-item list-group-item-action"

@@ -5,14 +5,13 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
 
+use super::common::get_user;
 use crate::common::{endpoint_auth, RequestAuthorization};
 
 pub struct Api;
@@ -166,25 +165,6 @@ pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
         }
         Ok(endpoint_auth(ep).call(req).await?.into_response())
     })
-}
-
-async fn get_user(
-    auth: &RequestAuthorization,
-    db: &DatabaseConnection,
-) -> Result<Option<entities::User::Model>, WarpgateError> {
-    let Some(username) = auth.username() else {
-        return Ok(None);
-    };
-
-    let Some(user_model) = entities::User::Entity::find()
-        .filter(entities::User::Column::Username.eq(username))
-        .one(db)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(user_model))
 }
 
 #[OpenApi]

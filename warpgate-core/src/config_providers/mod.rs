@@ -52,6 +52,8 @@ pub trait ConfigProvider {
         &self,
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError>;
+
+    async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError>;
 }
 
 //TODO: move this somewhere

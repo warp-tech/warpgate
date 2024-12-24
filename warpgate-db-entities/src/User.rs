@@ -51,6 +51,12 @@ impl Related<super::SsoCredential::Entity> for Entity {
     }
 }
 
+impl Related<super::ApiToken::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ApiTokens.def()
+    }
+}
+
 #[derive(Copy, Clone, Debug, EnumIter)]
 #[allow(clippy::enum_variant_names)]
 pub enum Relation {
@@ -58,6 +64,7 @@ pub enum Relation {
     PasswordCredentials,
     PublicKeyCredentials,
     SsoCredentials,
+    ApiTokens,
 }
 
 impl RelationTrait for Relation {
@@ -78,6 +85,10 @@ impl RelationTrait for Relation {
             Self::SsoCredentials => Entity::has_many(super::SsoCredential::Entity)
                 .from(Column::Id)
                 .to(super::SsoCredential::Column::UserId)
+                .into(),
+            Self::ApiTokens => Entity::has_many(super::ApiToken::Entity)
+                .from(Column::Id)
+                .to(super::ApiToken::Column::UserId)
                 .into(),
         }
     }

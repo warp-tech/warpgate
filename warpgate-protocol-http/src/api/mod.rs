@@ -1,6 +1,7 @@
 use poem_openapi::auth::ApiKey;
 use poem_openapi::{OpenApi, SecurityScheme};
 
+mod api_tokens;
 pub mod auth;
 mod common;
 mod credentials;
@@ -33,5 +34,6 @@ pub fn get() -> impl OpenApi {
         sso_provider_list::Api,
         sso_provider_detail::Api,
         credentials::Api,
+        api_tokens::Api,
     )
 }
