@@ -6,6 +6,7 @@ import Fa from 'svelte-fa'
 import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
 import { stringifyError } from 'common/errors'
 import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import EmptyState from 'common/EmptyState.svelte';
 
 let error: string|undefined = $state()
 let tickets: Ticket[]|undefined = $state()
@@ -29,12 +30,12 @@ async function deleteTicket (ticket: Ticket) {
 <Alert color="danger">{error}</Alert>
 {/if}
 
-{#if tickets }
+{#if tickets}
     <div class="page-summary-bar">
         {#if tickets.length }
             <h1>access tickets: <span class="counter">{tickets.length}</span></h1>
         {:else}
-            <h1>No tickets created yet</h1>
+            <h1>access tickets</h1>
         {/if}
         <a
             class="btn btn-primary ms-auto"
@@ -44,7 +45,7 @@ async function deleteTicket (ticket: Ticket) {
         </a>
     </div>
 
-    {#if tickets.length }
+    {#if tickets.length}
         <div class="list-group list-group-flush">
             {#each tickets as ticket}
                 <div class="list-group-item">
@@ -79,9 +80,10 @@ async function deleteTicket (ticket: Ticket) {
             {/each}
         </div>
     {:else}
-        <Alert color="info" fade={false}>
-            Tickets are secret keys that allow access to one specific target without any additional authentication.
-        </Alert>
+        <EmptyState
+            title="No tickets yet"
+            hint="Tickets are secret keys that allow access to one specific target without any additional authentication"
+        />
     {/if}
 {/if}
 

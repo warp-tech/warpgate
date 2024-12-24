@@ -26,7 +26,7 @@
 </div>
 
 <ItemList load={getUsers} showSearch={true}>
-    {#snippet item({ item: user })}
+    {#snippet item(user)}
         <a
             class="list-group-item list-group-item-action"
             href="/users/{user.id}"

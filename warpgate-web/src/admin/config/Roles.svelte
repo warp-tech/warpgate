@@ -15,8 +15,7 @@
     }
 </script>
 
-
-<div class="page-summary-bar mt-4">
+<div class="page-summary-bar">
     <h1>roles</h1>
     <a
         class="btn btn-primary ms-auto"
@@ -27,7 +26,7 @@
 </div>
 
 <ItemList load={getRoles} showSearch={true}>
-    {#snippet item({ item: role })}
+    {#snippet item(role)}
         <a
             class="list-group-item list-group-item-action"
             href="/roles/{role.id}"

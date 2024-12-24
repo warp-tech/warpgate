@@ -7,6 +7,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import EmptyState from 'common/EmptyState.svelte';
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
@@ -26,10 +27,9 @@
     }
 </script>
 
-<div class="d-flex align-items-center mt-4 mb-2">
-    <h4 class="m-0">API tokens</h4>
-    <span class="ms-auto"></span>
-    <a href={''} color="link" onclick={e => {
+<div class="page-summary-bar mt-4">
+    <h1>API tokens</h1>
+    <a href={''} class="btn btn-primary ms-auto" onclick={e => {
         creatingToken = true
         e.preventDefault()
     }}>Create token</a>
@@ -46,6 +46,13 @@
 {/if}
 
 <Loadable promise={api.getMyApiTokens()} bind:data={tokens}>
+    {#if tokens.length === 0}
+        <EmptyState
+            title="No tokens yet"
+            hint="Tokens let you manage Warpgate programmatically via its API"
+        />
+    {/if}
+
     <div class="list-group list-group-flush mb-3">
         {#each tokens as token}
         <div class="list-group-item d-flex align-items-center">
