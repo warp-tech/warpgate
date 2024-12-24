@@ -7,7 +7,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
-    import EmptyState from 'common/EmptyState.svelte';
+    import EmptyState from 'common/EmptyState.svelte'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)

@@ -431,7 +431,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         active_model.update(&*db).await.map_err(|e| {
             error!("Failed to update last_used for public key: {:?}", e);
-            WarpgateError::DatabaseError(e.into())
+            WarpgateError::DatabaseError(e)
         })?;
 
         Ok(())

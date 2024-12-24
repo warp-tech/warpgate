@@ -4,7 +4,7 @@
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
-    import EmptyState from 'common/EmptyState.svelte';
+    import EmptyState from 'common/EmptyState.svelte'
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({

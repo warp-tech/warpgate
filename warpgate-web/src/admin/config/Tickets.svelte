@@ -1,29 +1,28 @@
 <script lang="ts">
-import { api, type Ticket } from 'admin/lib/api'
-import { link } from 'svelte-spa-router'
-import RelativeDate from '../RelativeDate.svelte'
-import Fa from 'svelte-fa'
-import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
-import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import EmptyState from 'common/EmptyState.svelte';
+    import { api, type Ticket } from 'admin/lib/api'
+    import { link } from 'svelte-spa-router'
+    import RelativeDate from '../RelativeDate.svelte'
+    import Fa from 'svelte-fa'
+    import { faCalendarXmark, faCalendarCheck, faSquareXmark, faSquareCheck } from '@fortawesome/free-solid-svg-icons'
+    import { stringifyError } from 'common/errors'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import EmptyState from 'common/EmptyState.svelte'
 
-let error: string|undefined = $state()
-let tickets: Ticket[]|undefined = $state()
+    let error: string|undefined = $state()
+    let tickets: Ticket[]|undefined = $state()
 
-async function load () {
-    tickets = await api.getTickets()
-}
+    async function load () {
+        tickets = await api.getTickets()
+    }
 
-load().catch(async e => {
-    error = await stringifyError(e)
-})
+    load().catch(async e => {
+        error = await stringifyError(e)
+    })
 
-async function deleteTicket (ticket: Ticket) {
-    await api.deleteTicket(ticket)
-    load()
-}
-
+    async function deleteTicket (ticket: Ticket) {
+        await api.deleteTicket(ticket)
+        load()
+    }
 </script>
 
 {#if error}
