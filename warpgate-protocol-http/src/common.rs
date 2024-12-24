@@ -115,6 +115,7 @@ impl SessionAuthorization {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
+    UserToken { username: String },
     AdminToken,
 }
 
@@ -122,6 +123,7 @@ impl RequestAuthorization {
     pub fn username(&self) -> Option<&String> {
         match self {
             Self::Session(auth) => Some(auth.username()),
+            Self::UserToken { username } => Some(username),
             Self::AdminToken => None,
         }
     }
@@ -133,6 +135,7 @@ async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Resu
     let username = match auth {
         RequestAuthorization::Session(SessionAuthorization::User(username)) => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
+        RequestAuthorization::UserToken { username } => username,
         RequestAuthorization::AdminToken => return Ok(true),
     };
 
@@ -184,13 +187,21 @@ pub async fn _inner_auth<E: Endpoint + 'static>(
         Some(auth) => RequestAuthorization::Session(auth),
         None => match req.headers().get(&X_WARPGATE_TOKEN) {
             Some(token_from_header) => {
-                if Some(
-                    token_from_header
-                        .to_str()
-                        .map_err(poem::error::BadRequest)?,
-                ) == services.admin_token.lock().await.as_deref()
-                {
+                let token_from_header = token_from_header
+                    .to_str()
+                    .map_err(poem::error::BadRequest)?;
+                if Some(token_from_header) == services.admin_token.lock().await.as_deref() {
                     RequestAuthorization::AdminToken
+                } else if let Some(user) = services
+                    .config_provider
+                    .lock()
+                    .await
+                    .validate_api_token(token_from_header)
+                    .await?
+                {
+                    RequestAuthorization::UserToken {
+                        username: user.username,
+                    }
                 } else {
                     return Ok(None);
                 }

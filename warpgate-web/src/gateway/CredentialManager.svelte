@@ -66,15 +66,15 @@
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item credential">
             {#if creds.password === PasswordState.Unset}
-                <span class="label">Your account has no password set</span>
+                <span class="label ms-3">Your account has no password set</span>
             {/if}
             {#if creds.password === PasswordState.Set}
                 <Fa fw icon={faKeyboard} />
-                <span class="label">Password set</span>
+                <span class="label ms-3">Password set</span>
             {/if}
             {#if creds.password === PasswordState.MultipleSet}
                 <Fa fw icon={faKeyboard} />
-                <span class="label">Multiple passwords set</span>
+                <span class="label ms-3">Multiple passwords set</span>
             {/if}
 
             <span class="ms-auto"></span>
@@ -116,7 +116,7 @@
         {#each creds.otp as credential}
         <div class="list-group-item credential">
             <Fa fw icon={faMobilePhone} />
-            <span class="label">OTP device</span>
+            <span class="label ms-3">OTP device</span>
             <span class="ms-auto"></span>
             <a
                 class="ms-2"
@@ -150,7 +150,7 @@
         {#each creds.publicKeys as credential}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
-            <div class="main">
+            <div class="main ms-3">
                 <div class="label">{credential.label}</div>
                 <small class="d-block text-muted">{credential.abbreviated}</small>
             </div>
@@ -185,7 +185,7 @@
         {#each creds.sso as credential}
         <div class="list-group-item credential">
             <Fa fw icon={faIdBadge} />
-            <span class="label">
+            <span class="label ms-3">
                 {credential.email}
                 {#if credential.provider} ({credential.provider}){/if}
             </span>
@@ -222,9 +222,5 @@
     .credential {
         display: flex;
         align-items: center;
-
-        .label:not(:first-child), .main {
-            margin-left: .75rem;
-        }
     }
 </style>

@@ -436,4 +436,25 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         Ok(())
     }
+
+    async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
+        let db = self.db.lock().await;
+        let Some(ticket) = entities::ApiToken::Entity::find()
+            .filter(entities::ApiToken::Column::Secret.eq(token))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let Some(user) = ticket
+            .find_related(entities::User::Entity)
+            .one(&*db)
+            .await?
+        else {
+            return Err(WarpgateError::InconsistentState);
+        };
+
+        Ok(Some(user.try_into()?))
+    }
 }
