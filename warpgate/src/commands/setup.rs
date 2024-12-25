@@ -2,7 +2,7 @@
 
 use std::fs::{create_dir_all, File};
 use std::io::Write;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -137,7 +137,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     store.http.enable = true;
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
-        store.http.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *http_port)));
+        store.http.listen =
+            ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
     } else {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
@@ -150,7 +151,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
         if let Some(ssh_port) = ssh_port {
             store.ssh.enable = true;
-            store.ssh.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *ssh_port)));
+            store.ssh.listen =
+                ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
         }
     } else {
         if is_docker() {
@@ -178,7 +180,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if let Commands::UnattendedSetup { mysql_port, .. } = &cli.command {
         if let Some(mysql_port) = mysql_port {
             store.mysql.enable = true;
-            store.mysql.listen = ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *mysql_port)));
+            store.mysql.listen =
+                ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
         }
     } else {
         if is_docker() {
@@ -200,8 +203,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
         if let Some(postgres_port) = postgres_port {
             store.postgres.enable = true;
-            store.postgres.listen =
-                ListenEndpoint(SocketAddr::from(([0, 0, 0, 0], *postgres_port)));
+            store.postgres.listen = ListenEndpoint(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                *postgres_port,
+            ));
         }
     } else {
         if is_docker() {
