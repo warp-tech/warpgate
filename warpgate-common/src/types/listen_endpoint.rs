@@ -61,7 +61,7 @@ impl ListenEndpoint {
                 .into_iter()
                 .map(TcpListenerStream::new),
         )
-        .flatten())
+        .flatten_unordered(None))
     }
 
     pub fn port(&self) -> u16 {
