@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use data_encoding::BASE64;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
@@ -440,7 +440,11 @@ impl ConfigProvider for DatabaseConfigProvider {
     async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
         let db = self.db.lock().await;
         let Some(ticket) = entities::ApiToken::Entity::find()
-            .filter(entities::ApiToken::Column::Secret.eq(token))
+            .filter(
+                entities::ApiToken::Column::Secret
+                    .eq(token)
+                    .and(entities::ApiToken::Column::Expiry.gt(Utc::now())),
+            )
             .one(&*db)
             .await?
         else {
