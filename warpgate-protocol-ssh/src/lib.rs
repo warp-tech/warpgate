@@ -14,7 +14,9 @@ pub use common::*;
 pub use keys::*;
 pub use server::run_server;
 use uuid::Uuid;
-use warpgate_common::{ListenEndpoint, ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions};
+use warpgate_common::{
+    ListenEndpoint, ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions,
+};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 
 pub static PROTOCOL_NAME: ProtocolName = "SSH";
