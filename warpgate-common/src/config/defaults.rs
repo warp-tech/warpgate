@@ -1,4 +1,4 @@
-use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::net::{Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use crate::{ListenEndpoint, Secret};
