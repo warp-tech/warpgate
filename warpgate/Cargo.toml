@@ -16,7 +16,7 @@ console = { version = "0.15", default-features = false }
 console-subscriber = { version = "0.1", optional = true }
 data-encoding.workspace = true
 dialoguer = "0.10"
-futures = "0.3"
+futures.workspace = true
 notify = "5.1"
 rcgen = { version = "0.10", features = ["zeroize"] }
 serde_json.workspace = true

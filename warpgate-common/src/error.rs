@@ -37,6 +37,8 @@ pub enum WarpgateError {
     Sso(#[from] SsoError),
     #[error(transparent)]
     RusshKeys(#[from] russh_keys::Error),
+    #[error("I/O: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("Session end")]
     SessionEnd,

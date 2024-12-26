@@ -1,16 +1,77 @@
 use std::fmt::Debug;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::ops::Deref;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 
+use futures::stream::{iter, FuturesUnordered};
+use futures::{Stream, StreamExt, TryStreamExt};
+use poem::listener::Listener;
 use serde::{Deserialize, Serialize};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_stream::wrappers::TcpListenerStream;
+
+use crate::WarpgateError;
 
 #[derive(Clone)]
-pub struct ListenEndpoint(pub SocketAddr);
+pub struct ListenEndpoint(SocketAddr);
 
-impl Deref for ListenEndpoint {
-    type Target = SocketAddr;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl ListenEndpoint {
+    pub fn addresses_to_listen_on(&self) -> Vec<SocketAddr> {
+        // For [::], explicitly return both addresses so that we are not affected
+        // by the state of the ipv6only sysctl.
+        if self.0.ip() == Ipv6Addr::UNSPECIFIED {
+            vec![
+                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), self.0.port()),
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), self.0.port()),
+            ]
+        } else {
+            vec![self.0]
+        }
+    }
+
+    pub async fn tcp_listeners(&self) -> Result<Vec<TcpListener>, WarpgateError> {
+        Ok(self
+            .addresses_to_listen_on()
+            .into_iter()
+            .map(TcpListener::bind)
+            .collect::<FuturesUnordered<_>>()
+            .try_collect()
+            .await?)
+    }
+
+    pub async fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
+        let addrs = self.addresses_to_listen_on();
+        #[allow(clippy::unwrap_used)] // length known >=1
+        let (first, rest) = addrs.split_first().unwrap();
+        let mut listener: poem::listener::BoxListener =
+            poem::listener::TcpListener::bind(first.to_string()).boxed();
+        for addr in rest {
+            listener = listener
+                .combine(poem::listener::TcpListener::bind(addr.to_string()))
+                .boxed();
+        }
+
+        Ok(listener)
+    }
+
+    pub async fn tcp_accept_stream(
+        &self,
+    ) -> Result<impl Stream<Item = std::io::Result<TcpStream>>, WarpgateError> {
+        Ok(iter(
+            self.tcp_listeners()
+                .await?
+                .into_iter()
+                .map(TcpListenerStream::new),
+        )
+        .flatten())
+    }
+
+    pub fn port(&self) -> u16 {
+        self.0.port()
+    }
+}
+
+impl From<SocketAddr> for ListenEndpoint {
+    fn from(addr: SocketAddr) -> Self {
+        Self(addr)
     }
 }
 

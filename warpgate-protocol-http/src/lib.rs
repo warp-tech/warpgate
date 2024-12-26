@@ -10,7 +10,6 @@ mod session;
 mod session_handle;
 
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,7 +20,7 @@ pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
 use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
-use poem::listener::{Listener, RustlsConfig, TcpListener};
+use poem::listener::{Listener, RustlsConfig};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession, Session};
 use poem::web::Data;
@@ -31,7 +30,8 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::{
-    Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+    ListenEndpoint, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
+    TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
@@ -59,7 +59,7 @@ fn make_session_storage() -> SharedSessionStorage {
 
 #[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
-    async fn run(self, address: SocketAddr) -> Result<()> {
+    async fn run(self, address: ListenEndpoint) -> Result<()> {
         let admin_api_app = admin_api_app(&self.services).into_endpoint();
         let api_service = OpenApiService::new(
             crate::api::get(),
@@ -205,7 +205,9 @@ impl ProtocolServer for HTTPProtocolServer {
 
         info!(?address, "Listening");
         Server::new(
-            TcpListener::bind(address)
+            address
+                .poem_listener()
+                .await?
                 .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
         )
         .run(app)

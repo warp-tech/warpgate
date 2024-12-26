@@ -33,7 +33,7 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
             .and_then(|v| v.to_socket_addrs());
         match v {
             Ok(mut addr) => match addr.next() {
-                Some(addr) => return ListenEndpoint(addr),
+                Some(addr) => return ListenEndpoint::from(addr),
                 None => {
                     error!("No endpoints resolved");
                 }
@@ -138,7 +138,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     store.http.enable = true;
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
         store.http.listen =
-            ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
+            ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
     } else {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
@@ -152,7 +152,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         if let Some(ssh_port) = ssh_port {
             store.ssh.enable = true;
             store.ssh.listen =
-                ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
         }
     } else {
         if is_docker() {
@@ -181,7 +181,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         if let Some(mysql_port) = mysql_port {
             store.mysql.enable = true;
             store.mysql.listen =
-                ListenEndpoint(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
         }
     } else {
         if is_docker() {
@@ -203,7 +203,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
         if let Some(postgres_port) = postgres_port {
             store.postgres.enable = true;
-            store.postgres.listen = ListenEndpoint(SocketAddr::new(
+            store.postgres.listen = ListenEndpoint::from(SocketAddr::new(
                 Ipv6Addr::UNSPECIFIED.into(),
                 *postgres_port,
             ));
