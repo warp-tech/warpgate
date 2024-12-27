@@ -193,6 +193,7 @@ class Test:
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
+        fw_port = alloc_port()
         pf_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
@@ -200,11 +201,11 @@ class Test:
             "-v",
             *common_args,
             "-R",
-            "1234:github.com:443",
+            f"{fw_port}:www.google.com:443",
             "-N",
             password="123",
         )
-        time.sleep(5)
+        # time.sleep(5)
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
@@ -213,13 +214,14 @@ class Test:
             *common_args,
             "curl",
             "-vk",
-            "-H", "Host: github.com",
-            "https://localhost:1234",
+            "--http1.1",
+            "-H", "Host: www.google.com",
+            f"https://localhost:{fw_port}",
             password="123",
         )
         output = ssh_client.communicate(timeout=timeout)[0]
         assert ssh_client.returncode == 0
-        assert b"<html>" in output
+        assert b"</html>" in output
         pf_client.kill()
 
     def test_shell(
