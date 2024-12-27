@@ -167,7 +167,7 @@ class Test:
             "-v",
             *common_args,
             "-L",
-            f"{local_port}:neverssl.com:80",
+            f"{local_port}:github.com:443",
             "-N",
             password="123",
         )
@@ -178,8 +178,8 @@ class Test:
 
         s = requests.Session()
         retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f"http://localhost:{local_port}", timeout=timeout)
+        s.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
+        response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
         assert response.status_code == 200
         ssh_client.kill()
 
@@ -193,6 +193,7 @@ class Test:
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
+        fw_port = alloc_port()
         pf_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
@@ -200,11 +201,11 @@ class Test:
             "-v",
             *common_args,
             "-R",
-            "1234:neverssl.com:80",
+            f"{fw_port}:www.google.com:443",
             "-N",
             password="123",
         )
-        time.sleep(5)
+        # time.sleep(5)
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
@@ -212,13 +213,15 @@ class Test:
             "-v",
             *common_args,
             "curl",
-            "-v",
-            "http://localhost:1234",
+            "-vk",
+            "--http1.1",
+            "-H", "Host: www.google.com",
+            f"https://localhost:{fw_port}",
             password="123",
         )
         output = ssh_client.communicate(timeout=timeout)[0]
         assert ssh_client.returncode == 0
-        assert b"<html>" in output
+        assert b"</html>" in output
         pf_client.kill()
 
     def test_shell(

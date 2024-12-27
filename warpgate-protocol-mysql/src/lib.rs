@@ -6,19 +6,18 @@ mod session;
 mod session_handle;
 mod stream;
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use client::{ConnectionOptions, MySqlClient};
+use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
-use tokio::net::TcpListener;
 use tracing::*;
 use warpgate_common::{
-    ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
-    TlsPrivateKey,
+    ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
+    TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
 
@@ -39,7 +38,7 @@ impl MySQLProtocolServer {
 
 #[async_trait]
 impl ProtocolServer for MySQLProtocolServer {
-    async fn run(self, address: SocketAddr) -> Result<()> {
+    async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
             let config = self.services.config.lock().await;
             let certificate_path = config
@@ -72,9 +71,15 @@ impl ProtocolServer for MySQLProtocolServer {
         ))));
 
         info!(?address, "Listening");
-        let listener = TcpListener::bind(address).await?;
+
+        let mut listener = address.tcp_accept_stream().await?;
+
         loop {
-            let (stream, remote_address) = listener.accept().await?;
+            let Some(stream) = listener.try_next().await? else {
+                return Ok(());
+            };
+            let remote_address = stream.peer_addr()?;
+
             let tls_config = tls_config.clone();
             let services = self.services.clone();
             tokio::spawn(async move {

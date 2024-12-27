@@ -20,3 +20,4 @@ thiserror = "1.0"
 rustls-native-certs = "0.6"
 pgwire = { version = "0.25" }
 rsasl = { version = "2.1.0", default-features = false, features = ["config_builder", "scram-sha-2", "std", "plain", "provider"] }
+futures.workspace = true

@@ -45,7 +45,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             SSHProtocolServer::new(&services)
                 .await?
-                .run(*config.store.ssh.listen),
+                .run(config.store.ssh.listen.clone()),
         );
     }
 
@@ -53,7 +53,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             HTTPProtocolServer::new(&services)
                 .await?
-                .run(*config.store.http.listen),
+                .run(config.store.http.listen.clone()),
         );
     }
 
@@ -61,7 +61,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             MySQLProtocolServer::new(&services)
                 .await?
-                .run(*config.store.mysql.listen),
+                .run(config.store.mysql.listen.clone()),
         );
     }
 
@@ -69,7 +69,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             PostgresProtocolServer::new(&services)
                 .await?
-                .run(*config.store.postgres.listen),
+                .run(config.store.postgres.listen.clone()),
         );
     }
 
