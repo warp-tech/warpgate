@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 
 use futures::stream::{iter, FuturesUnordered};
@@ -14,22 +15,29 @@ use crate::WarpgateError;
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {
-    pub fn addresses_to_listen_on(&self) -> Vec<SocketAddr> {
+    pub fn addresses_to_listen_on(&self) -> Result<Vec<SocketAddr>, WarpgateError> {
         // For [::], explicitly return both addresses so that we are not affected
         // by the state of the ipv6only sysctl.
         if self.0.ip() == Ipv6Addr::UNSPECIFIED {
-            vec![
-                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), self.0.port()),
-                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), self.0.port()),
-            ]
+            let addr6 = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), self.0.port());
+            let addr4 = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), self.0.port());
+            let listener6 = std::net::TcpListener::bind(addr6)?;
+            let listener4 = std::net::TcpListener::bind(addr4);
+            let result = match listener4 {
+                Ok(_) => vec![addr4, addr6],
+                Err(e) if e.kind() == ErrorKind::AddrInUse => vec![addr6],
+                Err(e) => return Err(WarpgateError::Io(e)),
+            };
+            drop(listener6);
+            Ok(result)
         } else {
-            vec![self.0]
+            Ok(vec![self.0])
         }
     }
 
     pub async fn tcp_listeners(&self) -> Result<Vec<TcpListener>, WarpgateError> {
         Ok(self
-            .addresses_to_listen_on()
+            .addresses_to_listen_on()?
             .into_iter()
             .map(TcpListener::bind)
             .collect::<FuturesUnordered<_>>()
@@ -38,7 +46,7 @@ impl ListenEndpoint {
     }
 
     pub async fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
-        let addrs = self.addresses_to_listen_on();
+        let addrs = self.addresses_to_listen_on()?;
         #[allow(clippy::unwrap_used)] // length known >=1
         let (first, rest) = addrs.split_first().unwrap();
         let mut listener: poem::listener::BoxListener =
