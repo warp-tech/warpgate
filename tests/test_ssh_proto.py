@@ -167,7 +167,7 @@ class Test:
             "-v",
             *common_args,
             "-L",
-            f"{local_port}:neverssl.com:80",
+            f"{local_port}:github.com:443",
             "-N",
             password="123",
         )
@@ -178,8 +178,8 @@ class Test:
 
         s = requests.Session()
         retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f"http://localhost:{local_port}", timeout=timeout)
+        s.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
+        response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
         assert response.status_code == 200
         ssh_client.kill()
 
@@ -200,7 +200,7 @@ class Test:
             "-v",
             *common_args,
             "-R",
-            "1234:neverssl.com:80",
+            "1234:github.com:443",
             "-N",
             password="123",
         )
@@ -212,8 +212,9 @@ class Test:
             "-v",
             *common_args,
             "curl",
-            "-v",
-            "http://localhost:1234",
+            "-vk",
+            "-H", "Host: github.com",
+            "https://localhost:1234",
             password="123",
         )
         output = ssh_client.communicate(timeout=timeout)[0]
