@@ -38,7 +38,7 @@ jobs:
         working-directory: tests
         run: |
           sudo apt install -y gnome-keyring
-          pip3 install setuptools==70 keyring==24 poetry==1.8.3
+          pip3 install keyring==24 poetry==1.8.3
           poetry install
 
       - name: Run
