@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::Result;
 use futures::TryStreamExt;
 use russh::keys::{Algorithm, HashAlg};
-use russh::{MethodSet, Preferred};
+use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -31,7 +31,13 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             keepalive_interval: config.store.ssh.keepalive_interval,
-            methods: MethodSet::PUBLICKEY | MethodSet::PASSWORD | MethodSet::KEYBOARD_INTERACTIVE,
+            methods: MethodSet::from(
+                &[
+                    MethodKind::PublicKey,
+                    MethodKind::Password,
+                    MethodKind::KeyboardInteractive,
+                ][..],
+            ),
             keys: vec![load_host_keys(&config)?],
             event_buffer_size: 100,
             preferred: Preferred {

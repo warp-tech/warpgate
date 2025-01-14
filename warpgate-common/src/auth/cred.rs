@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use poem_openapi::Enum;
-use russh_keys::Algorithm;
+use russh::keys::Algorithm;
 use serde::{Deserialize, Serialize};
 
 use crate::Secret;

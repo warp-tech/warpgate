@@ -26,7 +26,7 @@ poem-openapi = { version = "5.1", features = [
 rand = "0.8"
 rand_chacha = "0.3"
 rand_core = { version = "0.6", features = ["std"] }
-russh-keys.workspace = true
+russh.workspace = true
 rustls-native-certs = "0.6"
 sea-orm = { version = "0.12.2", features = [
     "runtime-tokio-rustls",
