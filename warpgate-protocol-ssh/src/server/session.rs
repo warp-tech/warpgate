@@ -13,7 +13,7 @@ use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
-use russh::{CryptoVec, MethodSet, Sig};
+use russh::{CryptoVec, MethodKind, MethodSet, Sig};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
@@ -1400,11 +1400,11 @@ impl ServerSession {
         let mut m = MethodSet::empty();
         for kind in kinds {
             match kind {
-                CredentialKind::Password => m.insert(MethodSet::PASSWORD),
-                CredentialKind::Totp => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
-                CredentialKind::WebUserApproval => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
-                CredentialKind::PublicKey => m.insert(MethodSet::PUBLICKEY),
-                CredentialKind::Sso => m.insert(MethodSet::KEYBOARD_INTERACTIVE),
+                CredentialKind::Password => m.push(MethodKind::Password),
+                CredentialKind::Totp => m.push(MethodKind::KeyboardInteractive),
+                CredentialKind::WebUserApproval => m.push(MethodKind::KeyboardInteractive),
+                CredentialKind::PublicKey => m.push(MethodKind::PublicKey),
+                CredentialKind::Sso => m.push(MethodKind::KeyboardInteractive),
             }
         }
         m

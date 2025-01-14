@@ -496,7 +496,7 @@ impl RemoteClient {
                         SSHTargetAuth::Password(auth) => {
                             auth_result = session
                                 .authenticate_password(ssh_options.username.clone(), auth.password.expose_secret())
-                                .await?;
+                                .await?.success();
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
                             }
@@ -511,7 +511,7 @@ impl RemoteClient {
                                         ssh_options.username.clone(),
                                         key
                                     )
-                                    .await?;
+                                    .await?.success();
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;

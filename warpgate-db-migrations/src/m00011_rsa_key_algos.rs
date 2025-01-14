@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
         let connection = manager.get_connection();
         let creds = PKC::Entity::find().all(connection).await?;
         for cred in creds.into_iter() {
-            let parsed = match russh_keys::PublicKey::from_openssh(&cred.openssh_public_key) {
+            let parsed = match russh::keys::PublicKey::from_openssh(&cred.openssh_public_key) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     error!("Failed to parse public key '{cred:?}': {e}");
