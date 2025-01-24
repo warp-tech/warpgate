@@ -37,7 +37,7 @@
     "bootstrap": "^5.3.3",
     "copy-text-to-clipboard": "^3.0.1",
     "date-fns": "^4.1.0",
-    "eslint": "^9.18.0",
+    "eslint": "^9.19.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-import-resolver-typescript": "^3.7.0",
     "eslint-plugin-import": "^2.31.0",
