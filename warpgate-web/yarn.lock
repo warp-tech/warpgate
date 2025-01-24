@@ -554,10 +554,10 @@
     magic-string "^0.30.12"
     vitefu "^1.0.3"
 
-"@sveltestrap/sveltestrap@^6.2.7":
-  version "6.2.7"
-  resolved "https://registry.yarnpkg.com/@sveltestrap/sveltestrap/-/sveltestrap-6.2.7.tgz#5b2736cbee2db973f02b09d2e9d5bf819418f1f9"
-  integrity sha512-WwLLfAFUb42BGuRrf3Vbct30bQMzlEMMipN/MfxhjuLTmLQeW9muVJfPyvjtWS+mY+RjkSCoHvAp/ZobP1NLlQ==
+"@sveltestrap/sveltestrap@^7.0.3":
+  version "7.0.3"
+  resolved "https://registry.yarnpkg.com/@sveltestrap/sveltestrap/-/sveltestrap-7.0.3.tgz#e2c0725c4366bc7fb169646b8cb357c8d46e2a95"
+  integrity sha512-lvZpVlq7pHVxJbjq2d6JAAr/Z1mkSaPOw3pwpZiuQ9FK97/Pr66m5Bf9qZIc1FUkLnbNiDtRAbhVyR8LVdr3FQ==
   dependencies:
     "@popperjs/core" "^2.11.8"
 
