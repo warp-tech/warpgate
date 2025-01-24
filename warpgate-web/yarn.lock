@@ -221,10 +221,10 @@
   resolved "https://registry.yarnpkg.com/@fontsource/poppins/-/poppins-5.1.1.tgz#fe7c25534d2f46bf296c37b68535d419913bc2c4"
   integrity sha512-PQVKHGQOK+UpVNPzTFF9Z9ez3CIDkunfvRXGH95hiDoqWJc1shW4JFqe4tEoqnq7RtZaYrw9aWQq58L4eny5xg==
 
-"@fontsource/work-sans@^4.5.12":
-  version "4.5.14"
-  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-4.5.14.tgz#965bf103baa9f812d042b5f678a34f632fa76f2e"
-  integrity sha512-AFBSDBA3hnSCXHwb52qBOMEGqF5nfdbANp+y5/hbE1PMjYfFY0lUdtUwL5J7mRAdyn1NJwobJlhduHtlAyPzmA==
+"@fontsource/work-sans@^5.1.1":
+  version "5.1.1"
+  resolved "https://registry.yarnpkg.com/@fontsource/work-sans/-/work-sans-5.1.1.tgz#1363d8c8a4f1c6437c6cae6d265e0ba2939d08da"
+  integrity sha512-fKxyO68szc0pg1GMVP87lVwfDAU/Ku3gjJK5G8TonOjSQAyQjcHlnC7HENeyIgboC/+hocGklSnMYmldjyAJtw==
 
 "@fortawesome/fontawesome-common-types@6.7.2":
   version "6.7.2"

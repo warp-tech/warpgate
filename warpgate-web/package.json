@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@fontsource/poppins": "^5.1.1",
-    "@fontsource/work-sans": "^4.5.12",
+    "@fontsource/work-sans": "^5.1.1",
     "@fortawesome/free-brands-svg-icons": "^6.7.2",
     "@fortawesome/free-regular-svg-icons": "^6.7.2",
     "@fortawesome/free-solid-svg-icons": "^6.7.2",
