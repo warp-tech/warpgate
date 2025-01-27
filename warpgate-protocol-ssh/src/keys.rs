@@ -115,13 +115,13 @@ pub fn load_all_usable_private_keys(
         let key = Arc::new(key);
         if key.key_data().is_rsa() {
             for hash in &[Some(HashAlg::Sha512), Some(HashAlg::Sha256)] {
-                keys.push(PrivateKeyWithHashAlg::new(key.clone(), *hash)?);
+                keys.push(PrivateKeyWithHashAlg::new(key.clone(), *hash));
             }
             if allow_insecure_algos {
-                keys.push(PrivateKeyWithHashAlg::new(key.clone(), None)?);
+                keys.push(PrivateKeyWithHashAlg::new(key.clone(), None));
             }
         } else {
-            keys.push(PrivateKeyWithHashAlg::new(key, None)?);
+            keys.push(PrivateKeyWithHashAlg::new(key, None));
         }
     }
     Ok(keys)
