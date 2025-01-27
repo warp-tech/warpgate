@@ -49,7 +49,8 @@ impl Api {
         };
 
         if let Some(ref search) = *search {
-            targets.retain(|t| t.name.contains(search))
+            let search = search.to_lowercase();
+            targets.retain(|t| t.name.to_lowercase().contains(&search))
         }
 
         let mut targets = stream::iter(targets)
