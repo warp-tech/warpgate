@@ -14,7 +14,7 @@ pub struct Model {
     pub secret: String,
     pub username: String,
     pub target: String,
-    pub uses_left: Option<i32>,
+    pub uses_left: Option<i16>,
     pub expiry: Option<DateTime<Utc>>,
     pub created: DateTime<Utc>,
 }

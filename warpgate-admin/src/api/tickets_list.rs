@@ -28,7 +28,7 @@ struct CreateTicketRequest {
     username: String,
     target_name: String,
     expiry: Option<DateTime<Utc>>,
-    number_of_uses: Option<i32>,
+    number_of_uses: Option<i16>,
 }
 
 #[derive(Object)]
