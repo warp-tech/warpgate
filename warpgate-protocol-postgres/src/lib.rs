@@ -10,7 +10,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use client::{ConnectionOptions, PostgresClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
@@ -36,7 +35,6 @@ impl PostgresProtocolServer {
     }
 }
 
-#[async_trait]
 impl ProtocolServer for PostgresProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {

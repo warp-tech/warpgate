@@ -28,7 +28,9 @@ use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
 };
-use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
+use warpgate_core::{
+    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+};
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;

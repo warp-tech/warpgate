@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
-use warpgate_core::{Services, WarpgateServerHandle};
+use warpgate_core::{ConfigProvider, Services, WarpgateServerHandle};
 
 use crate::common::{RequestAuthorization, SessionAuthorization, SessionExt};
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};

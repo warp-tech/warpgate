@@ -9,7 +9,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use client::{ConnectionOptions, MySqlClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
@@ -36,7 +35,6 @@ impl MySQLProtocolServer {
     }
 }
 
-#[async_trait]
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {

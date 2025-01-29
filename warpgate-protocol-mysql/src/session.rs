@@ -12,7 +12,9 @@ use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
-use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
+use warpgate_core::{
+    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+};
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{

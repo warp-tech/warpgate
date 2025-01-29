@@ -8,7 +8,6 @@ mod server;
 use std::fmt::Debug;
 
 use anyhow::Result;
-use async_trait::async_trait;
 pub use client::*;
 pub use common::*;
 pub use keys::*;
@@ -37,7 +36,6 @@ impl SSHProtocolServer {
     }
 }
 
-#[async_trait]
 impl ProtocolServer for SSHProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         run_server(self.services, address).await

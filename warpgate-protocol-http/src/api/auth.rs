@@ -13,7 +13,7 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_core::Services;
+use warpgate_core::{ConfigProvider, Services};
 
 use super::common::logout;
 use crate::common::{

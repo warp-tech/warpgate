@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{SessionId, WarpgateError};
 
-use crate::ConfigProvider;
+use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
 pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));
@@ -25,13 +25,13 @@ impl AuthCompletionSignal {
 }
 
 pub struct AuthStateStore {
-    config_provider: Arc<Mutex<dyn ConfigProvider + Send + 'static>>,
+    config_provider: Arc<Mutex<ConfigProviderEnum>>,
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
 }
 
 impl AuthStateStore {
-    pub fn new(config_provider: Arc<Mutex<dyn ConfigProvider + Send + 'static>>) -> Self {
+    pub fn new(config_provider: Arc<Mutex<ConfigProviderEnum>>) -> Self {
         Self {
             store: HashMap::new(),
             config_provider,

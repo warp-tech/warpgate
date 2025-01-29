@@ -11,7 +11,9 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
-use warpgate_core::{authorize_ticket, consume_ticket, Services, WarpgateServerHandle};
+use warpgate_core::{
+    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+};
 
 use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;

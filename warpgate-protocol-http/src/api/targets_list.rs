@@ -5,7 +5,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::TargetOptions;
-use warpgate_core::Services;
+use warpgate_core::{ConfigProvider, Services};
 use warpgate_db_entities::Target;
 
 use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};

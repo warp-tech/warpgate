@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use russh::keys::PublicKey;
 use russh::server::{Auth, Handle, Msg, Session};
@@ -69,7 +68,6 @@ impl ServerHandler {
     }
 }
 
-#[async_trait]
 impl russh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
 
@@ -224,11 +222,11 @@ impl russh::server::Handler for ServerHandler {
         Ok(result)
     }
 
-    async fn auth_keyboard_interactive(
-        &mut self,
+    async fn auth_keyboard_interactive<'a>(
+        &'a mut self,
         user: &str,
         _submethods: &str,
-        response: Option<russh::server::Response<'async_trait>>,
+        response: Option<russh::server::Response<'a>>,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let response = response

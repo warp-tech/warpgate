@@ -28,6 +28,7 @@ russh = { version = "0.50.0", features = ["des"] }
 tracing = "0.1"
 futures = "0.3"
 tokio-stream = { version = "0.1.17", features = ["net"] }
+enum_dispatch = "0.3.13"
 
 [profile.release]
 lto = true
