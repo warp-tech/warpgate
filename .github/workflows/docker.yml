@@ -4,10 +4,10 @@ on:
   schedule:
     - cron: '25 12 * * *'
   push:
-    branches: [ main ]
+    branches: [ main, docker-build-fix ]
     tags: [ 'v*.*.*' ] # Publish semver tags as releases.
   pull_request:
-    branches: [ main ]
+    branches: [ main, docker-build-fix ]
 
 env:
   REGISTRY: ghcr.io
