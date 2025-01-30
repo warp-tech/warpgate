@@ -1,4 +1,3 @@
-#![feature(type_alias_impl_trait, try_blocks)]
 pub mod api;
 mod catchall;
 mod common;
@@ -14,7 +13,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use common::page_admin_auth;
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
@@ -57,7 +55,6 @@ fn make_session_storage() -> SharedSessionStorage {
     SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
 }
 
-#[async_trait]
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let admin_api_app = admin_api_app(&self.services).into_endpoint();

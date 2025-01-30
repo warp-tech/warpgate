@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
 use tracing::*;
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
-use warpgate_core::{ProtocolServer, Services};
+use warpgate_core::{ConfigProvider, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
@@ -45,7 +45,8 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             SSHProtocolServer::new(&services)
                 .await?
-                .run(config.store.ssh.listen.clone()),
+                .run(config.store.ssh.listen.clone())
+                .boxed(),
         );
     }
 
@@ -53,7 +54,8 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             HTTPProtocolServer::new(&services)
                 .await?
-                .run(config.store.http.listen.clone()),
+                .run(config.store.http.listen.clone())
+                .boxed(),
         );
     }
 
@@ -61,7 +63,8 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             MySQLProtocolServer::new(&services)
                 .await?
-                .run(config.store.mysql.listen.clone()),
+                .run(config.store.mysql.listen.clone())
+                .boxed(),
         );
     }
 
@@ -69,7 +72,8 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         protocol_futures.push(
             PostgresProtocolServer::new(&services)
                 .await?
-                .run(config.store.postgres.listen.clone()),
+                .run(config.store.postgres.listen.clone())
+                .boxed(),
         );
     }
 

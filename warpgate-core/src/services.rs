@@ -8,9 +8,9 @@ use warpgate_common::{ConfigProviderKind, WarpgateConfig};
 
 use crate::db::{connect_to_db, populate_db};
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProvider, DatabaseConfigProvider, State};
+use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
 
-type ConfigProviderArc = Arc<Mutex<dyn ConfigProvider + Send + 'static>>;
+type ConfigProviderArc = Arc<Mutex<ConfigProviderEnum>>;
 
 #[derive(Clone)]
 pub struct Services {
@@ -40,7 +40,8 @@ impl Services {
                 anyhow::bail!("File based config provider in no longer supported");
             }
             ConfigProviderKind::Database => {
-                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).await)) as ConfigProviderArc
+                Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).await.into()))
+                    as ConfigProviderArc
             }
         };
 

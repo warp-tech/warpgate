@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
-use warpgate_core::{AuthStateStore, Services};
+use warpgate_core::{AuthStateStore, ConfigProvider, Services};
 use warpgate_sso::CoreIdToken;
 
 use crate::session::SessionStore;

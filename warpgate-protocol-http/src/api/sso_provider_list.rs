@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_core::{ConfigProvider, Services};
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};

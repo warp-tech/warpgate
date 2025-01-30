@@ -436,6 +436,17 @@ impl RemoteClient {
                     },
                     russh::keys::Algorithm::Rsa { hash: None },
                 ]),
+                cipher: Cow::Borrowed(&[
+                    russh::cipher::CHACHA20_POLY1305,
+                    russh::cipher::AES_256_GCM,
+                    russh::cipher::AES_256_CTR,
+                    russh::cipher::AES_256_CBC,
+                    russh::cipher::AES_192_CTR,
+                    russh::cipher::AES_192_CBC,
+                    russh::cipher::AES_128_CTR,
+                    russh::cipher::AES_128_CBC,
+                    russh::cipher::TRIPLE_DES_CBC,
+                ]),
                 ..<_>::default()
             }
         } else {

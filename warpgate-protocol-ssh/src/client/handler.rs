@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use russh::client::{Msg, Session};
 use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::Channel;
@@ -39,7 +38,6 @@ pub enum ClientHandlerError {
     Internal,
 }
 
-#[async_trait]
 impl russh::client::Handler for ClientHandler {
     type Error = ClientHandlerError;
 

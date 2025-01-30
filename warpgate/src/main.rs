@@ -1,7 +1,7 @@
-#![feature(type_alias_impl_trait)]
 mod commands;
 mod config;
 mod logging;
+mod protocols;
 use std::path::PathBuf;
 
 use anyhow::Result;

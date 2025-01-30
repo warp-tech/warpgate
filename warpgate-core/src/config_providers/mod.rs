@@ -1,8 +1,8 @@
 mod db;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 pub use db::DatabaseConfigProvider;
+use enum_dispatch::enum_dispatch;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
@@ -12,7 +12,13 @@ use warpgate_common::auth::{AuthCredential, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities::Ticket;
 
-#[async_trait]
+#[enum_dispatch]
+pub enum ConfigProviderEnum {
+    Database(DatabaseConfigProvider),
+}
+
+#[enum_dispatch(ConfigProviderEnum)]
+#[allow(async_fn_in_trait)]
 pub trait ConfigProvider {
     async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError>;
 

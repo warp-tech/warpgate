@@ -1,7 +1,8 @@
 mod handle;
 
+use std::future::Future;
+
 use anyhow::Result;
-use async_trait::async_trait;
 pub use handle::{SessionHandle, WarpgateServerHandle};
 use warpgate_common::{ListenEndpoint, Target};
 
@@ -19,8 +20,10 @@ pub enum TargetTestError {
     Io(#[from] std::io::Error),
 }
 
-#[async_trait]
 pub trait ProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()>;
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError>;
+    fn run(self, address: ListenEndpoint) -> impl Future<Output = Result<()>> + Send;
+    fn test_target(
+        &self,
+        target: Target,
+    ) -> impl Future<Output = Result<(), TargetTestError>> + Send;
 }

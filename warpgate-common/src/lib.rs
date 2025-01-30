@@ -1,4 +1,3 @@
-#![feature(duration_constants)]
 pub mod auth;
 mod config;
 pub mod consts;

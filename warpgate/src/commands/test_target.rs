@@ -1,9 +1,10 @@
 use anyhow::Result;
 use tracing::*;
 use warpgate_common::TargetOptions;
-use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_core::{ConfigProvider, ProtocolServer, Services, TargetTestError};
 
 use crate::config::load_config;
+use crate::protocols::ProtocolServerEnum;
 
 pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {
     let config = load_config(&cli.config, true)?;
@@ -23,19 +24,19 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         return Ok(());
     };
 
-    let s: Box<dyn ProtocolServer> = match target.options {
-        TargetOptions::Ssh(_) => {
-            Box::new(warpgate_protocol_ssh::SSHProtocolServer::new(&services).await?)
-        }
-        TargetOptions::Http(_) => {
-            Box::new(warpgate_protocol_http::HTTPProtocolServer::new(&services).await?)
-        }
-        TargetOptions::MySql(_) => {
-            Box::new(warpgate_protocol_mysql::MySQLProtocolServer::new(&services).await?)
-        }
-        TargetOptions::Postgres(_) => {
-            Box::new(warpgate_protocol_postgres::PostgresProtocolServer::new(&services).await?)
-        }
+    let s: ProtocolServerEnum = match target.options {
+        TargetOptions::Ssh(_) => ProtocolServerEnum::SSHProtocolServer(
+            warpgate_protocol_ssh::SSHProtocolServer::new(&services).await?,
+        ),
+        TargetOptions::Http(_) => ProtocolServerEnum::HTTPProtocolServer(
+            warpgate_protocol_http::HTTPProtocolServer::new(&services).await?,
+        ),
+        TargetOptions::MySql(_) => ProtocolServerEnum::MySQLProtocolServer(
+            warpgate_protocol_mysql::MySQLProtocolServer::new(&services).await?,
+        ),
+        TargetOptions::Postgres(_) => ProtocolServerEnum::PostgresProtocolServer(
+            warpgate_protocol_postgres::PostgresProtocolServer::new(&services).await?,
+        ),
         TargetOptions::WebAdmin(_) => {
             error!("Unsupported target type");
             return Ok(());
