@@ -56,17 +56,17 @@ pub(crate) fn _default_postgres_listen() -> ListenEndpoint {
 
 #[inline]
 pub(crate) fn _default_retention() -> Duration {
-    Duration::SECOND * 60 * 60 * 24 * 7
+    Duration::from_secs(60 * 60 * 24 * 7)
 }
 
 #[inline]
 pub(crate) fn _default_session_max_age() -> Duration {
-    Duration::SECOND * 60 * 30
+    Duration::from_secs(60 * 30)
 }
 
 #[inline]
 pub(crate) fn _default_cookie_max_age() -> Duration {
-    Duration::SECOND * 60 * 60 * 24
+    Duration::from_secs(60 * 60 * 24)
 }
 
 #[inline]
@@ -83,5 +83,5 @@ pub(crate) fn _default_ssh_keys_path() -> String {
 }
 
 pub(crate) fn _default_ssh_inactivity_timeout() -> Duration {
-    Duration::SECOND * 60 * 5
+    Duration::from_secs(60 * 5)
 }

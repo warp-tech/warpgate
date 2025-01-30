@@ -1,4 +1,4 @@
-cargo-features = ["profile-rustflags"]
+# cargo-features = ["profile-rustflags"]
 
 [workspace]
 members = [
@@ -37,4 +37,4 @@ strip = "debuginfo"
 
 [profile.coverage]
 inherits = "dev"
-rustflags = ["-Cinstrument-coverage"]
+# rustflags = ["-Cinstrument-coverage"]
