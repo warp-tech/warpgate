@@ -13,9 +13,9 @@ tokio = { version = "1.20", features = ["tracing", "signal"] }
 tracing.workspace = true
 uuid = { version = "1.2" }
 bytes.workspace = true
-rustls = "0.23"
+rustls.workspace = true
 rustls-pemfile = "1.0"
-tokio-rustls = "0.26"
+tokio-rustls.workspace = true
 thiserror = "1.0"
 rustls-native-certs = "0.6"
 pgwire = { version = "0.25" }
