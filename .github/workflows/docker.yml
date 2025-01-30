@@ -15,7 +15,15 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            docker-platform: linux/amd64
+          - os: ubuntu-24.04-arm
+            docker-platform: linux/arm64
+
     permissions:
       contents: read
       packages: write
@@ -53,4 +61,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64, linux/arm64
+          platforms: ${{ matrix.docker-platform }}
