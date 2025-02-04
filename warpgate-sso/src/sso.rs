@@ -5,13 +5,12 @@ use futures::future::OptionFuture;
 use openidconnect::core::{
     CoreAuthenticationFlow, CoreClient, CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
 };
-use openidconnect::reqwest::async_http_client;
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, DiscoveryError, LogoutRequest,
-    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
-    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, TokenResponse,
-    UserInfoClaims,
+    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, DiscoveryError,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, LogoutRequest, Nonce, OAuth2TokenResponse,
+    PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, ProviderMetadataWithLogout,
+    RedirectUrl, RequestTokenError, Scope, TokenResponse, UserInfoClaims,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -36,12 +35,14 @@ pub struct SsoResult {
 
 pub struct SsoClient {
     config: SsoInternalProviderConfig,
+    http_client: reqwest::Client,
 }
 
 pub async fn discover_metadata(
     config: &SsoInternalProviderConfig,
+    http_client: &reqwest::Client,
 ) -> Result<ProviderMetadataWithLogout, SsoError> {
-    ProviderMetadataWithLogout::discover_async(config.issuer_url()?, async_http_client)
+    ProviderMetadataWithLogout::discover_async(config.issuer_url()?, http_client)
         .await
         .map_err(|e| {
             SsoError::Discovery(match e {
@@ -51,8 +52,21 @@ pub async fn discover_metadata(
         })
 }
 
-async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, SsoError> {
-    let metadata = discover_metadata(config).await?;
+async fn make_client(
+    config: &SsoInternalProviderConfig,
+    http_client: &reqwest::Client,
+) -> Result<
+    CoreClient<
+        EndpointSet,      // HasAuthUrl
+        EndpointNotSet,   // HasDeviceAuthUrl
+        EndpointNotSet,   // HasIntrospectionUrl
+        EndpointNotSet,   // HasRevocationUrl
+        EndpointMaybeSet, // HasTokenUrl
+        EndpointMaybeSet, // HasUserInfoUrl
+    >,
+    SsoError,
+> {
+    let metadata = discover_metadata(config, http_client).await?;
 
     let client = CoreClient::from_provider_metadata(
         metadata,
@@ -65,12 +79,15 @@ async fn make_client(config: &SsoInternalProviderConfig) -> Result<CoreClient, S
 }
 
 impl SsoClient {
-    pub fn new(config: SsoInternalProviderConfig) -> Self {
-        Self { config }
+    pub fn new(config: SsoInternalProviderConfig) -> Result<Self, SsoError> {
+        Ok(Self {
+            config,
+            http_client: reqwest::ClientBuilder::new().build()?,
+        })
     }
 
     pub async fn supports_single_logout(&self) -> Result<bool, SsoError> {
-        let metadata = discover_metadata(&self.config).await?;
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
         Ok(metadata
             .additional_metadata()
             .end_session_endpoint
@@ -79,7 +96,7 @@ impl SsoClient {
 
     pub async fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
         let redirect_url = RedirectUrl::new(redirect_url)?;
-        let client = make_client(&self.config).await?;
+        let client = make_client(&self.config, &self.http_client).await?;
         let mut auth_req = client
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
@@ -123,17 +140,17 @@ impl SsoClient {
         nonce: &Nonce,
         code: String,
     ) -> Result<SsoResult, SsoError> {
-        let client = make_client(&self.config)
+        let client = make_client(&self.config, &self.http_client)
             .await?
             .set_redirect_uri(redirect_url);
 
-        let mut req = client.exchange_code(AuthorizationCode::new(code));
+        let mut req = client.exchange_code(AuthorizationCode::new(code))?;
         if let Some(verifier) = pkce_verifier {
             req = req.set_pkce_verifier(verifier);
         }
 
         let token_response = req
-            .request_async(async_http_client)
+            .request_async(&self.http_client)
             .await
             .map_err(|e| match e {
                 RequestTokenError::ServerResponse(response) => {
@@ -169,7 +186,7 @@ impl SsoClient {
             .ok();
 
         let userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>> =
-            OptionFuture::from(user_info_req.map(|req| req.request_async(async_http_client)))
+            OptionFuture::from(user_info_req.map(|req| req.request_async(&self.http_client)))
                 .await
                 .and_then(|res| {
                     res.map_err(|err| {
@@ -182,7 +199,8 @@ impl SsoClient {
         if let Some(expected_access_token_hash) = claims.access_token_hash() {
             let actual_access_token_hash = AccessTokenHash::from_token(
                 token_response.access_token(),
-                &id_token.signing_alg()?,
+                id_token.signing_alg()?,
+                id_token.signing_key(&token_verifier)?,
             )?;
             if actual_access_token_hash != *expected_access_token_hash {
                 return Err(SsoError::Mitm);
@@ -197,7 +215,7 @@ impl SsoClient {
     }
 
     pub async fn logout(&self, token: CoreIdToken, redirect_url: Url) -> Result<Url, SsoError> {
-        let metadata = discover_metadata(&self.config).await?;
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
         let Some(ref url) = metadata.additional_metadata().end_session_endpoint else {
             return Err(SsoError::LogoutNotSupported);
         };

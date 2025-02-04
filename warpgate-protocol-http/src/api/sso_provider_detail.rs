@@ -67,7 +67,7 @@ impl Api {
         return_url.set_path("@warpgate/api/sso/return");
         debug!("Return URL: {}", &return_url);
 
-        let client = SsoClient::new(provider_config.provider.clone());
+        let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
 
