@@ -20,6 +20,7 @@ enum_dispatch.workspace = true
 futures.workspace = true
 notify = "5.1"
 rcgen = { version = "0.10", features = ["zeroize"] }
+rustls.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 sea-orm = { version = "0.12.2", default-features = false }
