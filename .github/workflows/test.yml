@@ -49,7 +49,7 @@ jobs:
           cargo llvm-cov report --lcov > coverage.lcov
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v4.2.1
         if: github.repository_owner == 'warp-tech' && github.actor != 'dependabot[bot]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
