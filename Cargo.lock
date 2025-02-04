@@ -5527,6 +5527,7 @@ dependencies = [
  "futures",
  "notify",
  "rcgen",
+ "rustls 0.23.12",
  "sd-notify",
  "sea-orm",
  "serde_json",

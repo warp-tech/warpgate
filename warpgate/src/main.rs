@@ -94,6 +94,11 @@ async fn _main() -> Result<()> {
 
     init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
 
+    #[allow(clippy::unwrap_used)]
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .unwrap();
+
     match &cli.command {
         Commands::Run { enable_admin_token } => {
             crate::commands::run::command(&cli, *enable_admin_token).await
