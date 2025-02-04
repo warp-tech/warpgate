@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use openidconnect::{ClaimsVerificationError, SigningError};
+use openidconnect::{ClaimsVerificationError, SignatureVerificationError, SigningError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SsoError {
@@ -24,6 +24,8 @@ pub enum SsoError {
     Io(#[from] std::io::Error),
     #[error("JWT error: {0}")]
     Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("signature verification: {0}")]
+    SignatureVerification(#[from] SignatureVerificationError),
     #[error("the OIDC provider doesn't support RP-initiated logout")]
     LogoutNotSupported,
     #[error(transparent)]

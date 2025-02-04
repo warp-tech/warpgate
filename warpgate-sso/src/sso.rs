@@ -3,18 +3,16 @@ use std::ops::Deref;
 
 use futures::future::OptionFuture;
 use openidconnect::core::{
-    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreClient, CoreErrorResponseType,
-    CoreGenderClaim, CoreIdToken, CoreIdTokenClaims, CoreJsonWebKey,
-    CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreRevocableToken, CoreTokenType,
+    CoreAuthenticationFlow, CoreClient,
+    CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, Client, CsrfToken,
-    DiscoveryError, EmptyAdditionalClaims, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
+    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken,
+    DiscoveryError, EndpointMaybeSet, EndpointNotSet,
+    EndpointSet, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
     PkceCodeVerifier, PostLogoutRedirectUrl, ProviderMetadataWithLogout, RedirectUrl,
-    RequestTokenError, RevocationErrorResponseType, Scope, StandardErrorResponse,
-    StandardTokenIntrospectionResponse, StandardTokenResponse, TokenResponse, UserInfoClaims,
+    RequestTokenError, Scope, TokenResponse, UserInfoClaims,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -60,33 +58,13 @@ async fn make_client(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
 ) -> Result<
-    Client<
-        EmptyAdditionalClaims,
-        CoreAuthDisplay,
-        CoreGenderClaim,
-        CoreJweContentEncryptionAlgorithm,
-        CoreJsonWebKey,
-        CoreAuthPrompt,
-        StandardErrorResponse<CoreErrorResponseType>,
-        StandardTokenResponse<
-            IdTokenFields<
-                EmptyAdditionalClaims,
-                EmptyExtraTokenFields,
-                CoreGenderClaim,
-                CoreJweContentEncryptionAlgorithm,
-                CoreJwsSigningAlgorithm,
-            >,
-            CoreTokenType,
-        >,
-        StandardTokenIntrospectionResponse<EmptyExtraTokenFields, CoreTokenType>,
-        CoreRevocableToken,
-        StandardErrorResponse<RevocationErrorResponseType>,
-        EndpointSet,
-        EndpointNotSet,
-        EndpointNotSet,
-        EndpointNotSet,
-        EndpointMaybeSet,
-        EndpointMaybeSet,
+    CoreClient<
+        EndpointSet, // HasAuthUrl
+        EndpointNotSet, // HasDeviceAuthUrl
+        EndpointNotSet, // HasIntrospectionUrl
+        EndpointNotSet, // HasRevocationUrl
+        EndpointMaybeSet, // HasTokenUrl
+        EndpointMaybeSet, // HasUserInfoUrl
     >,
     SsoError,
 > {
@@ -224,8 +202,8 @@ impl SsoClient {
         if let Some(expected_access_token_hash) = claims.access_token_hash() {
             let actual_access_token_hash = AccessTokenHash::from_token(
                 token_response.access_token(),
-                id_token.signing_alg().unwrap(),
-                id_token.signing_key(&token_verifier).unwrap(),
+                id_token.signing_alg()?,
+                id_token.signing_key(&token_verifier)?,
             )?;
             if actual_access_token_hash != *expected_access_token_hash {
                 return Err(SsoError::Mitm);
