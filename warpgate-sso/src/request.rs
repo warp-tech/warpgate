@@ -25,8 +25,7 @@ impl SsoLoginRequest {
     }
 
     pub async fn verify_code(self, code: String) -> Result<SsoLoginResponse, SsoError> {
-        //
-        let result = SsoClient::new(self.config)
+        let result = SsoClient::new(self.config)?
             .finish_login(self.pkce_verifier, self.redirect_url, &self.nonce, code)
             .await?;
 

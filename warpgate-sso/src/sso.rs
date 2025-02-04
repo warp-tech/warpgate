@@ -3,16 +3,14 @@ use std::ops::Deref;
 
 use futures::future::OptionFuture;
 use openidconnect::core::{
-    CoreAuthenticationFlow, CoreClient,
-    CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
+    CoreAuthenticationFlow, CoreClient, CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken,
-    DiscoveryError, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
-    PkceCodeVerifier, PostLogoutRedirectUrl, ProviderMetadataWithLogout, RedirectUrl,
-    RequestTokenError, Scope, TokenResponse, UserInfoClaims,
+    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, DiscoveryError,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, LogoutRequest, Nonce, OAuth2TokenResponse,
+    PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, ProviderMetadataWithLogout,
+    RedirectUrl, RequestTokenError, Scope, TokenResponse, UserInfoClaims,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -59,10 +57,10 @@ async fn make_client(
     http_client: &reqwest::Client,
 ) -> Result<
     CoreClient<
-        EndpointSet, // HasAuthUrl
-        EndpointNotSet, // HasDeviceAuthUrl
-        EndpointNotSet, // HasIntrospectionUrl
-        EndpointNotSet, // HasRevocationUrl
+        EndpointSet,      // HasAuthUrl
+        EndpointNotSet,   // HasDeviceAuthUrl
+        EndpointNotSet,   // HasIntrospectionUrl
+        EndpointNotSet,   // HasRevocationUrl
         EndpointMaybeSet, // HasTokenUrl
         EndpointMaybeSet, // HasUserInfoUrl
     >,
@@ -81,12 +79,11 @@ async fn make_client(
 }
 
 impl SsoClient {
-    pub fn new(config: SsoInternalProviderConfig) -> Self {
-        let http_client = reqwest::ClientBuilder::new().build().unwrap();
-        Self {
+    pub fn new(config: SsoInternalProviderConfig) -> Result<Self, SsoError> {
+        Ok(Self {
             config,
-            http_client,
-        }
+            http_client: reqwest::ClientBuilder::new().build()?,
+        })
     }
 
     pub async fn supports_single_logout(&self) -> Result<bool, SsoError> {
@@ -147,7 +144,7 @@ impl SsoClient {
             .await?
             .set_redirect_uri(redirect_url);
 
-        let mut req = client.exchange_code(AuthorizationCode::new(code)).unwrap();
+        let mut req = client.exchange_code(AuthorizationCode::new(code))?;
         if let Some(verifier) = pkce_verifier {
             req = req.set_pkce_verifier(verifier);
         }

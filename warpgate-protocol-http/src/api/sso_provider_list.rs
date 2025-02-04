@@ -308,7 +308,7 @@ impl Api {
             return Ok(StartSloResponse::NotFound);
         };
 
-        let client = SsoClient::new(provider_config.provider.clone());
+        let client = SsoClient::new(provider_config.provider.clone())?;
         let logout_url = client.logout(state.token, return_url).await?;
 
         logout(session, session_middleware.lock().await.deref_mut());
