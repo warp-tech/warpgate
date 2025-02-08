@@ -8,34 +8,23 @@ version = "0.13.0"
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
-cookie = "0.17"
+cookie = "0.18"
 data-encoding.workspace = true
-delegate = "0.6"
+delegate.workspace = true
 futures.workspace = true
 http = "1.0"
 once_cell = "1.17"
-poem = { version = "3.1", features = [
-    "cookie",
-    "session",
-    "anyhow",
-    "rustls",
-    "websocket",
-    "sse",
-    "embed",
-] }
+poem.workspace = true
 poem-openapi = { version = "5.1", features = ["swagger-ui"] }
 reqwest = { version = "0.12", features = [
-    "rustls-tls-native-roots",
+    "rustls-tls-native-roots-no-provider",
     "stream",
 ], default-features = false }
-sea-orm = { version = "0.12", features = [
-    "runtime-tokio-rustls",
-    "macros",
-], default-features = false }
+sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.20", features = ["tracing", "signal"] }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.25", features = ["rustls-tls-native-roots"] }
 tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
