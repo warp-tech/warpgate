@@ -24,7 +24,7 @@ mod target {
     use uuid::Uuid;
 
     #[derive(Debug, PartialEq, Eq, Clone, EnumIter, DeriveActiveEnum)]
-    #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
+    #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
     pub enum TargetKind {
         #[sea_orm(string_value = "http")]
         Http,
@@ -37,7 +37,7 @@ mod target {
     }
 
     #[derive(Debug, PartialEq, Eq, Clone, EnumIter, DeriveActiveEnum)]
-    #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
+    #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
     pub enum SshAuthKind {
         #[sea_orm(string_value = "password")]
         Password,

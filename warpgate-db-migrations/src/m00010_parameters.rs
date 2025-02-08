@@ -3,7 +3,6 @@ use sea_orm_migration::prelude::*;
 
 pub mod parameters {
     use sea_orm::entity::prelude::*;
-    use sea_orm::Set;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -18,22 +17,6 @@ pub mod parameters {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
-
-    impl Model {
-        pub async fn get(db: &DatabaseConnection) -> Result<Self, DbErr> {
-            match Entity::find().one(db).await? {
-                Some(model) => Ok(model),
-                None => {
-                    ActiveModel {
-                        id: Set(Uuid::new_v4()),
-                        allow_own_credential_management: Set(true),
-                    }
-                    .insert(db)
-                    .await
-                }
-            }
-        }
-    }
 }
 
 pub struct Migration;

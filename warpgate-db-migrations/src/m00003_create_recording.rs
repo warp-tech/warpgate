@@ -8,7 +8,7 @@ pub mod recording {
     use crate::m00002_create_session::session;
 
     #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
-    #[sea_orm(rs_type = "String", db_type = "String(Some(16))")]
+    #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
     pub enum RecordingKind {
         #[sea_orm(string_value = "terminal")]
         Terminal,

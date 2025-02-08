@@ -52,7 +52,7 @@ jobs:
 
       - name: cargo-deny
         run: |
-          cargo deny check bans
+          cargo deny check
 
       - name: Install admin UI deps
         run: |

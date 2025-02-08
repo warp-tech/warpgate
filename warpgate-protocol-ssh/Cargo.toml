@@ -15,9 +15,7 @@ curve25519-dalek = "4.0.0" # pin due to build fail on x86
 ed25519-dalek = "2.0.0" # pin due to build fail on x86 in 2.1
 futures.workspace = true
 russh.workspace = true
-sea-orm = { version = "0.12", features = [
-    "runtime-tokio-rustls",
-], default-features = false }
+sea-orm.workspace = true
 thiserror = "1.0"
 time = "0.3"
 tokio = { version = "1.20", features = ["tracing", "signal"] }
