@@ -82,7 +82,10 @@
 </div>
 
 <div class="narrow-page">
-    <Form>
+    <Form on:submit={e => {
+        create()
+        e.preventDefault()
+    }}>
         <!-- svelte-ignore a11y_label_has_associated_control -->
         <label class="mb-2">Type</label>
         <ButtonGroup class="w-100 mb-3">
@@ -108,10 +111,9 @@
             <input class="form-control" required bind:value={name} />
         </FormGroup>
 
-        <AsyncButton
-        color="primary"
-
-            click={create}
-        >Create target</AsyncButton>
+        <Button
+            color="primary"
+            type="submit"
+        >Create target</Button>
     </Form>
 </div>
