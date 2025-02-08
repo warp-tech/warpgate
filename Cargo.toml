@@ -31,6 +31,20 @@ tokio-stream = { version = "0.1.17", features = ["net"] }
 tokio-rustls = "0.26"
 enum_dispatch = "0.3.13"
 rustls = "0.23"
+sea-orm = { version = "1.0", default-features = false, features = ["runtime-tokio", "macros"] }
+sea-orm-migration = { version = "1.0", default-features = false, features = [
+    "cli",
+] }
+poem = { version = "3.1", features = [
+    "cookie",
+    "session",
+    "anyhow",
+    "websocket",
+    "rustls",
+    "embed",
+] }
+password-hash = { version = "0.4", features = ["std"] }
+delegate = "0.13"
 
 [profile.release]
 lto = true

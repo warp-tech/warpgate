@@ -11,16 +11,12 @@ version = "0.13.0"
 tokio = { version = "1.20", features = ["macros", "rt-multi-thread"] }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
-sea-orm = { version = "0.12", features = [
-    "runtime-tokio-rustls",
-    "macros",
+sea-orm = { workspace = true, features = [
     "with-chrono",
     "with-uuid",
     "with-json",
 ], default-features = false }
-sea-orm-migration = { version = "0.12", default-features = false, features = [
-    "cli",
-] }
+sea-orm-migration.workspace = true
 russh.workspace = true
 tracing.workspace = true
 uuid = { version = "1.3", features = ["v4", "serde"] }

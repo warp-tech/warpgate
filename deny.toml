@@ -70,7 +70,8 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    #"RUSTSEC-0000-0000",
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2021-0139", # ansi-term is unmaintained
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
@@ -87,9 +88,9 @@ ignore = [
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 # Lint level for when multiple versions of the same crate are detected
-multiple-versions = "warn"
+# multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
-wildcards = "allow"
+wildcards = "warn"
 # The graph highlighting used when creating dotgraphs for crates
 # with multiple versions
 # * lowest-version - The path to the lowest versioned duplicate is highlighted
@@ -119,13 +120,19 @@ deny = [
     #{ crate = "ansi_term@0.11.0", wrappers = ["this-crate-directly-depends-on-ansi_term"] },
 ]
 
-# List of features to allow/deny
-# Each entry the name of a crate and a version range. If version is
-# not specified, all versions will be matched.
-#[[bans.features]]
-#crate = "reqwest"
+# TODO reenable once poem updates its tokio-rustls dependency
+# [[bans.features]]
+# crate = "rustls"
+# # Features to not allow
+# deny = ["ring"]
+
+[[bans.features]]
+crate = "reqwest"
 # Features to not allow
-#deny = ["json"]
+deny = ["rustls-tls-webpki-roots"]
+
+
+
 # Features to allow
 #allow = [
 #    "rustls",
@@ -143,18 +150,18 @@ deny = [
 #exact = true
 
 # Certain crates/versions that will be skipped when doing duplicate detection.
-skip = [
+# skip = [
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason why it can't be updated/removed" },
-]
+# ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite.
-skip-tree = [
+# skip-tree = [
     #"ansi_term@0.11.0", # will be skipped along with _all_ of its direct and transitive dependencies
     #{ crate = "ansi_term@0.11.0", depth = 20 },
-]
+# ]
 
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:
@@ -179,3 +186,33 @@ github = []
 gitlab = []
 # bitbucket.org organizations to allow git sources for
 bitbucket = []
+
+[licenses]
+confidence-threshold = 0.95
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+    "ISC",
+    "OpenSSL",
+    "BSD-3-Clause",
+    "Zlib",
+    "WTFPL",
+    "CC0-1.0",
+    "LGPL-3.0",
+    "MPL-2.0",
+]
+
+[[licenses.clarify]]
+crate = "ring"
+expression = "OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+[[licenses.clarify]]
+crate = "webpki"
+expression = "ISC"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]

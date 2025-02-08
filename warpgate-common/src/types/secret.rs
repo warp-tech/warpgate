@@ -85,9 +85,9 @@ impl<T: poem_openapi::types::Type> poem_openapi::types::Type for Secret<T> {
     delegate! {
         to self.0 {
             fn as_raw_value(&self) -> Option<&Self::RawValueType>;
-            fn raw_element_iter<'a>(
-                &'a self,
-            ) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a>;
+            fn raw_element_iter(
+                &'_ self,
+            ) -> Box<dyn Iterator<Item = &'_ Self::RawElementValueType> + '_>;
             fn is_empty(&self) -> bool;
             fn is_none(&self) -> bool;
         }

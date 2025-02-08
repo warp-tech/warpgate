@@ -8,7 +8,7 @@ use delegate::delegate;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
-use http::Uri;
+use http::{HeaderValue, Uri};
 use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
@@ -50,22 +50,29 @@ impl<B> SomeResponse for http::Response<B> {
 }
 
 trait SomeRequestBuilder {
-    fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
+    fn header<K: Into<HeaderName>, V>(self, k: K, v: V) -> Self
+    where
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>;
 }
 
 impl SomeRequestBuilder for reqwest::RequestBuilder {
-    delegate! {
-        to self {
-            fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
-        }
+    fn header<K: Into<HeaderName>, V>(self, k: K, v: V) -> Self
+    where
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        self.header(k, v)
     }
 }
 
 impl SomeRequestBuilder for http::request::Builder {
-    delegate! {
-        to self {
-            fn header<K: Into<HeaderName>>(self, k: K, v: String) -> Self;
-        }
+    fn header<K: Into<HeaderName>, V>(self, k: K, v: V) -> Self
+    where
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        self.header(k, v)
     }
 }
 
@@ -150,7 +157,7 @@ fn copy_client_response<R: SomeResponse>(
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
     if let Some(ref headers) = options.headers {
         for (k, v) in headers {
-            req = req.header(HeaderName::try_from(k)?, v.parse()?);
+            req = req.header(HeaderName::try_from(k)?, v);
         }
     }
     Ok(req)
@@ -223,10 +230,10 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B
     if let Some(host) = req.headers().get(http::header::HOST) {
         target = target.header(
             X_FORWARDED_HOST.clone(),
-            host.to_str()?.split(':').next().unwrap().to_string(),
+            host.to_str()?.split(':').next().unwrap(),
         );
     }
-    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str().to_owned());
+    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str());
     if let Some(addr) = req.remote_addr().as_socket_addr() {
         target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
     }
@@ -236,16 +243,13 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B
 async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     let session = <&Session>::from_request_without_body(req).await?;
     if let Some(auth) = session.get_auth() {
-        target = target
-            .header(&X_WARPGATE_USERNAME, auth.username().into())
-            .header(
-                &X_WARPGATE_AUTHENTICATION_TYPE,
-                match auth {
-                    SessionAuthorization::Ticket { .. } => "ticket",
-                    SessionAuthorization::User { .. } => "user",
-                }
-                .into(),
-            );
+        target = target.header(&X_WARPGATE_USERNAME, auth.username()).header(
+            &X_WARPGATE_AUTHENTICATION_TYPE,
+            match auth {
+                SessionAuthorization::Ticket { .. } => "ticket",
+                SessionAuthorization::User { .. } => "user",
+            },
+        );
     }
     Ok(target)
 }
@@ -445,16 +449,24 @@ async fn proxy_ws_inner(
                         tracing::debug!("Server: {:?}", msg);
                         match msg? {
                             Message::Binary(data) => {
-                                client_sink.send(tungstenite::Message::Binary(data)).await?;
+                                client_sink
+                                    .send(tungstenite::Message::Binary(data.into()))
+                                    .await?;
                             }
                             Message::Text(text) => {
-                                client_sink.send(tungstenite::Message::Text(text)).await?;
+                                client_sink
+                                    .send(tungstenite::Message::Text(text.into()))
+                                    .await?;
                             }
                             Message::Ping(data) => {
-                                client_sink.send(tungstenite::Message::Ping(data)).await?;
+                                client_sink
+                                    .send(tungstenite::Message::Ping(data.into()))
+                                    .await?;
                             }
                             Message::Pong(data) => {
-                                client_sink.send(tungstenite::Message::Pong(data)).await?;
+                                client_sink
+                                    .send(tungstenite::Message::Pong(data.into()))
+                                    .await?;
                             }
                             Message::Close(data) => {
                                 client_sink
@@ -476,16 +488,22 @@ async fn proxy_ws_inner(
                         tracing::debug!("Client: {:?}", msg);
                         match msg? {
                             tungstenite::Message::Binary(data) => {
-                                server_sink.send(Message::Binary(data)).await?;
+                                server_sink
+                                    .send(Message::Binary(data.as_slice().to_vec()))
+                                    .await?;
                             }
                             tungstenite::Message::Text(text) => {
-                                server_sink.send(Message::Text(text)).await?;
+                                server_sink.send(Message::Text(text.to_string())).await?;
                             }
                             tungstenite::Message::Ping(data) => {
-                                server_sink.send(Message::Ping(data)).await?;
+                                server_sink
+                                    .send(Message::Ping(data.as_slice().to_vec()))
+                                    .await?;
                             }
                             tungstenite::Message::Pong(data) => {
-                                server_sink.send(Message::Pong(data)).await?;
+                                server_sink
+                                    .send(Message::Pong(data.as_slice().to_vec()))
+                                    .await?;
                             }
                             tungstenite::Message::Close(data) => {
                                 server_sink

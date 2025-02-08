@@ -8,10 +8,9 @@ version = "0.13.0"
 ansi_term = "0.12"
 anyhow = { version = "1.0", features = ["backtrace"] }
 async-trait = "0.1"
-atty = "0.2"
 bytes.workspace = true
 clap = { version = "4.0", features = ["derive"] }
-config = { version = "0.13", features = ["yaml"], default-features = false }
+config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.15", default-features = false }
 console-subscriber = { version = "0.1", optional = true }
 data-encoding.workspace = true
@@ -23,7 +22,7 @@ rcgen = { version = "0.10", features = ["zeroize"] }
 rustls.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
-sea-orm = { version = "0.12.2", default-features = false }
+sea-orm.workspace = true
 time = "0.3"
 tokio = { version = "1.20", features = ["tracing", "signal", "macros"] }
 tracing.workspace = true

@@ -12,12 +12,7 @@ chrono = { version = "0.4", default-features = false }
 futures.workspace = true
 hex = "0.4"
 mime_guess = { version = "2.0", default-features = false }
-poem = { version = "3.1", features = [
-    "cookie",
-    "session",
-    "anyhow",
-    "websocket",
-] }
+poem.workspace = true
 poem-openapi = { version = "5.1", features = [
     "swagger-ui",
     "chrono",
@@ -26,10 +21,7 @@ poem-openapi = { version = "5.1", features = [
 ] }
 russh.workspace = true
 rust-embed = "8.3"
-sea-orm = { version = "0.12", features = [
-    "runtime-tokio-rustls",
-    "macros",
-], default-features = false }
+sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "1.0"
