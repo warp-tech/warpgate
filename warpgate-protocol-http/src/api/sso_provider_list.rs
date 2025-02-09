@@ -192,7 +192,12 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let provider = context.provider.clone();
+        let providers_config = services.config.lock().await.store.sso_providers.clone();
+        let mut iter = providers_config.iter();
+        let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
+            return Ok(Err(format!("No provider matching {}", context.provider)));
+        };
+
         let cred = AuthCredential::Sso {
             provider: context.provider.clone(),
             email: email.clone(),
@@ -202,7 +207,11 @@ impl Api {
             .config_provider
             .lock()
             .await
-            .username_for_sso_credential(&cred)
+            .username_for_sso_credential(
+                &cred,
+                response.preferred_username,
+                provider_config.clone(),
+            )
             .await?;
         let Some(username) = username else {
             return Ok(Err(format!("No user matching {email}")));
@@ -238,12 +247,6 @@ impl Api {
                 supports_single_logout: context.supports_single_logout,
             });
         }
-
-        let providers_config = services.config.lock().await.store.sso_providers.clone();
-        let mut iter = providers_config.iter();
-        let Some(provider_config) = iter.find(|x| x.name == provider) else {
-            return Ok(Err(format!("No provider matching {provider}")));
-        };
 
         let mappings = provider_config.provider.role_mappings();
         if let Some(remote_groups) = response.groups {

@@ -9,6 +9,7 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
     CredentialPolicy, PerProtocolCredentialPolicy,
@@ -17,9 +18,10 @@ use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
     Role, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
-    UserSsoCredential, UserTotpCredential, WarpgateError,
+    UserRequireCredentialsPolicy, UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
+use warpgate_sso::SsoProviderConfig;
 
 use super::ConfigProvider;
 
@@ -30,6 +32,33 @@ pub struct DatabaseConfigProvider {
 impl DatabaseConfigProvider {
     pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
+    }
+
+    async fn maybe_autocreate_sso_user(
+        &self,
+        db: &DatabaseConnection,
+        credential: UserSsoCredential,
+        preferred_username: String,
+    ) -> Result<Option<String>, WarpgateError> {
+        let user = entities::User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(preferred_username.clone()),
+            credential_policy: Set(serde_json::to_value(
+                UserRequireCredentialsPolicy::default(),
+            )?),
+        }
+        .insert(&*db)
+        .await?;
+
+        entities::SsoCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            ..entities::SsoCredential::ActiveModel::from(credential)
+        }
+        .insert(&*db)
+        .await?;
+
+        Ok(Some(preferred_username))
     }
 }
 
@@ -143,6 +172,8 @@ impl ConfigProvider for DatabaseConfigProvider {
     async fn username_for_sso_credential(
         &mut self,
         client_credential: &AuthCredential,
+        preferred_username: Option<String>,
+        sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError> {
         let db = self.db.lock().await;
 
@@ -154,7 +185,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let Some(cred) = entities::SsoCredential::Entity::find()
+        let cred = entities::SsoCredential::Entity::find()
             .filter(
                 entities::SsoCredential::Column::Email.eq(client_email).and(
                     entities::SsoCredential::Column::Provider
@@ -163,14 +194,34 @@ impl ConfigProvider for DatabaseConfigProvider {
                 ),
             )
             .one(&*db)
-            .await?
-        else {
-            return Ok(None);
-        };
+            .await?;
 
-        let user = cred.find_related(entities::User::Entity).one(&*db).await?;
+        if let Some(cred) = cred {
+            let user = cred.find_related(entities::User::Entity).one(&*db).await?;
 
-        Ok(user.map(|x| x.username))
+            if let Some(user) = user {
+                return Ok(Some(user.username.clone()));
+            }
+        }
+
+        if sso_config.auto_create_users {
+            let Some(preferred_username) = preferred_username else {
+                error!("The OIDC server did not provide a preferred_username claim for this user");
+                return Ok(None);
+            };
+            return Ok(self
+                .maybe_autocreate_sso_user(
+                    &*db,
+                    UserSsoCredential {
+                        email: client_email.clone(),
+                        provider: Some(client_provider.clone()),
+                    },
+                    preferred_username,
+                )
+                .await?);
+        }
+
+        Ok(None)
     }
 
     async fn validate_credential(
@@ -330,8 +381,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let user = entities::User::Entity::find()
             .filter(entities::User::Column::Username.eq(username))
             .one(&*db)
-            .await
-            .map_err(WarpgateError::from)?
+            .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
 
         let managed_role_names = match managed_role_names {
@@ -348,16 +398,14 @@ impl ConfigProvider for DatabaseConfigProvider {
             let role = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
                 .one(&*db)
-                .await
-                .map_err(WarpgateError::from)?
+                .await?
                 .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
 
             let assignment = entities::UserRoleAssignment::Entity::find()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserRoleAssignment::Column::RoleId.eq(role.id))
                 .one(&*db)
-                .await
-                .map_err(WarpgateError::from)?;
+                .await?;
 
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
@@ -368,11 +416,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                         ..Default::default()
                     };
 
-                    values.insert(&*db).await.map_err(WarpgateError::from)?;
+                    values.insert(&*db).await?;
                 }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await.map_err(WarpgateError::from)?;
+                    assignment.delete(&*db).await?;
                 }
                 _ => (),
             }

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities::Ticket;
+use warpgate_sso::SsoProviderConfig;
 
 #[enum_dispatch]
 pub enum ConfigProviderEnum {
@@ -33,6 +34,8 @@ pub trait ConfigProvider {
     async fn username_for_sso_credential(
         &mut self,
         client_credential: &AuthCredential,
+        preferred_username: Option<String>,
+        sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError>;
 
     async fn apply_sso_role_mappings(

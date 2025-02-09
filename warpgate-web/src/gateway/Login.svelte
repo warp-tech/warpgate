@@ -194,8 +194,10 @@
                 Login
                 <Fa class="ms-2" fw icon={faArrowRight} />
             </AsyncButton>
-
         {/if}
+
+        <div class="mt-3"></div>
+
         {#if authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
@@ -210,7 +212,7 @@
     {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
         <Loadable promise={ssoProvidersPromise}>
             {#snippet children(ssoProviders)}
-                <div class="mt-5 sso-buttons">
+                <div class="mt-3 sso-buttons">
                     {#each ssoProviders as ssoProvider}
                         <button
                             class="btn btn-secondary"

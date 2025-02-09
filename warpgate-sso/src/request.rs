@@ -42,6 +42,10 @@ impl SsoLoginRequest {
         }
 
         Ok(SsoLoginResponse {
+            preferred_username: get_claim!(preferred_username)
+                .map(|x| x.as_str())
+                .map(ToString::to_string),
+
             name: get_claim!(name)
                 .and_then(|x| x.get(None))
                 .map(|x| x.as_str())

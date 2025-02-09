@@ -2,9 +2,10 @@ version: '3'
 services:
   oidc-server-mock:
     container_name: oidc-server-mock
-    image: ghcr.io/soluto/oidc-server-mock:latest
+    image: ghcr.io/soluto/oidc-server-mock:0.10.1
+    platform: linux/amd64
     ports:
-      - '4011:80'
+      - '4011:8080'
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       SERVER_OPTIONS_INLINE: |
@@ -20,23 +21,16 @@ services:
         }
       LOGIN_OPTIONS_INLINE: |
         {
-          "AllowRememberLogin": false
+          "AllowRememberLogin": true
         }
       LOGOUT_OPTIONS_INLINE: |
         {
           "AutomaticRedirectAfterSignOut": true
         }
-      API_SCOPES_INLINE: |
-        - Name: some-app-scope-1
-        - Name: some-app-scope-2
       IDENTITY_RESOURCES_INLINE: |
-        - Name: warpgate-scope
+        - Name: preferred_username
           ClaimTypes:
-          - warpgate_roles
-      # API_RESOURCES_INLINE: |
-      #   - Name: wapgate_groups
-      #     Scopes:
-      #       - warpgate
+          - preferred_username
       USERS_CONFIGURATION_INLINE: |
         [
           {
@@ -55,10 +49,10 @@ services:
                 "ValueType": "string"
               },
               {
-                "Type": "warpgate_roles",
-                "Value": "[\"qa\", \"unknown\"]",
-                "ValueType": "json"
-              }
+                "Type": "preferred_username",
+                "Value": "sam_tailor",
+                "ValueType": "string"
+              },
             ]
           }
         ]
