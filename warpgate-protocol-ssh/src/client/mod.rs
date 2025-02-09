@@ -29,7 +29,7 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{load_all_usable_private_keys, ForwardedTcpIpParams};
+use crate::{load_all_usable_private_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -91,6 +91,7 @@ pub enum RCEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
+    ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
     X11(Uuid, String, u32),
 }
 
@@ -102,6 +103,8 @@ pub enum RCCommand {
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
+    StreamlocalForward(String),
+    CancelStreamlocalForward(String),
     Disconnect,
 }
 
@@ -126,6 +129,7 @@ pub struct RemoteClient {
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
     pending_forwards: Vec<(String, u32)>,
+    pending_streamlocal_forwards: Vec<String>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
@@ -155,6 +159,7 @@ impl RemoteClient {
             channel_pipes: Arc::new(Mutex::new(HashMap::new())),
             pending_ops: vec![],
             pending_forwards: vec![],
+            pending_streamlocal_forwards: vec![],
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -309,6 +314,11 @@ impl RemoteClient {
                         let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
                     }
+                    ClientHandlerEvent::ForwardedStreamlocal(channel, params) => {
+                        info!("New forwarded socket connection: {params:?}");
+                        let id = self.setup_server_initiated_channel(channel).await?;
+                        let _ = self.tx.send(RCEvent::ForwardedStreamlocal(id, params));
+                    }
                     ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
                         info!("New X11 connection from {originator_address}:{originator_port:?}");
                         let id = self.setup_server_initiated_channel(channel).await?;
@@ -355,9 +365,18 @@ impl RemoteClient {
                     for (id, op) in ops {
                         self.apply_channel_op(id, op).await?;
                     }
+
                     let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
                     for (address, port) in forwards {
                         self.tcpip_forward(address, port).await?;
+                    }
+
+                    let forwards = self
+                        .pending_streamlocal_forwards
+                        .drain(..)
+                        .collect::<Vec<_>>();
+                    for socket_path in forwards {
+                        self.streamlocal_forward(socket_path).await?;
                     }
                 }
                 Err(e) => {
@@ -375,6 +394,12 @@ impl RemoteClient {
             }
             RCCommand::CancelTCPIPForward(address, port) => {
                 self.cancel_tcpip_forward(address, port).await?;
+            }
+            RCCommand::StreamlocalForward(socket_path) => {
+                self.streamlocal_forward(socket_path).await?;
+            }
+            RCCommand::CancelStreamlocalForward(socket_path) => {
+                self.cancel_streamlocal_forward(socket_path).await?;
             }
             RCCommand::Disconnect => {
                 self.disconnect().await;
@@ -631,6 +656,30 @@ impl RemoteClient {
         } else {
             self.pending_forwards
                 .retain(|x| x.0 != address || x.1 != port);
+        }
+        Ok(())
+    }
+
+    async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
+        if let Some(session) = &self.session {
+            let mut session = session.lock().await;
+            session.streamlocal_forward(socket_path).await?;
+        } else {
+            self.pending_streamlocal_forwards.push(socket_path);
+        }
+        Ok(())
+    }
+
+    async fn cancel_streamlocal_forward(
+        &mut self,
+        socket_path: String,
+    ) -> Result<(), SshClientError> {
+        if let Some(session) = &self.session {
+            let session = session.lock().await;
+            session.cancel_streamlocal_forward(socket_path).await?;
+        } else {
+            self.pending_streamlocal_forwards
+                .retain(|x| x != &socket_path);
         }
         Ok(())
     }

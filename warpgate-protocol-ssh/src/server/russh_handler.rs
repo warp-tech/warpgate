@@ -47,6 +47,8 @@ pub enum ServerHandlerEvent {
     X11Request(ServerChannelId, X11Request, oneshot::Sender<()>),
     TcpIpForward(String, u32, oneshot::Sender<bool>),
     CancelTcpIpForward(String, u32, oneshot::Sender<bool>),
+    StreamlocalForward(String, oneshot::Sender<bool>),
+    CancelStreamlocalForward(String, oneshot::Sender<bool>),
     Disconnect,
 }
 
@@ -469,6 +471,43 @@ impl russh::server::Handler for ServerHandler {
         let address = address.to_string();
         let (tx, rx) = oneshot::channel();
         self.send_event(ServerHandlerEvent::CancelTcpIpForward(address, port, tx))?;
+        let allowed = rx.await.unwrap_or(false);
+        if allowed {
+            session.request_success()
+        } else {
+            session.request_failure()
+        }
+        Ok(allowed)
+    }
+
+    async fn streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let socket_path = socket_path.to_string();
+        let (tx, rx) = oneshot::channel();
+        self.send_event(ServerHandlerEvent::StreamlocalForward(socket_path, tx))?;
+        let allowed = rx.await.unwrap_or(false);
+        if allowed {
+            session.request_success()
+        } else {
+            session.request_failure()
+        }
+        Ok(allowed)
+    }
+
+    async fn cancel_streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let socket_path = socket_path.to_string();
+        let (tx, rx) = oneshot::channel();
+        self.send_event(ServerHandlerEvent::CancelStreamlocalForward(
+            socket_path,
+            tx,
+        ))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
             session.request_success()

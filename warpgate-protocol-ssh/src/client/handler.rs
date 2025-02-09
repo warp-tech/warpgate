@@ -8,13 +8,14 @@ use warpgate_common::{SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
-use crate::{ConnectionError, ForwardedTcpIpParams};
+use crate::{ConnectionError, ForwardedStreamlocalParams, ForwardedTcpIpParams};
 
 #[derive(Debug)]
 pub enum ClientHandlerEvent {
     HostKeyReceived(PublicKey),
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Channel<Msg>, ForwardedTcpIpParams),
+    ForwardedStreamlocal(Channel<Msg>, ForwardedStreamlocalParams),
     X11(Channel<Msg>, String, u32),
     Disconnect,
 }
@@ -143,6 +144,20 @@ impl russh::client::Handler for ClientHandler {
             channel,
             originator_address,
             originator_port,
+        ));
+        Ok(())
+    }
+
+    async fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let socket_path = socket_path.to_string();
+        let _ = self.event_tx.send(ClientHandlerEvent::ForwardedStreamlocal(
+            channel,
+            ForwardedStreamlocalParams { socket_path },
         ));
         Ok(())
     }

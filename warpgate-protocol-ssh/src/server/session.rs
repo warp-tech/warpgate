@@ -71,6 +71,21 @@ struct CachedSuccessfulTicketAuth {
     username: String,
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+pub enum TrafficRecorderKey {
+    Tcp(String, u32),
+    Socket(String),
+}
+
+impl TrafficRecorderKey {
+    pub fn to_name(&self) -> String {
+        match self {
+            TrafficRecorderKey::Tcp(addr, port) => format!("{addr}-{port}"),
+            TrafficRecorderKey::Socket(path) => path.clone().replace("/", "-"),
+        }
+    }
+}
+
 pub struct ServerSession {
     pub id: SessionId,
     username: Option<String>,
@@ -87,7 +102,7 @@ pub struct ServerSession {
     services: Services,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
-    traffic_recorders: HashMap<(String, u32), TrafficRecorder>,
+    traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
     traffic_connection_recorders: HashMap<Uuid, ConnectionRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
@@ -556,6 +571,15 @@ impl ServerSession {
                 let _ = reply.send(true);
             }
 
+            ServerHandlerEvent::StreamlocalForward(socket_path, reply) => {
+                self._streamlocal_forward(socket_path).await?;
+                let _ = reply.send(true);
+            }
+
+            ServerHandlerEvent::CancelStreamlocalForward(socket_path, reply) => {
+                self._cancel_streamlocal_forward(socket_path).await?;
+                let _ = reply.send(true);
+            }
             ServerHandlerEvent::Disconnect => (),
         }
 
@@ -791,18 +815,48 @@ impl ServerSession {
 
                     let recorder = self
                         .traffic_recorder_for(
-                            &params.originator_address,
-                            params.originator_port,
+                            TrafficRecorderKey::Tcp(
+                                params.originator_address,
+                                params.originator_port,
+                            ),
                             "forwarded-tcpip",
                         )
                         .await;
                     if let Some(recorder) = recorder {
                         #[allow(clippy::unwrap_used)]
-                        let mut recorder = recorder.connection(TrafficConnectionParams {
+                        let mut recorder = recorder.connection(TrafficConnectionParams::Tcp {
                             dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
                             dst_port: params.connected_port as u16,
                             src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
                             src_port: params.originator_port as u16,
+                        });
+                        if let Err(error) = recorder.write_connection_setup().await {
+                            error!(channel=%id, ?error, "Failed to record connection setup");
+                        }
+                        self.traffic_connection_recorders.insert(id, recorder);
+                    }
+                }
+            }
+            RCEvent::ForwardedStreamlocal(id, params) => {
+                if let Some(session) = &mut self.session_handle {
+                    let server_channel = session
+                        .channel_open_forwarded_streamlocal(params.socket_path.clone())
+                        .await?;
+
+                    self.channel_map
+                        .insert(ServerChannelId(server_channel.id()), id);
+                    self.all_channels.push(id);
+
+                    let recorder = self
+                        .traffic_recorder_for(
+                            TrafficRecorderKey::Socket(params.socket_path.clone()),
+                            "forwarded-streamlocal",
+                        )
+                        .await;
+                    if let Some(recorder) = recorder {
+                        #[allow(clippy::unwrap_used)]
+                        let mut recorder = recorder.connection(TrafficConnectionParams::Socket {
+                            socket_path: params.socket_path,
                         });
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
@@ -933,14 +987,13 @@ impl ServerSession {
 
                 let recorder = self
                     .traffic_recorder_for(
-                        &params.host_to_connect,
-                        params.port_to_connect,
+                        TrafficRecorderKey::Tcp(params.host_to_connect, params.port_to_connect),
                         "direct-tcpip",
                     )
                     .await;
                 if let Some(recorder) = recorder {
                     #[allow(clippy::unwrap_used)]
-                    let mut recorder = recorder.connection(TrafficConnectionParams {
+                    let mut recorder = recorder.connection(TrafficConnectionParams::Tcp {
                         dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
                         dst_port: params.port_to_connect as u16,
                         src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
@@ -1072,29 +1125,27 @@ impl ServerSession {
 
     async fn traffic_recorder_for(
         &mut self,
-        host: &str,
-        port: u32,
+        key: TrafficRecorderKey,
         tag: &str,
     ) -> Option<&mut TrafficRecorder> {
-        let host = host.to_owned();
-        if let Vacant(e) = self.traffic_recorders.entry((host.clone(), port)) {
+        if let Vacant(e) = self.traffic_recorders.entry(key.clone()) {
             match self
                 .services
                 .recordings
                 .lock()
                 .await
-                .start(&self.id, format!("{tag}-{host}-{port}"))
+                .start(&self.id, format!("{tag}-{}", key.to_name()))
                 .await
             {
                 Ok(recorder) => {
                     e.insert(recorder);
                 }
                 Err(error) => {
-                    error!(%host, %port, ?error, "Failed to start recording");
+                    error!(?key, ?error, "Failed to start recording");
                 }
             }
         }
-        self.traffic_recorders.get_mut(&(host, port))
+        self.traffic_recorders.get_mut(&key)
     }
 
     pub async fn _channel_subsystem_request(
@@ -1176,6 +1227,21 @@ impl ServerSession {
     pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> Result<()> {
         info!(%address, %port, "Remote port forwarding cancelled");
         self.send_command_and_wait(RCCommand::CancelTCPIPForward(address, port))
+            .await
+            .map_err(anyhow::Error::from)
+    }
+
+    async fn _streamlocal_forward(&mut self, socket_path: String) -> Result<()> {
+        info!(%socket_path, "Remote UNIX socket forwarding requested");
+        let _ = self.maybe_connect_remote().await;
+        self.send_command_and_wait(RCCommand::StreamlocalForward(socket_path))
+            .await
+            .map_err(anyhow::Error::from)
+    }
+
+    pub async fn _cancel_streamlocal_forward(&mut self, socket_path: String) -> Result<()> {
+        info!(%socket_path, "Remote UNIX socket forwarding cancelled");
+        self.send_command_and_wait(RCCommand::CancelStreamlocalForward(socket_path))
             .await
             .map_err(anyhow::Error::from)
     }
