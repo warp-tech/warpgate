@@ -181,7 +181,6 @@ impl russh::server::Handler for ServerHandler {
         user: &str,
         key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
-        dbg!(key);
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
 
