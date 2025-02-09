@@ -39,6 +39,11 @@ pub struct ForwardedTcpIpParams {
 }
 
 #[derive(Clone, Debug)]
+pub struct ForwardedStreamlocalParams {
+    pub socket_path: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct X11Request {
     pub single_conection: bool,
     pub x11_auth_protocol: String,

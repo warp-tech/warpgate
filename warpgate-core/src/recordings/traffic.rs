@@ -17,11 +17,16 @@ pub struct TrafficRecorder {
 }
 
 #[derive(Debug)]
-pub struct TrafficConnectionParams {
-    pub src_addr: Ipv4Addr,
-    pub src_port: u16,
-    pub dst_addr: Ipv4Addr,
-    pub dst_port: u16,
+pub enum TrafficConnectionParams {
+    Tcp {
+        src_addr: Ipv4Addr,
+        src_port: u16,
+        dst_addr: Ipv4Addr,
+        dst_port: u16,
+    },
+    Socket {
+        socket_path: String,
+    },
 }
 
 impl TrafficRecorder {
@@ -136,30 +141,47 @@ impl ConnectionRecorder {
     where
         F: FnOnce(packet::ip::v4::Builder) -> Result<Bytes>,
     {
-        f(packet::ip::v4::Builder::default()
-            .protocol(packet::ip::Protocol::Tcp)?
-            .source(self.params.src_addr)?
-            .destination(self.params.dst_addr)?)
+        match self.params {
+            TrafficConnectionParams::Socket { .. } => f(packet::ip::v4::Builder::default()
+                .protocol(packet::ip::Protocol::Tcp)?
+                .source(Ipv4Addr::UNSPECIFIED)?
+                .destination(Ipv4Addr::BROADCAST)?),
+            TrafficConnectionParams::Tcp {
+                src_addr, dst_addr, ..
+            } => f(packet::ip::v4::Builder::default()
+                .protocol(packet::ip::Protocol::Tcp)?
+                .source(src_addr)?
+                .destination(dst_addr)?),
+        }
     }
 
     fn ip_packet_rx<F>(&self, f: F) -> Result<Bytes>
     where
         F: FnOnce(packet::ip::v4::Builder) -> Result<Bytes>,
     {
-        f(packet::ip::v4::Builder::default()
-            .protocol(packet::ip::Protocol::Tcp)?
-            .source(self.params.dst_addr)?
-            .destination(self.params.src_addr)?)
+        match self.params {
+            TrafficConnectionParams::Socket { .. } => f(packet::ip::v4::Builder::default()
+                .protocol(packet::ip::Protocol::Tcp)?
+                .source(Ipv4Addr::BROADCAST)?
+                .destination(Ipv4Addr::UNSPECIFIED)?),
+            TrafficConnectionParams::Tcp {
+                src_addr, dst_addr, ..
+            } => f(packet::ip::v4::Builder::default()
+                .protocol(packet::ip::Protocol::Tcp)?
+                .source(dst_addr)?
+                .destination(src_addr)?),
+        }
     }
 
     fn tcp_packet_tx<F>(&self, f: F) -> Result<Bytes>
     where
         F: FnOnce(packet::tcp::Builder) -> Result<Bytes>,
     {
-        self.ip_packet_tx(|b| {
-            f(b.tcp()?
-                .source(self.params.src_port)?
-                .destination(self.params.dst_port)?)
+        self.ip_packet_tx(|b| match self.params {
+            TrafficConnectionParams::Socket { .. } => f(b.tcp()?.source(0)?.destination(0)?),
+            TrafficConnectionParams::Tcp {
+                src_port, dst_port, ..
+            } => f(b.tcp()?.source(src_port)?.destination(dst_port)?),
         })
     }
 
@@ -167,10 +189,11 @@ impl ConnectionRecorder {
     where
         F: FnOnce(packet::tcp::Builder) -> Result<Bytes>,
     {
-        self.ip_packet_rx(|b| {
-            f(b.tcp()?
-                .source(self.params.dst_port)?
-                .destination(self.params.src_port)?)
+        self.ip_packet_rx(|b| match self.params {
+            TrafficConnectionParams::Socket { .. } => f(b.tcp()?.source(0)?.destination(0)?),
+            TrafficConnectionParams::Tcp {
+                src_port, dst_port, ..
+            } => f(b.tcp()?.source(dst_port)?.destination(src_port)?),
         })
     }
 

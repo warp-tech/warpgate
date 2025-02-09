@@ -24,8 +24,7 @@ bytes = "1.4"
 data-encoding = "2.3"
 serde = "1.0"
 serde_json = "1.0"
-russh = { version = "0.50.0", features = ["des"] }
-tracing = "0.1"
+russh = { version = "0.50.1", features = ["des"] }
 futures = "0.3"
 tokio-stream = { version = "0.1.17", features = ["net"] }
 tokio-rustls = "0.26"
@@ -45,6 +44,7 @@ poem = { version = "3.1", features = [
 ] }
 password-hash = { version = "0.4", features = ["std"] }
 delegate = "0.13"
+tracing = "0.1"
 
 [profile.release]
 lto = true

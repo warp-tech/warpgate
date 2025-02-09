@@ -165,13 +165,10 @@ impl SsoClient {
             })?;
 
         let mut token_verifier = client.id_token_verifier();
-        dbg!(self.config.additional_trusted_audiences());
 
         if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|aud| {
-                dbg!(aud);
-                trusted_audiences.contains(aud.deref())
-            });
+            token_verifier = token_verifier
+                .set_other_audience_verifier_fn(|aud| trusted_audiences.contains(aud.deref()));
         }
 
         let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
