@@ -3675,9 +3675,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.50.1"
+version = "0.50.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80312b5f2cd37e542093244b369c72b9dbf1ecf4880f8463ba0dbfc949f52fec"
+checksum = "125d81ea357e708dd04bcaab60bb664e759c0bd3553995ca6cdfb9f87a9ae43d"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3741,11 +3741,12 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.50.0"
+version = "0.50.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc93a38a1e0f67c8339a324ee5ba20067f25d3dd0136aeb99d20fe084c591772"
+checksum = "1fcb7c127135848b47715b5bcb13d8a27ccd86ce1de1c15eab5982df91fe279a"
 dependencies = [
  "libc",
+ "log",
  "ssh-encoding",
  "winapi",
 ]
