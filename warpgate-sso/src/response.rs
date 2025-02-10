@@ -7,4 +7,5 @@ pub struct SsoLoginResponse {
     pub email_verified: Option<bool>,
     pub groups: Option<Vec<String>>,
     pub id_token: CoreIdToken,
+    pub preferred_username: Option<String>,
 }

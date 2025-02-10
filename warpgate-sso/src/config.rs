@@ -22,6 +22,8 @@ pub struct SsoProviderConfig {
     pub label: Option<String>,
     pub provider: SsoInternalProviderConfig,
     pub return_domain_whitelist: Option<Vec<String>>,
+    #[serde(default)]
+    pub auto_create_users: bool,
 }
 
 impl SsoProviderConfig {
