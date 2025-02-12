@@ -16,6 +16,7 @@ pub enum ClientHandlerEvent {
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Channel<Msg>, ForwardedTcpIpParams),
     ForwardedStreamlocal(Channel<Msg>, ForwardedStreamlocalParams),
+    ForwardedAgent(Channel<Msg>),
     X11(Channel<Msg>, String, u32),
     Disconnect,
 }
@@ -158,6 +159,17 @@ impl russh::client::Handler for ClientHandler {
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedStreamlocal(
             channel,
             ForwardedStreamlocalParams { socket_path },
+        ));
+        Ok(())
+    }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: Channel<Msg>,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let _ = self.event_tx.send(ClientHandlerEvent::ForwardedAgent(
+            channel,
         ));
         Ok(())
     }

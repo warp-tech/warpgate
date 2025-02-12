@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-
 use bytes::Bytes;
 use russh::keys::PublicKey;
 use russh::server::{Auth, Handle, Msg, Session};
@@ -49,6 +48,7 @@ pub enum ServerHandlerEvent {
     CancelTcpIpForward(String, u32, oneshot::Sender<bool>),
     StreamlocalForward(String, oneshot::Sender<bool>),
     CancelStreamlocalForward(String, oneshot::Sender<bool>),
+    AgentForward(ServerChannelId, oneshot::Sender<bool>),
     Disconnect,
 }
 
@@ -508,6 +508,18 @@ impl russh::server::Handler for ServerHandler {
             socket_path,
             tx,
         ))?;
+        let allowed = rx.await.unwrap_or(false);
+        if allowed {
+            session.request_success()
+        } else {
+            session.request_failure()
+        }
+        Ok(allowed)
+    }
+
+    async fn agent_request(&mut self, channel: ChannelId, session: &mut Session) -> Result<bool, Self::Error> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(ServerHandlerEvent::AgentForward(ServerChannelId(channel), tx))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
             session.request_success()

@@ -62,6 +62,7 @@ pub enum ChannelOperation {
     RequestEnv(String, String),
     RequestExec(String),
     RequestX11(X11Request),
+    AgentForward,
     RequestSubsystem(String),
     Data(Bytes),
     ExtendedData { data: Bytes, ext: u32 },

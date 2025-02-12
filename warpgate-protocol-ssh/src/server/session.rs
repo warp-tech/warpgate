@@ -580,6 +580,12 @@ impl ServerSession {
                 self._cancel_streamlocal_forward(socket_path).await?;
                 let _ = reply.send(true);
             }
+
+            ServerHandlerEvent::AgentForward(channel,reply) => {
+                self._agent_forward(channel).await?;
+                let _ = reply.send(true);
+            }
+
             ServerHandlerEvent::Disconnect => (),
         }
 
@@ -863,6 +869,17 @@ impl ServerSession {
                         }
                         self.traffic_connection_recorders.insert(id, recorder);
                     }
+                }
+            }
+            RCEvent::ForwardedAgent(id) => {
+                if let Some(session) = &mut self.session_handle {
+                    let server_channel = session
+                        .channel_open_agent()
+                        .await?;
+
+                    self.channel_map
+                        .insert(ServerChannelId(server_channel.id()), id);
+                    self.all_channels.push(id);
                 }
             }
             RCEvent::X11(id, originator_address, originator_port) => {
@@ -1244,6 +1261,18 @@ impl ServerSession {
         self.send_command_and_wait(RCCommand::CancelStreamlocalForward(socket_path))
             .await
             .map_err(anyhow::Error::from)
+    }
+
+    async fn _agent_forward(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+        let channel_id = self.map_channel(&server_channel_id)?;
+        debug!(channel=%channel_id, "Requested Agent Forwarding");
+        let _ = self.maybe_connect_remote().await;
+        self.send_command_and_wait(RCCommand::Channel(
+            channel_id,
+            ChannelOperation::AgentForward,
+        ))
+            .await?;
+        Ok(())
     }
 
     async fn _auth_publickey_offer(

@@ -92,6 +92,7 @@ pub enum RCEvent {
     HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
+    ForwardedAgent(Uuid),
     X11(Uuid, String, u32),
 }
 
@@ -318,6 +319,11 @@ impl RemoteClient {
                         info!("New forwarded socket connection: {params:?}");
                         let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self.tx.send(RCEvent::ForwardedStreamlocal(id, params));
+                    }
+                    ClientHandlerEvent::ForwardedAgent(channel) => {
+                        info!("New forwarded agent connection");
+                        let id = self.setup_server_initiated_channel(channel).await?;
+                        let _ = self.tx.send(RCEvent::ForwardedAgent(id));
                     }
                     ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
                         info!("New X11 connection from {originator_address}:{originator_port:?}");
