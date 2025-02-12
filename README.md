@@ -116,6 +116,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Gurkengewuerz"><img src="https://avatars.githubusercontent.com/u/10966337?v=4?s=100" width="100px;" alt="Niklas"/><br /><sub><b>Niklas</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=Gurkengewuerz" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/notnooblord"><img src="https://avatars.githubusercontent.com/u/11678665?v=4?s=100" width="100px;" alt="Nooblord"/><br /><sub><b>Nooblord</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=notnooblord" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://shea.nz/"><img src="https://avatars.githubusercontent.com/u/51303984?v=4?s=100" width="100px;" alt="Shea Smith"/><br /><sub><b>Shea Smith</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=SheaSmith" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/samtoxie"><img src="https://avatars.githubusercontent.com/u/7732658?v=4?s=100" width="100px;" alt="samtoxie"/><br /><sub><b>samtoxie</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=samtoxie" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
