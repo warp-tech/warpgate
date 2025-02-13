@@ -171,6 +171,10 @@ impl SsoClient {
                 .set_other_audience_verifier_fn(|aud| trusted_audiences.contains(aud.deref()));
         }
 
+        if self.config.trust_unknown_audiences() {
+            token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud|true);
+        }
+
         let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = id_token.claims(&token_verifier, nonce)?;
 
