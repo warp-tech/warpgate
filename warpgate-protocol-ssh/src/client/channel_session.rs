@@ -96,6 +96,11 @@ impl SessionChannel {
                                 request.x11_auth_cookie,
                                 request.x11_screen_number,
                             ).await?;
+                        },
+                        Some(ChannelOperation::AgentForward) => {
+                            self.client_channel.agent_forward(
+                                true,
+                            ).await?;
                         }
                         Some(ChannelOperation::Close) => break,
                         None => break,
