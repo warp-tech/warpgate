@@ -581,7 +581,7 @@ impl ServerSession {
                 let _ = reply.send(true);
             }
 
-            ServerHandlerEvent::AgentForward(channel,reply) => {
+            ServerHandlerEvent::AgentForward(channel, reply) => {
                 self._agent_forward(channel).await?;
                 let _ = reply.send(true);
             }
@@ -873,9 +873,7 @@ impl ServerSession {
             }
             RCEvent::ForwardedAgent(id) => {
                 if let Some(session) = &mut self.session_handle {
-                    let server_channel = session
-                        .channel_open_agent()
-                        .await?;
+                    let server_channel = session.channel_open_agent().await?;
 
                     self.channel_map
                         .insert(ServerChannelId(server_channel.id()), id);
@@ -1271,7 +1269,7 @@ impl ServerSession {
             channel_id,
             ChannelOperation::AgentForward,
         ))
-            .await?;
+        .await?;
         Ok(())
     }
 

@@ -168,9 +168,9 @@ impl russh::client::Handler for ClientHandler {
         channel: Channel<Msg>,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.event_tx.send(ClientHandlerEvent::ForwardedAgent(
-            channel,
-        ));
+        let _ = self
+            .event_tx
+            .send(ClientHandlerEvent::ForwardedAgent(channel));
         Ok(())
     }
 }
