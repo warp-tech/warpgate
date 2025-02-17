@@ -39,7 +39,7 @@
     "date-fns": "^4.1.0",
     "eslint": "^9.20.1",
     "eslint-config-standard": "^17.1.0",
-    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-import-resolver-typescript": "^3.8.1",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^7.2.1",
@@ -48,7 +48,7 @@
     "otpauth": "^9.3.6",
     "qrcode": "^1.5.4",
     "sass": "1.78",
-    "svelte": "^5.20.0",
+    "svelte": "^5.20.1",
     "svelte-check": "^4.1.4",
     "svelte-fa": "^4.0.3",
     "svelte-intersection-observer": "^1.0.0",
@@ -65,6 +65,6 @@
   },
   "dependencies": {
     "@stylistic/eslint-plugin": "^2.13.0",
-    "typescript-eslint": "^8.24.0"
+    "typescript-eslint": "^8.24.1"
   }
 }
