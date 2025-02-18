@@ -62,3 +62,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.docker-platform }}
+          # Provenance attestations generates an unknown/unknown platform layer
+          # that causes issues, see #1255
+          attests: ''
+          provenance: false
