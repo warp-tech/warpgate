@@ -21,8 +21,10 @@ jobs:
         include:
           - os: ubuntu-24.04
             docker-platform: linux/amd64
+            matrix-id: amd64
           - os: ubuntu-24.04-arm
             docker-platform: linux/arm64
+            matrix-id: arm64
 
     permissions:
       contents: read
@@ -79,7 +81,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.docker-platform }}
+          name: digests-${{ matrix.matrix-id }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
