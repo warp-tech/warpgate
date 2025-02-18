@@ -1,6 +1,5 @@
 <script lang="ts">
     import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
     import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
