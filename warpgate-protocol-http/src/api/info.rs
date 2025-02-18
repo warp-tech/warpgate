@@ -22,7 +22,7 @@ pub struct PortsInfo {
 
 #[derive(Serialize, Object)]
 pub struct Info {
-    version: String,
+    version: Option<String>,
     username: Option<String>,
     selected_target: Option<String>,
     external_host: Option<String>,
@@ -58,7 +58,9 @@ impl Api {
         let parameters = Parameters::Entity::get(&*services.db.lock().await).await?;
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: session
+                .is_authenticated()
+                .then(|| env!("CARGO_PKG_VERSION").to_string()),
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,

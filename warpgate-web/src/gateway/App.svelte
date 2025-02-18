@@ -86,9 +86,13 @@
             </main>
 
             <footer class="mt-5">
-                <span class="me-auto ms-3">
-                    v{$serverInfo?.version}
+                {#if $serverInfo?.version}
+                <span class="ms-3 me-auto">
+                    v{$serverInfo.version}
                 </span>
+                {:else}
+                <div class="me-auto"></div>
+                {/if}
                 <ThemeSwitcher />
             </footer>
         {/if}

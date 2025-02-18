@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.12.0"
+    "version": "0.13.0"
   },
   "servers": [
     {
@@ -840,7 +840,6 @@
       "Info": {
         "type": "object",
         "required": [
-          "version",
           "ports",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
