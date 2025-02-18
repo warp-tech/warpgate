@@ -62,6 +62,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.docker-platform }}
+          cache-from: type=gha,scope=build-${{ matrix.docker-platform }}
+          cache-to: type=gha,scope=build-${{ matrix.docker-platform }}
           # Provenance attestations generates an unknown/unknown platform layer
           # that causes issues, see #1255
           attests: ''
