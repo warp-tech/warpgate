@@ -6,7 +6,7 @@ fn maybe_apply_permissions<P: AsRef<Path>>(
     permissions: std::fs::Permissions,
 ) -> std::io::Result<()> {
     let current = std::fs::metadata(&path)?.permissions();
-    if current != permissions {
+    if (current.mode() & 0o777) != permissions.mode() {
         std::fs::set_permissions(path, permissions)?;
     }
     Ok(())
