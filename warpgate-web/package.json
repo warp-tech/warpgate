@@ -39,7 +39,7 @@
     "date-fns": "^4.1.0",
     "eslint": "^9.20.1",
     "eslint-config-standard": "^17.1.0",
-    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-import-resolver-typescript": "^3.8.3",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^7.2.1",
@@ -48,7 +48,7 @@
     "otpauth": "^9.3.6",
     "qrcode": "^1.5.4",
     "sass": "1.78",
-    "svelte": "^5.20.0",
+    "svelte": "^5.20.2",
     "svelte-check": "^4.1.4",
     "svelte-fa": "^4.0.3",
     "svelte-intersection-observer": "^1.0.0",
@@ -60,11 +60,11 @@
     "typescript": "^5.7.3",
     "ua-parser-js": "^2.0.2",
     "vite": "^5.4.11",
-    "vite-plugin-checker": "^0.8.0",
+    "vite-plugin-checker": "^0.9.0",
     "vite-tsconfig-paths": "^5.1.4"
   },
   "dependencies": {
     "@stylistic/eslint-plugin": "^2.13.0",
-    "typescript-eslint": "^8.24.0"
+    "typescript-eslint": "^8.24.1"
   }
 }
