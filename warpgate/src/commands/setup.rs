@@ -161,7 +161,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             info!("You will now choose specific protocol listeners to be enabled.");
             info!("");
             info!("NB: Nothing will be exposed by default -");
-            info!("    you'll set target hosts in the config file later.");
+            info!("    you'll choose target hosts in the UI later.");
 
             store.ssh.enable = dialoguer::Confirm::with_theme(&theme)
                 .default(true)
