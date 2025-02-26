@@ -91,6 +91,7 @@ pub mod public_key_credential {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
         pub user_id: Uuid,
+        #[sea_orm(column_type = "Text")]
         pub openssh_public_key: String,
     }
 
