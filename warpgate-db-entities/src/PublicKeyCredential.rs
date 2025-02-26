@@ -15,6 +15,7 @@ pub struct Model {
     pub label: String,
     pub date_added: Option<DateTime<Utc>>,
     pub last_used: Option<DateTime<Utc>>,
+    #[sea_orm(column_type = "Text")]
     pub openssh_public_key: String,
 }
 
