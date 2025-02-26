@@ -76,6 +76,7 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
 
 #app {
     display: block;
+    -webkit-font-smoothing: antialiased;
 }
 
 .page-summary-bar {
