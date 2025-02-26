@@ -29,6 +29,8 @@
     let opensshPublicKey: string = $state('')
     let validated = $state(false)
 
+    const PK_REGEX = /^ssh-([\w-]+) [A-Za-z0-9+/=]+( (?<comment>[^ ]+))?$/
+
     function _save () {
         if (!opensshPublicKey || !label) {
             return
@@ -43,6 +45,21 @@
 
     function _cancel () {
         isOpen = false
+    }
+
+    $effect(() => field?.addEventListener('paste', e => {
+        const clipboardData = e.clipboardData
+        if (clipboardData) {
+            const newValue = clipboardData.getData('text')
+            onPublicKeyPaste(newValue)
+        }
+    }))
+
+    function onPublicKeyPaste (newValue: string) {
+        const match = PK_REGEX.exec(newValue)
+        if (!label && match) {
+            label = match.groups?.comment || ''
+        }
     }
 </script>
 
