@@ -48,7 +48,7 @@ jobs:
       - name: Install tools
         run: |
           cargo install just
-          cargo install cargo-deny
+          cargo install cargo-deny@^0.16
 
       - name: cargo-deny
         run: |
