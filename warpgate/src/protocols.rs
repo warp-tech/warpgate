@@ -7,6 +7,7 @@ use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[enum_dispatch(ProtocolServer)]
+#[allow(clippy::enum_variant_names)]
 pub enum ProtocolServerEnum {
     SSHProtocolServer,
     HTTPProtocolServer,

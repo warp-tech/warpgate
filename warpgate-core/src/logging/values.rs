@@ -45,7 +45,7 @@ impl<'a> RecordVisitor<'a> {
     }
 }
 
-impl<'a> Visit for RecordVisitor<'a> {
+impl Visit for RecordVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.values.insert(field.name(), value.to_string());
     }

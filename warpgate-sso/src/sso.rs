@@ -172,7 +172,7 @@ impl SsoClient {
         }
 
         if self.config.trust_unknown_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud|true);
+            token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
         }
 
         let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;

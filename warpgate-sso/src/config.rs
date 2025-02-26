@@ -28,10 +28,9 @@ pub struct SsoProviderConfig {
 
 impl SsoProviderConfig {
     pub fn label(&self) -> &str {
-        return self
-            .label
+        self.label
             .as_deref()
-            .unwrap_or_else(|| self.provider.label());
+            .unwrap_or_else(|| self.provider.label())
     }
 }
 

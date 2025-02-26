@@ -39,7 +39,7 @@ impl<S: AsyncWrite + Unpin> Future for WriteAndFlush<'_, S> {
     }
 }
 
-impl<'a, S> Drop for WriteAndFlush<'a, S> {
+impl<S> Drop for WriteAndFlush<'_, S> {
     fn drop(&mut self) {
         // clear the buffer regardless of whether the flush succeeded or not
         self.buf.get_mut().clear();

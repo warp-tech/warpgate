@@ -182,7 +182,7 @@ impl Api {
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(*auth, &*db).await? else {
+        let Some(user_model) = get_user(*auth, &db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
         };
 
@@ -232,7 +232,7 @@ impl Api {
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
@@ -273,7 +273,7 @@ impl Api {
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
@@ -308,7 +308,7 @@ impl Api {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
@@ -339,7 +339,7 @@ impl Api {
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
         };
 
@@ -354,7 +354,7 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user_model.load_details(&*db).await?;
+        let details = user_model.load_details(&db).await?;
         user.credential_policy = Some(
             user.credential_policy
                 .unwrap_or_default()
@@ -382,7 +382,7 @@ impl Api {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 

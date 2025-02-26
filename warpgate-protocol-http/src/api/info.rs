@@ -70,7 +70,7 @@ impl Api {
             ),
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
-                .map_or(false, |state| state.supports_single_logout),
+                .is_some_and(|state| state.supports_single_logout),
             ports: if session.is_authenticated() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {

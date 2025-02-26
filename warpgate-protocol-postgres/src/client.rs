@@ -36,7 +36,7 @@ impl Default for ConnectionOptions {
 
 struct SaslBufferWriter<'a>(&'a mut Option<Vec<u8>>);
 
-impl<'a> Write for SaslBufferWriter<'a> {
+impl Write for SaslBufferWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Some(data) = self.0.as_mut() {
             data.extend_from_slice(buf);

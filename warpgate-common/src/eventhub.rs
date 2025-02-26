@@ -70,7 +70,7 @@ pub struct EventHub<E: Send> {
     subscriptions: SubscriptionStore<E>,
 }
 
-impl<'h, E: Send> EventHub<E> {
+impl<E: Send> EventHub<E> {
     pub fn setup() -> (Self, EventSender<E>) {
         let subscriptions = Arc::new(Mutex::new(vec![]));
         (
@@ -82,7 +82,7 @@ impl<'h, E: Send> EventHub<E> {
     }
 
     pub async fn subscribe<F: Fn(&E) -> bool + Send + 'static>(
-        &'h self,
+        &'_ self,
         filter: F,
     ) -> EventSubscription<E> {
         let (sender, receiver) = unbounded_channel();

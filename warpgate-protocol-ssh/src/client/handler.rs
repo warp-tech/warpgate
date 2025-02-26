@@ -67,14 +67,14 @@ impl russh::client::Handler for ClientHandler {
                 key_base64,
             }) => {
                 warn!(session=%self.session_id, "Host key is invalid!");
-                return Err(ClientHandlerError::ConnectionError(
+                Err(ClientHandlerError::ConnectionError(
                     ConnectionError::HostKeyMismatch {
                         received_key_type: server_public_key.algorithm(),
                         received_key_base64: server_public_key.public_key_base64(),
                         known_key_type: key_type,
                         known_key_base64: key_base64,
                     },
-                ));
+                ))
             }
             Ok(KnownHostValidationResult::Unknown) => {
                 warn!(session=%self.session_id, "Host key is unknown");

@@ -87,7 +87,7 @@ impl Api {
     ) -> Result<GetApiTokensResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(*auth, &*db).await? else {
+        let Some(user_model) = get_user(*auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
         };
 
@@ -112,7 +112,7 @@ impl Api {
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
 
@@ -149,7 +149,7 @@ impl Api {
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let Some(user_model) = get_user(&*auth, &*db).await? else {
+        let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);
         };
 
