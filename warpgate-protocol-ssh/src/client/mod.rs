@@ -545,7 +545,6 @@ impl RemoteClient {
                         }
                         SSHTargetAuth::PublicKey(_) => {
                             let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                            dbg!(best_hash);
                             #[allow(clippy::explicit_auto_deref)]
                             let keys = load_client_keys(&*self.services.config.lock().await)?;
                             let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
