@@ -178,7 +178,7 @@ impl RemoteClient {
                     Ok::<(), anyhow::Error>(())
                 }
             }
-                .instrument(Span::current()),
+            .instrument(Span::current()),
         );
 
         this.start()?;
@@ -280,17 +280,17 @@ impl RemoteClient {
                     }
                     Ok::<(), anyhow::Error>(())
                 }
-                    .await
-                    .map_err(|error| {
-                        error!(?error, "error in command loop");
-                        let err = anyhow::anyhow!("Error in command loop: {error}");
-                        let _ = self.tx.send(RCEvent::Error(error));
-                        err
-                    })?;
+                .await
+                .map_err(|error| {
+                    error!(?error, "error in command loop");
+                    let err = anyhow::anyhow!("Error in command loop: {error}");
+                    let _ = self.tx.send(RCEvent::Error(error));
+                    err
+                })?;
                 info!("Client session closed");
                 Ok::<(), anyhow::Error>(())
             }
-                .instrument(Span::current()),
+            .instrument(Span::current()),
         )
     }
 
@@ -657,29 +657,33 @@ impl RemoteClient {
                 remaining_methods: methods,
             } => {
                 debug!("Initial auth failed, checking remaining methods");
-                for method in methods.into_iter() {
+                for method in methods.iter() {
                     if matches!(method, MethodKind::KeyboardInteractive) {
                         debug!("Found keyboard-interactive challenge");
                         let mut kb_result = session
-                            .authenticate_keyboard_interactive_start(
-                                username.clone(),
-                                None,
-                            )
+                            .authenticate_keyboard_interactive_start(username.clone(), None)
                             .await?;
 
                         while let KeyboardInteractiveAuthResponse::InfoRequest {
                             name: _name,
                             instructions: _instructions,
                             prompts,
-                        } = kb_result {
+                        } = kb_result
+                        {
                             for prompt in prompts.iter().clone() {
-                                debug!(prompt=prompt.prompt, echo=prompt.echo, "Prompt received for keyboard-interactive");
+                                debug!(
+                                    prompt = prompt.prompt,
+                                    echo = prompt.echo,
+                                    "Prompt received for keyboard-interactive"
+                                );
                             }
                             debug!("Responding with empty responses");
                             kb_result = session
-                                .authenticate_keyboard_interactive_respond(
-                                    vec![String::new(); prompts.len()]
-                                ).await?;
+                                .authenticate_keyboard_interactive_respond(vec![
+                                    String::new();
+                                    prompts.len()
+                                ])
+                                .await?;
                         }
 
                         match kb_result {
@@ -687,7 +691,9 @@ impl RemoteClient {
                                 debug!("keyboard-interactive challenge successful");
                                 return Ok(true);
                             }
-                            KeyboardInteractiveAuthResponse::Failure { remaining_methods: _remaining_methods } => {
+                            KeyboardInteractiveAuthResponse::Failure {
+                                remaining_methods: _remaining_methods,
+                            } => {
                                 debug!("keyboard-interactive challenge failed");
                                 return Ok(false);
                             }
