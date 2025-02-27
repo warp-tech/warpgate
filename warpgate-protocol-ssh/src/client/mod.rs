@@ -16,7 +16,7 @@ pub use error::SshClientError;
 use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::Handle;
-use russh::keys::PublicKey;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
 use russh::{kex, Preferred, Sig};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -29,7 +29,7 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{load_all_usable_private_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
+use crate::{load_client_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -544,16 +544,37 @@ impl RemoteClient {
                             }
                         }
                         SSHTargetAuth::PublicKey(_) => {
+                            let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                            dbg!(best_hash);
                             #[allow(clippy::explicit_auto_deref)]
-                            let keys = load_all_usable_private_keys(&*self.services.config.lock().await, ssh_options.allow_insecure_algos.unwrap_or(false))?;
+                            let keys = load_client_keys(&*self.services.config.lock().await)?;
+                            let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
                             for key in keys.into_iter() {
+                                let key = Arc::new(key);
+                                if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
+                                    info!("Skipping ssh-rsa (SHA1) key authentication since insecure SSH algos are not allowed for this target");
+                                    continue;
+                                }
                                 let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
                                 auth_result = session
                                     .authenticate_publickey(
                                         ssh_options.username.clone(),
-                                        key
+                                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
                                     )
                                     .await?.success();
+
+                                if !auth_result && key.key_data().is_rsa() && best_hash.is_some() && allow_insecure_algos {
+                                    // Corner case: OpenSSH advertising rsa2-sha-* through server-sig-algs, but it being
+                                    // disabled via PubkeyAcceptedAlgorithms. So far the only case is our own test suite.
+                                    // In this case we retry with ssh-rsa (SHA1)
+                                    auth_result = session
+                                        .authenticate_publickey(
+                                            ssh_options.username.clone(),
+                                            PrivateKeyWithHashAlg::new(key.clone(), None),
+                                        )
+                                        .await?.success();
+                                }
+
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
