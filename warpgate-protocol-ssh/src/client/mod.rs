@@ -565,11 +565,11 @@ impl RemoteClient {
                                 }
                                 let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
                                 let mut response  = session
-                                        .authenticate_publickey(
-                                            ssh_options.username.clone(),
-                                            PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                                        )
-                                        .await?;
+                                    .authenticate_publickey(
+                                        ssh_options.username.clone(),
+                                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                                    )
+                                    .await?;
 
                                 auth_result = self._handle_auth_result(
                                     &mut session,
@@ -581,11 +581,11 @@ impl RemoteClient {
                                     // Corner case: OpenSSH advertising rsa2-sha-* through server-sig-algs, but it being
                                     // disabled via PubkeyAcceptedAlgorithms. So far the only case is our own test suite.
                                     // In this case we retry with ssh-rsa (SHA1)
-                                    response  = session
+                                    response = session
                                         .authenticate_publickey(
-                                        ssh_options.username.clone(),
-                                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                                    ).await?;
+                                            ssh_options.username.clone(),
+                                            PrivateKeyWithHashAlg::new(key.clone(), None),
+                                        ).await?;
 
                                     auth_result = self._handle_auth_result(
                                         &mut session,
