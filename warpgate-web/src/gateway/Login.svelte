@@ -228,7 +228,7 @@
                             {#if ssoProvider.kind === SsoProviderKind.Apple}
                                 <Fa fw class="me-2" icon={faApple} />
                             {/if}
-                            {ssoProvider.label}
+                            {ssoProvider.name || ssoProvider.label}
                         </button>
                     {/each}
                 </div>
