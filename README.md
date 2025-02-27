@@ -47,19 +47,20 @@ Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that
 <table>
   <tr>
   <td>
-    <img width="500" alt="image" src="https://user-images.githubusercontent.com/161476/177408495-80268a91-1a21-43bf-b171-2a563a322f5f.png">
-
+    <img src="https://github.com/user-attachments/assets/c9a6a372-198e-4f46-ab86-8c420dc24bca">
   </td>
   <td>
-    <img width="500" alt="image" src="https://user-images.githubusercontent.com/161476/177410749-cf029df7-223e-4c9c-827a-bb96dbe0a7c8.png">
-
+    <img src="https://github.com/user-attachments/assets/a2166426-e865-4aba-9600-520954bcfe7f">
+  </td>
+  <td>
+    <img src="https://github.com/user-attachments/assets/366a5afb-aa86-4902-9080-eb2f40bf162c">
   </td>
   </tr>
 </table>
 
 ## Project Status
 
-The project is currently in **alpha** stage and is gathering community feedback.
+The project is ready for production.
 
 ## How it works
 
