@@ -131,21 +131,6 @@ onDestroy(() => {
     <div class="table-wrapper">
         <table class="w-100">
             <tbody>
-                <tr>
-                    <th>Time</th>
-                    {#if !filters?.sessionId}
-                        <th>User</th>
-                        <th>Session</th>
-                    {/if}
-                    <th class="d-flex">
-                        <div class="me-auto">Message</div>
-                        {#if isLive}
-                            <span class="badge bg-danger">Live</span>
-                        {:else}
-                            <small><em>Last update: {stringifyDate(lastUpdate)}</em></small>
-                        {/if}
-                    </th>
-                </tr>
                 {#each visibleItems as item}
                     <tr>
                         <td class="timestamp pe-4">
@@ -256,9 +241,5 @@ onDestroy(() => {
                 font-style: italic;
             }
         }
-    }
-
-    .badge {
-        line-height: 1.3;
     }
 </style>
