@@ -561,10 +561,10 @@
     magic-string "^0.30.12"
     vitefu "^1.0.3"
 
-"@sveltestrap/sveltestrap@^6.2.7":
-  version "6.2.7"
-  resolved "https://registry.yarnpkg.com/@sveltestrap/sveltestrap/-/sveltestrap-6.2.7.tgz#5b2736cbee2db973f02b09d2e9d5bf819418f1f9"
-  integrity sha512-WwLLfAFUb42BGuRrf3Vbct30bQMzlEMMipN/MfxhjuLTmLQeW9muVJfPyvjtWS+mY+RjkSCoHvAp/ZobP1NLlQ==
+"@sveltestrap/sveltestrap@^7.1.0":
+  version "7.1.0"
+  resolved "https://registry.yarnpkg.com/@sveltestrap/sveltestrap/-/sveltestrap-7.1.0.tgz#7226d9396f23323cb5464fd9ce2e508bba5041c3"
+  integrity sha512-TpIx25kqLV+z+VD3yfqYayOI1IaCeWFbT0uqM6NfA4vQgDs9PjFwmjkU4YEAlV/ngs9e7xPmaRWE7lkrg4Miow==
   dependencies:
     "@popperjs/core" "^2.11.8"
 
