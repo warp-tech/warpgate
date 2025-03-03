@@ -54,6 +54,12 @@ jobs:
           name: coverage.lcov
           path: tests/coverage.lcov
 
+      - name: Upload coverage (HTML)
+        uses: actions/upload-artifact@master
+        with:
+          name: coverage-html
+          path: target/llvm-cov/html
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v4.2.1
         if: github.repository_owner == 'warp-tech' && github.actor != 'dependabot[bot]'
