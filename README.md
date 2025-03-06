@@ -36,7 +36,7 @@ Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that
 
 ## Getting started & downloads
 
-* See the [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) wiki page (or [Getting started on Docker](https://github.com/warp-tech/warpgate/wiki/Getting-started-on-Docker)).
+* See the [Getting started](https://warpgate.null.page/getting-started/) docs page (or [Getting started on Docker](https://warpgate.null.page/getting-started-on-docker/)).
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
 
@@ -66,7 +66,7 @@ The project is ready for production.
 
 Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, MySQL and PostgreSQL connections and provide an (optional) web admin UI.
 
-Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://github.com/warp-tech/warpgate/wiki/Getting-started) for details.
+Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://warpgate.null.page/getting-started/) for details.
 
 It receives connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
 
