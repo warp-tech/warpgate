@@ -6,6 +6,9 @@ jobs:
   reprotest:
     name: Reproducibility test
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Setup
@@ -23,7 +26,7 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo ~/.cargo/bin/cargo install just
+          sudo cargo install just
 
       - name: Reprotest
         run: |
