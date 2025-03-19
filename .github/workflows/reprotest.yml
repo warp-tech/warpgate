@@ -6,9 +6,6 @@ jobs:
   reprotest:
     name: Reproducibility test
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
 
     steps:
       - name: Setup
@@ -26,8 +23,8 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo cargo install just
+          sudo env "PATH=$PATH" cargo install just
 
       - name: Reprotest
         run: |
-          sudo -i reprotest --vary=-user_group --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate
+          sudo env "PATH=$PATH" reprotest --vary=-user_group --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate
