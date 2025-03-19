@@ -15,6 +15,7 @@ jobs:
           test -c /dev/fuse || mknod -m 666 /dev/fuse c 10 229
           test -f /etc/mtab || ln -s ../proc/self/mounts /etc/mtab
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
+          echo 'export PATH="$HOME/.cargo/bin:$PATH"' | sudo tee -a /root/.bashrc
 
       - uses: actions/checkout@v2
         with:
@@ -22,7 +23,7 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo cargo install just
+          sudo ~/.cargo/bin/cargo install just
 
       - name: Reprotest
         run: |
