@@ -21,7 +21,7 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo cargo install just
+          sudo $(which cargo) install just
 
       - name: Reprotest
         run: |
