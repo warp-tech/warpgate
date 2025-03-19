@@ -26,4 +26,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          reprotest --build-command 'just yarn --frozen-lockfile --network-timeout 1000000000; just yarn build; cargo build --all-features --release' . target/release/warpgate
+          reprotest --vary -user_group --build-command 'just npm ci; just yarn build; cargo build --all-features --release' . target/release/warpgate
