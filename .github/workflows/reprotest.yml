@@ -1,0 +1,27 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  Build:
+    name: Test reproducibility
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install reprotest
+        run: |
+          sudo pip3 install reprotest
+          sudo apt update
+          sudo apt install -y libssl-dev pkg-config
+
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          cargo install just
+
+      - name: Reprotest
+        run: |
+          reprotest --build-command 'just yarn --network-timeout 1000000000; just yarn build; cargo build --all-features --release' .

@@ -69,15 +69,10 @@ jobs:
           use-cross: true
           args: --all-features --release --target ${{ matrix.target }}
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable"
-        # env:
-        #   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
