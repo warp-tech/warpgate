@@ -86,7 +86,7 @@ jobs:
           mv warpgate*/*.cdx.xml cdx/
 
       - name: Merge BOMs
-        run: docker run -v $(PWD):/work -w /work --rm cyclonedx/cyclonedx-cli:0.27.2 merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
+        run: docker run -v $(pwd):/work -w /work --rm cyclonedx/cyclonedx-cli:0.27.2 merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
