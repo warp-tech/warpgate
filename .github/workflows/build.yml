@@ -49,6 +49,8 @@ jobs:
         run: |
           cargo install just
           cargo install cargo-deny@^0.16
+          cargo install cargo-cyclonedx@^0.5
+          mkdir cdx
 
       - name: cargo-deny
         run: |
@@ -62,6 +64,10 @@ jobs:
         run: |
           just npm run build
 
+      - name: Generate admin UI BOM
+        run: |
+          NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
@@ -74,16 +80,31 @@ jobs:
           CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
 
+      - name: Generate Rust BOM
+        run: |
+          cargo cyclonedx --all-features
+          mv warpgate*/*.cdx.xml cdx/
+
+      - name: Merge BOMs
+        run: docker run -v $(PWD):/work -w /work --rm cyclonedx/cyclonedx-cli:0.27.2 merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
+
       - name: Upload artifact
         uses: actions/upload-artifact@master
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/warpgate
 
-      - name: Rename artifact
+      - name: Upload SBOM
+        uses: actions/upload-artifact@master
+        with:
+          name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
+          path: cdx.xml
+
+      - name: Rename artifacts
         run: |
           mkdir dist
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
+          mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
         uses: softprops/action-gh-release@v1

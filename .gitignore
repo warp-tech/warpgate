@@ -26,3 +26,7 @@ dhat-heap.json
 # IntelliJ based IDEs
 .idea/
 /.data/
+
+
+cdx.xml
+*.cdx.xml

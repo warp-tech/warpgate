@@ -18,6 +18,9 @@ test:
 npm *ARGS:
     cd warpgate-web && npm {{ARGS}}
 
+npx *ARGS:
+    cd warpgate-web && npx {{ARGS}}
+
 migrate *ARGS:
     cargo run --all-features -p warpgate-db-migrations -- {{ARGS}}
 
