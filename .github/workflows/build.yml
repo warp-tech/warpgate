@@ -55,8 +55,8 @@ jobs:
           cargo install cargo-deny@^0.16
           cargo install cargo-cyclonedx@^0.5
           mkdir cdx
-          wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O /usr/bin/cyclonedx
-          chmod +x /usr/bin/cyclonedx
+          wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
+          chmod +x cyclonedx
 
       - name: cargo-deny
         run: |
@@ -92,7 +92,7 @@ jobs:
           mv warpgate*/*.cdx.xml cdx/
 
       - name: Merge BOMs
-        run: cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
+        run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
