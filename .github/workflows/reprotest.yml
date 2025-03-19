@@ -8,11 +8,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Install reprotest
+      - name: Setup
         run: |
           sudo pip3 install reprotest
           sudo apt update
-          sudo apt install -y libssl-dev pkg-config
+          sudo apt install -y libssl-dev pkg-config disorderfs faketime locales-all
+          test -c /dev/fuse || mknod -m 666 /dev/fuse c 10 229
+          test -f /etc/mtab || ln -s ../proc/self/mounts /etc/mtab
 
       - uses: actions/checkout@v2
         with:
@@ -24,4 +26,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          reprotest --build-command 'just yarn --network-timeout 1000000000; just yarn build; cargo build --all-features --release' . target/release/warpgate
+          reprotest --build-command 'just yarn --frozen-lockfile --network-timeout 1000000000; just yarn build; cargo build --all-features --release' . target/release/warpgate

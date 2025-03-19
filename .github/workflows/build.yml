@@ -56,7 +56,7 @@ jobs:
 
       - name: Install admin UI deps
         run: |
-          just yarn --network-timeout 1000000000
+          just yarn --frozen-lockfile --network-timeout 1000000000
 
       - name: Build admin UI
         run: |
