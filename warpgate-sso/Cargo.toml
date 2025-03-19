@@ -16,6 +16,6 @@ openidconnect = { version = "4.0", default-features = false, features = [
 serde.workspace = true
 serde_json.workspace = true
 once_cell = "1.17"
-jsonwebtoken = "8"
+jsonwebtoken = "9"
 data-encoding.workspace = true
 futures.workspace = true

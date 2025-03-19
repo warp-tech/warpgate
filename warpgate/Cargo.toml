@@ -18,7 +18,7 @@ dialoguer = "0.10"
 enum_dispatch.workspace = true
 futures.workspace = true
 notify = "5.1"
-rcgen = { version = "0.10", features = ["zeroize"] }
+rcgen = { version = "0.13", features = ["zeroize"] }
 rustls.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
