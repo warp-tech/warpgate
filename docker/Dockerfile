@@ -7,15 +7,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get update \
     && apt-get install -y ca-certificates-java nodejs openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g yarn \
     && cargo install just
 
 COPY . /opt/warpgate
 
 RUN cd /opt/warpgate \
-    && just yarn --frozen-lockfile --network-timeout 1000000000 \
+    && just npm ci \
     && just openapi \
-    && just yarn build \
+    && just npm run build \
     && cargo build --features mysql,postgres --release
 
 FROM debian:bullseye-20221024

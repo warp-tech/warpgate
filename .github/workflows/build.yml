@@ -56,11 +56,11 @@ jobs:
 
       - name: Install admin UI deps
         run: |
-          just yarn --frozen-lockfile --network-timeout 1000000000
+          just npm ci
 
       - name: Build admin UI
         run: |
-          just yarn build
+          just npm run build
 
       - name: Build
         uses: actions-rs/cargo@v1

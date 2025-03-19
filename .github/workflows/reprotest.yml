@@ -26,4 +26,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          reprotest --vary -user_group --build-command 'just yarn; just yarn build; cargo build --all-features --release' . target/release/warpgate
+          reprotest --vary -user_group --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate

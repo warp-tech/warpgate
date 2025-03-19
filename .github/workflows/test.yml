@@ -24,10 +24,10 @@ jobs:
 
       - name: Build UI
         run: |
-          just yarn --frozen-lockfile --network-timeout 1000000000
+          just npm ci
           just openapi
-          just yarn openapi:tests-sdk
-          just yarn build
+          just npm run openapi:tests-sdk
+          just npm run build
 
       - name: Build images
         working-directory: tests

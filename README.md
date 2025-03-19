@@ -78,11 +78,11 @@ You can also use the admin web interface to view the live session list, review s
 
 ## Contributing / building from source
 
-* You'll need Rust, NodeJS and Yarn
+* You'll need Rust, NodeJS and NPM
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
-* Install the admin UI deps: `just yarn`
-* Build the frontend: `just yarn build`
+* Install the admin UI deps: `just npm`
+* Build the frontend: `just npm run build`
 * Build Warpgate: `cargo build` (optionally `--release`)
 
 The binary is in `target/{debug|release}`.
