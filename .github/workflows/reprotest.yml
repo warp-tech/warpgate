@@ -1,10 +1,10 @@
-name: Build
+name: Reproducibility test
 
 on: [push, pull_request]
 
 jobs:
-  Build:
-    name: Test reproducibility
+  reprotest:
+    name: Reproducibility test
     runs-on: ubuntu-24.04
 
     steps:
@@ -24,4 +24,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          reprotest --build-command 'just yarn --network-timeout 1000000000; just yarn build; cargo build --all-features --release' .
+          reprotest --build-command 'just yarn --network-timeout 1000000000; just yarn build; cargo build --all-features --release' . target/release/warpgate
