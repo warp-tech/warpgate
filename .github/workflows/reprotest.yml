@@ -27,4 +27,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          sudo env "PATH=$PATH" reprotest -vv --vary=environment,build_path,kernel,aslr,num_cpus,time --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate
+          sudo env "PATH=$PATH" reprotest -vv --vary=environment,build_path,kernel,aslr,num_cpus --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate

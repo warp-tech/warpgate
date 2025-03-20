@@ -11,18 +11,22 @@ jobs:
             target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
             cyclonedx-build: cyclonedx-linux-x64
+            cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
             os: ubuntu-22.04-arm
             cyclonedx-build: cyclonedx-linux-arm64
+            cargo-cross: false
           - arch: x86_64-macos
             target: x86_64-apple-darwin
             os: macos-latest
             cyclonedx-build: cyclonedx-osx-x64
+            cargo-cross: false
           - arch: arm64-macos
             target: aarch64-apple-darwin
             os: macos-latest
             cyclonedx-build: cyclonedx-osx-arm64
+            cargo-cross: true
       fail-fast: false
 
     name: Build (${{ matrix.arch }})
@@ -78,7 +82,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          use-cross: true
+          use-cross: ${{ matrix.cargo-cross }}
           args: --all-features --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
