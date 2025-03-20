@@ -1,4 +1,6 @@
 name: Build
+permissions:
+  contents: write
 
 on: [push, pull_request]
 
@@ -10,15 +12,23 @@ jobs:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
+            cyclonedx-build: cyclonedx-linux-x64
+            cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-22.04-arm
+            cyclonedx-build: cyclonedx-linux-arm64
+            cargo-cross: false
           - arch: x86_64-macos
             target: x86_64-apple-darwin
             os: macos-latest
+            cyclonedx-build: cyclonedx-osx-x64
+            cargo-cross: false
           - arch: arm64-macos
             target: aarch64-apple-darwin
             os: macos-latest
+            cyclonedx-build: cyclonedx-osx-arm64
+            cargo-cross: true
       fail-fast: false
 
     name: Build (${{ matrix.arch }})
@@ -49,6 +59,10 @@ jobs:
         run: |
           cargo install just
           cargo install cargo-deny@^0.16
+          cargo install cargo-cyclonedx@^0.5
+          mkdir cdx
+          wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
+          chmod +x cyclonedx
 
       - name: cargo-deny
         run: |
@@ -56,28 +70,35 @@ jobs:
 
       - name: Install admin UI deps
         run: |
-          just yarn --network-timeout 1000000000
+          just npm ci
 
       - name: Build admin UI
         run: |
-          just yarn build
+          just npm run build
+
+      - name: Generate admin UI BOM
+        run: |
+          NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
 
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
-          use-cross: true
+          use-cross: ${{ matrix.cargo-cross }}
           args: --all-features --release --target ${{ matrix.target }}
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable"
-          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable"
-        # env:
-        #   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
-        #   CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-C target-feature=+crt-static --cfg tokio_unstable"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+
+      - name: Generate Rust BOM
+        run: |
+          cargo cyclonedx --all-features
+          mv warpgate*/*.cdx.xml cdx/
+
+      - name: Merge BOMs
+        run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@master
@@ -85,10 +106,17 @@ jobs:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/warpgate
 
-      - name: Rename artifact
+      - name: Upload SBOM
+        uses: actions/upload-artifact@master
+        with:
+          name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
+          path: cdx.xml
+
+      - name: Rename artifacts
         run: |
           mkdir dist
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
+          mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
         uses: softprops/action-gh-release@v1

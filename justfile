@@ -15,23 +15,26 @@ clippy *ARGS:
 test:
     for p in {{projects}}; do cargo test --all-features -p $p; done
 
-yarn *ARGS:
-    cd warpgate-web && yarn {{ARGS}}
+npm *ARGS:
+    cd warpgate-web && npm {{ARGS}}
+
+npx *ARGS:
+    cd warpgate-web && npx {{ARGS}}
 
 migrate *ARGS:
     cargo run --all-features -p warpgate-db-migrations -- {{ARGS}}
 
 lint *ARGS:
-    cd warpgate-web && yarn run lint {{ARGS}}
+    cd warpgate-web && npm run lint {{ARGS}}
 
 svelte-check:
-    cd warpgate-web && yarn run check
+    cd warpgate-web && npm run check
 
 openapi-all:
-    cd warpgate-web && yarn openapi:schema:admin && yarn openapi:schema:gateway && yarn openapi:client:admin && yarn openapi:client:gateway
+    cd warpgate-web && npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway
 
 openapi:
-    cd warpgate-web && yarn openapi:client:admin && yarn openapi:client:gateway
+    cd warpgate-web && npm run openapi:client:admin && npm run openapi:client:gateway
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
 

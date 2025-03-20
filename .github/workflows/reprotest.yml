@@ -1,0 +1,32 @@
+name: Reproducibility test
+permissions:
+  contents: read
+
+on: [workflow_dispatch]
+
+jobs:
+  reprotest:
+    name: Reproducibility test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Setup
+        run: |
+          sudo apt update
+          sudo apt install --no-install-recommends -y libssl-dev pkg-config disorderfs faketime locales-all reprotest diffoscope
+          test -c /dev/fuse || mknod -m 666 /dev/fuse c 10 229
+          test -f /etc/mtab || ln -s ../proc/self/mounts /etc/mtab
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
+          echo "/root/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          sudo env "PATH=$PATH" cargo install just
+
+      - name: Reprotest
+        run: |
+          sudo env "PATH=$PATH" reprotest -vv --vary=environment,build_path,kernel,aslr,num_cpus --build-command 'just npm ci; just npm run build; cargo build --all-features --release' . target/release/warpgate

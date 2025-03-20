@@ -361,8 +361,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             .paths_relative_to
             .join(&config.store.http.certificate);
         let key_path = config.paths_relative_to.join(&config.store.http.key);
-        std::fs::write(&certificate_path, cert.serialize_pem()?)?;
-        std::fs::write(&key_path, cert.serialize_private_key_pem())?;
+        std::fs::write(&certificate_path, cert.cert.pem())?;
+        std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
         secure_file(&certificate_path)?;
         secure_file(&key_path)?;
     }
