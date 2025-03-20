@@ -14,7 +14,7 @@ jobs:
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
             os: ubuntu-22.04
-            cyclonedx-build: cyclonedx-linux-arm
+            cyclonedx-build: cyclonedx-linux-x64
           - arch: x86_64-macos
             target: x86_64-apple-darwin
             os: macos-latest
