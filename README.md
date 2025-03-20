@@ -58,6 +58,10 @@ Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that
   </tr>
 </table>
 
+## Reporting security issues
+
+Please use GitHub's [vulnerability reporting system](https://github.com/warp-tech/warpgate/security/policy).
+
 ## Project Status
 
 The project is ready for production.
