@@ -14,7 +14,7 @@ jobs:
           sudo apt install --no-install-recommends -y libssl-dev pkg-config disorderfs faketime locales-all reprotest diffoscope
           test -c /dev/fuse || mknod -m 666 /dev/fuse c 10 229
           test -f /etc/mtab || ln -s ../proc/self/mounts /etc/mtab
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y --default-toolchain none
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
           echo "/root/.cargo/bin" >> $GITHUB_PATH
 
       - uses: actions/checkout@v2
