@@ -61,6 +61,7 @@
                 targetDataRequest: {
                     name,
                     options,
+                    description: '',
                 },
             })
             replace(`/targets/${target.id}`)
