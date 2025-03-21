@@ -77,18 +77,19 @@ impl MigrationTrait for Migration {
             .await?;
 
         // set description for builtin admin role
-        let admin_role = role::Entity::find()
+        if let Some(admin_role) = role::Entity::find()
             .filter(role::Column::Name.eq("warpgate:admin"))
             .one(manager.get_connection())
             .await?
-            .unwrap();
-        role::ActiveModel {
-            id: Set(admin_role.id),
-            description: Set("Built-in admin role".into()),
-            name: Set(admin_role.name),
+        {
+            role::ActiveModel {
+                id: Set(admin_role.id),
+                description: Set("Built-in admin role".into()),
+                name: Set(admin_role.name),
+            }
+            .update(manager.get_connection())
+            .await?;
         }
-        .update(manager.get_connection())
-        .await?;
         Ok(())
     }
 
