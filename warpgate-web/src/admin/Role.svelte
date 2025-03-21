@@ -1,11 +1,14 @@
 <script lang="ts">
-    import { api, type Role } from 'admin/lib/api'
+    import { api, type Role, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { replace } from 'svelte-spa-router'
+    import { link, replace } from 'svelte-spa-router'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte';
+    import * as rx from 'rxjs'
+    import EmptyState from 'common/EmptyState.svelte';
 
     interface Props {
         params: { id: string };
@@ -22,6 +25,30 @@
     async function init () {
         role = await api.getRole({ id: params.id })
         disabled = role.name === 'warpgate:admin'
+    }
+
+    function loadUsers (): rx.Observable<PaginatedResponse<User>> {
+        return rx.from(api.getRoleUsers({
+            id: params.id,
+        })).pipe(
+            rx.map(targets => ({
+                items: targets,
+                offset: 0,
+                total: targets.length,
+            })),
+        )
+    }
+
+    function loadTargets (): rx.Observable<PaginatedResponse<Target>> {
+        return rx.from(api.getRoleTargets({
+            id: params.id,
+        })).pipe(
+            rx.map(targets => ({
+                items: targets,
+                offset: 0,
+                total: targets.length,
+            })),
+        )
     }
 
     async function update () {
@@ -85,3 +112,50 @@
         click={remove}
     >Remove</AsyncButton>
 </div>
+
+
+<h4 class="mt-4">Assigned users</h4>
+
+<ItemList load={loadUsers}>
+    {#snippet item(user)}
+        <a
+            class="list-group-item list-group-item-action"
+            href="/users/{user.id}"
+            use:link>
+            <div>
+                <strong class="me-auto">
+                    {user.username}
+                </strong>
+                {#if user.description}
+                    <small class="d-block text-muted">{user.description}</small>
+                {/if}
+            </div>
+        </a>
+    {/snippet}
+    {#snippet empty()}
+        <Alert color="info">This role has no users assigned to it</Alert>
+    {/snippet}
+</ItemList>
+
+<h4 class="mt-4">Assigned targets</h4>
+
+<ItemList load={loadTargets}>
+    {#snippet item(target)}
+        <a
+            class="list-group-item list-group-item-action"
+            href="/targets/{target.id}"
+            use:link>
+            <div class="me-auto">
+                <strong>
+                    {target.name}
+                </strong>
+                {#if target.description}
+                    <small class="d-block text-muted">{target.description}</small>
+                {/if}
+            </div>
+        </a>
+    {/snippet}
+    {#snippet empty()}
+        <Alert color="info">This role has no targets assigned to it</Alert>
+    {/snippet}
+</ItemList>

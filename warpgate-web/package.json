@@ -49,6 +49,7 @@
     "format-duration": "^3.0.2",
     "otpauth": "^9.3.6",
     "qrcode": "^1.5.4",
+    "rxjs": "^7.8.2",
     "sass": "1.78",
     "svelte": "^5.20.0",
     "svelte-check": "^4.1.4",
