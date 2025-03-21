@@ -47,6 +47,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
+    #[sea_orm(column_type = "Text")]
+    pub description: String,
     pub kind: TargetKind,
     pub options: serde_json::Value,
 }
@@ -74,6 +76,7 @@ impl TryFrom<Model> for Target {
         Ok(Self {
             id: model.id,
             name: model.name,
+            description: model.description,
             allow_roles: vec![],
             options,
         })

@@ -19,7 +19,7 @@ pub(crate) mod role {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-mod target {
+pub mod target {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 

@@ -29,6 +29,7 @@ struct CreateTicketRequest {
     target_name: String,
     expiry: Option<DateTime<Utc>>,
     number_of_uses: Option<i16>,
+    description: String,
 }
 
 #[derive(Object)]
@@ -91,6 +92,7 @@ impl Api {
             created: Set(chrono::Utc::now()),
             expiry: Set(body.expiry),
             uses_left: Set(body.number_of_uses),
+            description: Set(body.description.clone()),
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;

@@ -94,6 +94,7 @@ pub async fn populate_db(
         None => {
             let values = Role::ActiveModel {
                 id: Set(Uuid::new_v4()),
+                description: Set("Built-in admin role".into()),
                 name: Set(BUILTIN_ADMIN_ROLE_NAME.to_owned()),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
@@ -111,6 +112,7 @@ pub async fn populate_db(
             let values = Target::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 name: Set(BUILTIN_ADMIN_TARGET_NAME.to_owned()),
+                description: Set("".into()),
                 kind: Set(TargetKind::WebAdmin),
                 options: Set(serde_json::to_value(TargetOptions::WebAdmin(
                     TargetWebAdminOptions {},

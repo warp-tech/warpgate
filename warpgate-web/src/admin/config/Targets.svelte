@@ -40,9 +40,14 @@
             class:disabled={target.options.kind === TargetKind.WebAdmin}
             href="/targets/{target.id}"
             use:link>
-            <strong class="me-auto">
-                {target.name}
-            </strong>
+            <div class="me-auto">
+                <strong>
+                    {target.name}
+                </strong>
+                {#if target.description}
+                    <small class="d-block text-muted">{target.description}</small>
+                {/if}
+            </div>
             <small class="text-muted ms-auto">
                 {#if target.options.kind === TargetKind.Http}
                     HTTP

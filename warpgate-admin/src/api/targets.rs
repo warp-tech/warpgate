@@ -20,6 +20,7 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct TargetDataRequest {
     name: String,
+    description: String,
     options: TargetOptions,
 }
 
@@ -86,6 +87,7 @@ impl ListApi {
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
+            description: Set(body.description.clone()),
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
         };
@@ -168,6 +170,7 @@ impl DetailApi {
 
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
+        model.description = Set(body.description.clone());
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         let target = model.update(&*db).await?;

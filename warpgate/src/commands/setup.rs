@@ -318,6 +318,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 let values = User::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
+                    description: Set("".into()),
                     credential_policy: Set(serde_json::to_value(
                         None::<UserRequireCredentialsPolicy>,
                     )?),

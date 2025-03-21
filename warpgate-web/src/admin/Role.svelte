@@ -2,7 +2,7 @@
     import { api, type Role } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
-    import { FormGroup } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -17,8 +17,11 @@
     let role: Role | undefined = $state()
     const initPromise = init()
 
+    let disabled = $state(false)
+
     async function init () {
         role = await api.getRole({ id: params.id })
+        disabled = role.name === 'warpgate:admin'
     }
 
     async function update () {
@@ -49,7 +52,17 @@
     </div>
 
     <FormGroup floating label="Name">
-        <input class="form-control" bind:value={role!.name} />
+        <Input
+            bind:value={role!.name}
+            disabled={disabled}
+        />
+    </FormGroup>
+
+    <FormGroup floating label="Description">
+        <Input
+            bind:value={role!.description}
+            disabled={disabled}
+        />
     </FormGroup>
 </Loadable>
 
@@ -60,12 +73,14 @@
 <div class="d-flex">
     <AsyncButton
     color="primary"
+        disabled={disabled}
         class="ms-auto"
         click={update}
     >Update</AsyncButton>
 
     <AsyncButton
         class="ms-2"
+        disabled={disabled}
         color="danger"
         click={remove}
     >Remove</AsyncButton>

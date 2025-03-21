@@ -20,11 +20,13 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct CreateUserRequest {
     username: String,
+    description: String,
 }
 #[derive(Object)]
 struct UserDataRequest {
     username: String,
     credential_policy: Option<UserRequireCredentialsPolicy>,
+    description: String,
 }
 
 #[derive(ApiResponse)]
@@ -89,6 +91,7 @@ impl ListApi {
                 serde_json::to_value(UserRequireCredentialsPolicy::default())
                     .map_err(WarpgateError::from)?,
             ),
+            description: Set(body.description.clone()),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -160,6 +163,7 @@ impl DetailApi {
 
         let mut model: User::ActiveModel = user.into();
         model.username = Set(body.username.clone());
+        model.description = Set(body.description.clone());
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);

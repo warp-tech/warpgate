@@ -15,6 +15,7 @@ pub struct Api;
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
     pub name: String,
+    pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
 }
@@ -83,6 +84,7 @@ impl Api {
                 .into_iter()
                 .map(|t| TargetSnapshot {
                     name: t.name.clone(),
+                    description: t.description.clone(),
                     kind: (&t.options).into(),
                     external_host: match t.options {
                         TargetOptions::Http(ref opt) => opt.external_host.clone(),

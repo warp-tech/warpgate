@@ -15,6 +15,8 @@ pub struct Model {
     pub id: Uuid,
     pub username: String,
     pub credential_policy: serde_json::Value,
+    #[sea_orm(column_type = "Text")]
+    pub description: String,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -104,6 +106,7 @@ impl TryFrom<Model> for User {
             id: model.id,
             username: model.username,
             credential_policy: serde_json::from_value(model.credential_policy)?,
+            description: model.description,
         })
     }
 }
@@ -165,6 +168,7 @@ impl TryFrom<User> for ActiveModel {
             id: Set(user.id),
             username: Set(user.username),
             credential_policy: Set(serde_json::to_value(&user.credential_policy)?),
+            description: Set(user.description),
         })
     }
 }

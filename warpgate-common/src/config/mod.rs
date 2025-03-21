@@ -132,6 +132,7 @@ pub struct User {
     #[serde(default)]
     pub id: Uuid,
     pub username: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
 }
@@ -156,6 +157,7 @@ pub struct Role {
     #[serde(default)]
     pub id: Uuid,
     pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy)]

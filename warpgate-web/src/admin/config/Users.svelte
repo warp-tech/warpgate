@@ -31,9 +31,14 @@
             class="list-group-item list-group-item-action"
             href="/users/{user.id}"
             use:link>
-            <strong class="me-auto">
-                {user.username}
-            </strong>
+            <div>
+                <strong class="me-auto">
+                    {user.username}
+                </strong>
+                {#if user.description}
+                    <small class="d-block text-muted">{user.description}</small>
+                {/if}
+            </div>
         </a>
     {/snippet}
 </ItemList>

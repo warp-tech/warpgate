@@ -132,7 +132,11 @@
     <h4 class="mt-4">Configuration</h4>
 
     <FormGroup floating label="Name">
-        <input class="form-control" bind:value={target.name} />
+        <Input class="form-control" bind:value={target.name} />
+    </FormGroup>
+
+    <FormGroup floating label="Description">
+        <Input bind:value={target.description} />
     </FormGroup>
 
     {#if target.options.kind === 'Ssh'}
@@ -247,7 +251,12 @@
                             type="switch"
                             on:change={() => toggleRole(role)}
                             checked={roleIsAllowed[role.id]} />
-                        <div>{role.name}</div>
+                        <div>
+                            <div>{role.name}</div>
+                            {#if role.description}
+                                <small class="text-muted">{role.description}</small>
+                            {/if}
+                        </div>
                     </label>
                 {/each}
             </div>

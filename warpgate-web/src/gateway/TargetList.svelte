@@ -67,7 +67,12 @@ function loadURL (url: string) {
                 {#if target.kind === TargetKind.WebAdmin}
                     Manage Warpgate
                 {:else}
-                    {target.name}
+                    <div>
+                        {target.name}
+                    </div>
+                    {#if target.description}
+                        <small class="d-block text-muted">{target.description}</small>
+                    {/if}
                 {/if}
             </span>
             <small class="protocol text-muted ms-auto">

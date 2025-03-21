@@ -31,9 +31,14 @@
             class="list-group-item list-group-item-action"
             href="/roles/{role.id}"
             use:link>
-            <strong class="me-auto">
-                {role.name}
-            </strong>
+            <div>
+                <strong class="me-auto">
+                    {role.name}
+                </strong>
+                {#if role.description}
+                    <small class="d-block text-muted">{role.description}</small>
+                {/if}
+            </div>
         </a>
     {/snippet}
 </ItemList>

@@ -17,6 +17,7 @@ let selectedUser: User|undefined = $state()
 let selectedExpiry: string|undefined = $state()
 let selectedNumberOfUses: number|undefined = $state()
 let result: TicketAndSecret|undefined = $state()
+let selectedDescription: string = $state('')
 
 async function load () {
     [targets, users] = await Promise.all([
@@ -43,6 +44,7 @@ async function create () {
                 targetName: selectedTarget.name,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
                 numberOfUses: selectedNumberOfUses,
+                description: selectedDescription,
             },
         })
     } catch (err) {
@@ -109,6 +111,10 @@ async function create () {
         </select>
     </FormGroup>
     {/if}
+
+    <FormGroup floating label="Description">
+        <input type="text" bind:value={selectedDescription} class="form-control" placeholder="Optional description"/>
+    </FormGroup>
 
     <FormGroup floating label="Expiry (optional)">
         <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>

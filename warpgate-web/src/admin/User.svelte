@@ -78,6 +78,10 @@
     <Input bind:value={user.username} />
 </FormGroup>
 
+<FormGroup floating label="Description">
+    <Input bind:value={user.description} />
+</FormGroup>
+
 <CredentialEditor
     userId={user.id}
     username={user.username}
@@ -97,7 +101,12 @@
                 type="switch"
                 on:change={() => toggleRole(role)}
                 checked={roleIsAllowed[role.id]} />
-            <div>{role.name}</div>
+            <div>
+                <div>{role.name}</div>
+                {#if role.description}
+                    <small class="text-muted">{role.description}</small>
+                {/if}
+            </div>
         </label>
     {/each}
 </div>

@@ -22,13 +22,10 @@ let loading = $state(true)
 let endReached = $state(false)
 let loadOlderButton: HTMLButtonElement|undefined = $state()
 let reloadInterval: any
-let lastUpdate = $state(new Date())
-let isLive = $state(true)
 let searchQuery = $state('')
 const PAGE_SIZE = 1000
 
 function addItems (newItems: LogEntry[]) {
-    lastUpdate = new Date()
     let existingIds = new Set(items?.map(i => i.id) ?? [])
     newItems = newItems.filter(i => !existingIds.has(i.id))
     newItems.sort(firstBy('timestamp', -1))
@@ -103,7 +100,6 @@ loadOlder().catch(async e => {
 
 onMount(() => {
     reloadInterval = setInterval(() => {
-        isLive = Date.now() - lastUpdate.valueOf() < 3000
         if (!loading) {
             loadNewer()
         }
