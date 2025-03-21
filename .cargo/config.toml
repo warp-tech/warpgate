@@ -2,6 +2,7 @@
 [target.'cfg(all())']
 rustflags = [
     "--cfg", "tokio_unstable",
+    "-Zremap-cwd-prefix=/reproducible-cwd",
     "--remap-path-prefix=$HOME=/reproducible-home",
     "--remap-path-prefix=$PWD=/reproducible-pwd",
 ]

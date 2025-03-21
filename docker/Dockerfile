@@ -11,6 +11,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 
 COPY . /opt/warpgate
 
+ENV SOURCE_DATE_EPOCH=0 # for rust-embed determinism
 RUN cd /opt/warpgate \
     && just npm ci \
     && just openapi \
