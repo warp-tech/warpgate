@@ -20,8 +20,9 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct CreateUserRequest {
     username: String,
-    description: String,
+    description: Option<String>,
 }
+
 #[derive(Object)]
 struct UserDataRequest {
     username: String,
@@ -91,7 +92,7 @@ impl ListApi {
                 serde_json::to_value(UserRequireCredentialsPolicy::default())
                     .map_err(WarpgateError::from)?,
             ),
-            description: Set(body.description.clone()),
+            description: Set(body.description.clone().unwrap_or_default()),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
