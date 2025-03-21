@@ -19,7 +19,7 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct RoleDataRequest {
     name: String,
-    description: String,
+    description: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -81,7 +81,7 @@ impl ListApi {
         let values = Role::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
-            description: Set(body.description.clone()),
+            description: Set(body.description.clone().unwrap_or_default()),
         };
 
         let role = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -159,7 +159,7 @@ impl DetailApi {
 
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
-        model.description = Set(body.description.clone());
+        model.description = Set(body.description.clone().unwrap_or_default());
         let role = model.update(&*db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))
