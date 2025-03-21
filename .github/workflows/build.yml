@@ -1,6 +1,7 @@
 name: Build
 permissions:
   contents: write
+  packages: write
 
 on: [push, pull_request]
 
