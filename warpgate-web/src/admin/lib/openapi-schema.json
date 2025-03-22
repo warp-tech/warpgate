@@ -2987,8 +2987,7 @@
       "UserDataRequest": {
         "type": "object",
         "required": [
-          "username",
-          "description"
+          "username"
         ],
         "properties": {
           "username": {
