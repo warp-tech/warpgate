@@ -2086,8 +2086,7 @@
         "type": "object",
         "required": [
           "username",
-          "target_name",
-          "description"
+          "target_name"
         ],
         "properties": {
           "username": {
@@ -2112,8 +2111,7 @@
       "CreateUserRequest": {
         "type": "object",
         "required": [
-          "username",
-          "description"
+          "username"
         ],
         "properties": {
           "username": {
@@ -2425,8 +2423,7 @@
       "RoleDataRequest": {
         "type": "object",
         "required": [
-          "name",
-          "description"
+          "name"
         ],
         "properties": {
           "name": {
@@ -2627,7 +2624,6 @@
         "type": "object",
         "required": [
           "name",
-          "description",
           "options"
         ],
         "properties": {

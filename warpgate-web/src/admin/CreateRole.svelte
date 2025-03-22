@@ -14,7 +14,6 @@ async function create () {
         const role = await api.createRole({
             roleDataRequest: {
                 name,
-                description: '',
             },
         })
         replace(`/roles/${role.id}`)
