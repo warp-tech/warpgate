@@ -18,6 +18,26 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
+impl Related<super::Target::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::TargetRoleAssignment::Relation::Target.def()
+    }
+
+    fn via() -> Option<RelationDef> {
+        Some(super::TargetRoleAssignment::Relation::Role.def().rev())
+    }
+}
+
+impl Related<super::User::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::UserRoleAssignment::Relation::User.def()
+    }
+
+    fn via() -> Option<RelationDef> {
+        Some(super::UserRoleAssignment::Relation::Role.def().rev())
+    }
+}
+
 impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for Role {
