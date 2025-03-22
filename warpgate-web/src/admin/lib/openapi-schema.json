@@ -2102,6 +2102,9 @@
           "number_of_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
@@ -2112,6 +2115,9 @@
         ],
         "properties": {
           "username": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           }
         }
@@ -2398,7 +2404,8 @@
         "type": "object",
         "required": [
           "id",
-          "name"
+          "name",
+          "description"
         ],
         "properties": {
           "id": {
@@ -2406,6 +2413,9 @@
             "format": "uuid"
           },
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           }
         }
@@ -2417,6 +2427,9 @@
         ],
         "properties": {
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           }
         }
@@ -2581,6 +2594,7 @@
         "required": [
           "id",
           "name",
+          "description",
           "allow_roles",
           "options"
         ],
@@ -2590,6 +2604,9 @@
             "format": "uuid"
           },
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "allow_roles": {
@@ -2611,6 +2628,9 @@
         ],
         "properties": {
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "options": {
@@ -2871,6 +2891,7 @@
         "required": [
           "id",
           "username",
+          "description",
           "target",
           "created"
         ],
@@ -2880,6 +2901,9 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "target": {
@@ -2941,7 +2965,8 @@
         "type": "object",
         "required": [
           "id",
-          "username"
+          "username",
+          "description"
         ],
         "properties": {
           "id": {
@@ -2949,6 +2974,9 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "credential_policy": {
@@ -2967,6 +2995,9 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },

@@ -48,17 +48,24 @@
         <div class="list-group list-group-flush">
             {#each tickets as ticket}
                 <div class="list-group-item">
-                    <strong>
-                        Access to {ticket.target} as {ticket.username}
-                    </strong>
+                    <div>
+                        <strong>
+                            Access to {ticket.target} as {ticket.username}
+                        </strong>
+                        {#if ticket.description}
+                            <small class="d-block text-muted">
+                                {ticket.description}
+                            </small>
+                        {/if}
+                    </div>
                     {#if ticket.expiry}
-                        <small class="text-muted ms-4">
+                        <small class="text-muted ms-4 d-flex align-items-center">
                             <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> Until {ticket.expiry?.toLocaleString()}
                         </small>
                     {/if}
                     {#if ticket.usesLeft != null}
                         {#if ticket.usesLeft > 0}
-                            <small class="text-muted ms-4">
+                            <small class="text-muted ms-4 d-flex align-items-center">
                                 <Fa icon={faSquareCheck} fw /> Uses left: {ticket.usesLeft}
                             </small>
                         {/if}

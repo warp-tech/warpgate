@@ -11,6 +11,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
+    #[sea_orm(column_type = "Text")]
+    pub description: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -23,6 +25,7 @@ impl From<Model> for Role {
         Self {
             id: model.id,
             name: model.name,
+            description: model.description,
         }
     }
 }

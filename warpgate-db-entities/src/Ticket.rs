@@ -13,6 +13,8 @@ pub struct Model {
     #[oai(skip)]
     pub secret: String,
     pub username: String,
+    #[sea_orm(column_type = "Text")]
+    pub description: String,
     pub target: String,
     pub uses_left: Option<i16>,
     pub expiry: Option<DateTime<Utc>>,

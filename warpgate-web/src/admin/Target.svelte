@@ -7,11 +7,12 @@
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Modal, ModalBody } from '@sveltestrap/sveltestrap'
     import TlsConfiguration from './TlsConfiguration.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 
     interface Props {
         params: { id: string };
@@ -23,6 +24,7 @@
     let selectedUser: User|undefined = $state()
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
+    let connectionsInstructionsModalOpen = $state(false)
 
     async function init () {
         target = await api.getTarget({ id: params.id })
@@ -75,6 +77,42 @@
 
 <Loadable promise={init()}>
 {#if target}
+    <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false}>
+        <ModalHeader toggle={() => connectionsInstructionsModalOpen = false}>
+            Access instructions
+        </ModalHeader>
+        <ModalBody>
+            {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                <Loadable promise={api.getUsers()}>
+                    {#snippet children(users)}
+                        <FormGroup floating label="Select a user">
+                            <select bind:value={selectedUser} class="form-control">
+                                {#each users as user}
+                                    <option value={user}>
+                                        {user.username}
+                                    </option>
+                                {/each}
+                            </select>
+                        </FormGroup>
+                    {/snippet}
+                </Loadable>
+            {/if}
+
+            <ConnectionInstructions
+                targetName={target.name}
+                username={selectedUser?.username}
+                targetKind={{
+                    Ssh: TargetKind.Ssh,
+                    WebAdmin: TargetKind.WebAdmin,
+                    Http: TargetKind.Http,
+                    MySql: TargetKind.MySql,
+                    Postgres: TargetKind.Postgres,
+                }[target.options.kind ?? '']}
+                targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
+            />
+        </ModalBody>
+    </Modal>
+
     <div class="page-summary-bar">
         <div>
             <h1>{target.name}</h1>
@@ -98,41 +136,14 @@
         </div>
     </div>
 
-    <h4>Access instructions</h4>
-
-    {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
-        <Loadable promise={api.getUsers()}>
-            {#snippet children(users)}
-                <FormGroup floating label="Select a user">
-                    <select bind:value={selectedUser} class="form-control">
-                        {#each users as user}
-                            <option value={user}>
-                                {user.username}
-                            </option>
-                        {/each}
-                    </select>
-                </FormGroup>
-            {/snippet}
-        </Loadable>
-    {/if}
-
-    <ConnectionInstructions
-        targetName={target.name}
-        username={selectedUser?.username}
-        targetKind={{
-            Ssh: TargetKind.Ssh,
-            WebAdmin: TargetKind.WebAdmin,
-            Http: TargetKind.Http,
-            MySql: TargetKind.MySql,
-            Postgres: TargetKind.Postgres,
-        }[target.options.kind ?? '']}
-        targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
-    />
-
     <h4 class="mt-4">Configuration</h4>
 
     <FormGroup floating label="Name">
-        <input class="form-control" bind:value={target.name} />
+        <Input class="form-control" bind:value={target.name} />
+    </FormGroup>
+
+    <FormGroup floating label="Description">
+        <Input bind:value={target.description} />
     </FormGroup>
 
     {#if target.options.kind === 'Ssh'}
@@ -247,7 +258,12 @@
                             type="switch"
                             on:change={() => toggleRole(role)}
                             checked={roleIsAllowed[role.id]} />
-                        <div>{role.name}</div>
+                        <div>
+                            <div>{role.name}</div>
+                            {#if role.description}
+                                <small class="text-muted">{role.description}</small>
+                            {/if}
+                        </div>
                     </label>
                 {/each}
             </div>
@@ -261,6 +277,11 @@
 {/if}
 
 <div class="d-flex">
+    <Button
+        color="secondary"
+        on:click={() => connectionsInstructionsModalOpen = true}
+    >Access instructions</Button>
+
     <AsyncButton
     color="primary"
         class="ms-auto"
