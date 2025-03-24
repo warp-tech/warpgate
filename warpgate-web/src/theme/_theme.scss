@@ -203,3 +203,8 @@ body {
         background-color: $real-background if($enable-important-utilities, !important, null);
     }
 }
+
+ul.pagination {
+    display: flex;
+    align-items: center;
+}
