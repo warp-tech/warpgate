@@ -206,6 +206,18 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        if target.kind == TargetKind::Ssh {
+            let options: TargetOptions = serde_json::from_value(target.options.clone())?;
+            if let TargetOptions::Ssh(ssh_options) = options {
+                use warpgate_db_entities::KnownHost;
+                KnownHost::Entity::delete_many()
+                    .filter(KnownHost::Column::Host.eq(&ssh_options.host))
+                    .filter(KnownHost::Column::Port.eq(ssh_options.port as i32))
+                    .exec(&*db)
+                    .await?;
+            }
+        }
+
         target.delete(&*db).await?;
         Ok(DeleteTargetResponse::Deleted)
     }
