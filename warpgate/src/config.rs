@@ -11,7 +11,7 @@ use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
     let mut store: serde_yaml::Value = Config::builder()
-        .add_source(File::new(path.to_str().unwrap_or(""), FileFormat::Yaml))
+        .add_source(File::new(path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?, FileFormat::Yaml))
         .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?
