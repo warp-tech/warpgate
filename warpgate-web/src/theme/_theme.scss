@@ -208,3 +208,14 @@ ul.pagination {
     display: flex;
     align-items: center;
 }
+
+@media (prefers-reduced-motion: reduce) {
+    // #1271: sveltestrap modals are broken when `prefers-reduced-motion` is on
+    .modal.fade {
+        opacity: 1 !important;
+    }
+
+    .modal-backdrop.fade {
+        opacity: var(--bs-backdrop-opacity) !important;
+    }
+}
