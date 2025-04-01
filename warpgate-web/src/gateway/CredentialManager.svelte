@@ -107,8 +107,9 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">One-time passwords</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={() => {
+        <a href={''} color="link" onclick={e => {
             creatingOtpCredential = true
+            e.preventDefault()
         }}>Add device</a>
     </div>
 
@@ -141,8 +142,9 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={() => {
+        <a href={''} color="link" onclick={e => {
             creatingPublicKeyCredential = true
+            e.preventDefault()
         }}>Add key</a>
     </div>
 
