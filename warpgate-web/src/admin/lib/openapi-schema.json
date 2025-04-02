@@ -658,6 +658,39 @@
       }
     },
     "/ssh/known-hosts": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSshKnownHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHKnownHost"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_ssh_known_host"
+      },
       "get": {
         "responses": {
           "200": {
@@ -994,6 +1027,53 @@
           }
         ],
         "operationId": "delete_target"
+      }
+    },
+    "/targets/{id}/known-ssh-host-keys": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_target_known_ssh_host_keys"
       }
     },
     "/targets/{id}/roles": {
@@ -2166,10 +2246,100 @@
         ],
         "operationId": "update_parameters"
       }
+    },
+    "/ssh/check-host-key": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckSshHostKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckSshHostKeyResponseBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_ssh_host_key"
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddSshKnownHostRequest": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "key_type",
+          "key_base64"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "key_type": {
+            "type": "string"
+          },
+          "key_base64": {
+            "type": "string"
+          }
+        }
+      },
+      "CheckSshHostKeyRequest": {
+        "type": "object",
+        "required": [
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          }
+        }
+      },
+      "CheckSshHostKeyResponseBody": {
+        "type": "object",
+        "required": [
+          "remote_key_type",
+          "remote_key_base64"
+        ],
+        "properties": {
+          "remote_key_type": {
+            "type": "string"
+          },
+          "remote_key_base64": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTicketRequest": {
         "type": "object",
         "required": [

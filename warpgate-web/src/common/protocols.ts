@@ -66,3 +66,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     mysql: new Set([CredentialKind.Password]),
     postgres: new Set([CredentialKind.Password]),
 }
+
+export function abbreviatePublicKey (key: string): string {
+    return key.slice(0, 16) + '...' + key.slice(-8)
+}

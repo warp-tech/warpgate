@@ -19,3 +19,9 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    pub fn key_openssh(&self) -> String {
+        format!("{} {}", self.key_type, self.key_base64)
+    }
+}

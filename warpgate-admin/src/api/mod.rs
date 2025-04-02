@@ -13,6 +13,7 @@ pub mod recordings_detail;
 mod roles;
 mod sessions_detail;
 pub mod sessions_list;
+mod ssh_connection_test;
 mod ssh_keys;
 mod sso_credentials;
 mod targets;
@@ -59,5 +60,6 @@ pub fn get() -> impl OpenApi {
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
         parameters::Api,
+        ssh_connection_test::Api,
     )
 }
