@@ -16,7 +16,7 @@
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
-    import { possibleCredentials } from 'common/protocols'
+    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
 
@@ -202,10 +202,6 @@
         }
         editingPublicKeyCredential = false
         editingPublicKeyCredentialInstance = null
-    }
-
-    function abbreviatePublicKey (key: string) {
-        return key.slice(0, 16) + '...' + key.slice(-8)
     }
 
     function assertDefined<T>(value: T|undefined): T {

@@ -66,8 +66,10 @@ impl ListApi {
 
         let users = users.all(&*db).await.map_err(WarpgateError::from)?;
 
-        let users: Result<Vec<UserConfig>, _> = users.into_iter().map(|t| t.try_into()).collect();
-        let users = users.map_err(WarpgateError::from)?;
+        let users: Vec<UserConfig> = users
+            .into_iter()
+            .map(UserConfig::try_from)
+            .collect::<Result<Vec<UserConfig>, _>>()?;
 
         Ok(GetUsersResponse::Ok(Json(users)))
     }
@@ -97,9 +99,7 @@ impl ListApi {
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
 
-        Ok(CreateUserResponse::Created(Json(
-            user.try_into().map_err(WarpgateError::from)?,
-        )))
+        Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
 }
 
@@ -170,9 +170,7 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?);
         let user = model.update(&*db).await?;
 
-        Ok(UpdateUserResponse::Ok(Json(
-            user.try_into().map_err(WarpgateError::from)?,
-        )))
+        Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }
 
     #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]

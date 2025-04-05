@@ -59,10 +59,6 @@ impl Api {
 
         let db = db.lock().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
-        let tickets = tickets
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<Ticket::Model>>();
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
 

@@ -10,10 +10,12 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{Role as RoleConfig, Target as TargetConfig, TargetOptions, WarpgateError};
+use warpgate_common::{
+    Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions, WarpgateError,
+};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
 
 use super::AnySecurityScheme;
 
@@ -130,6 +132,18 @@ enum DeleteTargetResponse {
     NotFound,
 }
 
+#[derive(ApiResponse)]
+enum TargetKnownSshHostKeysResponse {
+    #[oai(status = 200)]
+    Found(Json<Vec<KnownHost::Model>>),
+
+    #[oai(status = 400)]
+    InvalidType,
+
+    #[oai(status = 404)]
+    NotFound,
+}
+
 pub struct DetailApi;
 
 #[OpenApi]
@@ -220,6 +234,42 @@ impl DetailApi {
 
         target.delete(&*db).await?;
         Ok(DeleteTargetResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/targets/:id/known-ssh-host-keys",
+        method = "get",
+        operation_id = "get_ssh_target_known_ssh_host_keys"
+    )]
+    async fn get_ssh_target_known_ssh_host_keys(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        _auth: AnySecurityScheme,
+    ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(TargetKnownSshHostKeysResponse::NotFound);
+        };
+
+        let target: TargetConfig = target.try_into()?;
+
+        let options: TargetSSHOptions = match target.options {
+            TargetOptions::Ssh(x) => x,
+            _ => return Ok(TargetKnownSshHostKeysResponse::InvalidType),
+        };
+
+        let known_hosts = KnownHost::Entity::find()
+            .filter(
+                KnownHost::Column::Host
+                    .eq(&options.host)
+                    .and(KnownHost::Column::Port.eq(options.port)),
+            )
+            .all(&*db)
+            .await?;
+
+        Ok(TargetKnownSshHostKeysResponse::Found(Json(known_hosts)))
     }
 }
 

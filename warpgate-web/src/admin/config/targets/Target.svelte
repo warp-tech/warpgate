@@ -1,18 +1,17 @@
 <script lang="ts">
-    import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Modal, ModalBody } from '@sveltestrap/sveltestrap'
-    import TlsConfiguration from './TlsConfiguration.svelte'
+    import TlsConfiguration from '../../TlsConfiguration.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+    import TargetSshOptions from './ssh/Options.svelte'
 
     interface Props {
         params: { id: string };
@@ -147,56 +146,7 @@
     </FormGroup>
 
     {#if target.options.kind === 'Ssh'}
-        <div class="row">
-            <div class="col-8">
-                <FormGroup floating label="Target host">
-                    <input class="form-control" bind:value={target.options.host} />
-                </FormGroup>
-            </div>
-            <div class="col-4">
-                <FormGroup floating label="Target port">
-                    <input class="form-control" type="number" bind:value={target.options.port} min="1" max="65535" step="1" />
-                </FormGroup>
-            </div>
-        </div>
-
-        <FormGroup floating label="Username">
-            <input class="form-control"
-                placeholder="Use the currently logged in user's name"
-                bind:value={target.options.username}
-            />
-        </FormGroup>
-
-        <div class="d-flex">
-            <FormGroup floating label="Authentication" class="w-100">
-                <select bind:value={target.options.auth.kind} class="form-control">
-                    <option value={'PublicKey'}>Warpgate's private keys</option>
-                    <option value={'Password'}>Password</option>
-                </select>
-            </FormGroup>
-            {#if target.options.auth.kind === 'PublicKey'}
-                <a
-                    class="btn btn-link mb-3 d-flex align-items-center"
-                    href="/@warpgate/admin#/config/ssh"
-                    target="_blank">
-                    <Fa fw icon={faExternalLink} />
-                </a>
-            {/if}
-            {#if target.options.auth.kind === 'Password'}
-                <FormGroup floating label="Password" class="w-100 ms-3">
-                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth.password} />
-                </FormGroup>
-            {/if}
-        </div>
-
-        <div class="d-flex">
-            <Input
-                class="mb-0 me-2"
-                type="switch"
-                label="Allow insecure SSH algorithms (e.g. for older network devices)"
-                bind:checked={target.options.allowInsecureAlgos} />
-        </div>
-
+        <TargetSshOptions id={target.id} options={target.options} />
     {/if}
 
     {#if target.options.kind === 'Http'}
@@ -279,6 +229,7 @@
 <div class="d-flex">
     <Button
         color="secondary"
+        class="me-3"
         on:click={() => connectionsInstructionsModalOpen = true}
     >Access instructions</Button>
 
