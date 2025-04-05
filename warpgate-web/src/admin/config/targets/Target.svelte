@@ -1,11 +1,9 @@
 <script lang="ts">
-    import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Modal, ModalBody } from '@sveltestrap/sveltestrap'
     import TlsConfiguration from '../../TlsConfiguration.svelte'

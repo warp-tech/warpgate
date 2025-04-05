@@ -6,9 +6,8 @@
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte';
+    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
-    import EmptyState from 'common/EmptyState.svelte';
 
     interface Props {
         params: { id: string };
