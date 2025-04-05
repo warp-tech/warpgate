@@ -8,12 +8,12 @@
     import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Modal, ModalBody } from '@sveltestrap/sveltestrap'
-    import TlsConfiguration from './TlsConfiguration.svelte'
+    import TlsConfiguration from '../../TlsConfiguration.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
-    import TargetSshOptions from './TargetSSHOptions.svelte'
+    import TargetSshOptions from './ssh/Options.svelte'
 
     interface Props {
         params: { id: string };

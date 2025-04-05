@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
-use sea_orm::DatabaseConnection;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError};
 use warpgate_core::Services;
@@ -43,7 +39,6 @@ impl Api {
     )]
     async fn api_ssh_check_host_key(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
         services: Data<&Services>,
         body: Json<CheckSshHostKeyRequest>,
         _auth: AnySecurityScheme,

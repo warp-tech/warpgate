@@ -29,7 +29,7 @@
             asyncComponent: () => import('./CreateTarget.svelte') as any,
         }),
         '/targets/:id': wrap({
-            asyncComponent: () => import('./Target.svelte') as any,
+            asyncComponent: () => import('./config/targets/Target.svelte') as any,
         }),
         '/roles/create': wrap({
             asyncComponent: () => import('./CreateRole.svelte') as any,
@@ -59,7 +59,7 @@
             asyncComponent: () => import('./config/Roles.svelte') as any,
         }),
         '/config/targets': wrap({
-            asyncComponent: () => import('./config/Targets.svelte') as any,
+            asyncComponent: () => import('./config/targets/Targets.svelte') as any,
         }),
         '/config/ssh': wrap({
             asyncComponent: () => import('./config/SSHKeys.svelte') as any,
