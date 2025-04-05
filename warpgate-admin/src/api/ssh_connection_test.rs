@@ -64,7 +64,7 @@ impl Api {
                 match handles.event_rx.recv().await {
                     Some(RCEvent::HostKeyReceived(key)) => break key,
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
-                    Some(RCEvent::Error(err)) => return Err(anyhow::Error::from(err)),
+                    Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),
                     _ => (),
                 }

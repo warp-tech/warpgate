@@ -269,9 +269,7 @@ impl DetailApi {
             .all(&*db)
             .await?;
 
-        Ok(TargetKnownSshHostKeysResponse::Found(Json(
-            known_hosts.into_iter().map(|x| x.into()).collect(),
-        )))
+        Ok(TargetKnownSshHostKeysResponse::Found(Json(known_hosts)))
     }
 }
 

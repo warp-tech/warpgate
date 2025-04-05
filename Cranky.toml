@@ -4,5 +4,5 @@ deny = [
   "clippy::expect_used",
   "clippy::panic",
   "clippy::indexing_slicing",
-  "dbg_macro",
+  "clippy::dbg_macro",
 ]

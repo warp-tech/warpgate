@@ -69,10 +69,6 @@ impl Api {
         }
 
         let logs = q.all(&*db).await?;
-        let logs = logs
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<LogEntry::Model>>();
         Ok(GetLogsResponse::Ok(Json(logs)))
     }
 }

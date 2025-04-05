@@ -3,7 +3,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import KeyCheckerResult, { Key, type CheckResult } from './KeyCheckerResult.svelte'
-    import { stringifyError } from 'common/errors';
+    import { stringifyError } from 'common/errors'
 
     type State = {
         state: 'initializing'
