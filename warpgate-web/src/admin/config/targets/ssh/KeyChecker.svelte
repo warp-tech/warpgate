@@ -3,6 +3,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import KeyCheckerResult, { Key, type CheckResult } from './KeyCheckerResult.svelte'
+    import { stringifyError } from 'common/errors';
 
     type State = {
         state: 'initializing'
@@ -15,6 +16,9 @@
     } | {
         state: 'ready',
         result: CheckResult
+    } | {
+        state: 'error',
+        error: string
     }
 
     let _state: State = $state({
@@ -74,7 +78,12 @@
     }
 
     async function reloadKnownHosts () {
-        knownHosts = await api.getSshTargetKnownSshHostKeys({ id })
+        try {
+            knownHosts = await api.getSshTargetKnownSshHostKeys({ id })
+        } catch (err) {
+            _state = { state: 'error', error: await stringifyError(err) }
+            throw err
+        }
     }
 
     async function checkRemoteHostKey () {
@@ -82,21 +91,31 @@
             return
         }
         _state = { state: 'checking', previousResult: _state.state === 'ready' ? _state.result : null }
-        remoteHostKey = await api.checkSshHostKey({
-            checkSshHostKeyRequest: options,
-        })
+        try {
+            remoteHostKey = await api.checkSshHostKey({
+                checkSshHostKeyRequest: options,
+            })
+        } catch (err) {
+            _state = { state: 'error', error: await stringifyError(err) }
+            return
+        }
         updateReadyState()
     }
 
     async function trustRemoteKey () {
-        await api.addSshKnownHost({
-            addSshKnownHostRequest: {
-                host: options.host,
-                port: options.port,
-                keyBase64: remoteHostKey!.remoteKeyBase64,
-                keyType: remoteHostKey!.remoteKeyType,
-            },
-        })
+        try {
+            await api.addSshKnownHost({
+                addSshKnownHostRequest: {
+                    host: options.host,
+                    port: options.port,
+                    keyBase64: remoteHostKey!.remoteKeyBase64,
+                    keyType: remoteHostKey!.remoteKeyType,
+                },
+            })
+        } catch (err) {
+            _state = { state: 'error', error: await stringifyError(err) }
+            throw err
+        }
         await reloadKnownHosts()
         updateReadyState()
     }
@@ -131,6 +150,10 @@
 
     {#if _state.state === 'ready'}
         <KeyCheckerResult result={_state.result} />
+    {/if}
+
+    {#if _state.state === 'error'}
+        <Alert color="danger">{_state.error}</Alert>
     {/if}
 
     <div class="buttons">

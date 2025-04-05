@@ -1,6 +1,5 @@
-use anyhow::Context;
 use poem::web::Data;
-use poem_openapi::payload::Json;
+use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
@@ -28,6 +27,8 @@ struct CheckSshHostKeyResponseBody {
 enum CheckSshHostKeyResponse {
     #[oai(status = 200)]
     Ok(Json<CheckSshHostKeyResponseBody>),
+    #[oai(status = 500)]
+    Error(PlainText<String>),
 }
 
 #[OpenApi]
@@ -58,20 +59,31 @@ impl Api {
             None,
         ));
 
-        let key = loop {
-            match handles.event_rx.recv().await {
-                Some(RCEvent::HostKeyReceived(key)) => break key,
-                Some(RCEvent::ConnectionError(err)) => Err(err).context("Failed to connect")?,
-                None => return Err(anyhow::anyhow!("Failed to connect").into()),
-                _ => (),
-            }
+        let fut = async move {
+            let key = loop {
+                match handles.event_rx.recv().await {
+                    Some(RCEvent::HostKeyReceived(key)) => break key,
+                    Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
+                    Some(RCEvent::Error(err)) => return Err(anyhow::Error::from(err)),
+                    None => anyhow::bail!("Failed to connect to target"),
+                    _ => (),
+                }
+            };
+            anyhow::Ok(key)
         };
 
-        Ok(CheckSshHostKeyResponse::Ok(Json(
-            CheckSshHostKeyResponseBody {
-                remote_key_type: key.algorithm().as_str().into(),
-                remote_key_base64: key.public_key_base64(),
-            },
-        )))
+        // Result is matched manually since we need to manually format
+        // the error message with :# to included the nested errors here
+        match fut.await {
+            Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
+                CheckSshHostKeyResponseBody {
+                    remote_key_type: key.algorithm().as_str().into(),
+                    remote_key_base64: key.public_key_base64(),
+                },
+            ))),
+            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(format!(
+                "{err:#}"
+            )))),
+        }
     }
 }
