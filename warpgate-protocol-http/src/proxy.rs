@@ -16,7 +16,9 @@ use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
 use url::Url;
-use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
+use warpgate_common::{
+    configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError,
+};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
@@ -267,9 +269,13 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    if let TlsMode::Required = options.tls.mode {
-        client = client.https_only(true);
-    }
+    let accept_invalid_certs = !options.tls.verify;
+    let accept_invalid_hostname = false; // ca + hostname verification
+    client = client.use_preconfigured_tls(
+        configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
+            .await
+            .context("tls setup")?,
+    );
 
     client = client.redirect(reqwest::redirect::Policy::custom({
         let tls_mode = options.tls.mode.clone();
@@ -287,11 +293,7 @@ pub async fn proxy_normal_request(
         }
     }));
 
-    if !options.tls.verify {
-        client = client.danger_accept_invalid_certs(true);
-    }
-
-    let client = client.build().context("Could not build request")?;
+    let client = client.build().context("Could not build reqwest client")?;
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
@@ -533,4 +535,19 @@ async fn proxy_ws_inner(
     copy_client_response(&client_response, &mut response);
     rewrite_response(&mut response, options, &uri)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::configure_tls_connector;
+
+    #[tokio::test]
+    async fn test_rustls_reqwest_version_match() {
+        let cfg = configure_tls_connector(false, false, None).await.unwrap();
+        // build() will fail if the preconfigured tls backend wasn't recognized due to a version mismatch
+        reqwest::ClientBuilder::new()
+            .use_preconfigured_tls(cfg)
+            .build()
+            .unwrap();
+    }
 }
