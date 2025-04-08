@@ -17,7 +17,8 @@ use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
 use url::Url;
 use warpgate_common::{
-    configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError,
+    configure_tls_connector, try_block, Target, TargetHTTPOptions, TlsMode, WarpgateError,
+    WarpgateVerifierOptions,
 };
 use warpgate_web::lookup_built_file;
 
@@ -260,6 +261,7 @@ pub async fn proxy_normal_request(
     req: &Request,
     body: Body,
     options: &TargetHTTPOptions,
+    target: &Target,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
 
@@ -269,10 +271,8 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    let accept_invalid_certs = !options.tls.verify;
-    let accept_invalid_hostname = false; // ca + hostname verification
     client = client.use_preconfigured_tls(
-        configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
+        configure_tls_connector(WarpgateVerifierOptions::from_target(&target))
             .await
             .context("tls setup")?,
     );
@@ -392,6 +392,7 @@ pub async fn proxy_websocket_request(
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, options, true)?;
+    // TODO tls verify
     proxy_ws_inner(req, ws, uri.clone(), options)
         .await
         .map_err(|error| {
@@ -539,11 +540,17 @@ async fn proxy_ws_inner(
 
 #[cfg(test)]
 mod tests {
-    use warpgate_common::configure_tls_connector;
+    use warpgate_common::{configure_tls_connector, WarpgateVerifierOptions};
 
     #[tokio::test]
     async fn test_rustls_reqwest_version_match() {
-        let cfg = configure_tls_connector(false, false, None).await.unwrap();
+        let cfg = configure_tls_connector(WarpgateVerifierOptions {
+            accept_invalid_certs: false,
+            accept_invalid_hostnames: false,
+            additional_trusted_certificates: vec![],
+        })
+        .await
+        .unwrap();
         // build() will fail if the preconfigured tls backend wasn't recognized due to a version mismatch
         reqwest::ClientBuilder::new()
             .use_preconfigured_tls(cfg)

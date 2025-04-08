@@ -118,6 +118,7 @@ pub async fn populate_db(
                     TargetWebAdminOptions {},
                 ))
                 .map_err(WarpgateError::from)?),
+                trusted_tls_certificate: Set(None),
             };
 
             values.insert(&*db).await.map_err(WarpgateError::from)?

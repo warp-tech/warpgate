@@ -2,7 +2,7 @@ use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{Target, TargetOptions};
+use warpgate_common::{CertificateDer, Target, TargetOptions};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -51,6 +51,7 @@ pub struct Model {
     pub description: String,
     pub kind: TargetKind,
     pub options: serde_json::Value,
+    pub trusted_tls_certificate: Option<Vec<u8>>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -79,6 +80,9 @@ impl TryFrom<Model> for Target {
             description: model.description,
             allow_roles: vec![],
             options,
+            trusted_tls_certificate: model
+                .trusted_tls_certificate
+                .map(|x| CertificateDer::from(&x[..]).into_owned()),
         })
     }
 }

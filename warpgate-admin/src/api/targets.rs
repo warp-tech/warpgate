@@ -92,6 +92,7 @@ impl ListApi {
             description: Set(body.description.clone().unwrap_or_default()),
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            trusted_tls_certificate: Set(None),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;

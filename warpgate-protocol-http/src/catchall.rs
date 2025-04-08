@@ -50,7 +50,7 @@ pub async fn catchall_endpoint(
             .instrument(span)
             .await?
             .into_response(),
-        None => proxy_normal_request(req, body, &options)
+        None => proxy_normal_request(req, body, &options, &target)
             .instrument(span)
             .await?
             .into_response(),

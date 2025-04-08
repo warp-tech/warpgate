@@ -120,7 +120,7 @@ impl ProtocolServer for PostgresProtocolServer {
     }
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Postgres(options) = target.options else {
+        let TargetOptions::Postgres(options) = &target.options else {
             return Err(TargetTestError::Misconfigured(
                 "Not a PostgreSQL target".to_owned(),
             ));
@@ -129,7 +129,7 @@ impl ProtocolServer for PostgresProtocolServer {
         conn_options
             .parameters
             .insert("database".into(), "postgres".into());
-        PostgresClient::connect(&options, conn_options)
+        PostgresClient::connect(&options, &target, conn_options)
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())

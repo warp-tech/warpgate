@@ -9,7 +9,9 @@ use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 use tracing::*;
-use warpgate_common::{configure_tls_connector, TargetPostgresOptions, TlsMode};
+use warpgate_common::{
+    configure_tls_connector, Target, TargetPostgresOptions, TlsMode, WarpgateVerifierOptions,
+};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
@@ -53,13 +55,15 @@ impl Write for SaslBufferWriter<'_> {
 
 impl PostgresClient {
     pub async fn connect(
-        target: &TargetPostgresOptions,
+        target_options: &TargetPostgresOptions,
+        target: &Target,
         options: ConnectionOptions,
     ) -> Result<Self, PostgresError> {
-        let mut stream =
-            PostgresStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let mut stream = PostgresStream::new(
+            TcpStream::connect((target_options.host.clone(), target_options.port)).await?,
+        );
 
-        if target.tls.mode != TlsMode::Disabled {
+        if target_options.tls.mode != TlsMode::Disabled {
             stream.push(pgwire::messages::startup::SslRequest::new())?;
             stream.flush().await?;
 
@@ -70,7 +74,7 @@ impl PostgresClient {
                 return Err(PostgresError::Eof);
             };
 
-            match target.tls.mode {
+            match target_options.tls.mode {
                 TlsMode::Disabled => unreachable!(),
                 TlsMode::Required => {
                     if response == pgwire::messages::response::SslResponse::Refuse {
@@ -79,22 +83,19 @@ impl PostgresClient {
                 }
                 TlsMode::Preferred => {
                     if response == pgwire::messages::response::SslResponse::Refuse {
-                        warn!("TLS not supported by target");
+                        warn!("TLS not supported by target_options");
                     }
                 }
             }
 
             if response == pgwire::messages::response::SslResponse::Accept {
-                let accept_invalid_certs = !target.tls.verify;
-                let accept_invalid_hostname = false; // ca + hostname verification
                 let client_config = Arc::new(
-                    configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
-                        .await?,
+                    configure_tls_connector(WarpgateVerifierOptions::from_target(&target)).await?,
                 );
 
                 stream = stream
                     .upgrade((
-                        target
+                        target_options
                             .host
                             .clone()
                             .try_into()
@@ -110,7 +111,7 @@ impl PostgresClient {
         startup.parameters = options.parameters.clone();
         startup
             .parameters
-            .insert("user".to_owned(), target.username.clone());
+            .insert("user".to_owned(), target_options.username.clone());
         startup.protocol_number_major = options.protocol_number_major;
         startup.protocol_number_minor = options.protocol_number_minor;
 
@@ -123,7 +124,7 @@ impl PostgresClient {
             };
 
             let get_password = || {
-                target
+                target_options
                     .password
                     .as_ref()
                     .ok_or(PostgresError::PasswordRequired)
@@ -135,7 +136,7 @@ impl PostgresClient {
                 }
                 PgWireBackendMessage::Authentication(auth) => match auth {
                     pgwire::messages::startup::Authentication::Ok => {
-                        info!("Authenticated at target");
+                        info!("Authenticated at target_options");
                         break;
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
@@ -148,7 +149,7 @@ impl PostgresClient {
                     pgwire::messages::startup::Authentication::MD5Password(scramble) => {
                         let password = get_password()?;
                         let hashed = pgwire::api::auth::md5pass::hash_md5_password(
-                            &target.username,
+                            &target_options.username,
                             password,
                             &scramble,
                         );
@@ -161,7 +162,7 @@ impl PostgresClient {
                         PostgresClient::run_sasl_auth(
                             &mut stream,
                             mechanisms,
-                            &target.username,
+                            &target_options.username,
                             password,
                         )
                         .await?;

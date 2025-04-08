@@ -214,7 +214,7 @@ impl ProtocolServer for HTTPProtocolServer {
     }
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Http(options) = target.options else {
+        let TargetOptions::Http(options) = &target.options else {
             return Err(TargetTestError::Misconfigured(
                 "Not an HTTP target".to_owned(),
             ));
@@ -222,7 +222,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let mut request = poem::Request::builder().uri_str("http://host/").finish();
         request.extensions_mut().insert(Session::default());
-        crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
+        crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options, &target)
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
