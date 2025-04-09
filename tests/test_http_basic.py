@@ -12,6 +12,7 @@ class Test:
     def test_basic(
         self,
         echo_server_port,
+        echo_server_ports,
         shared_wg: WarpgateProcess,
     ):
         url = f"https://localhost:{shared_wg.http_port}"

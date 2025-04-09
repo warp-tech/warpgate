@@ -1,6 +1,5 @@
-from urllib.parse import unquote
-from uuid import uuid4
 import requests
+from uuid import uuid4
 
 from tests.conftest import WarpgateProcess
 
@@ -9,7 +8,7 @@ from .test_http_common import *  # noqa
 
 
 class Test:
-    def test_basic(
+    def test_tls(
         self,
         echo_server_port_https,
         shared_wg: WarpgateProcess,

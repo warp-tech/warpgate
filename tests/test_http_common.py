@@ -39,8 +39,8 @@ def echo_server_ports():
             data = ws.receive()
             ws.send(data)
 
-    port = alloc_port()
-    port_https = alloc_port()
+    port = alloc_port('echoserver http')
+    port_https = alloc_port('echoserver https')
 
     def runner():
         app.run(port=port, load_dotenv=False)
@@ -65,9 +65,9 @@ def echo_server_ports():
 
 @pytest.fixture(scope="session")
 def echo_server_port(echo_server_ports):
-    return echo_server_ports[0]
+    yield echo_server_ports[0]
 
 
 @pytest.fixture(scope="session")
 def echo_server_port_https(echo_server_ports):
-    return echo_server_ports[1]
+    yield echo_server_ports[1]
