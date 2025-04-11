@@ -39,6 +39,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
+          rm -rf ~/.cargo/registry
 
       - uses: actions/checkout@v2
         with:
