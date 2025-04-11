@@ -12,6 +12,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
+use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
@@ -46,7 +47,7 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
 }
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
     if cli.config.exists() {

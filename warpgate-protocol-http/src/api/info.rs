@@ -4,6 +4,7 @@ use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
+use warpgate_common::version::warpgate_version;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
@@ -60,7 +61,7 @@ impl Api {
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: session
                 .is_authenticated()
-                .then(|| env!("CARGO_PKG_VERSION").to_string()),
+                .then(|| warpgate_version().to_string()),
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,
