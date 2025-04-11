@@ -6,6 +6,7 @@ use futures::{FutureExt, StreamExt};
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
 use tracing::*;
+use warpgate_common::version::warpgate_version;
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
@@ -17,7 +18,7 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 use crate::config::{load_config, watch_config};
 
 pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = warpgate_version();
     info!(%version, "Warpgate");
 
     let admin_token = enable_admin_token.then(|| {

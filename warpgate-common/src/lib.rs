@@ -7,6 +7,7 @@ pub mod helpers;
 mod tls;
 mod try_macro;
 mod types;
+pub mod version;
 
 pub use config::*;
 pub use error::WarpgateError;

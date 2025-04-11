@@ -196,6 +196,7 @@ allow = [
     "Unicode-3.0",
     "ISC",
     "OpenSSL",
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "Zlib",
     "WTFPL",

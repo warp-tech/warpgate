@@ -27,6 +27,7 @@ use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
+use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     ListenEndpoint, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
     TlsPrivateKey,
@@ -58,12 +59,9 @@ fn make_session_storage() -> SharedSessionStorage {
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let admin_api_app = admin_api_app(&self.services).into_endpoint();
-        let api_service = OpenApiService::new(
-            crate::api::get(),
-            "Warpgate user API",
-            env!("CARGO_PKG_VERSION"),
-        )
-        .server("/@warpgate/api");
+        let api_service =
+            OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
+                .server("/@warpgate/api");
         let ui = api_service.swagger_ui();
         let spec = api_service.spec_endpoint();
 
