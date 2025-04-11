@@ -24,7 +24,7 @@
 ---
 
 <p align="center">
-  <a href="https://github.com/warp-tech/warpgate/security/policy">Reporting security issues</a>
+  <a href="https://github.com/warp-tech/warpgate/security/policy"> ⦊ Reporting security issues ⦉ </a>
 </p>
 
 ---
