@@ -39,7 +39,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
-          rm -rf ~/.cargo/registry
 
       - uses: actions/checkout@v2
         with:
@@ -59,11 +58,12 @@ jobs:
       - name: Install tools
         run: |
           cargo install just
-          cargo install cargo-deny@^0.16
+          cargo install cargo-deny@^0.18
           cargo install cargo-cyclonedx@^0.5
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
+          rm -rf ~/.cargo/registry
 
       - name: cargo-deny
         run: |
