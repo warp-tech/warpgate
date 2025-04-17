@@ -23,12 +23,6 @@
 
 ---
 
-<p align="center">
-  <a href="https://github.com/warp-tech/warpgate/security/policy"> ⦊ Reporting security issues ⦉ </a>
-</p>
-
----
-
 Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that doesn't need special client apps.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
