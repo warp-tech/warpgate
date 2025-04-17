@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
+use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -138,6 +139,9 @@ pub struct Target {
     pub allow_roles: Vec<String>,
     #[serde(flatten)]
     pub options: TargetOptions,
+    #[serde(skip)]
+    #[oai(skip)]
+    pub trusted_tls_certificate: Option<CertificateDer<'static>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
