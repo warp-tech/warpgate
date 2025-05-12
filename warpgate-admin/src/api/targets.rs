@@ -31,10 +31,14 @@ enum GetTargetsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<TargetConfig>>),
 }
+
 #[derive(ApiResponse)]
 enum CreateTargetResponse {
     #[oai(status = 201)]
     Created(Json<TargetConfig>),
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
@@ -85,6 +89,15 @@ impl ListApi {
         }
 
         let db = db.lock().await;
+        let existing = Target::Entity::find()
+            .filter(Target::Column::Name.eq(body.name.clone()))
+            .one(&*db)
+            .await?;
+        if existing.is_some() {
+            return Ok(CreateTargetResponse::Conflict(Json(
+                "Name already exists".into(),
+            )));
+        }
 
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
