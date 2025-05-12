@@ -19,7 +19,7 @@ class Test:
 
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
-            user = api.create_user(sdk.CreateUserRequest(username="user"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
