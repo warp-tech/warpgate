@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.13.2"
+    "version": "v0.13.2-37-g71b4118-modified"
   },
   "servers": [
     {
@@ -132,6 +132,29 @@
           }
         },
         "operationId": "cancelDefaultAuth"
+      }
+    },
+    "/auth/web-auth-requests": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuthStateResponseInternal"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_web_auth_requests"
       }
     },
     "/auth/state/{id}": {
@@ -671,12 +694,16 @@
       "AuthStateResponseInternal": {
         "type": "object",
         "required": [
+          "id",
           "protocol",
           "started",
           "state",
           "identification_string"
         ],
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "protocol": {
             "type": "string"
           },

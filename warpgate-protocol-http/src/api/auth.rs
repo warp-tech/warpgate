@@ -2,9 +2,11 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures::{SinkExt, StreamExt};
 use poem::session::Session;
+use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::Request;
+use poem::{handler, IntoResponse, Request};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -69,11 +71,20 @@ enum LogoutResponse {
 
 #[derive(Object)]
 struct AuthStateResponseInternal {
+    pub id: String,
     pub protocol: String,
     pub address: Option<String>,
     pub started: DateTime<Utc>,
     pub state: ApiAuthState,
     pub identification_string: String,
+}
+
+#[derive(ApiResponse)]
+enum AuthStateListResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<AuthStateResponseInternal>>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -233,7 +244,10 @@ impl Api {
         let Some(state_arc) = store.get(&state_id.0) else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services).await
+        serialize_auth_state_inner(state_arc, *services)
+            .await
+            .map(Json)
+            .map(AuthStateResponse::Ok)
     }
 
     #[oai(
@@ -256,7 +270,41 @@ impl Api {
         state_arc.lock().await.reject();
         store.complete(&state_id.0).await;
         session.clear_auth_state();
-        serialize_auth_state_inner(state_arc, *services).await
+
+        serialize_auth_state_inner(state_arc, *services)
+            .await
+            .map(Json)
+            .map(AuthStateResponse::Ok)
+    }
+
+    #[oai(
+        path = "/auth/web-auth-requests",
+        method = "get",
+        operation_id = "get_web_auth_requests",
+        transform = "endpoint_auth"
+    )]
+    async fn get_web_auth_requests(
+        &self,
+        services: Data<&Services>,
+        auth: Option<Data<&RequestAuthorization>>,
+    ) -> poem::Result<AuthStateListResponse> {
+        let store = services.auth_state_store.lock().await;
+
+        let Some(RequestAuthorization::Session(SessionAuthorization::User(username))) =
+            auth.map(|x| x.0)
+        else {
+            return Ok(AuthStateListResponse::NotFound);
+        };
+
+        let state_arcs = store.all_pending_web_auths_for_user(&username).await;
+
+        let mut results = vec![];
+
+        for state_arc in state_arcs {
+            results.push(serialize_auth_state_inner(state_arc, *services).await?)
+        }
+
+        Ok(AuthStateListResponse::Ok(Json(results)))
     }
 
     #[oai(
@@ -275,7 +323,10 @@ impl Api {
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services).await
+        serialize_auth_state_inner(state_arc, *services)
+            .await
+            .map(Json)
+            .map(AuthStateResponse::Ok)
     }
 
     #[oai(
@@ -303,7 +354,10 @@ impl Api {
         if let AuthResult::Accepted { .. } = auth_result {
             services.auth_state_store.lock().await.complete(&id).await;
         }
-        serialize_auth_state_inner(state_arc, *services).await
+        serialize_auth_state_inner(state_arc, *services)
+            .await
+            .map(Json)
+            .map(AuthStateResponse::Ok)
     }
 
     #[oai(
@@ -323,7 +377,10 @@ impl Api {
         };
         state_arc.lock().await.reject();
         services.auth_state_store.lock().await.complete(&id).await;
-        serialize_auth_state_inner(state_arc, *services).await
+        serialize_auth_state_inner(state_arc, *services)
+            .await
+            .map(Json)
+            .map(AuthStateResponse::Ok)
     }
 }
 
@@ -353,7 +410,7 @@ async fn get_auth_state(
 async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
     services: &Services,
-) -> poem::Result<AuthStateResponse> {
+) -> poem::Result<AuthStateResponseInternal> {
     let state = state_arc.lock().await;
 
     let session_state_store = services.state.lock().await;
@@ -366,11 +423,47 @@ async fn serialize_auth_state_inner(
         None => None,
     };
 
-    Ok(AuthStateResponse::Ok(Json(AuthStateResponseInternal {
+    Ok(AuthStateResponseInternal {
+        id: state.id().to_string(),
         protocol: state.protocol().to_string(),
         address: peer_addr.map(|x| x.ip().to_string()),
         started: *state.started(),
         state: state.verify().into(),
         identification_string: state.identification_string().to_owned(),
-    })))
+    })
+}
+
+#[handler]
+pub async fn api_get_web_auth_requests_stream(
+    ws: WebSocket,
+    auth: Option<Data<&RequestAuthorization>>,
+    services: Data<&Services>,
+) -> anyhow::Result<impl IntoResponse> {
+    let auth_state_store = services.auth_state_store.clone();
+
+    let username = match auth.map(|x| x.0.clone()) {
+        Some(RequestAuthorization::Session(SessionAuthorization::User(username))) => Some(username),
+        _ => None,
+    };
+
+    let mut rx = {
+        let mut s = auth_state_store.lock().await;
+        s.subscribe_web_auth_request()
+    };
+
+    Ok(ws.on_upgrade(|socket| async move {
+        let (mut sink, _) = socket.split();
+
+        while let Ok(id) = rx.recv().await {
+            let auth_state_store = auth_state_store.lock().await;
+            if let Some(state) = auth_state_store.get(&id) {
+                let state = state.lock().await;
+                if Some(state.username()) == username.as_deref() {
+                    sink.send(Message::Text(id.to_string())).await?;
+                }
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    }))
 }
