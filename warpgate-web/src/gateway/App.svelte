@@ -8,17 +8,27 @@
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { api, type AuthStateResponseInternal } from './lib/api'
+    import { Button } from '@sveltestrap/sveltestrap'
+    import Fa from 'svelte-fa'
+    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 
-    let redirecting = false
+    let redirecting = $state(false)
     let serverInfoPromise = reloadServerInfo()
+    let webAuthRequests: AuthStateResponseInternal[] = $state([])
+    let doNotShowAuthRequests = $state(false)
 
     async function init () {
         await serverInfoPromise
+        reloadWebAuthRequests()
     }
 
     function onPageResume () {
         redirecting = false
-        init()
+    }
+
+    async function reloadWebAuthRequests () {
+        webAuthRequests = await api.getWebAuthRequests()
     }
 
     async function requireLogin (detail: RouteDetail) {
@@ -60,10 +70,24 @@
         '/login/:stateId': wrap({
             asyncComponent: () => import('./OutOfBandAuth.svelte') as any,
             conditions: [requireLogin],
+            userData: {
+                doNotShowAuthRequests: true,
+            },
         }),
     }
 
     const initPromise = init()
+    let socket: WebSocket | null = null
+
+    $effect(() => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        $serverInfo?.username // trigger effect on username change
+        socket?.close()
+        socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
+        socket.addEventListener('message', () => {
+            reloadWebAuthRequests()
+        })
+    })
 </script>
 
 <svelte:window on:pageshow={onPageResume}/>
@@ -81,8 +105,34 @@
                 <AuthBar />
             </div>
 
+            {#if !doNotShowAuthRequests}
+            {#each webAuthRequests as authRequest}
+                <Button
+                    color="success"
+                    class="mb-4 d-flex align-items-center w-100 text-start"
+                    on:click={() => {
+                        push('/login/' + authRequest.id)
+                    }}
+                >
+                    <div>
+                        <strong class="d-block">
+                            {authRequest.protocol} authentication request
+                        </strong>
+                        {#if authRequest.address}
+                            <small>
+                                From {authRequest.address}
+                            </small>
+                        {/if}
+                    </div>
+                    <Fa class="ms-auto" icon={faArrowRight} />
+                </Button>
+            {/each}
+            {/if}
+
             <main>
-                <Router {routes}/>
+                <Router {routes} on:routeLoaded={e => {
+                    doNotShowAuthRequests = !!(e.detail.userData as any)['doNotShowAuthRequests']
+                }} />
             </main>
 
             <footer class="mt-5">

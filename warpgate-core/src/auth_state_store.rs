@@ -28,6 +28,7 @@ pub struct AuthStateStore {
     config_provider: Arc<Mutex<ConfigProviderEnum>>,
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
+    web_auth_request_signal: broadcast::Sender<Uuid>,
 }
 
 impl AuthStateStore {
@@ -36,6 +37,7 @@ impl AuthStateStore {
             store: HashMap::new(),
             config_provider,
             completion_signals: HashMap::new(),
+            web_auth_request_signal: broadcast::channel(100).0,
         }
     }
 
@@ -43,8 +45,35 @@ impl AuthStateStore {
         self.store.contains_key(id)
     }
 
+    pub async fn all_pending_web_auths_for_user(
+        &self,
+        username: &str,
+    ) -> Vec<Arc<Mutex<AuthState>>> {
+        let mut results = vec![];
+        for auth in self.store.values() {
+            {
+                let inner = auth.0.lock().await;
+                if inner.username() != username {
+                    continue;
+                }
+                let AuthResult::Need(need) = inner.verify() else {
+                    continue;
+                };
+                if !need.contains(&CredentialKind::WebUserApproval) {
+                    continue;
+                }
+            }
+            results.push(auth.0.clone())
+        }
+        results
+    }
+
     pub fn get(&self, id: &Uuid) -> Option<Arc<Mutex<AuthState>>> {
         self.store.get(id).map(|x| x.0.clone())
+    }
+
+    pub fn subscribe_web_auth_request(&self) -> broadcast::Receiver<Uuid> {
+        self.web_auth_request_signal.subscribe()
     }
 
     pub async fn create(
@@ -65,12 +94,23 @@ impl AuthStateStore {
             return Err(WarpgateError::UserNotFound(username.into()));
         };
 
+        let (state_change_tx, mut state_change_rx) = broadcast::channel(1);
+        let web_auth_request_signal = self.web_auth_request_signal.clone();
+        tokio::spawn(async move {
+            while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
+                if result.contains(&CredentialKind::WebUserApproval) {
+                    let _ = web_auth_request_signal.send(id);
+                }
+            }
+        });
+
         let state = AuthState::new(
             id,
             session_id.copied(),
             username.to_string(),
             protocol.to_string(),
             policy,
+            state_change_tx,
         );
         self.store
             .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));

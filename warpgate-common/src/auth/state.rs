@@ -2,13 +2,14 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use rand::Rng;
-use tracing::info;
+use tokio::sync::broadcast;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
 use crate::SessionId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
     Accepted { username: String },
     Need(HashSet<CredentialKind>),
@@ -25,6 +26,8 @@ pub struct AuthState {
     valid_credentials: Vec<AuthCredential>,
     started: DateTime<Utc>,
     identification_string: String,
+    last_result: Option<AuthResult>,
+    state_change_signal: broadcast::Sender<AuthResult>,
 }
 
 fn generate_identification_string() -> String {
@@ -43,8 +46,9 @@ impl AuthState {
         username: String,
         protocol: String,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
+        state_change_signal: broadcast::Sender<AuthResult>,
     ) -> Self {
-        Self {
+        let mut this = Self {
             id,
             session_id,
             username,
@@ -54,7 +58,11 @@ impl AuthState {
             valid_credentials: vec![],
             started: Utc::now(),
             identification_string: generate_identification_string(),
-        }
+            last_result: None,
+            state_change_signal,
+        };
+        this.maybe_update_verification_state();
+        this
     }
 
     pub fn id(&self) -> &Uuid {
@@ -83,6 +91,7 @@ impl AuthState {
 
     pub fn add_valid_credential(&mut self, credential: AuthCredential) {
         self.valid_credentials.push(credential);
+        self.maybe_update_verification_state();
     }
 
     pub fn reject(&mut self) {
@@ -90,6 +99,10 @@ impl AuthState {
     }
 
     pub fn verify(&self) -> AuthResult {
+        self.current_verification_state()
+    }
+
+    fn current_verification_state(&self) -> AuthResult {
         if self.force_rejected {
             return AuthResult::Rejected;
         }
@@ -113,5 +126,19 @@ impl AuthState {
             }
             CredentialPolicyResponse::Need(kinds) => AuthResult::Need(kinds),
         }
+    }
+
+    fn maybe_update_verification_state(&mut self) -> AuthResult {
+        let new_result = self.current_verification_state();
+        if &Some(new_result.clone()) != &self.last_result {
+            debug!(
+                "Verification state changed for auth state {}: {:?} -> {:?}",
+                self.id, self.last_result, &new_result
+            );
+            let _ = self.state_change_signal.send(new_result.clone());
+        }
+        self.last_result = Some(new_result.clone());
+
+        return new_result;
     }
 }

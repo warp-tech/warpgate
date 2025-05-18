@@ -114,6 +114,10 @@ impl ProtocolServer for HTTPProtocolServer {
                         .with(cache_bust()),
                     )
                     .at(
+                        "/api/auth/web-auth-requests/stream",
+                        endpoint_auth(api::auth::api_get_web_auth_requests_stream),
+                    )
+                    .at(
                         "",
                         EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
                             .with(cache_bust()),

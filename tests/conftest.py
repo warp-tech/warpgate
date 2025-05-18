@@ -296,6 +296,7 @@ class ProcessManager:
                 "UserKnownHostsFile=/dev/null",
                 *args,
             ],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             **kwargs,
         )
