@@ -158,46 +158,112 @@ impl PostgresSession {
                     )
                     .await?
                     .1;
-                let mut state = state_arc.lock().await;
 
-                let user_auth_result = {
+                {
+                    let mut state = state_arc.lock().await;
+
                     let credential = AuthCredential::Password(password);
 
                     let mut cp = self.services.config_provider.lock().await;
                     if cp.validate_credential(&username, &credential).await? {
                         state.add_valid_credential(credential);
                     }
+                }
 
-                    state.verify()
-                };
+                let mut auth_ok_sent = false;
 
-                match user_auth_result {
-                    AuthResult::Accepted { username } => {
-                        self.services
-                            .auth_state_store
-                            .lock()
-                            .await
-                            .complete(state.id())
-                            .await;
-                        let target_auth_result = {
+                loop {
+                    let user_auth_result = state_arc.lock().await.verify();
+
+                    match user_auth_result {
+                        AuthResult::Accepted { username } => {
                             self.services
-                                .config_provider
+                                .auth_state_store
                                 .lock()
                                 .await
-                                .authorize_target(&username, &target_name)
-                                .await
-                                .map_err(PostgresError::other)?
-                        };
-                        if !target_auth_result {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, username
-                            );
-                            return fail(&mut self).await;
+                                .complete(state_arc.lock().await.id())
+                                .await;
+                            let target_auth_result = {
+                                self.services
+                                    .config_provider
+                                    .lock()
+                                    .await
+                                    .authorize_target(&username, &target_name)
+                                    .await
+                                    .map_err(PostgresError::other)?
+                            };
+                            if !target_auth_result {
+                                warn!("Target {target_name} not authorized for user {username}",);
+                                return fail(&mut self).await;
+                            }
+
+                            if !auth_ok_sent {
+                                self.stream
+                                    .push(pgwire::messages::startup::Authentication::Ok)?;
+                            }
+                            return self.run_authorized(startup, username, target_name).await;
                         }
-                        self.run_authorized(startup, username, target_name).await
+                        AuthResult::Need(kinds) => {
+                            if kinds.len() == 1 && kinds.contains(&CredentialKind::WebUserApproval)
+                            {
+                                // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
+
+                                let identification_string =
+                                    state_arc.lock().await.identification_string().to_owned();
+                                let auth_state_id = *state_arc.lock().await.id();
+                                let mut event = self
+                                    .services
+                                    .auth_state_store
+                                    .lock()
+                                    .await
+                                    .subscribe(auth_state_id);
+
+                                let login_url_result =
+                                    state_arc.lock().await.construct_web_approval_url(
+                                        &*self.services.config.lock().await,
+                                    );
+                                let login_url = match login_url_result {
+                                    Ok(login_url) => login_url,
+                                    Err(error) => {
+                                        error!(?error, "Failed to construct external URL");
+                                        return fail(&mut self).await;
+                                    }
+                                };
+
+                                if !auth_ok_sent {
+                                    self.stream
+                                        .push(pgwire::messages::startup::Authentication::Ok)?;
+                                    auth_ok_sent = true;
+                                }
+
+                                self.stream
+                                    .push(pgwire::messages::response::NoticeResponse::new(vec![
+                                        ('S' as u8, "WARNING".into()),
+                                        ('V' as u8, "WARNING".into()),
+                                        ('C' as u8, "WG001".into()),
+                                        ('M' as u8, "Warpgate authentication: please open the following URL in your browser:".into()),
+                                        ('D' as u8, login_url.into()),
+                                        ('H' as u8, format!(
+                                            "Make sure you're seeing this security key: {}\n",
+                                            identification_string
+                                                .chars()
+                                                .map(|x| x.to_string())
+                                                .collect::<Vec<_>>()
+                                                .join(" ")
+                                        )),
+                                    ]))?;
+                                self.stream.flush().await?;
+
+                                if !matches!(event.recv().await, Ok(AuthResult::Accepted { .. })) {
+                                    warn!("Web user approval failed");
+                                    return fail(&mut self).await;
+                                }
+                            } else {
+                                return fail(&mut self).await;
+                            }
+                        }
+                        AuthResult::Rejected => return fail(&mut self).await,
                     }
-                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await,
                 }
             }
             AuthSelector::Ticket { secret } => {
@@ -211,6 +277,8 @@ impl PostgresSession {
                             .await
                             .map_err(PostgresError::other)?;
 
+                        self.stream
+                            .push(pgwire::messages::startup::Authentication::Ok)?;
                         self.run_authorized(startup, ticket.username, ticket.target)
                             .await
                     }
@@ -226,8 +294,6 @@ impl PostgresSession {
         username: String,
         target_name: String,
     ) -> Result<(), PostgresError> {
-        self.stream
-            .push(pgwire::messages::startup::Authentication::Ok)?;
         self.stream.flush().await?;
 
         let target = {

@@ -7,7 +7,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::SessionId;
+use crate::{SessionId, WarpgateConfig, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -140,5 +140,15 @@ impl AuthState {
         self.last_result = Some(new_result.clone());
 
         return new_result;
+    }
+
+    pub fn construct_web_approval_url(
+        &self,
+        config: &WarpgateConfig,
+    ) -> Result<url::Url, WarpgateError> {
+        let mut external_url = config.construct_external_url(None, None)?;
+        external_url.set_path("@warpgate");
+        external_url.set_fragment(Some(&format!("/login/{}", self.id())));
+        Ok(external_url)
     }
 }
