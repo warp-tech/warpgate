@@ -18,6 +18,6 @@ rustls-pemfile = "1.0"
 tokio-rustls.workspace = true
 thiserror = "1.0"
 rustls-native-certs = "0.8"
-pgwire = { version = "0.25" }
+pgwire = { version = "0.28" }
 rsasl = { version = "2.1.0", default-features = false, features = ["config_builder", "scram-sha-2", "std", "plain", "provider"] }
 futures.workspace = true
