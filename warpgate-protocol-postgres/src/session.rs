@@ -346,7 +346,7 @@ impl PostgresSession {
         debug!(?msg, "C->S message");
         match msg {
             PgWireFrontendMessage::Parse(query) => {
-                info!(query_name=?query.name, "Preparing query");
+                info!(query_name=?query.name, query=query.query, "Preparing query");
             }
             PgWireFrontendMessage::Execute(query) => {
                 info!(query_name=?query.name, "Executing prepared query");
