@@ -82,11 +82,16 @@
     $effect(() => {
         // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         $serverInfo?.username // trigger effect on username change
-        socket?.close()
+        try {
+            socket?.close()
+        } catch {
+            // ignore
+        }
         socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
         socket.addEventListener('message', () => {
             reloadWebAuthRequests()
         })
+        reloadWebAuthRequests()
     })
 </script>
 
@@ -131,7 +136,7 @@
 
             <main>
                 <Router {routes} on:routeLoaded={e => {
-                    doNotShowAuthRequests = !!(e.detail.userData as any)['doNotShowAuthRequests']
+                    doNotShowAuthRequests = !!(e.detail.userData as any)?.['doNotShowAuthRequests']
                 }} />
             </main>
 

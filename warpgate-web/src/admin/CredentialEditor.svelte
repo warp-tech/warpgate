@@ -296,7 +296,7 @@
     <div class="list-group list-group-flush mb-3">
         {#each policyProtocols as protocol}
         <div class="list-group-item">
-            <div>
+            <div class="mb-1">
                 <strong>{protocol.name}</strong>
             </div>
             {#if possibleCredentials[protocol.id]}
