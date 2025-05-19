@@ -85,24 +85,39 @@
         create()
         e.preventDefault()
     }}>
+        <!-- Defualt button for key handling -->
+        <Button class="d-none" type="submit"></Button>
+
         <!-- svelte-ignore a11y_label_has_associated_control -->
         <label class="mb-2">Type</label>
         <ButtonGroup class="w-100 mb-3">
             <Button
                 active={type === TargetKind.Ssh}
-                on:click={() => type = TargetKind.Ssh}
+                on:click={e => {
+                    type = TargetKind.Ssh
+                    e.preventDefault()
+                }}
             >SSH</Button>
             <Button
                 active={type === TargetKind.Http}
-                on:click={() => type = TargetKind.Http}
+                on:click={e => {
+                    type = TargetKind.Http
+                    e.preventDefault()
+                }}
             >HTTP</Button>
             <Button
                 active={type === TargetKind.MySql}
-                on:click={() => type = TargetKind.MySql}
+                on:click={e => {
+                    type = TargetKind.MySql
+                    e.preventDefault()
+                }}
             >MySQL</Button>
             <Button
                 active={type === TargetKind.Postgres}
-                on:click={() => type = TargetKind.Postgres}
+                on:click={e => {
+                    type = TargetKind.Postgres
+                    e.preventDefault()
+                }}
             >PostgreSQL</Button>
         </ButtonGroup>
 
