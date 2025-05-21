@@ -255,6 +255,8 @@ class ProcessManager:
                     str(postgres_port),
                     "--data-path",
                     data_dir,
+                    "--external-host",
+                    "external-host",
                 ],
                 env={"WARPGATE_ADMIN_PASSWORD": "123"},
             )
