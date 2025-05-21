@@ -130,7 +130,7 @@ impl AuthState {
 
     fn maybe_update_verification_state(&mut self) -> AuthResult {
         let new_result = self.current_verification_state();
-        if &Some(new_result.clone()) != &self.last_result {
+        if Some(new_result.clone()) != self.last_result {
             debug!(
                 "Verification state changed for auth state {}: {:?} -> {:?}",
                 self.id, self.last_result, &new_result
@@ -139,7 +139,7 @@ impl AuthState {
         }
         self.last_result = Some(new_result.clone());
 
-        return new_result;
+        new_result
     }
 
     pub fn construct_web_approval_url(

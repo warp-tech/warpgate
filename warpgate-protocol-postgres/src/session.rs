@@ -238,12 +238,12 @@ impl PostgresSession {
 
                                 self.stream
                                     .push(pgwire::messages::response::NoticeResponse::new(vec![
-                                        ('S' as u8, "WARNING".into()),
-                                        ('V' as u8, "WARNING".into()),
-                                        ('C' as u8, "WG001".into()),
-                                        ('M' as u8, "Warpgate authentication: please open the following URL in your browser:".into()),
-                                        ('D' as u8, login_url.into()),
-                                        ('H' as u8, format!(
+                                        (b'S', "WARNING".into()),
+                                        (b'V', "WARNING".into()),
+                                        (b'C', "WG001".into()),
+                                        (b'M', "Warpgate authentication: please open the following URL in your browser:".into()),
+                                        (b'D', login_url.into()),
+                                        (b'H', format!(
                                             "Make sure you're seeing this security key: {}\n",
                                             identification_string
                                                 .chars()
