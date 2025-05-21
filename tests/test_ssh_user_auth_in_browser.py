@@ -9,6 +9,11 @@ from .util import wait_port
 
 
 class Test:
+    # When include_pk is False, we're testing for
+    # https://github.com/warp-tech/warpgate/issues/972
+    # where the SSH server fails to offer keyboard-interactive authentication
+    # when no OTP credential is present.
+    @pytest.mark.parametrize("include_pk", [True, False])
     @pytest.mark.asyncio
     async def test(
         self,
@@ -16,6 +21,7 @@ class Test:
         wg_c_ed25519_pubkey: Path,
         timeout,
         shared_wg: WarpgateProcess,
+        include_pk: bool,
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -32,13 +38,24 @@ class Test:
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
+            if include_pk:
+                api.create_public_key_credential(
+                    user.id,
+                    sdk.NewPublicKeyCredential(
+                        label="Public Key",
+                        openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
+                    ),
+                )
             api.add_user_role(user.id, role.id)
             api.update_user(
                 user.id,
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        ssh=[sdk.CredentialKind.WEBUSERAPPROVAL],
+                        ssh=[sdk.CredentialKind.WEBUSERAPPROVAL] if not include_pk else [
+                            sdk.CredentialKind.PUBLICKEY,
+                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                        ],
                     ),
                 ),
             )
@@ -80,11 +97,10 @@ class Test:
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
-            "-i",
-            "/dev/null",
+            "-o",
+            "IdentityFile=ssh-keys/id_ed25519",
             "ls",
             "/bin/sh",
-            password="123",
         )
 
         msg = await ws.receive(5)

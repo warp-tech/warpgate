@@ -1,9 +1,9 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
 import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
-    import type { ExistingCredential } from './CredentialEditor.svelte'
-    import Fa from 'svelte-fa';
-    import { faInfoCircle } from '@fortawesome/free-solid-svg-icons';
+import type { ExistingCredential } from './CredentialEditor.svelte'
+import Fa from 'svelte-fa'
+import { faInfoCircle } from '@fortawesome/free-solid-svg-icons'
 
 type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres'
 
@@ -29,7 +29,7 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
-const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string> | undefined> = {
+const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     postgres: new Map([
         [
             [CredentialKind.Password, false],
@@ -40,6 +40,9 @@ const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string> | undefine
             'Not all clients will show the 2FA auth prompt. The user might need to log in to the Warpgate UI to see the prompt.',
         ],
     ]),
+    http: new Map(),
+    mysql: new Map(),
+    ssh: new Map(),
 }
 
 let activeTips: string[] = $derived.by(() => {

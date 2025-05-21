@@ -109,12 +109,21 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user = user_model.load_details(&db).await?;
 
-        let supported_credential_types: HashSet<CredentialKind> = user
+        let mut available_credential_types = user
             .credentials
             .iter()
             .map(|x| x.kind())
-            .filter(|x| supported_credential_types.contains(x))
-            .collect();
+            .collect::<HashSet<_>>();
+        available_credential_types.insert(CredentialKind::WebUserApproval);
+
+        let supported_credential_types = supported_credential_types
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .intersection(&available_credential_types)
+            .copied()
+            .collect::<HashSet<_>>();
+
         let default_policy = Box::new(AnySingleCredentialPolicy {
             supported_credential_types: supported_credential_types.clone(),
         }) as Box<dyn CredentialPolicy + Sync + Send>;

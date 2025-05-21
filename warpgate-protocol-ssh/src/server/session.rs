@@ -1497,6 +1497,10 @@ impl ServerSession {
                 CredentialKind::Sso => m.push(MethodKind::KeyboardInteractive),
             }
         }
+        if m.contains(&MethodKind::KeyboardInteractive) {
+            // Ensure keyboard-interactive is always the last method
+            m.push(MethodKind::KeyboardInteractive);
+        }
         m
     }
 
