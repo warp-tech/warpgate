@@ -47,8 +47,10 @@ impl TryFrom<&NewPublicKeyCredential> for UserPublicKeyCredential {
     type Error = WarpgateError;
 
     fn try_from(credential: &NewPublicKeyCredential) -> Result<Self, WarpgateError> {
-        let key = russh::keys::PublicKey::from_openssh(&credential.openssh_public_key)
+        let mut key = russh::keys::PublicKey::from_openssh(&credential.openssh_public_key)
             .map_err(russh::keys::Error::from)?;
+
+        key.set_comment("");
 
         Ok(Self {
             key: key.to_openssh().map_err(russh::keys::Error::from)?.into(),
