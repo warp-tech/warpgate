@@ -296,7 +296,7 @@ impl Api {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        let state_arcs = store.all_pending_web_auths_for_user(&username).await;
+        let state_arcs = store.all_pending_web_auths_for_user(username).await;
 
         let mut results = vec![];
 

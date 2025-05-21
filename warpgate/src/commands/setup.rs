@@ -283,6 +283,10 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         },
     );
 
+    if let Commands::UnattendedSetup { external_host, .. } = &cli.command {
+        store.external_host = external_host.clone();
+    }
+
     // ---
 
     info!("Generated configuration:");

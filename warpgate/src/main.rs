@@ -66,6 +66,10 @@ pub(crate) enum Commands {
         /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
         #[clap(long)]
         admin_password: Option<String>,
+
+        /// External host used to construct URLs (without a port or scheme)
+        #[clap(long)]
+        external_host: Option<String>,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,
