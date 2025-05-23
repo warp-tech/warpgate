@@ -33,14 +33,13 @@ class Test:
                 sdk.RoleDataRequest(name=f"role-{uuid4()}"),
             )
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-            if include_public_key:
-                api.create_public_key_credential(
-                    user.id,
-                    sdk.NewPublicKeyCredential(
-                        label="Public Key",
-                        openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
-                    ),
-                )
+            api.create_public_key_credential(
+                user.id,
+                sdk.NewPublicKeyCredential(
+                    label="Public Key",
+                    openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
+                ),
+            )
             api.create_otp_credential(
                 user.id,
                 sdk.NewOtpCredential(
