@@ -115,12 +115,12 @@ impl ProtocolServer for MySQLProtocolServer {
     }
 
     async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::MySql(options) = target.options else {
+        let TargetOptions::MySql(options) = &target.options else {
             return Err(TargetTestError::Misconfigured(
                 "Not a MySQL target".to_owned(),
             ));
         };
-        MySqlClient::connect(&options, ConnectionOptions::default())
+        MySqlClient::connect(&options, &target, ConnectionOptions::default())
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())

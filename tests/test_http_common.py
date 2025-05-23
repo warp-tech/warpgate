@@ -5,7 +5,7 @@ from .util import alloc_port
 
 
 @pytest.fixture(scope="session")
-def echo_server_port():
+def echo_server_ports():
     from flask import Flask, request, jsonify, redirect
     from flask_sock import Sock
 
@@ -40,12 +40,35 @@ def echo_server_port():
             data = ws.receive()
             ws.send(data)
 
-    port = alloc_port()
+    port = alloc_port('echoserver http')
+    port_https = alloc_port('echoserver https')
 
     def runner():
         app.run(port=port, load_dotenv=False)
+        app.run
 
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
+    def runner_https():
+        app.run(
+            port=port_https,
+            load_dotenv=False,
+            ssl_context=(
+                "certs/tls.certificate.pem",
+                "certs/tls.key.pem",
+            ),
+        )
+        app.run
 
-    yield port
+    threading.Thread(target=runner, daemon=True).start()
+    threading.Thread(target=runner_https, daemon=True).start()
+
+    yield port, port_https
+
+
+@pytest.fixture(scope="session")
+def echo_server_port(echo_server_ports):
+    yield echo_server_ports[0]
+
+
+@pytest.fixture(scope="session")
+def echo_server_port_https(echo_server_ports):
+    yield echo_server_ports[1]

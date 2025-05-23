@@ -16,7 +16,10 @@ use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_with_config, tungstenite};
 use tracing::*;
 use url::Url;
-use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
+use warpgate_common::{
+    configure_tls_connector, try_block, Target, TargetHTTPOptions, TlsMode, WarpgateError,
+    WarpgateVerifierOptions,
+};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
@@ -258,6 +261,7 @@ pub async fn proxy_normal_request(
     req: &Request,
     body: Body,
     options: &TargetHTTPOptions,
+    target: &Target,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
 
@@ -267,9 +271,11 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    if let TlsMode::Required = options.tls.mode {
-        client = client.https_only(true);
-    }
+    client = client.use_preconfigured_tls(
+        configure_tls_connector(WarpgateVerifierOptions::from_target(&target))
+            .await
+            .context("tls setup")?,
+    );
 
     client = client.redirect(reqwest::redirect::Policy::custom({
         let tls_mode = options.tls.mode.clone();
@@ -287,11 +293,7 @@ pub async fn proxy_normal_request(
         }
     }));
 
-    if !options.tls.verify {
-        client = client.danger_accept_invalid_certs(true);
-    }
-
-    let client = client.build().context("Could not build request")?;
+    let client = client.build().context("Could not build reqwest client")?;
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
@@ -388,6 +390,7 @@ pub async fn proxy_websocket_request(
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, options, true)?;
+    // TODO tls verify
     proxy_ws_inner(req, ws, uri.clone(), options)
         .await
         .map_err(|error| {
@@ -540,4 +543,25 @@ async fn proxy_ws_inner(
     copy_client_response(&client_response, &mut response);
     rewrite_response(&mut response, options, &uri)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{configure_tls_connector, WarpgateVerifierOptions};
+
+    #[tokio::test]
+    async fn test_rustls_reqwest_version_match() {
+        let cfg = configure_tls_connector(WarpgateVerifierOptions {
+            accept_invalid_certs: false,
+            accept_invalid_hostnames: false,
+            additional_trusted_certificates: vec![],
+        })
+        .await
+        .unwrap();
+        // build() will fail if the preconfigured tls backend wasn't recognized due to a version mismatch
+        reqwest::ClientBuilder::new()
+            .use_preconfigured_tls(cfg)
+            .build()
+            .unwrap();
+    }
 }
