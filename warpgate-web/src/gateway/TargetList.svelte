@@ -10,6 +10,7 @@ import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 import GettingStarted from 'common/GettingStarted.svelte'
+    import EmptyState from 'common/EmptyState.svelte';
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
@@ -51,6 +52,10 @@ function loadURL (url: string) {
 {/if}
 
 <ItemList load={loadTargets} showSearch={true}>
+    {#snippet empty()}
+        <EmptyState
+            title="You don't have access to any targets yet" />
+    {/snippet}
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item"
