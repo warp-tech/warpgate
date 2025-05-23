@@ -93,7 +93,7 @@
 
         <footer class="mt-5">
             <span class="me-auto ms-3">
-                v{$serverInfo?.version}
+                {$serverInfo?.version}
             </span>
             <ThemeSwitcher />
         </footer>

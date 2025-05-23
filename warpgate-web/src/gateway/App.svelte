@@ -145,7 +145,7 @@
             <footer class="mt-5">
                 {#if $serverInfo?.version}
                 <span class="ms-3 me-auto">
-                    v{$serverInfo.version}
+                    {$serverInfo.version}
                 </span>
                 {:else}
                 <div class="me-auto"></div>
