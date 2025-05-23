@@ -21,7 +21,7 @@
     <h1>targets</h1>
     <a
         class="btn btn-primary ms-auto"
-        href="/targets/create"
+        href="/config/targets/create"
         use:link>
         Add a target
     </a>
@@ -38,7 +38,7 @@
         <a
             class="list-group-item list-group-item-action"
             class:disabled={target.options.kind === TargetKind.WebAdmin}
-            href="/targets/{target.id}"
+            href="/config/targets/{target.id}"
             use:link>
             <div class="me-auto">
                 <strong>

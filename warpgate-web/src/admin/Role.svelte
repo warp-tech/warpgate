@@ -119,7 +119,7 @@
     {#snippet item(user)}
         <a
             class="list-group-item list-group-item-action"
-            href="/users/{user.id}"
+            href="/config/users/{user.id}"
             use:link>
             <div>
                 <strong class="me-auto">
@@ -142,7 +142,7 @@
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action"
-            href="/targets/{target.id}"
+            href="/config/targets/{target.id}"
             use:link>
             <div class="me-auto">
                 <strong>

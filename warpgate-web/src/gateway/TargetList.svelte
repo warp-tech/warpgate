@@ -9,6 +9,7 @@ import { Modal, ModalBody } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+import GettingStarted from 'common/GettingStarted.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
@@ -43,6 +44,11 @@ function loadURL (url: string) {
 }
 
 </script>
+
+{#if $serverInfo?.setupState}
+    <GettingStarted
+        setupState={$serverInfo?.setupState} />
+{/if}
 
 <ItemList load={loadTargets} showSearch={true}>
     {#snippet item(target)}
@@ -95,12 +101,9 @@ function loadURL (url: string) {
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
     <ModalHeader toggle={() => selectedTarget = undefined}>
-        <div>
-            {selectedTarget?.name}
-        </div>
+        <div>Connection instructions for {selectedTarget?.name}</div>
     </ModalHeader>
     <ModalBody>
-        <h3>Connection instructions</h3>
         <ConnectionInstructions
             targetName={selectedTarget?.name}
             username={$serverInfo?.username}

@@ -11,6 +11,8 @@
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { Input } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
+    import GettingStarted from 'common/GettingStarted.svelte'
+    import { serverInfo } from 'gateway/lib/store'
 
     let [showActiveOnly, showActiveOnly$] = autosave('sessions-list:show-active-only', false)
     let [showLoggedInOnly, showLoggedInOnly$] = autosave('sessions-list:show-logged-in-only', true)
@@ -62,6 +64,11 @@
     const interval = setInterval(_reloadSessions, 1000000)
     onDestroy(() => clearInterval(interval))
 </script>
+
+{#if $serverInfo?.setupState}
+    <GettingStarted
+        setupState={$serverInfo?.setupState} />
+{/if}
 
 {#if activeSessionCount !== undefined}
 <div class="page-summary-bar">
