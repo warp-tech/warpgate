@@ -19,7 +19,7 @@
     <h1>roles</h1>
     <a
         class="btn btn-primary ms-auto"
-        href="/roles/create"
+        href="/config/roles/create"
         use:link>
         Add a role
     </a>
@@ -29,7 +29,7 @@
     {#snippet item(role)}
         <a
             class="list-group-item list-group-item-action"
-            href="/roles/{role.id}"
+            href="/config/roles/{role.id}"
             use:link>
             <div>
                 <strong class="me-auto">

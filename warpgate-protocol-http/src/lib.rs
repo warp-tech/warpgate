@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use common::page_admin_auth;
+use common::{inject_request_authorization, page_admin_auth};
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
 use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
@@ -144,6 +144,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     })
                 }),
             )
+            .around(inject_request_authorization)
             .around(move |ep, req| async move {
                 let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?

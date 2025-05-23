@@ -19,7 +19,7 @@
     <h1>users</h1>
     <a
         class="btn btn-primary ms-auto"
-        href="/users/create"
+        href="/config/users/create"
         use:link>
         Add a user
     </a>
@@ -29,7 +29,7 @@
     {#snippet item(user)}
         <a
             class="list-group-item list-group-item-action"
-            href="/users/{user.id}"
+            href="/config/users/{user.id}"
             use:link>
             <div>
                 <strong class="me-auto">

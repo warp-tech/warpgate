@@ -16,7 +16,7 @@ async function create () {
                 username,
             },
         })
-        replace(`/users/${user.id}`)
+        replace(`/config/users/${user.id}`)
     } catch (err) {
         error = await stringifyError(err)
     }

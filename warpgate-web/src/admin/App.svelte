@@ -25,22 +25,22 @@
         '/recordings/:id': wrap({
             asyncComponent: () => import('./Recording.svelte') as any,
         }),
-        '/targets/create': wrap({
+        '/config/targets/create': wrap({
             asyncComponent: () => import('./CreateTarget.svelte') as any,
         }),
-        '/targets/:id': wrap({
+        '/config/targets/:id': wrap({
             asyncComponent: () => import('./config/targets/Target.svelte') as any,
         }),
-        '/roles/create': wrap({
+        '/config/roles/create': wrap({
             asyncComponent: () => import('./CreateRole.svelte') as any,
         }),
-        '/roles/:id': wrap({
+        '/config/roles/:id': wrap({
             asyncComponent: () => import('./Role.svelte') as any,
         }),
-        '/users/create': wrap({
+        '/config/users/create': wrap({
             asyncComponent: () => import('./CreateUser.svelte') as any,
         }),
-        '/users/:id': wrap({
+        '/config/users/:id': wrap({
             asyncComponent: () => import('./User.svelte') as any,
         }),
         '/log': wrap({

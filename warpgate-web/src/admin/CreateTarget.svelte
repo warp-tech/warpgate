@@ -63,7 +63,7 @@
                     options,
                 },
             })
-            replace(`/targets/${target.id}`)
+            replace(`/config/targets/${target.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
