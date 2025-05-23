@@ -20,7 +20,6 @@
 
     async function init () {
         await serverInfoPromise
-        reloadWebAuthRequests()
     }
 
     function onPageResume () {
@@ -87,11 +86,14 @@
         } catch {
             // ignore
         }
-        socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
-        socket.addEventListener('message', () => {
+        socket = null
+        if ($serverInfo?.username) {
+            socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
+            socket.addEventListener('message', () => {
+                reloadWebAuthRequests()
+            })
             reloadWebAuthRequests()
-        })
-        reloadWebAuthRequests()
+        }
     })
 </script>
 
