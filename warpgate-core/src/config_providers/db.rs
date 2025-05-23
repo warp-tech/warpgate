@@ -125,7 +125,15 @@ impl ConfigProvider for DatabaseConfigProvider {
             .collect::<HashSet<_>>();
 
         let default_policy = Box::new(AnySingleCredentialPolicy {
-            supported_credential_types: supported_credential_types.clone(),
+            // "Any single credential" policy does not include WebUserApproval
+            // as it can be confusing to the users to see
+            // (or not see depending on the postgres client)
+            // the approval prompt in response to all authentication methods failing
+            supported_credential_types: supported_credential_types
+                .iter()
+                .cloned()
+                .filter(|x| x != &CredentialKind::WebUserApproval)
+                .collect(),
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
         if let Some(req) = user.credential_policy.clone() {
