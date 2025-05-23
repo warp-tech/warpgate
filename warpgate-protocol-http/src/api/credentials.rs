@@ -236,6 +236,12 @@ impl Api {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
+        entities::PasswordCredential::Entity::delete_many()
+            .filter(entities::PasswordCredential::Column::UserId.eq(user_model.id))
+            .exec(&*db)
+            .await
+            .map_err(WarpgateError::from)?;
+
         let new_credential = entities::PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
