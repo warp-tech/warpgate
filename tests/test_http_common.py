@@ -30,6 +30,7 @@ def echo_server_port():
                 "method": request.method,
                 "args": request.args,
                 "path": request.path,
+                "headers": request.headers.to_wsgi_list(),
             }
         )
 

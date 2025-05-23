@@ -63,7 +63,7 @@ async function create () {
         <h1>ticket created</h1>
     </div>
 
-    <Alert color="warning" fade={false}>
+    <Alert color="warning" fade={false} class="mb-3">
         The secret is only shown once - you won't be able to see it again.
     </Alert>
 
