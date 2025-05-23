@@ -104,7 +104,7 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
         .authority()
         .context("No authority in the URL")?
         .to_string();
-    let authority = authority.split('@').last().context("Authority is empty")?;
+
     let authority: Authority = authority.try_into()?;
     let mut uri = http::uri::Builder::new()
         .authority(authority)
@@ -300,12 +300,10 @@ pub async fn proxy_normal_request(
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
-    client_request = client_request.header(
-        http::header::HOST,
-        uri.authority()
-            .ok_or(WarpgateError::NoHostInUrl)?
-            .to_string(),
-    );
+
+    let authority_host = extract_authority_host(&uri)?;
+
+    client_request = client_request.header(http::header::HOST, authority_host);
 
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
@@ -398,12 +396,26 @@ pub async fn proxy_websocket_request(
         })
 }
 
+/// Remove the username/password from the URL before using it for the Host header
+fn extract_authority_host(uri: &Uri) -> anyhow::Result<String> {
+    let uri_authority = uri
+        .authority()
+        .ok_or(WarpgateError::NoHostInUrl)?
+        .to_string();
+    Ok(uri_authority
+        .split('@')
+        .last()
+        .context("URL authority is empty")?
+        .into())
+}
+
 async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
+    let authority_host = extract_authority_host(&uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
         .header(http::header::CONNECTION, "Upgrade")
@@ -413,12 +425,7 @@ async fn proxy_ws_inner(
             http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         )
-        .header(
-            http::header::HOST,
-            uri.authority()
-                .ok_or(WarpgateError::NoHostInUrl)?
-                .to_string(),
-        );
+        .header(http::header::HOST, authority_host);
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
