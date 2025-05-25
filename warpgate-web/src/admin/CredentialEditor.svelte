@@ -19,6 +19,7 @@
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import EmptyState from 'common/EmptyState.svelte';
 
     interface Props {
         userId: string
@@ -230,6 +231,12 @@
 </div>
 
 <Loadable promise={loadPromise}>
+    {#if credentials.length === 0}
+        <EmptyState
+            title="No credentials added"
+            hint="Users need credentials to authenticate with Warpgate"
+        />
+    {/if}
     <div class="list-group list-group-flush mb-3">
         {#each credentials as credential}
         <div class="list-group-item credential">

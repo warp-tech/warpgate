@@ -103,6 +103,12 @@ function loadURL (url: string) {
     {/snippet}
 </ItemList>
 
+{#if $serverInfo?.setupState && !$serverInfo.setupState.hasTargets}
+    <EmptyState
+        hint="Once you add targets and assign access, they will appear here"
+        title="No other targets yet" />
+{/if}
+
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
     <ModalBody>
         <ConnectionInstructions
