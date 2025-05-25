@@ -1,3 +1,8 @@
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/89be835b-ff96-46df-94c7-ae2d176615e3" />
+</p>
+
 <br/>
 
 
@@ -31,8 +36,6 @@ Warpgate is a smart SSH, HTTPS, MySQL and PostgreSQL bastion host for Linux that
 * Native 2FA and SSO support (TOTP & OpenID Connect)
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
-
-![](docs/banner.png)
 
 ## Getting started & downloads
 
