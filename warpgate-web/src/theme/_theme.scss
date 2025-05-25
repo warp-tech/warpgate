@@ -209,6 +209,21 @@ ul.pagination {
     align-items: center;
 }
 
+.container-max-sm {
+    margin: auto;
+    max-width: 540px;
+}
+
+.container-max-md {
+    margin: auto;
+    max-width: 720px;
+}
+
+.container-max-lg {
+    margin: auto;
+    max-width: 960px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     // #1271: sveltestrap modals are broken when `prefers-reduced-motion` is on
     .modal.fade {

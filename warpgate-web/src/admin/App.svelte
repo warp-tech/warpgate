@@ -26,22 +26,22 @@
             asyncComponent: () => import('./Recording.svelte') as any,
         }),
         '/config/targets/create': wrap({
-            asyncComponent: () => import('./CreateTarget.svelte') as any,
+            asyncComponent: () => import('./config/CreateTarget.svelte') as any,
         }),
         '/config/targets/:id': wrap({
             asyncComponent: () => import('./config/targets/Target.svelte') as any,
         }),
         '/config/roles/create': wrap({
-            asyncComponent: () => import('./CreateRole.svelte') as any,
+            asyncComponent: () => import('./config/CreateRole.svelte') as any,
         }),
         '/config/roles/:id': wrap({
-            asyncComponent: () => import('./Role.svelte') as any,
+            asyncComponent: () => import('./config/Role.svelte') as any,
         }),
         '/config/users/create': wrap({
-            asyncComponent: () => import('./CreateUser.svelte') as any,
+            asyncComponent: () => import('./config/CreateUser.svelte') as any,
         }),
         '/config/users/:id': wrap({
-            asyncComponent: () => import('./User.svelte') as any,
+            asyncComponent: () => import('./config/User.svelte') as any,
         }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte') as any,
@@ -68,7 +68,7 @@
             asyncComponent: () => import('./config/Tickets.svelte') as any,
         }),
         '/config/tickets/create': wrap({
-            asyncComponent: () => import('./CreateTicket.svelte') as any,
+            asyncComponent: () => import('./config/CreateTicket.svelte') as any,
         }),
     }
 </script>

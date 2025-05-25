@@ -24,24 +24,26 @@ async function create () {
 
 </script>
 
-{#if error}
-<Alert color="danger">{error}</Alert>
-{/if}
+<div class="container-max-md">
+    {#if error}
+        <Alert color="danger">{error}</Alert>
+    {/if}
 
+    <div class="page-summary-bar">
+        <h1>add a role</h1>
+    </div>
 
-<div class="page-summary-bar">
-    <h1>add a role</h1>
-</div>
+    <div class="narrow-page">
+        <Form>
+            <FormGroup floating label="Name">
+                <!-- svelte-ignore a11y_autofocus -->
+                <input class="form-control" bind:value={name} required autofocus />
+            </FormGroup>
 
-<div class="narrow-page">
-    <Form>
-        <FormGroup floating label="Name">
-            <input class="form-control" bind:value={name} required />
-        </FormGroup>
-
-        <AsyncButton
-            color="primary"
-            click={create}
-        >Create role</AsyncButton>
-    </Form>
+            <AsyncButton
+                color="primary"
+                click={create}
+            >Create role</AsyncButton>
+        </Form>
+    </div>
 </div>

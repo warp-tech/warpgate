@@ -17,57 +17,59 @@
     }
 </script>
 
-<div class="page-summary-bar">
-    <h1>targets</h1>
-    <a
-        class="btn btn-primary ms-auto"
-        href="/config/targets/create"
-        use:link>
-        Add a target
-    </a>
-</div>
-
-<ItemList load={getTargets} showSearch={true}>
-    {#snippet empty()}
-        <EmptyState
-            title="No targets yet"
-            hint="Targets are destinations on the internal network that your users will connect to"
-        />
-    {/snippet}
-    {#snippet item(target)}
+<div class="container-max-md">
+    <div class="page-summary-bar">
+        <h1>targets</h1>
         <a
-            class="list-group-item list-group-item-action"
-            class:disabled={target.options.kind === TargetKind.WebAdmin}
-            href="/config/targets/{target.id}"
+            class="btn btn-primary ms-auto"
+            href="/config/targets/create"
             use:link>
-            <div class="me-auto">
-                <strong>
-                    {target.name}
-                </strong>
-                {#if target.description}
-                    <small class="d-block text-muted">{target.description}</small>
-                {/if}
-            </div>
-            <small class="text-muted ms-auto">
-                {#if target.options.kind === TargetKind.Http}
-                    HTTP
-                {/if}
-                {#if target.options.kind === TargetKind.MySql}
-                    MySQL
-                {/if}
-                {#if target.options.kind === TargetKind.Postgres}
-                    PostgreSQL
-                {/if}
-                {#if target.options.kind === TargetKind.Ssh}
-                    SSH
-                {/if}
-                {#if target.options.kind === TargetKind.WebAdmin}
-                    This web admin interface
-                {/if}
-            </small>
+            Add a target
         </a>
-            {/snippet}
-</ItemList>
+    </div>
+
+    <ItemList load={getTargets} showSearch={true}>
+        {#snippet empty()}
+            <EmptyState
+                title="No targets yet"
+                hint="Targets are destinations on the internal network that your users will connect to"
+            />
+        {/snippet}
+        {#snippet item(target)}
+            <a
+                class="list-group-item list-group-item-action"
+                class:disabled={target.options.kind === TargetKind.WebAdmin}
+                href="/config/targets/{target.id}"
+                use:link>
+                <div class="me-auto">
+                    <strong>
+                        {target.name}
+                    </strong>
+                    {#if target.description}
+                        <small class="d-block text-muted">{target.description}</small>
+                    {/if}
+                </div>
+                <small class="text-muted ms-auto">
+                    {#if target.options.kind === TargetKind.Http}
+                        HTTP
+                    {/if}
+                    {#if target.options.kind === TargetKind.MySql}
+                        MySQL
+                    {/if}
+                    {#if target.options.kind === TargetKind.Postgres}
+                        PostgreSQL
+                    {/if}
+                    {#if target.options.kind === TargetKind.Ssh}
+                        SSH
+                    {/if}
+                    {#if target.options.kind === TargetKind.WebAdmin}
+                        This web admin interface
+                    {/if}
+                </small>
+            </a>
+                {/snippet}
+    </ItemList>
+</div>
 
 <style lang="scss">
     .list-group-item {

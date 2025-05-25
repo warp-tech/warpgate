@@ -71,63 +71,64 @@
 
 </script>
 
-{#if error}
-<Alert color="danger">{error}</Alert>
-{/if}
+<div class="container-max-md">
+    {#if error}
+    <Alert color="danger">{error}</Alert>
+    {/if}
 
+    <div class="page-summary-bar">
+        <h1>add a target</h1>
+    </div>
 
-<div class="page-summary-bar">
-    <h1>add a target</h1>
-</div>
+    <div class="narrow-page">
+        <Form on:submit={e => {
+            create()
+            e.preventDefault()
+        }}>
+            <!-- Defualt button for key handling -->
+            <Button class="d-none" type="submit"></Button>
 
-<div class="narrow-page">
-    <Form on:submit={e => {
-        create()
-        e.preventDefault()
-    }}>
-        <!-- Defualt button for key handling -->
-        <Button class="d-none" type="submit"></Button>
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="mb-2">Type</label>
+            <ButtonGroup class="w-100 mb-3">
+                <Button
+                    active={type === TargetKind.Ssh}
+                    on:click={e => {
+                        type = TargetKind.Ssh
+                        e.preventDefault()
+                    }}
+                >SSH</Button>
+                <Button
+                    active={type === TargetKind.Http}
+                    on:click={e => {
+                        type = TargetKind.Http
+                        e.preventDefault()
+                    }}
+                >HTTP</Button>
+                <Button
+                    active={type === TargetKind.MySql}
+                    on:click={e => {
+                        type = TargetKind.MySql
+                        e.preventDefault()
+                    }}
+                >MySQL</Button>
+                <Button
+                    active={type === TargetKind.Postgres}
+                    on:click={e => {
+                        type = TargetKind.Postgres
+                        e.preventDefault()
+                    }}
+                >PostgreSQL</Button>
+            </ButtonGroup>
 
-        <!-- svelte-ignore a11y_label_has_associated_control -->
-        <label class="mb-2">Type</label>
-        <ButtonGroup class="w-100 mb-3">
+            <FormGroup floating label="Name">
+                <input class="form-control" required bind:value={name} />
+            </FormGroup>
+
             <Button
-                active={type === TargetKind.Ssh}
-                on:click={e => {
-                    type = TargetKind.Ssh
-                    e.preventDefault()
-                }}
-            >SSH</Button>
-            <Button
-                active={type === TargetKind.Http}
-                on:click={e => {
-                    type = TargetKind.Http
-                    e.preventDefault()
-                }}
-            >HTTP</Button>
-            <Button
-                active={type === TargetKind.MySql}
-                on:click={e => {
-                    type = TargetKind.MySql
-                    e.preventDefault()
-                }}
-            >MySQL</Button>
-            <Button
-                active={type === TargetKind.Postgres}
-                on:click={e => {
-                    type = TargetKind.Postgres
-                    e.preventDefault()
-                }}
-            >PostgreSQL</Button>
-        </ButtonGroup>
-
-        <FormGroup floating label="Name">
-            <input class="form-control" required bind:value={name} />
-        </FormGroup>
-
-        <Button
-            color="primary"
-            type="submit"
-        >Create target</Button>
-    </Form>
+                color="primary"
+                type="submit"
+            >Create target</Button>
+        </Form>
+    </div>
 </div>

@@ -10,7 +10,7 @@ import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 import GettingStarted from 'common/GettingStarted.svelte'
-    import EmptyState from 'common/EmptyState.svelte';
+import EmptyState from 'common/EmptyState.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 

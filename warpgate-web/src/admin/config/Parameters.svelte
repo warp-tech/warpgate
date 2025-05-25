@@ -16,26 +16,28 @@
     <h1>global parameters</h1>
 </div>
 
-<Loadable promise={initPromise}>
-{#if parameters}
-    <label
-        for="allowOwnCredentialManagement"
-        class="d-flex align-items-center"
-    >
-        <Input
-            id="allowOwnCredentialManagement"
-            class="mb-0 me-2"
-            type="switch"
-            on:change={() => {
-                parameters!.allowOwnCredentialManagement = !parameters!.allowOwnCredentialManagement
-                api.updateParameters({
-                    parameterUpdate: {
-                        allowOwnCredentialManagement: parameters!.allowOwnCredentialManagement,
-                    },
-                })
-            }}
-            checked={parameters.allowOwnCredentialManagement} />
-        <div>Allow users to manage their own credentials</div>
-    </label>
-{/if}
-</Loadable>
+<div class="container-max-md">
+    <Loadable promise={initPromise}>
+    {#if parameters}
+        <label
+            for="allowOwnCredentialManagement"
+            class="d-flex align-items-center"
+        >
+            <Input
+                id="allowOwnCredentialManagement"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    parameters!.allowOwnCredentialManagement = !parameters!.allowOwnCredentialManagement
+                    api.updateParameters({
+                        parameterUpdate: {
+                            allowOwnCredentialManagement: parameters!.allowOwnCredentialManagement,
+                        },
+                    })
+                }}
+                checked={parameters.allowOwnCredentialManagement} />
+            <div>Allow users to manage their own credentials</div>
+        </label>
+    {/if}
+    </Loadable>
+</div>
