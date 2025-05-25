@@ -41,7 +41,7 @@
         _save()
         e.preventDefault()
     }}>
-        <ModalHeader toggle={_cancel}>
+        <ModalHeader>
             New API token
         </ModalHeader>
         <ModalBody>
@@ -52,26 +52,24 @@
                     bind:value={label} />
             </FormGroup>
 
-            <FormGroup floating label="Expiry">
+            <FormGroup floating label="Expiry" spacing="0">
                 <Input
                     type="datetime-local"
                     bind:value={expiry}  />
             </FormGroup>
-
         </ModalBody>
         <ModalFooter>
-            <div class="d-flex">
-                <Button
-                    class="ms-auto"
-                    on:click={() => validated = true}
-                >Create</Button>
+            <Button
+                color="primary"
+                class="modal-button"
+                on:click={() => validated = true}
+            >Create</Button>
 
-                <Button
-                    class="ms-2"
-                    color="danger"
-                    on:click={_cancel}
-                >Cancel</Button>
-            </div>
+            <Button
+                color="danger"
+                class="modal-button"
+                on:click={_cancel}
+            >Cancel</Button>
         </ModalFooter>
     </Form>
 </Modal>

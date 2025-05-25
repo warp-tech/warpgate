@@ -5,10 +5,9 @@ import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
 import { api, type TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import Fa from 'svelte-fa'
-import { Modal, ModalBody } from '@sveltestrap/sveltestrap'
+import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
-import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
 
@@ -105,9 +104,6 @@ function loadURL (url: string) {
 </ItemList>
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
-    <ModalHeader toggle={() => selectedTarget = undefined}>
-        <div>Connection instructions for {selectedTarget?.name}</div>
-    </ModalHeader>
     <ModalBody>
         <ConnectionInstructions
             targetName={selectedTarget?.name}
@@ -115,6 +111,16 @@ function loadURL (url: string) {
             targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
         />
     </ModalBody>
+    <ModalFooter>
+        <Button
+            color="secondary"
+            class="modal-button"
+            block
+            on:click={() => { selectedTarget = undefined }}
+        >
+            Close
+        </Button>
+    </ModalFooter>
 </Modal>
 
 <style lang="scss">

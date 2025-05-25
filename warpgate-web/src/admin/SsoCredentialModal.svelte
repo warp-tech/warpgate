@@ -9,7 +9,6 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingSsoCredential } from './lib/api'
     import { api } from 'gateway/lib/api'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -54,9 +53,6 @@
         _save()
         e.preventDefault()
     }}>
-        <ModalHeader toggle={_cancel}>
-            Single sign-on
-        </ModalHeader>
         <ModalBody>
             <FormGroup floating label="E-mail">
                 <Input
@@ -72,7 +68,7 @@
                         You don't have any SSO providers configured. Add them to your config file first.
                     </Alert>
                     {/if}
-                    <FormGroup floating label="SSO provider">
+                    <FormGroup floating label="SSO provider" spacing="0">
                         <Input
                             bind:value={provider}
                             type="select"
@@ -87,19 +83,18 @@
             </Loadable>
         </ModalBody>
         <ModalFooter>
-            <div class="d-flex">
-                <Button
-                    type="submit"
-                    class="ms-auto"
-                    on:click={() => validated = true}
-                >Save</Button>
+            <Button
+                type="submit"
+                color="primary"
+                class="modal-button"
+                on:click={() => validated = true}
+            >Save</Button>
 
-                <Button
-                    class="ms-2"
-                    color="danger"
-                    on:click={_cancel}
-                >Cancel</Button>
-            </div>
+            <Button
+                class="modal-button"
+                color="danger"
+                on:click={_cancel}
+            >Cancel</Button>
         </ModalFooter>
     </Form>
 </Modal>

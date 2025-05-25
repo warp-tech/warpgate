@@ -224,6 +224,39 @@ ul.pagination {
     max-width: 960px;
 }
 
+.modal-content {
+    box-shadow: 0 0 10px rgba(0, 0, 0, .25);
+}
+
+.modal-header {
+    padding-bottom: 0;
+
+    h5 {
+        margin: auto;
+        text-align: center;
+    }
+}
+
+.modal-footer {
+    border: none;
+    display: flex;
+    padding-top: 0;
+
+    .modal-button {
+        display: block;
+        flex: 1 0 0;
+    }
+
+    @media (max-width: 576px) {
+        flex-direction: column;
+        align-items: stretch;
+
+        .modal-button {
+            flex: auto;
+        }
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     // #1271: sveltestrap modals are broken when `prefers-reduced-motion` is on
     .modal.fade {

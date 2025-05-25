@@ -9,8 +9,6 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
-
     interface Props {
         isOpen: boolean
         create: (password: string) => void
@@ -44,11 +42,8 @@
         _save()
         e.preventDefault()
     }}>
-        <ModalHeader toggle={_cancel}>
-            Password
-        </ModalHeader>
         <ModalBody>
-            <FormGroup floating label="Enter a new password">
+            <FormGroup floating label="Enter a new password" spacing="0">
                 <Input
                     bind:inner={field}
                     type="password"
@@ -58,18 +53,17 @@
             </FormGroup>
         </ModalBody>
         <ModalFooter>
-            <div class="d-flex">
-                <Button
-                    class="ms-auto"
-                    on:click={() => validated = true}
-                >Create</Button>
+            <Button
+                class="modal-button"
+                color="primary"
+                on:click={() => validated = true}
+            >Create</Button>
 
-                <Button
-                    class="ms-2"
-                    color="danger"
-                    on:click={_cancel}
-                >Cancel</Button>
-            </div>
+            <Button
+                class="modal-button"
+                color="danger"
+                on:click={_cancel}
+            >Cancel</Button>
         </ModalFooter>
     </Form>
 </Modal>

@@ -5,7 +5,7 @@
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { replace } from 'svelte-spa-router'
-    import { Button, FormGroup, Input, Modal, ModalBody } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -78,7 +78,7 @@
     <Loadable promise={init()}>
     {#if target}
         <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false}>
-            <ModalHeader toggle={() => connectionsInstructionsModalOpen = false}>
+            <ModalHeader>
                 Access instructions
             </ModalHeader>
             <ModalBody>
@@ -111,6 +111,16 @@
                     targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
                 />
             </ModalBody>
+            <ModalFooter>
+                <Button
+                    color="secondary"
+                    class="modal-button"
+                    block
+                    on:click={() => connectionsInstructionsModalOpen = false }
+                >
+                    Close
+                </Button>
+            </ModalFooter>
         </Modal>
 
         <div class="page-summary-bar">
