@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import RadioButton from 'common/RadioButton.svelte'
 
     let error: string|null = $state(null)
     let name = $state('')
@@ -69,6 +70,12 @@
         }
     }
 
+    const kinds: { name: string, value: TargetKind }[] = [
+        { name: 'SSH', value: TargetKind.Ssh },
+        { name: 'HTTP', value: TargetKind.Http },
+        { name: 'MySQL', value: TargetKind.MySql },
+        { name: 'PostgreSQL', value: TargetKind.Postgres },
+    ]
 </script>
 
 <div class="container-max-md">
@@ -91,34 +98,13 @@
             <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="mb-2">Type</label>
             <ButtonGroup class="w-100 mb-3">
-                <Button
-                    active={type === TargetKind.Ssh}
-                    on:click={e => {
-                        type = TargetKind.Ssh
-                        e.preventDefault()
-                    }}
-                >SSH</Button>
-                <Button
-                    active={type === TargetKind.Http}
-                    on:click={e => {
-                        type = TargetKind.Http
-                        e.preventDefault()
-                    }}
-                >HTTP</Button>
-                <Button
-                    active={type === TargetKind.MySql}
-                    on:click={e => {
-                        type = TargetKind.MySql
-                        e.preventDefault()
-                    }}
-                >MySQL</Button>
-                <Button
-                    active={type === TargetKind.Postgres}
-                    on:click={e => {
-                        type = TargetKind.Postgres
-                        e.preventDefault()
-                    }}
-                >PostgreSQL</Button>
+                {#each kinds as kind}
+                    <RadioButton
+                        label={kind.name}
+                        value={kind.value}
+                        bind:group={type}
+                    />
+                {/each}
             </ButtonGroup>
 
             <FormGroup floating label="Name">
