@@ -19,7 +19,7 @@
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import EmptyState from 'common/EmptyState.svelte';
+    import EmptyState from 'common/EmptyState.svelte'
 
     interface Props {
         userId: string
