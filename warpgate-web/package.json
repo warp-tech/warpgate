@@ -45,7 +45,7 @@
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6",
-    "eslint-plugin-svelte": "^2.46.1",
+    "eslint-plugin-svelte": "^3.9.0",
     "format-duration": "^3.0.2",
     "otpauth": "^9.4.0",
     "qrcode": "^1.5.4",
