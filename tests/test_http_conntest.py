@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
+from .test_http_common import *  # noqa
 
 
 class Test:

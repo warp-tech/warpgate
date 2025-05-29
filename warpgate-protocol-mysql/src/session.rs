@@ -11,7 +11,7 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common::{Secret, Target, TargetMySqlOptions, TargetOptions};
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
 };
@@ -316,13 +316,15 @@ impl MySqlSession {
             handle.set_target(&target).await?;
         }
 
-        self.run_authorized_inner(handshake, mysql_options).await
+        self.run_authorized_inner(handshake, mysql_options, target)
+            .await
     }
 
     async fn run_authorized_inner(
         mut self,
         handshake: HandshakeResponse,
         options: TargetMySqlOptions,
+        target: Target,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
         self.username = Some(handshake.username);
@@ -332,6 +334,7 @@ impl MySqlSession {
 
         let mut client = match MySqlClient::connect(
             &options,
+            &target,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,
