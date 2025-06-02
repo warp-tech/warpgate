@@ -5448,7 +5448,6 @@ dependencies = [
 name = "warpgate-common"
 version = "0.14.0"
 dependencies = [
- "aho-corasick",
  "anyhow",
  "argon2",
  "async-trait",
