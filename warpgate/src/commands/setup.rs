@@ -293,6 +293,11 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let yaml = serde_yaml::to_string(&store)?;
     println!("{yaml}");
 
+    let yaml = format!(
+        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
+        version = warpgate_version()
+    );
+
     File::create(&cli.config)?.write_all(yaml.as_bytes())?;
     info!("Saved into {}", cli.config.display());
 
