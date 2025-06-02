@@ -149,5 +149,6 @@ jobs:
 
       - name: Ensure there are no changes in config schema
         run: |
+          mkdir warpgate-web/dist
           just config-schema
           git diff --exit-code config-schema.json

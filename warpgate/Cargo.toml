@@ -3,15 +3,6 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate"
 version = "0.14.0"
-default-run = "warpgate"
-
-[[bin]]
-name = "warpgate"
-path = "src/main.rs"
-
-[[bin]]
-name = "config-schema"
-path = "src/config_schema.rs"
 
 [dependencies]
 ansi_term = "0.12"

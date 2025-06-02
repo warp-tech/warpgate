@@ -4,6 +4,10 @@ license = "Apache-2.0"
 name = "warpgate-common"
 version = "0.14.0"
 
+[[bin]]
+name = "config-schema"
+path = "src/config_schema.rs"
+
 [dependencies]
 anyhow = "1.0"
 argon2 = "0.5"

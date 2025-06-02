@@ -37,7 +37,7 @@ openapi:
     cd warpgate-web && npm run openapi:client:admin && npm run openapi:client:gateway
 
 config-schema:
-    cargo run --bin config-schema > config-schema.json
+    cargo run -p warpgate-common --bin config-schema > config-schema.json
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
 
