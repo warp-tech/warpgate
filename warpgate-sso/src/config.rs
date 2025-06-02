@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use data_encoding::BASE64;
 use once_cell::sync::Lazy;
 use openidconnect::{AuthType, ClientId, ClientSecret, IssuerUrl};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::SsoError;
@@ -16,7 +17,7 @@ pub static GOOGLE_ISSUER_URL: Lazy<IssuerUrl> =
 pub static APPLE_ISSUER_URL: Lazy<IssuerUrl> =
     Lazy::new(|| IssuerUrl::new("https://appleid.apple.com".to_string()).unwrap());
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
@@ -34,31 +35,40 @@ impl SsoProviderConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum SsoInternalProviderConfig {
     #[serde(rename = "google")]
     Google {
+        #[schemars(with = "String")]
         client_id: ClientId,
+        #[schemars(with = "String")]
         client_secret: ClientSecret,
     },
     #[serde(rename = "apple")]
     Apple {
+        #[schemars(with = "String")]
         client_id: ClientId,
+        #[schemars(with = "String")]
         client_secret: ClientSecret,
         key_id: String,
         team_id: String,
     },
     #[serde(rename = "azure")]
     Azure {
+        #[schemars(with = "String")]
         client_id: ClientId,
+        #[schemars(with = "String")]
         client_secret: ClientSecret,
         tenant: String,
     },
     #[serde(rename = "custom")]
     Custom {
+        #[schemars(with = "String")]
         client_id: ClientId,
+        #[schemars(with = "String")]
         client_secret: ClientSecret,
+        #[schemars(with = "String")]
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
         role_mappings: Option<HashMap<String, String>>,

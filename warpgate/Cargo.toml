@@ -39,6 +39,7 @@ warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
+schemars.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = "0.4"
