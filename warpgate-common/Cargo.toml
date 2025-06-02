@@ -45,3 +45,4 @@ rustls-pemfile = "1.0"
 webpki = "0.22"
 tokio-stream.workspace = true
 git-version = "0.3.9"
+schemars.workspace = true

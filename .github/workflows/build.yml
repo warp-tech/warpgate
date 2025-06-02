@@ -5,7 +5,7 @@ permissions:
 on: [push, pull_request]
 
 jobs:
-  Build:
+  build:
     strategy:
       matrix:
         include:
@@ -128,3 +128,26 @@ jobs:
           generate_release_notes: true
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  config-schema:
+    name: Config schema check
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Setup
+        run: |
+          sudo apt update
+          sudo apt install --no-install-recommends -y libssl-dev pkg-config
+
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          sudo env "PATH=$PATH" cargo install just
+
+      - name: Ensure there are no changes in config schema
+        run: |
+            just config-schema
+            git diff --exit-code config-schema.json

@@ -19,3 +19,4 @@ once_cell = "1.17"
 jsonwebtoken = "9"
 data-encoding.workspace = true
 futures.workspace = true
+schemars.workspace = true

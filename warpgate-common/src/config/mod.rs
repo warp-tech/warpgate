@@ -8,6 +8,7 @@ use std::time::Duration;
 use defaults::*;
 use poem::http::uri;
 use poem_openapi::{Object, Union};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use tracing::warn;
@@ -160,7 +161,7 @@ pub struct Role {
     pub description: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
     #[default]
@@ -171,7 +172,7 @@ pub enum SshHostKeyVerificationMode {
     AutoReject,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct SshConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -189,6 +190,7 @@ pub struct SshConfig {
     pub host_key_verification: SshHostKeyVerificationMode,
 
     #[serde(default = "_default_ssh_inactivity_timeout", with = "humantime_serde")]
+    #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
     #[serde(default)]
@@ -215,7 +217,7 @@ impl SshConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct HttpConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -236,9 +238,11 @@ pub struct HttpConfig {
     pub trust_x_forwarded_headers: bool,
 
     #[serde(default = "_default_session_max_age", with = "humantime_serde")]
+    #[schemars(with = "String")]
     pub session_max_age: Duration,
 
     #[serde(default = "_default_cookie_max_age", with = "humantime_serde")]
+    #[schemars(with = "String")]
     pub cookie_max_age: Duration,
 }
 
@@ -263,7 +267,7 @@ impl HttpConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct MySqlConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -299,7 +303,7 @@ impl MySqlConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct PostgresConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -335,7 +339,7 @@ impl PostgresConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -353,9 +357,10 @@ impl Default for RecordingsConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct LogConfig {
     #[serde(default = "_default_retention", with = "humantime_serde")]
+    #[schemars(with = "String")]
     pub retention: Duration,
 
     #[serde(default)]
@@ -371,16 +376,7 @@ impl Default for LogConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
-pub enum ConfigProviderKind {
-    #[serde(rename = "file")]
-    File,
-    #[serde(rename = "database")]
-    #[default]
-    Database,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct WarpgateConfigStore {
     #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
@@ -392,6 +388,7 @@ pub struct WarpgateConfigStore {
     pub external_host: Option<String>,
 
     #[serde(default = "_default_database_url")]
+    #[schemars(with = "String")]
     pub database_url: Secret<String>,
 
     #[serde(default)]
@@ -408,9 +405,6 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
-
-    #[serde(default)]
-    pub config_provider: ConfigProviderKind,
 }
 
 impl Default for WarpgateConfigStore {
@@ -425,7 +419,6 @@ impl Default for WarpgateConfigStore {
             mysql: <_>::default(),
             postgres: <_>::default(),
             log: <_>::default(),
-            config_provider: <_>::default(),
         }
     }
 }

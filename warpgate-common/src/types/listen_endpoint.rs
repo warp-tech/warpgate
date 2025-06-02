@@ -5,13 +5,14 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use futures::stream::{iter, FuturesUnordered};
 use futures::{Stream, StreamExt, TryStreamExt};
 use poem::listener::Listener;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 
 use crate::WarpgateError;
 
-#[derive(Clone)]
+#[derive(Clone, JsonSchema)]
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {

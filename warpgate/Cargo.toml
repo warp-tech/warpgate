@@ -3,6 +3,15 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate"
 version = "0.14.0"
+default-run = "warpgate"
+
+[[bin]]
+name = "warpgate"
+path = "src/main.rs"
+
+[[bin]]
+name = "config-schema"
+path = "src/config_schema.rs"
 
 [dependencies]
 ansi_term = "0.12"
@@ -39,6 +48,7 @@ warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
+schemars.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = "0.4"
