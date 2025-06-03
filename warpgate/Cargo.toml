@@ -14,7 +14,7 @@ config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.15", default-features = false }
 console-subscriber = { version = "0.4", optional = true }
 data-encoding.workspace = true
-dialoguer = "0.11"
+dialoguer.workspace = true
 enum_dispatch.workspace = true
 futures.workspace = true
 notify = "8.0"

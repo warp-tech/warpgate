@@ -5448,6 +5448,7 @@ dependencies = [
  "bytes",
  "chrono",
  "data-encoding",
+ "dialoguer",
  "enum_dispatch",
  "futures",
  "humantime-serde",
