@@ -3,7 +3,9 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tracing::*;
-use warpgate_common::{configure_tls_connector, TargetMySqlOptions, TlsMode};
+use warpgate_common::{
+    configure_tls_connector, Target, TargetMySqlOptions, TlsMode, WarpgateVerifierOptions,
+};
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
@@ -54,14 +56,16 @@ impl Default for ConnectionOptions {
 
 impl MySqlClient {
     pub async fn connect(
-        target: &TargetMySqlOptions,
+        target_options: &TargetMySqlOptions,
+        target: &Target,
         mut options: ConnectionOptions,
     ) -> Result<Self, MySqlError> {
-        let mut stream =
-            MySqlStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let mut stream = MySqlStream::new(
+            TcpStream::connect((target_options.host.clone(), target_options.port)).await?,
+        );
 
         options.capabilities.remove(Capabilities::SSL);
-        if target.tls.mode != TlsMode::Disabled {
+        if target_options.tls.mode != TlsMode::Disabled {
             options.capabilities |= Capabilities::SSL;
         }
 
@@ -71,20 +75,19 @@ impl MySqlClient {
         let handshake = Handshake::decode(payload)?;
 
         options.capabilities &= handshake.server_capabilities;
-        if target.tls.mode == TlsMode::Required && !options.capabilities.contains(Capabilities::SSL)
+        if target_options.tls.mode == TlsMode::Required
+            && !options.capabilities.contains(Capabilities::SSL)
         {
             return Err(MySqlError::TlsNotSupported);
         }
 
         info!(capabilities=?options.capabilities, "Target handshake");
 
-        if options.capabilities.contains(Capabilities::SSL) && target.tls.mode != TlsMode::Disabled
+        if options.capabilities.contains(Capabilities::SSL)
+            && target_options.tls.mode != TlsMode::Disabled
         {
-            let accept_invalid_certs = !target.tls.verify;
-            let accept_invalid_hostname = false; // ca + hostname verification
             let client_config = Arc::new(
-                configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
-                    .await?,
+                configure_tls_connector(WarpgateVerifierOptions::from_target(&target)).await?,
             );
             let req = SslRequest {
                 collation: options.collation,
@@ -94,7 +97,7 @@ impl MySqlClient {
             stream.flush().await?;
             stream = stream
                 .upgrade((
-                    target
+                    target_options
                         .host
                         .clone()
                         .try_into()
@@ -111,7 +114,7 @@ impl MySqlClient {
             collation: options.collation,
             database: options.database,
             max_packet_size: options.max_packet_size,
-            username: target.username.clone(),
+            username: target_options.username.clone(),
         };
 
         if handshake.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
@@ -130,7 +133,7 @@ impl MySqlClient {
                         BytesMut::from(
                             compute_auth_challenge_response(
                                 scramble,
-                                target.password.as_deref().unwrap_or(""),
+                                target_options.password.as_deref().unwrap_or(""),
                             )
                             .map_err(MySqlError::other)?
                             .as_bytes(),

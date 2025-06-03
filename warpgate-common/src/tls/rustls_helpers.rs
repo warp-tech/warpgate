@@ -1,14 +1,15 @@
-use std::io::Cursor;
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+pub use rustls::pki_types::CertificateDer;
+use rustls::pki_types::{ServerName, UnixTime};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
 
 use super::{RustlsSetupError, ROOT_CERT_STORE};
+use crate::{Target, TargetOptions, Tls};
 
 #[derive(Debug)]
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);
@@ -20,106 +21,89 @@ impl ResolvesServerCert for ResolveServerCert {
 }
 
 pub async fn configure_tls_connector(
-    accept_invalid_certs: bool,
-    accept_invalid_hostnames: bool,
-    root_cert: Option<&[u8]>,
+    options: WarpgateVerifierOptions,
 ) -> Result<ClientConfig, RustlsSetupError> {
     let config = ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
     .with_safe_default_protocol_versions()?;
 
-    let config = if accept_invalid_certs {
-        config
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier))
-            .with_no_client_auth()
-    } else {
-        let mut cert_store = ROOT_CERT_STORE.clone();
+    let verifier = WarpgateVerifier::new(options)?;
 
-        if let Some(data) = root_cert {
-            let mut cursor = Cursor::new(data);
-
-            for cert in rustls_pemfile::certs(&mut cursor)? {
-                cert_store.add(CertificateDer::from(cert))?;
-            }
-        }
-
-        if accept_invalid_hostnames {
-            let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store)).build()?;
-
-            config
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-                .with_no_client_auth()
-        } else {
-            config
-                .with_root_certificates(cert_store)
-                .with_no_client_auth()
-        }
-    };
+    let config = config
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
 
     Ok(config)
 }
 
-#[derive(Debug)]
-pub struct DummyTlsVerifier;
+pub struct WarpgateVerifierOptions {
+    pub accept_invalid_certs: bool,
+    pub accept_invalid_hostnames: bool,
+    pub additional_trusted_certificates: Vec<CertificateDer<'static>>,
+}
 
-impl ServerCertVerifier for DummyTlsVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
+impl WarpgateVerifierOptions {
+    pub fn from_target(target: &Target) -> Self {
+        match &target.options {
+            TargetOptions::Http(options) => {
+                Self::from_tls_and_cert(&options.tls, &target.trusted_tls_certificate)
+            }
+            TargetOptions::MySql(options) => {
+                Self::from_tls_and_cert(&options.tls, &target.trusted_tls_certificate)
+            }
+            TargetOptions::Postgres(options) => {
+                Self::from_tls_and_cert(&options.tls, &target.trusted_tls_certificate)
+            }
+
+            TargetOptions::Ssh(_) | TargetOptions::WebAdmin(_) => {
+                Self::from_tls_and_cert(&Tls::default(), &None)
+            }
+        }
     }
 
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, TlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, TlsError> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA1,
-            SignatureScheme::ECDSA_SHA1_Legacy,
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP521_SHA512,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-            SignatureScheme::ED448,
-        ]
+    fn from_tls_and_cert(tls: &Tls, cert: &Option<CertificateDer<'static>>) -> Self {
+        Self {
+            accept_invalid_certs: !tls.verify,
+            accept_invalid_hostnames: false,
+            additional_trusted_certificates: cert
+                .as_ref()
+                .map(|c| vec![c.clone()])
+                .unwrap_or_default(),
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct NoHostnameTlsVerifier {
-    verifier: Arc<WebPkiServerVerifier>,
+pub struct WarpgateVerifier {
+    inner: Option<Arc<WebPkiServerVerifier>>,
+    accept_invalid_hostnames: bool,
 }
 
-impl ServerCertVerifier for NoHostnameTlsVerifier {
+impl WarpgateVerifier {
+    pub fn new(options: WarpgateVerifierOptions) -> Result<Self, RustlsSetupError> {
+        if options.accept_invalid_certs {
+            Ok(Self {
+                inner: None,
+                accept_invalid_hostnames: options.accept_invalid_hostnames,
+            })
+        } else {
+            let mut cert_store = ROOT_CERT_STORE.clone();
+
+            for cert in options.additional_trusted_certificates {
+                cert_store.add(cert)?;
+            }
+
+            Ok(Self {
+                inner: Some(WebPkiServerVerifier::builder(Arc::new(cert_store)).build()?),
+                accept_invalid_hostnames: options.accept_invalid_hostnames,
+            })
+        }
+    }
+}
+
+impl ServerCertVerifier for WarpgateVerifier {
     fn verify_server_cert(
         &self,
         end_entity: &CertificateDer<'_>,
@@ -128,14 +112,13 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        match self.verifier.verify_server_cert(
-            end_entity,
-            intermediates,
-            server_name,
-            ocsp_response,
-            now,
-        ) {
-            Err(TlsError::InvalidCertificate(CertificateError::NotValidForName)) => {
+        let Some(inner) = &self.inner else {
+            return Ok(ServerCertVerified::assertion());
+        };
+        match inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now) {
+            Err(TlsError::InvalidCertificate(CertificateError::NotValidForName))
+                if self.accept_invalid_hostnames =>
+            {
                 Ok(ServerCertVerified::assertion())
             }
             res => res,
@@ -148,7 +131,10 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, TlsError> {
-        self.verifier.verify_tls12_signature(message, cert, dss)
+        let Some(inner) = &self.inner else {
+            return Ok(HandshakeSignatureValid::assertion());
+        };
+        inner.verify_tls12_signature(message, cert, dss)
     }
 
     fn verify_tls13_signature(
@@ -157,10 +143,30 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
         cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, TlsError> {
-        self.verifier.verify_tls13_signature(message, cert, dss)
+        let Some(inner) = &self.inner else {
+            return Ok(HandshakeSignatureValid::assertion());
+        };
+        inner.verify_tls13_signature(message, cert, dss)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.verifier.supported_verify_schemes()
+        let Some(inner) = &self.inner else {
+            return vec![
+                SignatureScheme::RSA_PKCS1_SHA1,
+                SignatureScheme::ECDSA_SHA1_Legacy,
+                SignatureScheme::RSA_PKCS1_SHA256,
+                SignatureScheme::ECDSA_NISTP256_SHA256,
+                SignatureScheme::RSA_PKCS1_SHA384,
+                SignatureScheme::ECDSA_NISTP384_SHA384,
+                SignatureScheme::RSA_PKCS1_SHA512,
+                SignatureScheme::ECDSA_NISTP521_SHA512,
+                SignatureScheme::RSA_PSS_SHA256,
+                SignatureScheme::RSA_PSS_SHA384,
+                SignatureScheme::RSA_PSS_SHA512,
+                SignatureScheme::ED25519,
+                SignatureScheme::ED448,
+            ];
+        };
+        inner.supported_verify_schemes()
     }
 }

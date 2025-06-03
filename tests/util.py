@@ -17,9 +17,10 @@ if "GITHUB_ACTION" in os.environ:
     mysql_client_opts = ["--enable-cleartext-plugin"]
 
 
-def alloc_port():
+def alloc_port(desc='unknown'):
     global last_port
     last_port += 1
+    logging.info('Allocating port %d for %s', last_port, desc)
     return last_port
 
 

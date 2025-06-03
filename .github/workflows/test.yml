@@ -45,6 +45,7 @@ jobs:
       - name: Run
         working-directory: tests
         run: |
+          cargo llvm-cov test
           TIMEOUT=120 poetry run ./run.sh
           cargo llvm-cov report --lcov > coverage.lcov
 

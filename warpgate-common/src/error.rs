@@ -5,6 +5,8 @@ use poem_openapi::ApiResponse;
 use uuid::Uuid;
 use warpgate_sso::SsoError;
 
+use crate::RustlsSetupError;
+
 #[derive(thiserror::Error, Debug)]
 pub enum WarpgateError {
     #[error("database error: {0}")]
@@ -39,6 +41,8 @@ pub enum WarpgateError {
     RusshKeys(#[from] russh::keys::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error("rustls setup: {0}")]
+    RustlsSetup(#[from] RustlsSetupError),
 
     #[error("Session end")]
     SessionEnd,

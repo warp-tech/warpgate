@@ -10,7 +10,7 @@ use tokio_rustls::server::TlsStream;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
-use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common::{Secret, Target, TargetOptions, TargetPostgresOptions};
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
 };
@@ -328,7 +328,8 @@ impl PostgresSession {
             handle.set_target(&target).await?;
         }
 
-        self.run_authorized_inner(startup, postgres_options).await
+        self.run_authorized_inner(startup, postgres_options, target)
+            .await
     }
 
     async fn send_error_response(
@@ -347,9 +348,11 @@ impl PostgresSession {
         mut self,
         startup: pgwire::messages::startup::Startup,
         options: TargetPostgresOptions,
+        target: Target,
     ) -> Result<(), PostgresError> {
         let mut client = match PostgresClient::connect(
             &options,
+            &target,
             ConnectionOptions {
                 protocol_number_major: startup.protocol_number_major,
                 protocol_number_minor: startup.protocol_number_minor,

@@ -9,7 +9,7 @@ impl MigrationName for Migration {
     }
 }
 
-use crate::m00007_targets_and_roles::target;
+pub use crate::m00007_targets_and_roles::target;
 use crate::m00008_users::user;
 
 pub mod role {
