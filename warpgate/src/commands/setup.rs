@@ -5,7 +5,7 @@ use std::io::Write;
 use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
@@ -31,7 +31,8 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
             .default(format!("{default:?}"))
             .with_prompt(prompt)
             .interact_text()
-            .and_then(|v| v.to_socket_addrs());
+            .context("dialoguer")
+            .and_then(|v| v.to_socket_addrs().context("address resolution"));
         match v {
             Ok(mut addr) => match addr.next() {
                 Some(addr) => return ListenEndpoint::from(addr),

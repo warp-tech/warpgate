@@ -40,8 +40,8 @@ pub async fn configure_tls_connector(
         if let Some(data) = root_cert {
             let mut cursor = Cursor::new(data);
 
-            for cert in rustls_pemfile::certs(&mut cursor)? {
-                cert_store.add(CertificateDer::from(cert))?;
+            for cert in rustls_pemfile::certs(&mut cursor) {
+                cert_store.add(CertificateDer::from(cert?))?;
             }
         }
 

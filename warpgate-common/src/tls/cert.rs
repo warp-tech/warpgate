@@ -33,12 +33,10 @@ impl TlsCertificateBundle {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let certificates = rustls_pemfile::certs(&mut &bytes[..]).map(|mut certs| {
-            certs
-                .drain(..)
-                .map(CertificateDer::from)
-                .collect::<Vec<CertificateDer>>()
-        })?;
+        let certificates = rustls_pemfile::certs(&mut &bytes[..])
+            .map(|r| r.map(CertificateDer::from))
+            .collect::<Result<Vec<CertificateDer<'static>>, _>>()?;
+
         if certificates.is_empty() {
             return Err(RustlsSetupError::NoCertificates);
         }
@@ -58,24 +56,22 @@ impl TlsPrivateKey {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let mut key = rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice())?
-            .drain(..)
-            .next()
-            .and_then(|x| PrivateKeyDer::try_from(x).ok());
-
-        if key.is_none() {
-            key = rustls_pemfile::ec_private_keys(&mut bytes.as_slice())?
-                .drain(..)
-                .next()
-                .and_then(|x| PrivateKeyDer::try_from(x).ok());
+        let key = match rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice()).next() {
+            Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+            _ => None,
         }
-
-        if key.is_none() {
-            key = rustls_pemfile::rsa_private_keys(&mut bytes.as_slice())?
-                .drain(..)
-                .next()
-                .and_then(|x| PrivateKeyDer::try_from(x).ok());
-        }
+        .or_else(
+            || match rustls_pemfile::ec_private_keys(&mut bytes.as_slice()).next() {
+                Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+                _ => None,
+            },
+        )
+        .or_else(
+            || match rustls_pemfile::rsa_private_keys(&mut bytes.as_slice()).next() {
+                Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+                _ => None,
+            },
+        );
 
         let key = key.ok_or(RustlsSetupError::NoKeys)?;
         let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;

@@ -655,6 +655,7 @@ impl RemoteClient {
             }
             AuthResult::Failure {
                 remaining_methods: methods,
+                ..
             } => {
                 debug!("Initial auth failed, checking remaining methods");
                 for method in methods.iter() {
@@ -693,6 +694,7 @@ impl RemoteClient {
                             }
                             KeyboardInteractiveAuthResponse::Failure {
                                 remaining_methods: _remaining_methods,
+                                ..
                             } => {
                                 debug!("keyboard-interactive challenge failed");
                                 return Ok(false);

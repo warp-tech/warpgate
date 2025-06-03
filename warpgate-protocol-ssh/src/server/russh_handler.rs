@@ -193,9 +193,7 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        Ok(rx.await.unwrap_or(Auth::Reject {
-            proceed_with_methods: None,
-        }))
+        Ok(rx.await.unwrap_or(Auth::reject()))
     }
 
     async fn auth_publickey(

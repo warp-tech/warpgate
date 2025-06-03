@@ -14,9 +14,9 @@ tracing.workspace = true
 uuid = { version = "1.2" }
 bytes.workspace = true
 rustls.workspace = true
-rustls-pemfile = "1.0"
+rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
-thiserror = "1.0"
+thiserror.workspace = true
 rustls-native-certs = "0.8"
 pgwire = { version = "0.28" }
 rsasl = { version = "2.1.0", default-features = false, features = ["config_builder", "scram-sha-2", "std", "plain", "provider"] }
