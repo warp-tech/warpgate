@@ -34,7 +34,6 @@ impl TlsCertificateBundle {
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
         let certificates = rustls_pemfile::certs(&mut &bytes[..])
-            .map(|r| r.map(CertificateDer::from))
             .collect::<Result<Vec<CertificateDer<'static>>, _>>()?;
 
         if certificates.is_empty() {
@@ -57,18 +56,18 @@ impl TlsPrivateKey {
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
         let key = match rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice()).next() {
-            Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+            Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
             _ => None,
         }
         .or_else(
             || match rustls_pemfile::ec_private_keys(&mut bytes.as_slice()).next() {
-                Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
                 _ => None,
             },
         )
         .or_else(
             || match rustls_pemfile::rsa_private_keys(&mut bytes.as_slice()).next() {
-                Some(Ok(key)) => PrivateKeyDer::try_from(key).ok(),
+                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
                 _ => None,
             },
         );
