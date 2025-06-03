@@ -1299,7 +1299,7 @@ impl ServerSession {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
                 partial_success: false,
             },
-            _ => russh::server::Auth::reject()
+            _ => russh::server::Auth::reject(),
         }
     }
 
