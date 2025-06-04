@@ -7,7 +7,7 @@ version = "0.14.0"
 [dependencies]
 bytes.workspace = true
 thiserror.workspace = true
-tokio = { version = "1.20", features = ["tracing", "macros"] }
+tokio.workspace = true
 tracing.workspace = true
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
@@ -15,8 +15,8 @@ openidconnect = { version = "4.0", default-features = false, features = [
 ] }
 serde.workspace = true
 serde_json.workspace = true
-once_cell = "1.17"
-jsonwebtoken = "9"
+once_cell = { version = "1.17", default-features = false }
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 data-encoding.workspace = true
 futures.workspace = true
 schemars.workspace = true

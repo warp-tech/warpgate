@@ -12,10 +12,10 @@ cookie = "0.18"
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
-http = "1.0"
-once_cell = "1.17"
+http = { version = "1.0", default-features = false }
+once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
-poem-openapi = { version = "5.1", features = ["swagger-ui"] }
+poem-openapi = { version = "5.1", features = ["swagger-ui"], default-features = false }
 reqwest = { version = "0.12", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
     "rustls-tls-native-roots-no-provider",
@@ -24,16 +24,16 @@ reqwest = { version = "0.12", features = [
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.20", features = ["tracing", "signal"] }
-tokio-tungstenite = { version = "0.25", features = ["rustls-tls-native-roots"] }
+tokio.workspace = true
+tokio-tungstenite = { version = "0.25", features = ["rustls-tls-native-roots"], default-features = false }
 tracing.workspace = true
-warpgate-admin = { version = "*", path = "../warpgate-admin" }
-warpgate-common = { version = "*", path = "../warpgate-common" }
-warpgate-core = { version = "*", path = "../warpgate-core" }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
-warpgate-web = { version = "*", path = "../warpgate-web" }
-warpgate-sso = { version = "*", path = "../warpgate-sso" }
-percent-encoding = "2.1"
-uuid = { version = "1.3", features = ["v4"] }
-regex = "1.6"
-url = "2.4"
+warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
+warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
+warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }
+warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
+percent-encoding = { version = "2.1", default-features = false }
+uuid = { version = "1.3", features = ["v4"], default-features = false }
+regex = { version = "1.6", default-features = false }
+url = { version = "2.4", default-features = false }

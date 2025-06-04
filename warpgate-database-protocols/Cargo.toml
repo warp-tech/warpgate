@@ -12,7 +12,7 @@ authors = [
 ]
 
 [dependencies]
-tokio = { version = "1.20", features = ["io-util"] }
+tokio.workspace = true
 bitflags = { version = "2", default-features = false }
 bytes.workspace = true
 futures-core = { version = "0.3", default-features = false }
