@@ -12,12 +12,12 @@ bytes.workspace = true
 clap = { version = "4.0", features = ["derive"] }
 config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.15", default-features = false }
-console-subscriber = { version = "0.1", optional = true }
+console-subscriber = { version = "0.4", optional = true }
 data-encoding.workspace = true
-dialoguer = "0.10"
+dialoguer.workspace = true
 enum_dispatch.workspace = true
 futures.workspace = true
-notify = "5.1"
+notify = "8.0"
 rcgen = { version = "0.13", features = ["zeroize"] }
 rustls.workspace = true
 serde_json.workspace = true

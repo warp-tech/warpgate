@@ -18,6 +18,8 @@ pub enum TargetTestError {
     Misconfigured(String),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error("dialoguer: {0}")]
+    Dialoguer(#[from] dialoguer::Error),
 }
 
 pub trait ProtocolServer {

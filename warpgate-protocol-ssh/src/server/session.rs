@@ -1297,10 +1297,9 @@ impl ServerSession {
         match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
-            _ => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            _ => russh::server::Auth::reject(),
         }
     }
 
@@ -1341,14 +1340,17 @@ impl ServerSession {
             }
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(MethodSet::all()),
+                partial_success: false,
             },
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }
@@ -1367,16 +1369,16 @@ impl ServerSession {
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }
@@ -1409,9 +1411,7 @@ impl ServerSession {
 
         match self.try_auth_lazy(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
                 if kinds.contains(&CredentialKind::Totp) {
                     self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
@@ -1424,6 +1424,7 @@ impl ServerSession {
                     let Some(auth_state) = self.auth_state.as_ref() else {
                         return russh::server::Auth::Reject {
                             proceed_with_methods: None,
+                            partial_success: false,
                         };
                     };
                     let identification_string =
@@ -1448,6 +1449,7 @@ impl ServerSession {
                             error!(?error, "Failed to construct external URL");
                             return russh::server::Auth::Reject {
                                 proceed_with_methods: None,
+                                partial_success: false,
                             };
                         }
                     };
@@ -1474,6 +1476,7 @@ impl ServerSession {
                 } else {
                     russh::server::Auth::Reject {
                         proceed_with_methods: None,
+                        partial_success: false,
                     }
                 }
             }
@@ -1481,6 +1484,7 @@ impl ServerSession {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }

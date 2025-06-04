@@ -18,12 +18,12 @@ uuid = { version = "1.3", features = ["v4"] }
 bytes.workspace = true
 mysql_common = { version = "0.34", default-features = false }
 flate2 = { version = "1", features = ["zlib"] } # flate2 requires a backend selection feature, but mysql_common does not depend on any when default-features = false
-rand = "0.8"
+rand.workspace = true
 sha1 = "0.10"
 password-hash.workspace = true
 rustls.workspace = true
-rustls-pemfile = "1.0"
+rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
-thiserror = "1.0"
+thiserror.workspace = true
 webpki = "0.22"
 once_cell = "1.17"
