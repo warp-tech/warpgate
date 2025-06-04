@@ -23,13 +23,10 @@
 # dependencies not shared by any other crates, would be ignored, as the target
 # list here is effectively saying which targets you are building for.
 targets = [
-    # The triple can be any string, but only the target triples built in to
-    # rustc (as of 1.40) can be checked against actual config expressions
-    #"x86_64-unknown-linux-musl",
-    # You can also specify which target_features you promise are enabled for a
-    # particular target. target_features are currently not validated against
-    # the actual valid features supported by the target architecture.
-    #{ triple = "wasm32-unknown-unknown", features = ["atomics"] },
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
 ]
 # When creating the dependency graph used as the source of truth when checks are
 # executed, this field can be used to prune crates from the graph, removing them
@@ -101,7 +98,7 @@ highlight = "all"
 # The default lint level for `default` features for crates that are members of
 # the workspace that is being checked. This can be overridden by allowing/denying
 # `default` on a crate-by-crate basis if desired.
-workspace-default-features = "allow"
+workspace-default-features = "warn"
 # The default lint level for `default` features for external crates that are not
 # members of the workspace. This can be overridden by allowing/denying `default`
 # on a crate-by-crate basis if desired.
