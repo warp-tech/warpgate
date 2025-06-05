@@ -9,7 +9,7 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
         OpenApiService::new(crate::api::get(), "Warpgate admin API", warpgate_version())
             .server("/@warpgate/admin/api");
 
-    let ui = api_service.swagger_ui();
+    let ui = api_service.stoplight_elements();
     let spec = api_service.spec_endpoint();
     let db = services.db.clone();
     let config = services.config.clone();
@@ -19,7 +19,7 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
 
     Route::new()
         .nest("", api_service)
-        .nest("/swagger", ui)
+        .nest("/playground", ui)
         .nest("/openapi.json", spec)
         .at(
             "/recordings/:id/cast",

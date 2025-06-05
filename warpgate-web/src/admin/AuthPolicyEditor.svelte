@@ -55,7 +55,6 @@ let activeTips: string[] = $derived.by(() => {
     return result
 })
 
-let isAny = $state(false)
 const validCredentials = $derived.by(() => {
     let vc = new Set<CredentialKind>()
     vc = new Set(existingCredentials.map(x => x.kind as CredentialKind))
@@ -63,9 +62,7 @@ const validCredentials = $derived.by(() => {
     return vc
 })
 
-$effect(() => {
-    isAny = !value[protocolId]
-})
+let isAny = $derived(!value[protocolId])
 
 function updateAny () {
     if (isAny) {
@@ -97,7 +94,7 @@ function toggle (type: CredentialKind) {
         on:change={updateAny}
     />
     {#if !isAny}
-        {#each [...validCredentials] as type}
+        {#each [...validCredentials] as type (type)}
             {#if possibleCredentials.has(type)}
                 <Input
                     id={'policy-editor-' + protocolId + type}
@@ -111,7 +108,7 @@ function toggle (type: CredentialKind) {
     {/if}
 </div>
 
-{#each activeTips as tip}
+{#each activeTips as tip (tip)}
     <div class="text-muted d-flex align-items-center mt-2">
         <Fa icon={faInfoCircle} class="me-2" />
         <small>{tip}</small>

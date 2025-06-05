@@ -57,8 +57,8 @@
 <div class="d-flex">
     <FormGroup floating label="Authenticate using" class="w-100">
         <select bind:value={options.auth.kind} class="form-control">
-            <option value={'PublicKey'}>Warpgate's own private keys</option>
-            <option value={'Password'}>Password</option>
+            <option value="PublicKey">Warpgate's own private keys</option>
+            <option value="Password">Password</option>
         </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}

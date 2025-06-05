@@ -45,7 +45,7 @@ poem = { version = "3.1", features = [
     "server",
 ], default-features = false }
 poem-openapi = { version = "5.1", features = [
-    "swagger-ui",
+    "stoplight-elements",
     "chrono",
     "uuid",
     "static-files",

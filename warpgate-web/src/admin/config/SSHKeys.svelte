@@ -55,14 +55,15 @@ async function deleteHost (host: SSHKnownHost) {
         <h2>No known hosts</h2>
     {/if}
     <div class="list-group list-group-flush">
-        {#each knownHosts as host}
+        {#each knownHosts as host (host.id)}
             <div class="list-group-item">
                 <div class="d-flex">
                     <strong>
                         {host.host}:{host.port}
                     </strong>
 
-                    <a class="ms-auto" href={''} onclick={e => {
+                    <!-- svelte-ignore a11y_invalid_attribute -->
+                    <a class="ms-auto" href="" onclick={e => {
                         e.preventDefault()
                         deleteHost(host)
                     }}>Delete</a>

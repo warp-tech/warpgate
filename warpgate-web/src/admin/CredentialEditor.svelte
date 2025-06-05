@@ -238,7 +238,7 @@
         />
     {/if}
     <div class="list-group list-group-flush mb-3">
-        {#each credentials as credential}
+        {#each credentials as credential (credential.id)}
         <div class="list-group-item credential">
             {#if credential.kind === CredentialKind.Password }
                 <Fa fw icon={faKeyboard} />
@@ -269,9 +269,10 @@
             {/if}
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
+            <!-- svelte-ignore a11y_invalid_attribute -->
             <a
                 class="ms-2"
-                href={''}
+                href=""
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
@@ -286,9 +287,10 @@
                 Change
             </a>
             {/if}
+            <!-- svelte-ignore a11y_invalid_attribute -->
             <a
                 class="ms-2"
-                href={''}
+                href=""
                 onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()
@@ -301,7 +303,7 @@
 
     <h4>Auth policy</h4>
     <div class="list-group list-group-flush mb-3">
-        {#each policyProtocols as protocol}
+        {#each policyProtocols as protocol (protocol)}
         <div class="list-group-item">
             <div class="mb-1">
                 <strong>{protocol.name}</strong>
