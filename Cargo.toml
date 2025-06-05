@@ -42,6 +42,14 @@ poem = { version = "3.1", features = [
     "websocket",
     "rustls",
     "embed",
+    "server",
+], default-features = false }
+poem-openapi = { version = "5.1", features = [
+    "swagger-ui",
+    "chrono",
+    "uuid",
+    "static-files",
+    "cookie",
 ], default-features = false }
 password-hash = { version = "0.5", features = ["std"], default-features = false }
 delegate = { version = "0.13", default-features = false }

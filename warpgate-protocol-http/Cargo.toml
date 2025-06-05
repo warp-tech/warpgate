@@ -15,7 +15,7 @@ futures.workspace = true
 http = { version = "1.0", default-features = false }
 once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
-poem-openapi = { version = "5.1", features = ["swagger-ui"], default-features = false }
+poem-openapi.workspace = true
 reqwest = { version = "0.12", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
     "rustls-tls-native-roots-no-provider",

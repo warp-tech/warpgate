@@ -13,12 +13,7 @@ futures.workspace = true
 hex = { version = "0.4", default-features = false }
 mime_guess = { version = "2.0", default-features = false }
 poem.workspace = true
-poem-openapi = { version = "5.1", features = [
-    "swagger-ui",
-    "chrono",
-    "uuid",
-    "static-files",
-], default-features = false }
+poem-openapi.workspace = true
 russh.workspace = true
 rust-embed = { version = "8.3", default-features = false }
 sea-orm.workspace = true

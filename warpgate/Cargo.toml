@@ -27,6 +27,7 @@ time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = [
+    "ansi",
     "env-filter",
     "local-time",
 ], default-features = false }

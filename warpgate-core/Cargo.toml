@@ -23,12 +23,7 @@ once_cell = "1.17"
 packet = "0.1"
 password-hash.workspace = true
 poem.workspace = true
-poem-openapi = { version = "5.1", features = [
-    "swagger-ui",
-    "chrono",
-    "uuid",
-    "static-files",
-], default-features = false }
+poem-openapi.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true

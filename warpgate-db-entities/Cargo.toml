@@ -7,7 +7,7 @@ version = "0.14.0"
 [dependencies]
 bytes = { version = "1.4", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
-poem-openapi = { version = "5.1", features = ["chrono", "uuid"], default-features = false }
+poem-openapi.workspace = true
 sqlx.workspace = true
 sea-orm = { workspace = true, features = [
     "macros",
