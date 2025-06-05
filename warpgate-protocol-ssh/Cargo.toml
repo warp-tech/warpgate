@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-ssh"
-version = "0.14.0"
+version = "0.14.1"
 
 [dependencies]
 ansi_term = { version = "0.12", default-features = false }
