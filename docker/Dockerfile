@@ -12,7 +12,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 COPY . /opt/warpgate
 
 # Needed to correctly embed the version number and the dirty state flag
-COPY .git /opt/warpgate
+COPY .git/ /opt/warpgate/.git/
 
 # for rust-embed determinism
 ENV SOURCE_DATE_EPOCH=0
