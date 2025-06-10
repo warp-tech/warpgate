@@ -20,6 +20,7 @@ reqwest = { version = "0.12", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
     "rustls-tls-native-roots-no-provider",
     "stream",
+    "gzip",
 ], default-features = false }
 sea-orm.workspace = true
 serde.workspace = true

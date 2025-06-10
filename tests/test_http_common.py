@@ -1,3 +1,4 @@
+import gzip
 import pytest
 import threading
 
@@ -6,7 +7,7 @@ from .util import alloc_port
 
 @pytest.fixture(scope="session")
 def echo_server_port():
-    from flask import Flask, request, jsonify, redirect
+    from flask import Flask, request, jsonify, redirect, make_response
     from flask_sock import Sock
 
     app = Flask(__name__)
@@ -33,6 +34,15 @@ def echo_server_port():
                 "headers": request.headers.to_wsgi_list(),
             }
         )
+
+    @app.route("/gzip-response")
+    def gzip_response():
+        content = gzip.compress(b'response', 5)
+        response = make_response(content)
+        response.headers['Content-Length'] = len(content)
+        response.headers['Content-Encoding'] = 'gzip'
+        return response
+
 
     @sock.route("/socket")
     def ws_echo(ws):

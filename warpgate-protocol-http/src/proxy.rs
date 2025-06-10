@@ -264,6 +264,7 @@ pub async fn proxy_normal_request(
     tracing::debug!("URI: {:?}", uri);
 
     let mut client = reqwest::Client::builder()
+        .gzip(true)
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
