@@ -8,12 +8,12 @@ use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
+use warpgate_common::version::warpgate_version;
 
 use crate::config::load_config;
 
 #[derive(clap::Parser)]
-#[clap(author, version, about, long_about = None)]
-#[clap(propagate_version = true)]
+#[clap(author, about, long_about = None)]
 pub struct Cli {
     #[clap(subcommand)]
     command: Commands,
@@ -91,6 +91,8 @@ pub(crate) enum Commands {
         #[clap(action=ArgAction::Set)]
         username: Option<String>,
     },
+    /// Show version information
+    Version,
 }
 
 async fn _main() -> Result<()> {
@@ -104,6 +106,10 @@ async fn _main() -> Result<()> {
         .unwrap();
 
     match &cli.command {
+        Commands::Version => {
+            println!("warpgate {}", warpgate_version());
+            return Ok(());
+        }
         Commands::Run { enable_admin_token } => {
             crate::commands::run::command(&cli, *enable_admin_token).await
         }
