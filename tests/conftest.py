@@ -349,7 +349,7 @@ def report_generation():
             "--all-features",
             "--no-report",
             "--",
-            "--version",
+            "version",
         ],
         cwd=cargo_root,
     )

@@ -19,7 +19,6 @@ data
 config.*.yaml
 config.yaml
 
-.git
 warpgate-web/dist
 warpgate-web/node_modules
 warpgate-web/src/admin/lib/api-client/
