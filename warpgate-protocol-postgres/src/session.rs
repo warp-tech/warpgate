@@ -91,31 +91,7 @@ impl PostgresSession {
         self.username = username.clone();
         self.database = startup.parameters.get("database").cloned();
 
-        let password = if let AuthSelector::Ticket { .. } =
-            AuthSelector::from(username.as_deref().unwrap_or(""))
-        {
-            Secret::from("".to_string())
-        } else {
-            self.stream
-                .push(pgwire::messages::startup::Authentication::CleartextPassword)?;
-            self.stream.flush().await?;
-
-            let Some(PgWireGenericFrontendMessage(PgWireFrontendMessage::PasswordMessageFamily(
-                message,
-            ))) = self.stream.recv::<PgWireGenericFrontendMessage>().await?
-            else {
-                return Err(PostgresError::Eof);
-            };
-
-            Secret::from(
-                message
-                    .into_password()
-                    .map_err(PostgresError::from)?
-                    .password,
-            )
-        };
-
-        self.run_authorization(startup, &username.unwrap_or("".into()), password)
+        self.run_authorization(startup, &username.unwrap_or("".into()))
             .await
     }
 
@@ -123,7 +99,6 @@ impl PostgresSession {
         mut self,
         startup: pgwire::messages::startup::Startup,
         username: &String,
-        password: Secret<String>,
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
 
@@ -159,17 +134,6 @@ impl PostgresSession {
                     .await?
                     .1;
 
-                {
-                    let mut state = state_arc.lock().await;
-
-                    let credential = AuthCredential::Password(password);
-
-                    let mut cp = self.services.config_provider.lock().await;
-                    if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
-                    }
-                }
-
                 let mut auth_ok_sent = false;
 
                 loop {
@@ -204,8 +168,44 @@ impl PostgresSession {
                             return self.run_authorized(startup, username, target_name).await;
                         }
                         AuthResult::Need(kinds) => {
-                            if kinds.len() == 1 && kinds.contains(&CredentialKind::WebUserApproval)
-                            {
+                            if kinds.contains(&CredentialKind::Password) {
+                                self.stream.push(
+                                    pgwire::messages::startup::Authentication::CleartextPassword,
+                                )?;
+                                self.stream.flush().await?;
+
+                                let Some(PgWireGenericFrontendMessage(
+                                    PgWireFrontendMessage::PasswordMessageFamily(message),
+                                )) = self.stream.recv::<PgWireGenericFrontendMessage>().await?
+                                else {
+                                    return Err(PostgresError::Eof);
+                                };
+
+                                let password = Secret::from(
+                                    message
+                                        .into_password()
+                                        .map_err(PostgresError::from)?
+                                        .password,
+                                );
+
+                                let mut state = state_arc.lock().await;
+
+                                let credential = AuthCredential::Password(password);
+
+                                if {
+                                    self.services
+                                        .config_provider
+                                        .lock()
+                                        .await
+                                        .validate_credential(&username, &credential)
+                                        .await?
+                                } {
+                                    state.add_valid_credential(credential);
+                                } else {
+                                    // Postgres CLI will just send the same password in a loop without prompting the user again
+                                    return fail(&mut self).await;
+                                }
+                            } else if kinds.contains(&CredentialKind::WebUserApproval) {
                                 // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
 
                                 let identification_string =

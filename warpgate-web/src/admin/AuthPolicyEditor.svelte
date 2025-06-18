@@ -32,10 +32,6 @@ const labels = {
 const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     postgres: new Map([
         [
-            [CredentialKind.Password, false],
-            'Since the PostgreSQL protocol requires a password, the user can just supply an empty password when connecting.',
-        ],
-        [
             [CredentialKind.WebUserApproval, true],
             'Not all clients will show the 2FA auth prompt. The user might need to log in to the Warpgate UI to see the prompt.',
         ],

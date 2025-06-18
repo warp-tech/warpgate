@@ -91,6 +91,9 @@ class Test:
             stdout=subprocess.PIPE,
         )
 
+        # First message comes as soon as an authstate is created
+        msg = await ws.receive(5)
+        # Second message is once password is accepted
         msg = await ws.receive(5)
 
         auth_id = msg.data
