@@ -91,12 +91,15 @@ class Test:
             stdout=subprocess.PIPE,
         )
 
+        # First message comes as soon as an authstate is created
+        msg = await ws.receive(5)
+        # Second message is once password is accepted
         msg = await ws.receive(5)
 
         auth_id = msg.data
         auth_state = await (await session.get(f'{url}/@warpgate/api/auth/state/{auth_id}', ssl=False)).json()
         assert auth_state['protocol'] == 'PostgreSQL'
-        # auth_state['state'] is undefined at this point as it might not have processed the password yet
+        assert auth_state['state'] == 'WebUserApprovalNeeded'
         r = await session.post(f'{url}/@warpgate/api/auth/state/{auth_id}/approve', ssl=False)
         assert r.status == 200
 
