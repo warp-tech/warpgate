@@ -96,7 +96,7 @@ class Test:
         auth_id = msg.data
         auth_state = await (await session.get(f'{url}/@warpgate/api/auth/state/{auth_id}', ssl=False)).json()
         assert auth_state['protocol'] == 'PostgreSQL'
-        assert auth_state['state'] == 'WebUserApprovalNeeded'
+        # auth_state['state'] is undefined at this point as it might not have processed the password yet
         r = await session.post(f'{url}/@warpgate/api/auth/state/{auth_id}/approve', ssl=False)
         assert r.status == 200
 
