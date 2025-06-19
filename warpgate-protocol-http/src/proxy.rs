@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_with_config, connect_async_tls_with_config, tungstenite, Connector};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
 use warpgate_common::{configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError};
