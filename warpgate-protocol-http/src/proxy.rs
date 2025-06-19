@@ -434,30 +434,20 @@ async fn proxy_ws_inner(
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
-    let result = if !options.tls.verify {
-        let tls_config = configure_tls_connector(true, true, None)
-            .await
-            .map_err(poem::error::InternalServerError)?;
-        let connector = Connector::Rustls(Arc::new(tls_config));
+    let tls_config = configure_tls_connector(!options.tls.verify, false, None)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+    let connector = Connector::Rustls(Arc::new(tls_config));
 
-        connect_async_tls_with_config(
-            client_request
-                .body(())
-                .map_err(poem::error::InternalServerError)?,
-            None,
-            true,
-            Some(connector),
-        ).await
-    } else {
-        connect_async_with_config(
-            client_request
-                .body(())
-                .map_err(poem::error::InternalServerError)?,
-            None,
-            true,
-        ).await
-    };
-    let (client, client_response) = result.map_err(poem::error::BadGateway)?;
+    let (client, client_response) = connect_async_tls_with_config(
+        client_request
+            .body(())
+            .map_err(poem::error::InternalServerError)?,
+        None,
+        true,
+        Some(connector),
+    ).await
+    .map_err(poem::error::BadGateway)?;
 
     tracing::info!("{:?} {:?} - WebSocket", client_response.status(), uri);
 
