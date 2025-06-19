@@ -446,7 +446,8 @@ async fn proxy_ws_inner(
         None,
         true,
         Some(connector),
-    ).await
+    )
+    .await
     .map_err(poem::error::BadGateway)?;
 
     tracing::info!("{:?} {:?} - WebSocket", client_response.status(), uri);
