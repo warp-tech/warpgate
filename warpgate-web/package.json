@@ -44,7 +44,7 @@
     "eslint-import-resolver-typescript": "^3.7.0",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-promise": "^6",
+    "eslint-plugin-promise": "^7",
     "eslint-plugin-svelte": "^3.9.2",
     "format-duration": "^3.0.2",
     "otpauth": "^9.4.0",
