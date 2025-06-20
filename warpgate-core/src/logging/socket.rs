@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 use chrono::Local;
+use chrono::format::{SecondsFormat};
 use tokio::net::UnixDatagram;
 use tracing::*;
 use tracing_subscriber::registry::LookupSpan;
@@ -32,7 +33,7 @@ where
         if !got_socket || values.contains_key(&SKIP_KEY) {
             return;
         }
-        values.insert("timestamp", Local::now().to_rfc3339());
+        values.insert("timestamp", Local::now().to_rfc3339_opts(SecondsFormat::Nanos, false));
         let _ = tx.try_send(values);
     });
 
