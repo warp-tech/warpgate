@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cookie::Cookie;
@@ -13,10 +14,10 @@ use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_with_config, tungstenite};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
-use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
+use warpgate_common::{configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
@@ -433,12 +434,18 @@ async fn proxy_ws_inner(
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
-    let (client, client_response) = connect_async_with_config(
+    let tls_config = configure_tls_connector(!options.tls.verify, false, None)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+    let connector = Connector::Rustls(Arc::new(tls_config));
+
+    let (client, client_response) = connect_async_tls_with_config(
         client_request
             .body(())
             .map_err(poem::error::InternalServerError)?,
         None,
         true,
+        Some(connector),
     )
     .await
     .map_err(poem::error::BadGateway)?;
