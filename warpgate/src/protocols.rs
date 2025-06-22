@@ -2,6 +2,7 @@ use enum_dispatch::enum_dispatch;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{ProtocolServer, TargetTestError};
 use warpgate_protocol_http::HTTPProtocolServer;
+use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
@@ -13,6 +14,7 @@ pub enum ProtocolServerEnum {
     HTTPProtocolServer,
     MySQLProtocolServer,
     PostgresProtocolServer,
+    KubernetesProtocolServer,
 }
 
 impl ProtocolServer for ProtocolServerEnum {
@@ -22,6 +24,7 @@ impl ProtocolServer for ProtocolServerEnum {
             ProtocolServerEnum::HTTPProtocolServer(s) => s.run(address).await,
             ProtocolServerEnum::MySQLProtocolServer(s) => s.run(address).await,
             ProtocolServerEnum::PostgresProtocolServer(s) => s.run(address).await,
+            ProtocolServerEnum::KubernetesProtocolServer(s) => s.run(address).await,
         }
     }
 
@@ -34,6 +37,7 @@ impl ProtocolServer for ProtocolServerEnum {
             ProtocolServerEnum::HTTPProtocolServer(s) => s.test_target(target).await,
             ProtocolServerEnum::MySQLProtocolServer(s) => s.test_target(target).await,
             ProtocolServerEnum::PostgresProtocolServer(s) => s.test_target(target).await,
+            ProtocolServerEnum::KubernetesProtocolServer(s) => s.test_target(target).await,
         }
     }
 }

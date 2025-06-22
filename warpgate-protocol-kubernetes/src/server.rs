@@ -1,0 +1,517 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use futures::{SinkExt, StreamExt};
+use poem::listener::{Listener, RustlsConfig};
+use poem::web::websocket::{Message, WebSocket};
+use poem::web::{Data, Path};
+use poem::{get, handler, Body, EndpointExt, IntoResponse, Request, Response, Route, Server};
+use sea_orm::{ActiveModelTrait, Set};
+use secrecy::ExposeSecret;
+use tokio::sync::Mutex;
+use tracing::*;
+use warpgate_common::{
+    ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions,
+    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
+use warpgate_core::recordings::SessionRecordings;
+use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
+use warpgate_db_entities::Session;
+
+use crate::client::create_kube_config;
+use crate::recording::KubernetesRecorder;
+
+#[derive(Debug)]
+struct AuthenticatedTarget {
+    target: Target,
+    auth_user: Option<String>,
+}
+
+pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
+    let state = services.state.clone();
+    let auth_state_store = services.auth_state_store.clone();
+    let recordings = services.recordings.clone();
+
+    let app = Route::new()
+        .at("/:target_name/*path", handle_api_request)
+        .at("/:target_name/ws", get(handle_websocket))
+        .with(poem::middleware::Cors::new())
+        .data(state)
+        .data(auth_state_store)
+        .data(recordings)
+        .data(services.clone())
+        .before(|req: Request| async move {
+            info!("Received Kubernetes API request: {}", req.uri());
+            Ok(req)
+        });
+
+    info!(?address, "Kubernetes protocol listening");
+
+    let certificate_and_key = {
+        let config = services.config.lock().await;
+        let certificate_path = config
+            .paths_relative_to
+            .join(&config.store.kubernetes.certificate);
+        let key_path = config.paths_relative_to.join(&config.store.kubernetes.key);
+
+        TlsCertificateAndPrivateKey {
+            certificate: TlsCertificateBundle::from_file(&certificate_path)
+                .await
+                .with_context(|| {
+                    format!("reading TLS private key from '{}'", key_path.display())
+                })?,
+            private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
+                format!(
+                    "reading TLS certificate from '{}'",
+                    certificate_path.display()
+                )
+            })?,
+        }
+    };
+
+    Server::new(
+        address
+            .poem_listener()
+            .await?
+            .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
+    )
+    .run(app)
+    .await
+    .context("Kubernetes server error")?;
+
+    Ok(())
+}
+
+#[handler]
+async fn handle_api_request(
+    req: &Request,
+    Path((target_name, path)): Path<(String, String)>,
+    body: Body,
+    state: Data<&Arc<Mutex<State>>>,
+    _auth_state_store: Data<&Arc<Mutex<AuthStateStore>>>,
+    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    services: Data<&Services>,
+) -> Result<Response, poem::Error> {
+    debug!(
+        target_name = target_name,
+        path_param = ?path,
+        full_uri = %req.uri(),
+        "Handling Kubernetes API request"
+    );
+
+    let target_info = authenticate_and_get_target(req, &target_name, &state, &services).await?;
+
+    let TargetOptions::Kubernetes(k8s_options) = &target_info.target.options else {
+        return Err(poem::Error::from_string(
+            "Invalid target type",
+            poem::http::StatusCode::BAD_REQUEST,
+        ));
+    };
+
+    let client =
+        create_authenticated_client(k8s_options, &target_info.auth_user, &services).await?;
+
+    info!(
+        "Target Kubernetes options: cluster_url={}, auth={:?}",
+        k8s_options.cluster_url,
+        match &k8s_options.auth {
+            warpgate_common::KubernetesTargetAuth::Token(_) => "Token",
+            warpgate_common::KubernetesTargetAuth::Certificate(_) => "Certificate",
+        }
+    );
+
+    let method = req.method().as_str();
+
+    // Extract the API path by removing the target name prefix from the original URI
+    let original_path = req.uri().path();
+    let api_path = if let Some(stripped) = original_path.strip_prefix(&format!("/{}/", target_name))
+    {
+        format!("/{}", stripped)
+    } else if original_path == format!("/{}", target_name) {
+        "/".to_string()
+    } else {
+        // Fallback to the path parameter method
+        format!("/{}", path)
+    };
+
+    let query = req.uri().query().unwrap_or("");
+
+    // Construct the full URL to the Kubernetes API server (without target prefix)
+    let full_url = if query.is_empty() {
+        format!("{}{}", k8s_options.cluster_url, api_path)
+    } else {
+        format!("{}{}?{}", k8s_options.cluster_url, api_path, query)
+    };
+
+    debug!(
+        target_name = target_name,
+        original_path = original_path,
+        api_path = api_path,
+        cluster_url = k8s_options.cluster_url,
+        full_url = full_url,
+        "Constructing upstream Kubernetes API URL"
+    );
+
+    // Extract headers
+    let mut headers = HashMap::new();
+    for (name, value) in req.headers() {
+        if let Ok(value_str) = value.to_str() {
+            headers.insert(name.to_string(), value_str.to_string());
+        }
+    }
+
+    // Get request body
+    let body_bytes = body.into_bytes().await.map_err(|e| {
+        poem::Error::from_string(
+            format!("Failed to read body: {}", e),
+            poem::http::StatusCode::BAD_REQUEST,
+        )
+    })?;
+
+    // Record the request if recording is enabled
+    let mut recorder_opt = {
+        // Check if recording is enabled in the config
+        let config = services.config.lock().await;
+        if config.store.recordings.enable {
+            drop(config);
+
+            // For Kubernetes protocol, we'll create a temporary session since each request is independent
+            // In the future, this could be improved to group related requests by user/target
+            let session_id = uuid::Uuid::new_v4();
+
+            // First create a minimal session record in the database to satisfy foreign key constraints
+            if let Err(e) = create_temporary_session(&session_id, &target_info, &services).await {
+                warn!("Failed to create temporary session for recording: {}", e);
+                None
+            } else {
+                match start_recording(&session_id, &recordings).await {
+                    Ok(recorder) => Some(recorder),
+                    Err(e) => {
+                        warn!("Failed to start recording: {}", e);
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some(ref mut recorder) = recorder_opt {
+        if let Err(e) = recorder
+            .record_request(method, &full_url, headers.clone(), &body_bytes)
+            .await
+        {
+            warn!("Failed to record Kubernetes request: {}", e);
+        }
+    }
+
+    // Forward request to Kubernetes API
+    let mut request_builder = client.request(
+        http::Method::from_bytes(method.as_bytes()).map_err(|e| {
+            poem::Error::from_string(
+                format!("Invalid method: {}", e),
+                poem::http::StatusCode::BAD_REQUEST,
+            )
+        })?,
+        &full_url,
+    );
+
+    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest)
+    let mut upstream_headers = HashMap::new();
+    for (name, value) in &headers {
+        let header_name_lower = name.to_lowercase();
+        if ![
+            "host",
+            "content-length",
+            "connection",
+            "transfer-encoding",
+            "authorization",
+        ]
+        .contains(&header_name_lower.as_str())
+        {
+            if let (Ok(header_name), Ok(header_value)) = (
+                http::HeaderName::from_bytes(name.as_bytes()),
+                http::HeaderValue::from_str(value),
+            ) {
+                request_builder = request_builder.header(header_name, header_value);
+                upstream_headers.insert(name.clone(), value.clone());
+            }
+        } else {
+            debug!(header = name, "Filtering out header from upstream request");
+        }
+    }
+
+    debug!(
+        filtered_headers = ?upstream_headers,
+        "Headers being sent to upstream Kubernetes API"
+    );
+
+    if !body_bytes.is_empty() {
+        request_builder = request_builder.body(body_bytes.to_vec());
+    }
+
+    // Debug logging for upstream request
+    debug!(
+        method = method,
+        url = %full_url,
+        headers = ?headers,
+        body_size = body_bytes.len(),
+        "Sending request to upstream Kubernetes API"
+    );
+
+    let response = request_builder.send().await.map_err(|e| {
+        warn!(
+            method = method,
+            url = %full_url,
+            error = %e,
+            "Kubernetes API request failed"
+        );
+        poem::Error::from_string(
+            format!("Kubernetes API error: {}", e),
+            poem::http::StatusCode::BAD_GATEWAY,
+        )
+    })?;
+
+    let status = response.status();
+    let response_headers = response.headers().clone();
+
+    debug!(
+        method = method,
+        url = %full_url,
+        status = %status,
+        response_headers = ?response_headers,
+        "Received response from upstream Kubernetes API"
+    );
+
+    let response_body = response.bytes().await.map_err(|e| {
+        poem::Error::from_string(
+            format!("Failed to read response: {}", e),
+            poem::http::StatusCode::BAD_GATEWAY,
+        )
+    })?;
+
+    // Record the response
+    if let Some(ref mut recorder) = recorder_opt {
+        if let Err(e) = recorder
+            .record_response(
+                method,
+                &full_url,
+                headers,
+                &body_bytes,
+                status.as_u16(),
+                &response_body,
+            )
+            .await
+        {
+            warn!("Failed to record Kubernetes response: {}", e);
+        }
+    }
+
+    let mut poem_response = Response::builder().status(status);
+
+    // Copy response headers
+    for (name, value) in response_headers.iter() {
+        if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes()) {
+            if let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes()) {
+                poem_response = poem_response.header(poem_name, poem_value);
+            }
+        }
+    }
+
+    Ok(poem_response.body(response_body.to_vec()))
+}
+
+#[handler]
+async fn handle_websocket(
+    Path(_target_name): Path<String>,
+    ws: WebSocket,
+    _state: Data<&Arc<Mutex<State>>>,
+    _auth_state_store: Data<&Arc<Mutex<AuthStateStore>>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| async move {
+        let (mut sink, mut stream) = socket.split();
+
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    // Echo back for now - in a real implementation, this would
+                    // establish a WebSocket connection to the Kubernetes API
+                    if sink.send(Message::Text(text)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Binary(data)) => {
+                    if sink.send(Message::Binary(data)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) => break,
+                Err(_) => break,
+                _ => {}
+            }
+        }
+    })
+}
+
+async fn authenticate_and_get_target(
+    req: &Request,
+    target_name: &str,
+    _state: &Arc<Mutex<State>>,
+    services: &Services,
+) -> Result<AuthenticatedTarget, poem::Error> {
+    // Check for Bearer token authentication (API tokens)
+    if let Some(auth_header) = req.headers().get("authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                let mut config_provider = services.config_provider.lock().await;
+                if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
+                    // Look up the specific target by name from the URL
+                    let targets = config_provider.list_targets().await.map_err(|e| {
+                        poem::Error::from_string(
+                            format!("Failed to list targets: {}", e),
+                            poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        )
+                    })?;
+
+                    // Find the target with the specified name
+                    for target in targets {
+                        if target.name == target_name
+                            && matches!(target.options, TargetOptions::Kubernetes(_))
+                        {
+                            if config_provider
+                                .authorize_target(&user.username, &target.name)
+                                .await
+                                .unwrap_or(false)
+                            {
+                                return Ok(AuthenticatedTarget {
+                                    target,
+                                    auth_user: Some(user.username),
+                                });
+                            } else {
+                                return Err(poem::Error::from_string(
+                                    format!("Access denied to target: {}", target_name),
+                                    poem::http::StatusCode::FORBIDDEN,
+                                ));
+                            }
+                        }
+                    }
+
+                    return Err(poem::Error::from_string(
+                        format!("Kubernetes target not found: {}", target_name),
+                        poem::http::StatusCode::NOT_FOUND,
+                    ));
+                }
+            }
+        }
+    }
+
+    // Check for certificate authentication
+    // This would be handled by TLS client certificate verification at the HTTP layer
+    // For now, return unauthorized if no valid authentication found
+    Err(poem::Error::from_string(
+        "Unauthorized",
+        poem::http::StatusCode::UNAUTHORIZED,
+    ))
+}
+
+async fn create_authenticated_client(
+    k8s_options: &TargetKubernetesOptions,
+    _auth_user: &Option<String>,
+    _services: &Services,
+) -> Result<reqwest::Client, poem::Error> {
+    debug!(
+        server_url = ?k8s_options.cluster_url,
+        auth_kind = ?k8s_options.auth,
+        tls_config = ?k8s_options.tls,
+        "Creating authenticated Kubernetes client"
+    );
+
+    let config = create_kube_config(k8s_options).await.map_err(|e| {
+        warn!(error = %e, "Failed to create kube config");
+        poem::Error::from_string(
+            format!("Kubernetes config error: {}", e),
+            poem::http::StatusCode::BAD_REQUEST,
+        )
+    })?;
+
+    // Create HTTP client with the configuration
+    let mut client_builder = reqwest::Client::builder();
+
+    if config.accept_invalid_certs {
+        client_builder = client_builder.danger_accept_invalid_certs(true);
+    }
+
+    // TODO: Add certificate authentication support
+    // For certificate auth, we would:
+    // 1. Look up the user's certificate credentials from the database
+    // 2. Configure the HTTP client with the certificate and private key
+
+    if let Some(token) = &config.auth_info.token {
+        info!(
+            "Setting Kubernetes auth token: {}...",
+            &token.expose_secret()[..std::cmp::min(10, token.expose_secret().len())]
+        );
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
+                .map_err(|e| {
+                    poem::Error::from_string(
+                        format!("Invalid token: {}", e),
+                        poem::http::StatusCode::BAD_REQUEST,
+                    )
+                })?,
+        );
+        client_builder = client_builder.default_headers(headers);
+    } else {
+        warn!("No Kubernetes auth token configured for target");
+    }
+
+    client_builder.build().map_err(|e| {
+        poem::Error::from_string(
+            format!("Failed to create HTTP client: {}", e),
+            poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )
+    })
+}
+
+async fn create_temporary_session(
+    session_id: &SessionId,
+    target_info: &AuthenticatedTarget,
+    services: &Services,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use chrono::Utc;
+
+    let session_model = Session::ActiveModel {
+        id: Set(*session_id),
+        username: Set(target_info.auth_user.clone()),
+        target_snapshot: Set(Some(serde_json::to_string(&target_info.target)?)),
+        remote_address: Set("kubernetes-api".to_string()), // For API requests, we don't have a real remote address
+        started: Set(Utc::now()),
+        protocol: Set("kubernetes".to_string()),
+        ..Default::default()
+    };
+
+    let db = services.db.lock().await;
+    session_model.insert(&*db).await?;
+
+    Ok(())
+}
+
+async fn start_recording(
+    session_id: &SessionId,
+    recordings: &Arc<Mutex<SessionRecordings>>,
+) -> Result<KubernetesRecorder, poem::Error> {
+    let mut recordings = recordings.lock().await;
+    recordings
+        .start::<KubernetesRecorder>(session_id, "kubernetes-api".to_string())
+        .await
+        .map_err(|e| {
+            poem::Error::from_string(
+                format!("Recording error: {}", e),
+                poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
+}

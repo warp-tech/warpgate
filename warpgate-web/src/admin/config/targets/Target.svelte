@@ -82,7 +82,7 @@
                 Access instructions
             </ModalHeader>
             <ModalBody>
-                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
                     <Loadable promise={api.getUsers()}>
                         {#snippet children(users)}
                             <FormGroup floating label="Select a user">
@@ -107,6 +107,7 @@
                         Http: TargetKind.Http,
                         MySql: TargetKind.MySql,
                         Postgres: TargetKind.Postgres,
+                        Kubernetes: TargetKind.Kubernetes,
                     }[target.options.kind ?? '']}
                     targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
                 />
@@ -138,6 +139,9 @@
                     {/if}
                     {#if target.options.kind === 'Http'}
                         HTTP target
+                    {/if}
+                    {#if target.options.kind === 'Kubernetes'}
+                        Kubernetes target
                     {/if}
                     {#if target.options.kind === 'WebAdmin'}
                         This web admin interface
@@ -200,6 +204,41 @@
                     </FormGroup>
                 </div>
             </div>
+
+            <TlsConfiguration bind:value={target.options.tls} />
+        {/if}
+
+        {#if target.options.kind === 'Kubernetes'}
+            <FormGroup floating label="Cluster URL">
+                <input class="form-control" bind:value={target.options.clusterUrl} placeholder="https://kubernetes.example.com:6443" />
+            </FormGroup>
+
+            <FormGroup floating label="Namespace">
+                <input class="form-control" bind:value={target.options.namespace} placeholder="default" />
+            </FormGroup>
+
+            <h5 class="mt-3">Authentication</h5>
+            <FormGroup floating label="Auth Type">
+                <select class="form-control" bind:value={target.options.auth.kind}>
+                    <option value="Certificate">Certificate</option>
+                    <option value="Token">Token</option>
+                </select>
+            </FormGroup>
+
+            {#if target.options.auth.kind === 'Certificate'}
+                <FormGroup floating label="Client Certificate">
+                    <textarea class="form-control" rows="8" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                </FormGroup>
+                <FormGroup floating label="Client Private Key">
+                    <textarea class="form-control" rows="8" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                </FormGroup>
+            {/if}
+
+            {#if target.options.auth.kind === 'Token'}
+                <FormGroup floating label="Bearer Token">
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth.token} />
+                </FormGroup>
+            {/if}
 
             <TlsConfiguration bind:value={target.options.tls} />
         {/if}

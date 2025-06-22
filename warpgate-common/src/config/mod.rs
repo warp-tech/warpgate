@@ -30,6 +30,8 @@ pub enum UserAuthCredential {
     Password(UserPasswordCredential),
     #[serde(rename = "publickey")]
     PublicKey(UserPublicKeyCredential),
+    #[serde(rename = "certificate")]
+    Certificate(UserCertificateCredential),
     #[serde(rename = "otp")]
     Totp(UserTotpCredential),
     #[serde(rename = "sso")]
@@ -53,6 +55,12 @@ impl UserPasswordCredential {
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserCertificateCredential {
+    pub certificate: Secret<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct UserTotpCredential {
     #[serde(with = "crate::helpers::serde_base64_secret")]
@@ -69,6 +77,7 @@ impl UserAuthCredential {
         match self {
             Self::Password(_) => CredentialKind::Password,
             Self::PublicKey(_) => CredentialKind::PublicKey,
+            Self::Certificate(_) => CredentialKind::Certificate,
             Self::Totp(_) => CredentialKind::Totp,
             Self::Sso(_) => CredentialKind::Sso,
         }
@@ -79,6 +88,8 @@ impl UserAuthCredential {
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kubernetes: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -304,6 +315,42 @@ impl MySqlConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct KubernetesConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_kubernetes_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for KubernetesConfig {
+    fn default() -> Self {
+        KubernetesConfig {
+            enable: false,
+            listen: _default_kubernetes_listen(),
+            external_port: None,
+            certificate: "".to_owned(),
+            key: "".to_owned(),
+        }
+    }
+}
+
+impl KubernetesConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct PostgresConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -398,6 +445,9 @@ pub struct WarpgateConfigStore {
     pub http: HttpConfig,
 
     #[serde(default)]
+    pub kubernetes: KubernetesConfig,
+
+    #[serde(default)]
     pub mysql: MySqlConfig,
 
     #[serde(default)]
@@ -416,6 +466,7 @@ impl Default for WarpgateConfigStore {
             database_url: _default_database_url(),
             ssh: <_>::default(),
             http: <_>::default(),
+            kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
             log: <_>::default(),

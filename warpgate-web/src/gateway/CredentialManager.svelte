@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential } from 'gateway/lib/api'
+    import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential, type ExistingCertificateCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
+    import { faCertificate, faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
+    import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
@@ -13,6 +14,7 @@
     let creds: CredentialsState | undefined = $state()
 
     let creatingPublicKeyCredential = $state(false)
+    let creatingCertificateCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
 
@@ -55,6 +57,21 @@
         creds!.otp = creds!.otp.filter(c => c.id !== credential.id)
         await api.deleteMyOtp(credential)
     }
+
+    async function createCertificate (label: string, certificate: string) {
+        const credential = await api.addMyCertificate({
+            newCertificateCredential: {
+                label,
+                certificate,
+            },
+        })
+        creds!.certificates.push(credential)
+    }
+
+    async function deleteCertificate (credential: ExistingCertificateCredential) {
+        creds!.certificates = creds!.certificates.filter(c => c.id !== credential.id)
+        await api.deleteMyCertificate(credential)
+    }
 </script>
 
 <Loadable promise={initPromise}>
@@ -78,9 +95,9 @@
             {/if}
 
             <span class="ms-auto"></span>
-            <a
-                class="ms-2"
-                href={''}
+            <button
+                type="button"
+                class="btn btn-link ms-2 p-0"
                 onclick={e => {
                     changingPassword = true
                     e.preventDefault()
@@ -94,7 +111,7 @@
                 {#if creds.password === PasswordState.MultipleSet}
                     Reset password
                 {/if}
-            </a>
+            </button>
         </div>
     </div>
 
@@ -107,21 +124,21 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">One-time passwords</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={e => {
+        <a href="#" color="link" onclick={e => {
             creatingOtpCredential = true
             e.preventDefault()
         }}>Add device</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.otp as credential}
+        {#each creds.otp as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faMobilePhone} />
             <span class="label ms-3">OTP device</span>
             <span class="ms-auto"></span>
             <a
                 class="ms-2"
-                href={''}
+                href="#"
                 onclick={e => {
                     deleteOtp(credential)
                     e.preventDefault()
@@ -142,14 +159,14 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={e => {
+        <a href="#" color="link" onclick={e => {
             creatingPublicKeyCredential = true
             e.preventDefault()
         }}>Add key</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.publicKeys as credential}
+        {#each creds.publicKeys as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
             <div class="main ms-3">
@@ -160,7 +177,7 @@
             <CredentialUsedStateBadge credential={credential} />
             <a
                 class="ms-2"
-                href={''}
+                href="#"
                 onclick={e => {
                     deletePublicKey(credential)
                     e.preventDefault()
@@ -178,13 +195,52 @@
         </Alert>
     {/if}
 
+    <div class="d-flex align-items-center mt-4 mb-2">
+        <h4 class="m-0">Certificates</h4>
+        <span class="ms-auto"></span>
+        <a href="#" color="link" onclick={e => {
+            creatingCertificateCredential = true
+            e.preventDefault()
+        }}>Add certificate</a>
+    </div>
+
+    <div class="list-group list-group-flush mb-3">
+        {#each creds.certificates as credential (credential.id)}
+        <div class="list-group-item credential">
+            <Fa fw icon={faCertificate} />
+            <div class="main ms-3">
+                <div class="label">{credential.label}</div>
+                <small class="d-block text-muted">{credential.abbreviated}</small>
+            </div>
+            <span class="ms-auto"></span>
+            <CredentialUsedStateBadge credential={credential} />
+            <a
+                class="ms-2"
+                href="#"
+                onclick={e => {
+                    deleteCertificate(credential)
+                    e.preventDefault()
+                }}
+            >
+                Delete
+            </a>
+        </div>
+        {/each}
+    </div>
+
+    {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
+        <Alert color="warning">
+            Your credential policy requires using a certificate for authentication. Without one, you won't be able to log in.
+        </Alert>
+    {/if}
+
     {#if creds.sso.length > 0}
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Single sign-on</h4>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.sso as credential}
+        {#each creds.sso as credential (credential.email)}
         <div class="list-group-item credential">
             <Fa fw icon={faIdBadge} />
             <span class="label ms-3">
@@ -217,6 +273,13 @@
     bind:isOpen={creatingOtpCredential}
     username={$serverInfo!.username!}
     create={createOtp}
+/>
+{/if}
+
+{#if creatingCertificateCredential}
+<CertificateCredentialModal
+    bind:isOpen={creatingCertificateCredential}
+    save={createCertificate}
 />
 {/if}
 

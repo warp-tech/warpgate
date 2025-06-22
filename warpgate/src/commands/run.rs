@@ -11,6 +11,7 @@ use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
+use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
@@ -74,6 +75,15 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
             PostgresProtocolServer::new(&services)
                 .await?
                 .run(config.store.postgres.listen.clone())
+                .boxed(),
+        );
+    }
+
+    if config.store.kubernetes.enable {
+        protocol_futures.push(
+            KubernetesProtocolServer::new(&services)
+                .await?
+                .run(config.store.kubernetes.listen.clone())
                 .boxed(),
         );
     }

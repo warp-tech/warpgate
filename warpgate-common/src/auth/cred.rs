@@ -3,7 +3,7 @@ use poem_openapi::Enum;
 use russh::keys::Algorithm;
 use serde::{Deserialize, Serialize};
 
-use crate::Secret;
+use crate::{Secret, UserCertificateCredential};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash, Enum)]
 pub enum CredentialKind {
@@ -11,6 +11,8 @@ pub enum CredentialKind {
     Password,
     #[serde(rename = "publickey")]
     PublicKey,
+    #[serde(rename = "certificate")]
+    Certificate,
     #[serde(rename = "otp")]
     Totp,
     #[serde(rename = "sso")]
@@ -27,6 +29,9 @@ pub enum AuthCredential {
         kind: Algorithm,
         public_key_bytes: Bytes,
     },
+    Certificate {
+        certificate: Secret<String>,
+    },
     Sso {
         provider: String,
         email: String,
@@ -39,6 +44,7 @@ impl AuthCredential {
         match self {
             Self::Password { .. } => CredentialKind::Password,
             Self::PublicKey { .. } => CredentialKind::PublicKey,
+            Self::Certificate { .. } => CredentialKind::Certificate,
             Self::Otp { .. } => CredentialKind::Totp,
             Self::Sso { .. } => CredentialKind::Sso,
             Self::WebUserApproval => CredentialKind::WebUserApproval,
@@ -49,9 +55,29 @@ impl AuthCredential {
         match self {
             Self::Password { .. } => "password".to_string(),
             Self::PublicKey { .. } => "public key".to_string(),
+            Self::Certificate { .. } => "client certificate".to_string(),
             Self::Otp { .. } => "one-time password".to_string(),
             Self::Sso { provider, .. } => format!("SSO ({provider})"),
             Self::WebUserApproval => "in-browser auth".to_string(),
+        }
+    }
+}
+
+impl From<UserCertificateCredential> for AuthCredential {
+    fn from(cred: UserCertificateCredential) -> Self {
+        AuthCredential::Certificate {
+            certificate: cred.certificate,
+        }
+    }
+}
+
+impl From<AuthCredential> for Option<UserCertificateCredential> {
+    fn from(cred: AuthCredential) -> Self {
+        match cred {
+            AuthCredential::Certificate { certificate } => Some(UserCertificateCredential {
+                certificate,
+            }),
+            _ => None,
         }
     }
 }

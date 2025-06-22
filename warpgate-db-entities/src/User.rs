@@ -5,7 +5,7 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
 
-use crate::{OtpCredential, PasswordCredential, PublicKeyCredential, Role, SsoCredential};
+use crate::{CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role, SsoCredential};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "users")]
@@ -47,6 +47,12 @@ impl Related<super::PublicKeyCredential::Entity> for Entity {
     }
 }
 
+impl Related<super::CertificateCredential::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::CertificateCredentials.def()
+    }
+}
+
 impl Related<super::SsoCredential::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::SsoCredentials.def()
@@ -65,6 +71,7 @@ pub enum Relation {
     OtpCredentials,
     PasswordCredentials,
     PublicKeyCredentials,
+    CertificateCredentials,
     SsoCredentials,
     ApiTokens,
 }
@@ -83,6 +90,10 @@ impl RelationTrait for Relation {
             Self::PublicKeyCredentials => Entity::has_many(super::PublicKeyCredential::Entity)
                 .from(Column::Id)
                 .to(super::PublicKeyCredential::Column::UserId)
+                .into(),
+            Self::CertificateCredentials => Entity::has_many(super::CertificateCredential::Entity)
+                .from(Column::Id)
+                .to(super::CertificateCredential::Column::UserId)
                 .into(),
             Self::SsoCredentials => Entity::has_many(super::SsoCredential::Entity)
                 .from(Column::Id)

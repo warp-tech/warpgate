@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 pub mod ApiToken;
+pub mod CertificateCredential;
 pub mod KnownHost;
 pub mod LogEntry;
 pub mod OtpCredential;

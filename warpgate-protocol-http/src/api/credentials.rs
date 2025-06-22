@@ -9,10 +9,41 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
-use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
+use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential, CertificateCredential};
 
 use super::common::get_user;
 use crate::common::{endpoint_auth, RequestAuthorization};
+
+fn validate_certificate_pem(cert: &str) -> Result<(), WarpgateError> {
+    // Check if it looks like a PEM certificate
+    let cert = cert.trim();
+    if !cert.starts_with("-----BEGIN CERTIFICATE-----") {
+        return Err(WarpgateError::Other(
+            "Certificate must be in PEM format and start with '-----BEGIN CERTIFICATE-----'".into()
+        ));
+    }
+    if !cert.ends_with("-----END CERTIFICATE-----") {
+        return Err(WarpgateError::Other(
+            "Certificate must be in PEM format and end with '-----END CERTIFICATE-----'".into()
+        ));
+    }
+
+    // Try to parse the certificate using rustls-pemfile
+    use rustls_pemfile::Item;
+    let mut reader = std::io::Cursor::new(cert.as_bytes());
+    match rustls_pemfile::read_one(&mut reader) {
+        Ok(Some(Item::X509Certificate(_))) => Ok(()),
+        Ok(Some(_)) => Err(WarpgateError::Other(
+            "PEM file does not contain a certificate".into()
+        )),
+        Ok(None) => Err(WarpgateError::Other(
+            "No valid PEM items found in certificate".into()
+        )),
+        Err(_) => Err(WarpgateError::Other(
+            "Invalid PEM certificate format".into()
+        )),
+    }
+}
 
 pub struct Api;
 
@@ -58,6 +89,7 @@ pub struct CredentialsState {
     password: PasswordState,
     otp: Vec<ExistingOtpCredential>,
     public_keys: Vec<ExistingPublicKeyCredential>,
+    certificates: Vec<ExistingCertificateCredential>,
     sso: Vec<ExistingSsoCredential>,
     credential_policy: UserRequireCredentialsPolicy,
 }
@@ -151,6 +183,64 @@ enum CreateOtpCredentialResponse {
     Unauthorized,
 }
 
+#[derive(Object)]
+struct NewCertificateCredential {
+    label: String,
+    certificate: String,
+}
+
+#[derive(Object)]
+struct ExistingCertificateCredential {
+    id: Uuid,
+    label: String,
+    date_added: Option<DateTime<Utc>>,
+    last_used: Option<DateTime<Utc>>,
+    abbreviated: String,
+}
+
+fn abbreviate_certificate(cert: &str) -> String {
+    // Extract the subject or first few lines of the certificate for display
+    if let Some(first_line) = cert.lines().next() {
+        if first_line.len() > 50 {
+            format!("{}...", &first_line[..47])
+        } else {
+            first_line.to_string()
+        }
+    } else {
+        "Invalid certificate".to_string()
+    }
+}
+
+impl From<entities::CertificateCredential::Model> for ExistingCertificateCredential {
+    fn from(credential: entities::CertificateCredential::Model) -> Self {
+        Self {
+            id: credential.id,
+            label: credential.label,
+            date_added: credential.date_added,
+            last_used: credential.last_used,
+            abbreviated: abbreviate_certificate(&credential.certificate),
+        }
+    }
+}
+
+#[derive(ApiResponse)]
+enum CreateCertificateCredentialResponse {
+    #[oai(status = 201)]
+    Created(Json<ExistingCertificateCredential>),
+    #[oai(status = 401)]
+    Unauthorized,
+}
+
+#[derive(ApiResponse)]
+enum DeleteCertificateCredentialResponse {
+    #[oai(status = 200)]
+    Ok,
+    #[oai(status = 401)]
+    Unauthorized,
+    #[oai(status = 404)]
+    NotFound,
+}
+
 pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
         let services = Data::<&Services>::from_request_without_body(&req).await?;
@@ -205,6 +295,12 @@ impl Api {
             .find_related(entities::PublicKeyCredential::Entity)
             .all(&*db)
             .await?;
+
+        let cert_creds = user_model
+            .find_related(entities::CertificateCredential::Entity)
+            .all(&*db)
+            .await?;
+
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
                 0 => PasswordState::Unset,
@@ -213,6 +309,7 @@ impl Api {
             },
             otp: otp_creds.into_iter().map(Into::into).collect(),
             public_keys: pk_creds.into_iter().map(Into::into).collect(),
+            certificates: cert_creds.into_iter().map(Into::into).collect(),
             sso: sso_creds.into_iter().map(Into::into).collect(),
             credential_policy: user.credential_policy.unwrap_or_default(),
         })))
@@ -403,5 +500,74 @@ impl Api {
 
         model.delete(&*db).await?;
         Ok(DeleteCredentialResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/profile/credentials/certificates",
+        method = "post",
+        operation_id = "add_my_certificate",
+        transform = "parameters_based_auth"
+    )]
+    async fn api_create_certificate(
+        &self,
+        auth: Data<&RequestAuthorization>,
+        services: Data<&Services>,
+        body: Json<NewCertificateCredential>,
+    ) -> Result<CreateCertificateCredentialResponse, WarpgateError> {
+        // Validate the certificate PEM format
+        validate_certificate_pem(&body.certificate)?;
+
+        let db = services.db.lock().await;
+
+        let Some(user_model) = get_user(&auth, &db).await? else {
+            return Ok(CreateCertificateCredentialResponse::Unauthorized);
+        };
+
+        let object = CertificateCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_model.id),
+            date_added: Set(Some(Utc::now())),
+            last_used: Set(None),
+            label: Set(body.label.clone()),
+            certificate: Set(body.certificate.clone()),
+        }
+        .insert(&*db)
+        .await
+        .map_err(WarpgateError::from)?;
+
+        Ok(CreateCertificateCredentialResponse::Created(Json(
+            object.into(),
+        )))
+    }
+
+    #[oai(
+        path = "/profile/credentials/certificates/:id",
+        method = "delete",
+        operation_id = "delete_my_certificate",
+        transform = "parameters_based_auth"
+    )]
+    async fn api_delete_certificate(
+        &self,
+        auth: Data<&RequestAuthorization>,
+        services: Data<&Services>,
+        id: Path<Uuid>,
+    ) -> Result<DeleteCertificateCredentialResponse, WarpgateError> {
+        let db = services.db.lock().await;
+
+        let Some(user_model) = get_user(&auth, &db).await? else {
+            return Ok(DeleteCertificateCredentialResponse::Unauthorized);
+        };
+
+        let Some(model) = user_model
+            .find_related(entities::CertificateCredential::Entity)
+            .filter(entities::CertificateCredential::Column::Id.eq(id.0))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(DeleteCertificateCredentialResponse::NotFound);
+        };
+
+        model.delete(&*db).await?;
+        Ok(DeleteCertificateCredentialResponse::Ok)
     }
 }

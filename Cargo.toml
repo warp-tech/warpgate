@@ -10,6 +10,7 @@ members = [
     "warpgate-db-entities",
     "warpgate-database-protocols",
     "warpgate-protocol-http",
+    "warpgate-protocol-kubernetes",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-ssh",
@@ -62,6 +63,8 @@ rand_chacha = { version = "0.3", default-features = false }
 rand_core = { version = "0.6", features = ["std"], default-features = false }
 dialoguer = { version = "0.11", default-features = false, features = ["editor", "password"] }
 tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
+kube = { version = "0.96", features = ["client", "rustls-tls"], default-features = false }
+k8s-openapi = { version = "0.23", features = ["latest"], default-features = false }
 
 [profile.release]
 lto = true

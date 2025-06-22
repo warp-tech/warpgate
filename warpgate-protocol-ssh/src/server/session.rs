@@ -1499,6 +1499,10 @@ impl ServerSession {
                 CredentialKind::WebUserApproval => m.push(MethodKind::KeyboardInteractive),
                 CredentialKind::PublicKey => m.push(MethodKind::PublicKey),
                 CredentialKind::Sso => m.push(MethodKind::KeyboardInteractive),
+                CredentialKind::Certificate => {
+                    // Certificate authentication is not supported for SSH protocol
+                    // This credential type is primarily for Kubernetes
+                }
             }
         }
         if m.contains(&MethodKind::KeyboardInteractive) {

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.13.2-49-ge91a4cf-modified"
+    "version": "v0.14.1-8-g2ef3553-modified"
   },
   "servers": [
     {
@@ -595,6 +595,65 @@
         "operationId": "delete_my_otp"
       }
     },
+    "/profile/credentials/certificates": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCertificateCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingCertificateCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "add_my_certificate"
+      }
+    },
+    "/profile/credentials/certificates/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_certificate"
+      }
+    },
     "/profile/api-tokens": {
       "get": {
         "responses": {
@@ -693,6 +752,7 @@
       },
       "AuthStateResponseInternal": {
         "type": "object",
+        "title": "AuthStateResponseInternal",
         "required": [
           "id",
           "protocol",
@@ -724,6 +784,7 @@
       },
       "ChangePasswordRequest": {
         "type": "object",
+        "title": "ChangePasswordRequest",
         "required": [
           "password"
         ],
@@ -738,6 +799,7 @@
         "enum": [
           "Password",
           "PublicKey",
+          "Certificate",
           "Totp",
           "Sso",
           "WebUserApproval"
@@ -745,10 +807,12 @@
       },
       "CredentialsState": {
         "type": "object",
+        "title": "CredentialsState",
         "required": [
           "password",
           "otp",
           "public_keys",
+          "certificates",
           "sso",
           "credential_policy"
         ],
@@ -768,6 +832,12 @@
               "$ref": "#/components/schemas/ExistingPublicKeyCredential"
             }
           },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingCertificateCredential"
+            }
+          },
           "sso": {
             "type": "array",
             "items": {
@@ -781,6 +851,7 @@
       },
       "ExistingApiToken": {
         "type": "object",
+        "title": "ExistingApiToken",
         "required": [
           "id",
           "label",
@@ -805,8 +876,38 @@
           }
         }
       },
+      "ExistingCertificateCredential": {
+        "type": "object",
+        "title": "ExistingCertificateCredential",
+        "required": [
+          "id",
+          "label",
+          "abbreviated"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "abbreviated": {
+            "type": "string"
+          }
+        }
+      },
       "ExistingOtpCredential": {
         "type": "object",
+        "title": "ExistingOtpCredential",
         "required": [
           "id"
         ],
@@ -819,6 +920,7 @@
       },
       "ExistingPublicKeyCredential": {
         "type": "object",
+        "title": "ExistingPublicKeyCredential",
         "required": [
           "id",
           "label",
@@ -847,6 +949,7 @@
       },
       "ExistingSsoCredential": {
         "type": "object",
+        "title": "ExistingSsoCredential",
         "required": [
           "id",
           "email"
@@ -866,6 +969,7 @@
       },
       "Info": {
         "type": "object",
+        "title": "Info",
         "required": [
           "ports",
           "authorized_via_ticket",
@@ -904,6 +1008,7 @@
       },
       "LoginFailureResponse": {
         "type": "object",
+        "title": "LoginFailureResponse",
         "required": [
           "state"
         ],
@@ -915,6 +1020,7 @@
       },
       "LoginRequest": {
         "type": "object",
+        "title": "LoginRequest",
         "required": [
           "username",
           "password"
@@ -930,6 +1036,7 @@
       },
       "NewApiToken": {
         "type": "object",
+        "title": "NewApiToken",
         "required": [
           "label",
           "expiry"
@@ -944,8 +1051,25 @@
           }
         }
       },
+      "NewCertificateCredential": {
+        "type": "object",
+        "title": "NewCertificateCredential",
+        "required": [
+          "label",
+          "certificate"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "certificate": {
+            "type": "string"
+          }
+        }
+      },
       "NewOtpCredential": {
         "type": "object",
+        "title": "NewOtpCredential",
         "required": [
           "secret_key"
         ],
@@ -961,6 +1085,7 @@
       },
       "NewPublicKeyCredential": {
         "type": "object",
+        "title": "NewPublicKeyCredential",
         "required": [
           "label",
           "openssh_public_key"
@@ -976,6 +1101,7 @@
       },
       "OtpLoginRequest": {
         "type": "object",
+        "title": "OtpLoginRequest",
         "required": [
           "otp"
         ],
@@ -995,6 +1121,7 @@
       },
       "PortsInfo": {
         "type": "object",
+        "title": "PortsInfo",
         "properties": {
           "ssh": {
             "type": "integer",
@@ -1016,6 +1143,7 @@
       },
       "SetupState": {
         "type": "object",
+        "title": "SetupState",
         "required": [
           "has_targets",
           "has_users"
@@ -1031,6 +1159,7 @@
       },
       "SsoProviderDescription": {
         "type": "object",
+        "title": "SsoProviderDescription",
         "required": [
           "name",
           "label",
@@ -1059,6 +1188,7 @@
       },
       "StartSloResponseParams": {
         "type": "object",
+        "title": "StartSloResponseParams",
         "required": [
           "url"
         ],
@@ -1070,6 +1200,7 @@
       },
       "StartSsoResponseParams": {
         "type": "object",
+        "title": "StartSsoResponseParams",
         "required": [
           "url"
         ],
@@ -1083,6 +1214,7 @@
         "type": "string",
         "enum": [
           "Http",
+          "Kubernetes",
           "MySql",
           "Ssh",
           "Postgres",
@@ -1091,6 +1223,7 @@
       },
       "TargetSnapshot": {
         "type": "object",
+        "title": "TargetSnapshot",
         "required": [
           "name",
           "description",
@@ -1113,6 +1246,7 @@
       },
       "TokenAndSecret": {
         "type": "object",
+        "title": "TokenAndSecret",
         "required": [
           "token",
           "secret"
@@ -1128,8 +1262,15 @@
       },
       "UserRequireCredentialsPolicy": {
         "type": "object",
+        "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "kubernetes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

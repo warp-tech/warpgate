@@ -3,17 +3,19 @@
         { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
         | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
         | { kind: typeof CredentialKind.PublicKey } & ExistingPublicKeyCredential
+        | { kind: typeof CredentialKind.Certificate } & ExistingCertificateCredential
         | { kind: typeof CredentialKind.Totp } & ExistingOtpCredential
 </script>
 
 <script lang="ts">
-    import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
+    import { faIdBadge, faKey, faKeyboard, faMobileScreen, faCertificate } from '@fortawesome/free-solid-svg-icons'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type ExistingCertificateCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
+    import CertificateCredentialModal from './CertificateCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
@@ -36,14 +38,17 @@
     let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
     let editingPublicKeyCredential = $state(false)
     let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
+    let editingCertificateCredential = $state(false)
+    let editingCertificateCredentialInstance: ExistingCertificateCredential|null = $state(null)
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres', name: string }[] = [
+    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes', name: string }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
+        { id: 'kubernetes', name: 'Kubernetes' },
     ]
 
     async function load () {
@@ -51,6 +56,7 @@
             loadPasswords(),
             loadSso(),
             loadPublicKeys(),
+            loadCertificates(),
             loadOtp(),
         ])
     }
@@ -72,6 +78,13 @@
     async function loadPublicKeys () {
         credentials.push(...(await api.getPublicKeyCredentials({ userId })).map(c => ({
             kind: CredentialKind.PublicKey,
+            ...c,
+        })))
+    }
+
+    async function loadCertificates () {
+        credentials.push(...(await api.getCertificateCredentials({ userId })).map(c => ({
+            kind: CredentialKind.Certificate,
             ...c,
         })))
     }
@@ -99,6 +112,12 @@
         }
         if (credential.kind === CredentialKind.PublicKey) {
             await api.deletePublicKeyCredential({
+                id: credential.id,
+                userId,
+            })
+        }
+        if (credential.kind === CredentialKind.Certificate) {
+            await api.deleteCertificateCredential({
                 id: credential.id,
                 userId,
             })
@@ -205,6 +224,22 @@
         editingPublicKeyCredentialInstance = null
     }
 
+    async function saveCertificateCredential (label: string, certificate: string) {
+        const credential = await api.createCertificateCredential({
+            userId,
+            newCertificateCredential: {
+                label,
+                certificate,
+            },
+        })
+        credentials.push({
+            kind: CredentialKind.Certificate,
+            ...credential,
+        })
+        editingCertificateCredential = false
+        editingCertificateCredentialInstance = null
+    }
+
     function assertDefined<T>(value: T|undefined): T {
         if (value === undefined) {
             throw new Error('Value is undefined')
@@ -223,6 +258,10 @@
         editingPublicKeyCredentialInstance = null
         editingPublicKeyCredential = true
     }}>Add public key</Button>
+    <Button size="sm" color="link" on:click={() => {
+        editingCertificateCredentialInstance = null
+        editingCertificateCredential = true
+    }}>Add certificate</Button>
     <Button size="sm" color="link" on:click={() => creatingOtp = true}>Add OTP</Button>
     <Button size="sm" color="link" on:click={() => {
         editingSsoCredentialInstance = null
@@ -255,6 +294,17 @@
                 <CredentialUsedStateBadge credential={credential} />
                 <div class="me-2"></div>
             {/if}
+            {#if credential.kind === CredentialKind.Certificate}
+                <Fa fw icon={faCertificate} />
+                <div class="main me-auto">
+                    <div class="label d-flex align-items-center">
+                        {credential.label}
+                    </div>
+                    <small class="d-block text-muted">{credential.abbreviated}</small>
+                </div>
+                <CredentialUsedStateBadge credential={credential} />
+                <div class="me-2"></div>
+            {/if}
             {#if credential.kind === 'Totp'}
                 <Fa fw icon={faMobileScreen} />
                 <span class="label me-auto">One-time password</span>
@@ -268,7 +318,7 @@
                 </span>
             {/if}
 
-            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
+            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Certificate || credential.kind === CredentialKind.Sso}
             <!-- svelte-ignore a11y_invalid_attribute -->
             <a
                 class="ms-2"
@@ -281,6 +331,10 @@
                     if (credential.kind === CredentialKind.PublicKey) {
                         editingPublicKeyCredentialInstance = credential
                         editingPublicKeyCredential = true
+                    }
+                    if (credential.kind === CredentialKind.Certificate) {
+                        editingCertificateCredentialInstance = credential
+                        editingCertificateCredential = true
                     }
                     e.preventDefault()
                 }}>
@@ -350,6 +404,14 @@
     bind:isOpen={editingPublicKeyCredential}
     instance={editingPublicKeyCredentialInstance ?? undefined}
     save={savePublicKeyCredential}
+/>
+{/if}
+
+{#if editingCertificateCredential}
+<CertificateCredentialModal
+    bind:isOpen={editingCertificateCredential}
+    instance={editingCertificateCredentialInstance ?? undefined}
+    save={saveCertificateCredential}
 />
 {/if}
 

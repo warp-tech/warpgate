@@ -65,8 +65,80 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
     mysql: new Set([CredentialKind.Password]),
     postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
+    kubernetes: new Set([CredentialKind.Certificate, CredentialKind.WebUserApproval]),
 }
 
 export function abbreviatePublicKey (key: string): string {
     return key.slice(0, 16) + '...' + key.slice(-8)
+}
+
+export function makeKubernetesContext (opt: ConnectionOptions): string {
+    if (opt.ticketSecret) {
+        return `ticket-${opt.ticketSecret}`
+    }
+    return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
+}
+
+export function makeKubernetesNamespace (opt: ConnectionOptions): string {
+    return 'default'
+}
+
+export function makeKubernetesClusterUrl (opt: ConnectionOptions): string {
+    const baseUrl = `https://${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.kubernetes ?? 'warpgate-kubernetes-port'}`
+    return `${baseUrl}/${opt.targetName ?? 'target'}`
+}
+
+export function makeKubeconfig (opt: ConnectionOptions): string {
+    const clusterUrl = makeKubernetesClusterUrl(opt)
+    const context = makeKubernetesContext(opt)
+    const namespace = makeKubernetesNamespace(opt)
+
+    if (opt.ticketSecret) {
+        // Token-based authentication using API ticket
+        return `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${clusterUrl}
+    insecure-skip-tls-verify: true
+  name: warpgate-${opt.targetName ?? 'target'}
+contexts:
+- context:
+    cluster: warpgate-${opt.targetName ?? 'target'}
+    namespace: ${namespace}
+    user: ${context}
+  name: ${context}
+current-context: ${context}
+users:
+- name: ${context}
+  user:
+    token: ${opt.ticketSecret}
+`
+    } else {
+        // Certificate-based authentication
+        return `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${clusterUrl}
+    insecure-skip-tls-verify: true
+  name: warpgate-${opt.targetName ?? 'target'}
+contexts:
+- context:
+    cluster: warpgate-${opt.targetName ?? 'target'}
+    namespace: ${namespace}
+    user: ${context}
+  name: ${context}
+current-context: ${context}
+users:
+- name: ${context}
+  user:
+    client-certificate-data: <your-client-certificate-base64>
+    client-key-data: <your-private-key-base64>
+`
+    }
+}
+
+export function makeExampleKubectlCommand (opt: ConnectionOptions): string {
+    return shellEscape(['kubectl', '--kubeconfig', 'warpgate-kubeconfig.yaml', 'get', 'pods'])
 }

@@ -1,6 +1,7 @@
 use poem_openapi::auth::ApiKey;
 use poem_openapi::{OpenApi, SecurityScheme};
 
+mod certificate_credentials;
 mod known_hosts_detail;
 mod known_hosts_list;
 mod logs;
@@ -57,6 +58,10 @@ pub fn get() -> impl OpenApi {
         (
             public_key_credentials::ListApi,
             public_key_credentials::DetailApi,
+        ),
+        (
+            certificate_credentials::ListApi,
+            certificate_credentials::DetailApi,
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
         parameters::Api,

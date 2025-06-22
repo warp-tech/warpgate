@@ -37,6 +37,9 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         TargetOptions::Postgres(_) => ProtocolServerEnum::PostgresProtocolServer(
             warpgate_protocol_postgres::PostgresProtocolServer::new(&services).await?,
         ),
+        TargetOptions::Kubernetes(_) => ProtocolServerEnum::KubernetesProtocolServer(
+            warpgate_protocol_kubernetes::KubernetesProtocolServer::new(&services).await?,
+        ),
         TargetOptions::WebAdmin(_) => {
             error!("Unsupported target type");
             return Ok(());
