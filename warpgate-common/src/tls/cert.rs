@@ -3,28 +3,46 @@ use std::sync::Arc;
 
 use poem::listener::RustlsCertificate;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::server::ResolvesServerCert;
 use rustls::sign::{CertifiedKey, SigningKey};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
 use crate::RustlsSetupError;
 
+#[derive(Debug, Clone)]
 pub struct TlsCertificateBundle {
     bytes: Vec<u8>,
     certificates: Vec<CertificateDer<'static>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct TlsPrivateKey {
     bytes: Vec<u8>,
     key: Arc<dyn SigningKey>,
 }
 
+impl TlsPrivateKey {
+    pub fn key(&self) -> &Arc<dyn SigningKey> {
+        &self.key
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TlsCertificateAndPrivateKey {
     pub certificate: TlsCertificateBundle,
     pub private_key: TlsPrivateKey,
 }
 
 impl TlsCertificateBundle {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn certificates(&self) -> &[CertificateDer<'static>] {
+        &self.certificates
+    }
+
     pub async fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, RustlsSetupError> {
         let mut file = File::open(path).await?;
         let mut bytes = Vec::new();
@@ -108,5 +126,23 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
             key: key.key,
             ocsp: None,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SingleCertResolver(Arc<CertifiedKey>);
+
+impl SingleCertResolver {
+    pub fn new(inner: TlsCertificateAndPrivateKey) -> Self {
+        Self(Arc::new(inner.into()))
+    }
+}
+
+impl ResolvesServerCert for SingleCertResolver {
+    fn resolve(
+        &self,
+        client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        Some(self.0.clone())
     }
 }

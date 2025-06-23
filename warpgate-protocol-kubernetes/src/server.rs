@@ -2,25 +2,165 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use base64::{self, Engine as _};
 use futures::{SinkExt, StreamExt};
-use poem::listener::{Listener, RustlsConfig};
+use poem::listener::{Acceptor, Listener, RustlsConfig, TcpAcceptor, TcpListener};
 use poem::web::websocket::{Message, WebSocket};
-use poem::web::{Data, Path};
-use poem::{get, handler, Body, EndpointExt, IntoResponse, Request, Response, Route, Server};
-use sea_orm::{ActiveModelTrait, Set};
+use poem::web::{Data, LocalAddr, Path, RemoteAddr};
+use poem::{get, handler, Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, Server};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
+use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
+use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use secrecy::ExposeSecret;
 use tokio::sync::Mutex;
+use tokio_rustls::server::TlsStream;
 use tracing::*;
 use warpgate_common::{
-    ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions,
+    ListenEndpoint, SessionId, SingleCertResolver, Target, TargetKubernetesOptions, TargetOptions,
     TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
-use warpgate_db_entities::Session;
+use warpgate_db_entities::{CertificateCredential, Session, User};
 
 use crate::client::create_kube_config;
 use crate::recording::KubernetesRecorder;
+
+/// Custom client certificate verifier that accepts any client certificate
+#[derive(Debug)]
+struct AcceptAnyClientCert;
+
+impl ClientCertVerifier for AcceptAnyClientCert {
+    fn offer_client_auth(&self) -> bool {
+        true
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        false
+    }
+
+    fn verify_client_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
+    ) -> Result<ClientCertVerified, rustls::Error> {
+        // Accept any client certificate - we'll extract and validate it later
+        debug!("Client certificate received, accepting for later validation");
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ]
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+}
+
+/// Custom TLS acceptor that captures client certificates and embeds them in remote_addr
+pub struct CertificateCapturingAcceptor<T> {
+    inner: T,
+    tls_acceptor: tokio_rustls::TlsAcceptor,
+}
+
+impl<T> CertificateCapturingAcceptor<T> {
+    pub fn new(inner: T, server_config: ServerConfig) -> Self {
+        Self {
+            inner,
+            tls_acceptor: tokio_rustls::TlsAcceptor::from(Arc::new(server_config)),
+        }
+    }
+}
+
+impl<T> Acceptor for CertificateCapturingAcceptor<T>
+where
+    T: Acceptor,
+{
+    type Io = TlsStream<T::Io>;
+
+    fn local_addr(&self) -> Vec<LocalAddr> {
+        self.inner.local_addr()
+    }
+
+    async fn accept(
+        &mut self,
+    ) -> std::io::Result<(Self::Io, LocalAddr, RemoteAddr, http::uri::Scheme)> {
+        let (stream, local_addr, remote_addr, _) = self.inner.accept().await?;
+
+        // Perform TLS handshake
+        let tls_stream = self.tls_acceptor.accept(stream).await?;
+
+        // Extract client certificate from the TLS connection
+        let enhanced_remote_addr = if let Some(cert_der) = extract_peer_certificates(&tls_stream) {
+            // Serialize certificate as base64 and embed in remote_addr
+            let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
+            RemoteAddr(Addr::Custom(
+                "captured-cert",
+                format!("{}|cert:{}", remote_addr.0, cert_b64).into(),
+            ))
+        } else {
+            remote_addr
+        };
+
+        Ok((
+            tls_stream,
+            local_addr,
+            enhanced_remote_addr,
+            http::uri::Scheme::HTTPS,
+        ))
+    }
+}
+
+/// Extract peer certificates from the TLS stream
+fn extract_peer_certificates<T>(tls_stream: &TlsStream<T>) -> Option<Vec<u8>> {
+    // Get the TLS connection info
+    let (_, tls_conn) = tls_stream.get_ref();
+
+    // Extract peer certificates - this gives us the certificate chain
+    if let Some(peer_certs) = tls_conn.peer_certificates() {
+        if let Some(end_entity_cert) = peer_certs.first() {
+            debug!("Extracted client certificate from TLS stream");
+            return Some(end_entity_cert.as_ref().to_vec());
+        }
+    }
+
+    debug!("No client certificate found in TLS stream");
+    None
+}
 
 #[derive(Debug)]
 struct AuthenticatedTarget {
@@ -70,15 +210,25 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         }
     };
 
-    Server::new(
-        address
-            .poem_listener()
-            .await?
-            .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
-    )
-    .run(app)
-    .await
-    .context("Kubernetes server error")?;
+    // Create TLS configuration with client certificate verification
+
+    let tls_config = ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {}", e))?
+    .with_client_cert_verifier(Arc::new(AcceptAnyClientCert))
+    .with_cert_resolver(Arc::new(SingleCertResolver::new(
+        certificate_and_key.clone(),
+    )));
+    // Create our custom certificate-capturing acceptor
+    let tcp_acceptor = address.poem_listener().await?.into_acceptor().await?;
+    let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
+
+    Server::new_with_acceptor(cert_capturing_acceptor)
+        .run(app)
+        .await
+        .context("Kubernetes server error")?;
 
     Ok(())
 }
@@ -407,11 +557,69 @@ async fn authenticate_and_get_target(
         }
     }
 
-    // Check for certificate authentication
-    // This would be handled by TLS client certificate verification at the HTTP layer
-    // For now, return unauthorized if no valid authentication found
+    // Check for client certificate authentication
+    // Extract certificate from enhanced remote_addr if present
+    if let Some(cert_der) = extract_client_cert_from_request(req) {
+        debug!("Found client certificate, validating against database");
+
+        match validate_client_certificate(&cert_der, services).await {
+            Ok(Some(username)) => {
+                debug!(
+                    user = username,
+                    "Client certificate authentication successful"
+                );
+
+                // Look up the specific target by name from the URL
+                let mut config_provider = services.config_provider.lock().await;
+                let targets = config_provider.list_targets().await.map_err(|e| {
+                    poem::Error::from_string(
+                        format!("Failed to list targets: {}", e),
+                        poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })?;
+
+                // Find the target with the specified name
+                for target in targets {
+                    if target.name == target_name
+                        && matches!(target.options, TargetOptions::Kubernetes(_))
+                    {
+                        if config_provider
+                            .authorize_target(&username, &target.name)
+                            .await
+                            .unwrap_or(false)
+                        {
+                            return Ok(AuthenticatedTarget {
+                                target,
+                                auth_user: Some(username.clone()),
+                            });
+                        } else {
+                            return Err(poem::Error::from_string(
+                                format!("Access denied to target: {}", target_name),
+                                poem::http::StatusCode::FORBIDDEN,
+                            ));
+                        }
+                    }
+                }
+
+                return Err(poem::Error::from_string(
+                    format!("Kubernetes target not found: {}", target_name),
+                    poem::http::StatusCode::NOT_FOUND,
+                ));
+            }
+            Ok(None) => {
+                debug!("Client certificate provided but not found in database");
+            }
+            Err(e) => {
+                warn!(error = %e, "Error validating client certificate");
+            }
+        }
+    } else {
+        debug!("No client certificate provided in TLS connection");
+    }
+
+    // Return unauthorized if no valid authentication found
     Err(poem::Error::from_string(
-        "Unauthorized",
+        "Unauthorized: Please provide either a valid Bearer token or a client certificate",
         poem::http::StatusCode::UNAUTHORIZED,
     ))
 }
@@ -514,4 +722,99 @@ async fn start_recording(
                 poem::http::StatusCode::INTERNAL_SERVER_ERROR,
             )
         })
+}
+
+// Helper function to extract client certificate from request remote_addr
+fn extract_client_cert_from_request(req: &Request) -> Option<Vec<u8>> {
+    // Extract from the enhanced remote_addr that our custom acceptor created
+    let remote_addr = req.remote_addr().to_string();
+    if let Some(cert_part) = remote_addr.split("|cert:").nth(1) {
+        // Decode the base64 certificate
+        match base64::engine::general_purpose::STANDARD.decode(cert_part) {
+            Ok(cert_der) => {
+                debug!("Successfully extracted client certificate from request");
+                Some(cert_der)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to decode client certificate from remote_addr: {}",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
+// Helper function to validate client certificate against database
+async fn validate_client_certificate(
+    cert_der: &[u8],
+    services: &Services,
+) -> Result<Option<String>, anyhow::Error> {
+    // Convert DER to PEM format for comparison
+    let cert_pem = der_to_pem(cert_der)?;
+
+    let db = services.db.lock().await;
+
+    // Find all certificate credentials and match against the provided certificate
+    let cert_credentials = CertificateCredential::Entity::find()
+        .find_with_related(User::Entity)
+        .all(&*db)
+        .await?;
+
+    for (cert_credential, users) in cert_credentials {
+        if let Some(user) = users.into_iter().next() {
+            // Normalize both certificates for comparison
+            let stored_cert = normalize_certificate_pem(&cert_credential.certificate);
+            let provided_cert = normalize_certificate_pem(&cert_pem);
+
+            if stored_cert == provided_cert {
+                info!(
+                    user = user.username,
+                    cert_label = cert_credential.label,
+                    "Client certificate validated for user"
+                );
+
+                // Update last_used timestamp
+                let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
+                active_model.last_used = Set(Some(chrono::Utc::now()));
+                if let Err(e) = active_model.update(&*db).await {
+                    warn!("Failed to update certificate last_used timestamp: {}", e);
+                }
+
+                return Ok(Some(user.username));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn der_to_pem(der_bytes: &[u8]) -> Result<String, anyhow::Error> {
+    use base64::engine::general_purpose;
+    use base64::Engine as _;
+    let cert_b64 = general_purpose::STANDARD.encode(der_bytes);
+    let cert_lines: Vec<String> = cert_b64
+        .chars()
+        .collect::<Vec<char>>()
+        .chunks(64)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect();
+
+    Ok(format!(
+        "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----",
+        cert_lines.join("\n")
+    ))
+}
+
+fn normalize_certificate_pem(pem: &str) -> String {
+    pem.lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect::<Vec<&str>>()
+        .join("")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
 }
