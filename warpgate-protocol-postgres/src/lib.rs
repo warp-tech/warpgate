@@ -94,12 +94,23 @@ impl ProtocolServer for PostgresProtocolServer {
                     )
                     .await?;
 
+                let config = services.config.lock().await;
+                // Find the target for this session to get log_query_results
+                let mut log_query_results = false;
+                if let Some(target_name) = config.store.postgres.targets.first().map(|t| &t.name) {
+                    if let Some(target) = config.store.postgres.targets.iter().find(|t| &t.name == target_name) {
+                        if let TargetOptions::Postgres(ref options) = target.options {
+                            log_query_results = options.log_query_results.unwrap_or(false);
+                        }
+                    }
+                }
                 let session = PostgresSession::new(
                     server_handle,
                     services,
                     stream,
                     tls_config,
                     remote_address,
+                    log_query_results,
                 )
                 .await;
 

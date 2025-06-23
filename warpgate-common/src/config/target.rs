@@ -123,6 +123,10 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub tls: Tls,
+
+    /// If true, log query results for audit purposes
+    #[serde(default)]
+    pub log_query_results: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]

@@ -28,6 +28,7 @@ pub struct PostgresSession {
     id: Uuid,
     services: Services,
     remote_address: SocketAddr,
+    log_query_results: bool,
 }
 
 impl PostgresSession {
@@ -37,6 +38,7 @@ impl PostgresSession {
         stream: TcpStream,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
+        log_query_results: bool,
     ) -> Self {
         let id = server_handle.lock().await.id();
 
@@ -49,6 +51,7 @@ impl PostgresSession {
             server_handle,
             id,
             remote_address,
+            log_query_results,
         }
     }
 
@@ -428,6 +431,17 @@ impl PostgresSession {
         debug!(?msg, "S->C message");
         if let PgWireBackendMessage::ErrorResponse(error) = msg {
             info!(?error, "PostgreSQL error");
+        }
+        if self.log_query_results {
+            match msg {
+                PgWireBackendMessage::DataRow(row) => {
+                    info!(?row, "PostgreSQL query result row");
+                }
+                PgWireBackendMessage::RowDescription(desc) => {
+                    info!(?desc, "PostgreSQL query result description");
+                }
+                _ => {}
+            }
         }
     }
 }
