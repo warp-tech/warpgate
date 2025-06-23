@@ -4,14 +4,14 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use base64::{self, Engine as _};
 use futures::{SinkExt, StreamExt};
-use poem::listener::{Acceptor, Listener, RustlsConfig, TcpAcceptor, TcpListener};
+use poem::listener::{Acceptor, Listener};
 use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, LocalAddr, Path, RemoteAddr};
 use poem::{get, handler, Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, Server};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
+use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use secrecy::ExposeSecret;
 use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
@@ -177,6 +177,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         .at("/:target_name/*path", handle_api_request)
         .at("/:target_name/ws", get(handle_websocket))
         .with(poem::middleware::Cors::new())
+        .with(CertificateExtractorMiddleware)
         .data(state)
         .data(auth_state_store)
         .data(recordings)
@@ -511,6 +512,8 @@ async fn authenticate_and_get_target(
     _state: &Arc<Mutex<State>>,
     services: &Services,
 ) -> Result<AuthenticatedTarget, poem::Error> {
+    use RequestCertificateExt; // Import the trait for certificate extraction
+
     // Check for Bearer token authentication (API tokens)
     if let Some(auth_header) = req.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
@@ -558,11 +561,11 @@ async fn authenticate_and_get_target(
     }
 
     // Check for client certificate authentication
-    // Extract certificate from enhanced remote_addr if present
-    if let Some(cert_der) = extract_client_cert_from_request(req) {
-        debug!("Found client certificate, validating against database");
+    // Use certificate extracted by middleware if present
+    if let Some(client_cert) = req.client_certificate() {
+        debug!("Found client certificate from middleware, validating against database");
 
-        match validate_client_certificate(&cert_der, services).await {
+        match validate_client_certificate(&client_cert.der_bytes, services).await {
             Ok(Some(username)) => {
                 debug!(
                     user = username,
@@ -724,30 +727,6 @@ async fn start_recording(
         })
 }
 
-// Helper function to extract client certificate from request remote_addr
-fn extract_client_cert_from_request(req: &Request) -> Option<Vec<u8>> {
-    // Extract from the enhanced remote_addr that our custom acceptor created
-    let remote_addr = req.remote_addr().to_string();
-    if let Some(cert_part) = remote_addr.split("|cert:").nth(1) {
-        // Decode the base64 certificate
-        match base64::engine::general_purpose::STANDARD.decode(cert_part) {
-            Ok(cert_der) => {
-                debug!("Successfully extracted client certificate from request");
-                Some(cert_der)
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to decode client certificate from remote_addr: {}",
-                    e
-                );
-                None
-            }
-        }
-    } else {
-        None
-    }
-}
-
 // Helper function to validate client certificate against database
 async fn validate_client_certificate(
     cert_der: &[u8],
@@ -770,6 +749,7 @@ async fn validate_client_certificate(
             let stored_cert = normalize_certificate_pem(&cert_credential.certificate);
             let provided_cert = normalize_certificate_pem(&cert_pem);
 
+            dbg!(&stored_cert, &provided_cert);
             if stored_cert == provided_cert {
                 info!(
                     user = user.username,
@@ -817,4 +797,93 @@ fn normalize_certificate_pem(pem: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect()
+}
+
+/// Certificate data extracted from client TLS connection
+#[derive(Debug, Clone)]
+pub struct ClientCertificate {
+    pub der_bytes: Vec<u8>,
+    pub pem: String,
+}
+
+/// Middleware that extracts client certificates from enhanced remote_addr and stores them in request extensions
+pub struct CertificateExtractorMiddleware;
+
+impl<E> poem::Middleware<E> for CertificateExtractorMiddleware
+where
+    E: poem::Endpoint,
+{
+    type Output = CertificateExtractorEndpoint<E>;
+
+    fn transform(&self, ep: E) -> Self::Output {
+        CertificateExtractorEndpoint { inner: ep }
+    }
+}
+
+pub struct CertificateExtractorEndpoint<E> {
+    inner: E,
+}
+
+impl<E> poem::Endpoint for CertificateExtractorEndpoint<E>
+where
+    E: poem::Endpoint,
+{
+    type Output = E::Output;
+    async fn call(&self, mut req: poem::Request) -> poem::Result<Self::Output> {
+        // Extract certificate from enhanced remote_addr if present
+        let remote_addr = req.remote_addr().to_string();
+        if let Some(cert_part) = remote_addr.split("|cert:").nth(1) {
+            // Decode the base64 certificate
+            match base64::engine::general_purpose::STANDARD.decode(cert_part) {
+                Ok(cert_der) => {
+                    debug!(
+                        "Middleware: Successfully extracted client certificate from remote_addr"
+                    );
+
+                    // Convert DER to PEM for storage
+                    match der_to_pem(&cert_der) {
+                        Ok(cert_pem) => {
+                            let client_cert = ClientCertificate {
+                                der_bytes: cert_der,
+                                pem: cert_pem,
+                            };
+
+                            // Store certificate in request extensions for later access
+                            req.extensions_mut().insert(client_cert);
+                            debug!("Middleware: Client certificate stored in request extensions");
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Middleware: Failed to convert certificate DER to PEM: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Middleware: Failed to decode client certificate from remote_addr: {}",
+                        e
+                    );
+                }
+            }
+        } else {
+            debug!("Middleware: No client certificate found in remote_addr");
+        }
+
+        // Continue with the request
+        self.inner.call(req).await
+    }
+}
+
+/// Helper trait to easily extract client certificate from request
+pub trait RequestCertificateExt {
+    /// Get the client certificate from request extensions, if present
+    fn client_certificate(&self) -> Option<&ClientCertificate>;
+}
+
+impl RequestCertificateExt for poem::Request {
+    fn client_certificate(&self) -> Option<&ClientCertificate> {
+        self.extensions().get::<ClientCertificate>()
+    }
 }
