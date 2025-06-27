@@ -12,6 +12,7 @@ use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
 
 use super::common::get_user;
+use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization};
 
 pub struct Api;
@@ -179,6 +180,7 @@ impl Api {
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
+        _auth: AnySecurityScheme,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -229,6 +231,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<ChangePasswordRequest>,
+        _auth: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -276,6 +279,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewPublicKeyCredential>,
+        _auth: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -311,6 +315,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -342,6 +347,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewOtpCredential>,
+        _auth: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -385,6 +391,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
+        _auth: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
