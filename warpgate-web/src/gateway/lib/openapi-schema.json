@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.13.2-49-ge91a4cf-modified"
+    "version": "v0.14.1-8-g2ef3553-modified"
   },
   "servers": [
     {
@@ -302,6 +302,11 @@
             }
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "get_targets"
       }
     },
@@ -444,6 +449,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "get_my_credentials"
       }
     },
@@ -474,6 +484,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "change_my_password"
       }
     },
@@ -504,6 +519,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "add_my_public_key"
       }
     },
@@ -533,6 +553,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_public_key"
       }
     },
@@ -563,6 +588,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "add_my_otp"
       }
     },
@@ -592,6 +622,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "AnySecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_otp"
       }
     },
@@ -693,6 +728,7 @@
       },
       "AuthStateResponseInternal": {
         "type": "object",
+        "title": "AuthStateResponseInternal",
         "required": [
           "id",
           "protocol",
@@ -724,6 +760,7 @@
       },
       "ChangePasswordRequest": {
         "type": "object",
+        "title": "ChangePasswordRequest",
         "required": [
           "password"
         ],
@@ -745,6 +782,7 @@
       },
       "CredentialsState": {
         "type": "object",
+        "title": "CredentialsState",
         "required": [
           "password",
           "otp",
@@ -781,6 +819,7 @@
       },
       "ExistingApiToken": {
         "type": "object",
+        "title": "ExistingApiToken",
         "required": [
           "id",
           "label",
@@ -807,6 +846,7 @@
       },
       "ExistingOtpCredential": {
         "type": "object",
+        "title": "ExistingOtpCredential",
         "required": [
           "id"
         ],
@@ -819,6 +859,7 @@
       },
       "ExistingPublicKeyCredential": {
         "type": "object",
+        "title": "ExistingPublicKeyCredential",
         "required": [
           "id",
           "label",
@@ -847,6 +888,7 @@
       },
       "ExistingSsoCredential": {
         "type": "object",
+        "title": "ExistingSsoCredential",
         "required": [
           "id",
           "email"
@@ -866,6 +908,7 @@
       },
       "Info": {
         "type": "object",
+        "title": "Info",
         "required": [
           "ports",
           "authorized_via_ticket",
@@ -904,6 +947,7 @@
       },
       "LoginFailureResponse": {
         "type": "object",
+        "title": "LoginFailureResponse",
         "required": [
           "state"
         ],
@@ -915,6 +959,7 @@
       },
       "LoginRequest": {
         "type": "object",
+        "title": "LoginRequest",
         "required": [
           "username",
           "password"
@@ -930,6 +975,7 @@
       },
       "NewApiToken": {
         "type": "object",
+        "title": "NewApiToken",
         "required": [
           "label",
           "expiry"
@@ -946,6 +992,7 @@
       },
       "NewOtpCredential": {
         "type": "object",
+        "title": "NewOtpCredential",
         "required": [
           "secret_key"
         ],
@@ -961,6 +1008,7 @@
       },
       "NewPublicKeyCredential": {
         "type": "object",
+        "title": "NewPublicKeyCredential",
         "required": [
           "label",
           "openssh_public_key"
@@ -976,6 +1024,7 @@
       },
       "OtpLoginRequest": {
         "type": "object",
+        "title": "OtpLoginRequest",
         "required": [
           "otp"
         ],
@@ -995,6 +1044,7 @@
       },
       "PortsInfo": {
         "type": "object",
+        "title": "PortsInfo",
         "properties": {
           "ssh": {
             "type": "integer",
@@ -1016,6 +1066,7 @@
       },
       "SetupState": {
         "type": "object",
+        "title": "SetupState",
         "required": [
           "has_targets",
           "has_users"
@@ -1031,6 +1082,7 @@
       },
       "SsoProviderDescription": {
         "type": "object",
+        "title": "SsoProviderDescription",
         "required": [
           "name",
           "label",
@@ -1059,6 +1111,7 @@
       },
       "StartSloResponseParams": {
         "type": "object",
+        "title": "StartSloResponseParams",
         "required": [
           "url"
         ],
@@ -1070,6 +1123,7 @@
       },
       "StartSsoResponseParams": {
         "type": "object",
+        "title": "StartSsoResponseParams",
         "required": [
           "url"
         ],
@@ -1091,6 +1145,7 @@
       },
       "TargetSnapshot": {
         "type": "object",
+        "title": "TargetSnapshot",
         "required": [
           "name",
           "description",
@@ -1113,6 +1168,7 @@
       },
       "TokenAndSecret": {
         "type": "object",
+        "title": "TokenAndSecret",
         "required": [
           "token",
           "secret"
@@ -1128,6 +1184,7 @@
       },
       "UserRequireCredentialsPolicy": {
         "type": "object",
+        "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
             "type": "array",
