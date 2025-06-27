@@ -20,7 +20,7 @@
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "^2.1.0",
     "@fontsource/poppins": "^5.2.6",
-    "@fontsource/work-sans": "^4.5.12",
+    "@fontsource/work-sans": "^5.2.6",
     "@fortawesome/free-brands-svg-icons": "^6.7.2",
     "@fortawesome/free-regular-svg-icons": "^6.7.2",
     "@fortawesome/free-solid-svg-icons": "^6.7.2",
