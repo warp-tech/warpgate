@@ -17,7 +17,9 @@ use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
-use warpgate_common::{configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError};
+use warpgate_common::{
+    configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError,
+};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};

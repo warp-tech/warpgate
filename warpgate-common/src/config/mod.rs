@@ -218,6 +218,12 @@ impl SshConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct SniCertificateConfig {
+    pub certificate: String,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct HttpConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -244,6 +250,9 @@ pub struct HttpConfig {
     #[serde(default = "_default_cookie_max_age", with = "humantime_serde")]
     #[schemars(with = "String")]
     pub cookie_max_age: Duration,
+
+    #[serde(default)]
+    pub sni_certificates: Vec<SniCertificateConfig>,
 }
 
 impl Default for HttpConfig {
@@ -257,6 +266,7 @@ impl Default for HttpConfig {
             trust_x_forwarded_headers: false,
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
+            sni_certificates: vec![],
         }
     }
 }
