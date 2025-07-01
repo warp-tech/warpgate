@@ -29,8 +29,7 @@ use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, TlsCertificateAndPrivateKey,
-    TlsCertificateBundle, TlsPrivateKey, WarpgateConfig,
+    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
 };
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
