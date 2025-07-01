@@ -1,3 +1,4 @@
+pub mod api;
 pub mod auth;
 mod config;
 pub mod consts;

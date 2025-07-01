@@ -21,7 +21,7 @@ resolver = "2"
 
 [workspace.dependencies]
 bytes = { version = "1.4", default-features = false }
-data-encoding = { version = "2.3", default-features = false }
+data-encoding = { version = "2.3", default-features = false, features = ["alloc"] }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
 russh = { version = "0.52.1", features = ["des"], default-features = false }
