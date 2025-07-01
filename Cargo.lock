@@ -376,9 +376,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
-version = "1.7.3"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89e25b6adfb930f02d1981565a6e5d9c547ac15a96606256d3b59040e5cd4ca3"
+checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bcrypt-pbkdf"
@@ -2036,9 +2036,9 @@ dependencies = [
 
 [[package]]
 name = "internal-russh-forked-ssh-key"
-version = "0.6.10+upstream-0.6.7"
+version = "0.6.11+upstream-0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33555bd765ace379fe85d97bb6d48b5783054f6048a7d5ec24cd9155e490e266"
+checksum = "e0a77eae781ed6a7709fb15b64862fcca13d886b07c7e2786f5ed34e5e2b9187"
 dependencies = [
  "argon2",
  "bcrypt-pbkdf",
@@ -3628,18 +3628,18 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.52.1"
+version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc2b4e549ed83a4e36517807367b538c6d00b603ce138637f50a2218222e23f"
+checksum = "9b71d6d784c75ab19c421b7c3df21b100c9643f8b2563ae345a495ee792e85e4"
 dependencies = [
  "aes",
- "aes-gcm",
+ "aws-lc-rs",
+ "base64ct",
  "bitflags 2.9.1",
  "block-padding",
  "byteorder",
  "bytes",
  "cbc",
- "chacha20",
  "ctr",
  "curve25519-dalek",
  "data-encoding",
@@ -3671,7 +3671,6 @@ dependencies = [
  "pkcs1",
  "pkcs5",
  "pkcs8",
- "poly1305",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rsa",
