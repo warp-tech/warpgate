@@ -551,6 +551,10 @@ impl ServerSession {
                 let _ = reply.send(self._channel_open_direct_tcpip(channel, params).await?);
             }
 
+            ServerHandlerEvent::ChannelOpenDirectStreamlocal(channel, path, reply) => {
+                let _ = reply.send(self._channel_open_direct_streamlocal(channel, path).await?);
+            }
+
             ServerHandlerEvent::EnvRequest(channel, name, value, reply) => {
                 self._channel_env_request(channel, name, value).await?;
                 let _ = reply.send(());
@@ -1013,6 +1017,52 @@ impl ServerSession {
                         dst_port: params.port_to_connect as u16,
                         src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
                         src_port: params.originator_port as u16,
+                    });
+                    if let Err(error) = recorder.write_connection_setup().await {
+                        error!(%channel, ?error, "Failed to record connection setup");
+                    }
+                    self.traffic_connection_recorders.insert(uuid, recorder);
+                }
+
+                Ok(true)
+            }
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(x) => Err(x.into()),
+        }
+    }
+
+    async fn _channel_open_direct_streamlocal(
+        &mut self,
+        channel: ServerChannelId,
+        path: String,
+    ) -> Result<bool> {
+        let uuid = Uuid::new_v4();
+        self.channel_map.insert(channel, uuid);
+
+        info!(%channel, "Opening direct streamlocal channel to {}", path);
+
+        let _ = self.maybe_connect_remote().await;
+
+        match self
+            .send_command_and_wait(RCCommand::Channel(
+                uuid,
+                ChannelOperation::OpenDirectStreamlocal(path.clone()),
+            ))
+            .await
+        {
+            Ok(()) => {
+                self.all_channels.push(uuid);
+
+                let recorder = self
+                    .traffic_recorder_for(
+                        TrafficRecorderKey::Socket(path.clone()),
+                        "direct-tcpip",
+                    )
+                    .await;
+                if let Some(recorder) = recorder {
+                    #[allow(clippy::unwrap_used)]
+                    let mut recorder = recorder.connection(TrafficConnectionParams::Socket {
+                        socket_path: path,
                     });
                     if let Err(error) = recorder.write_connection_setup().await {
                         error!(%channel, ?error, "Failed to record connection setup");
