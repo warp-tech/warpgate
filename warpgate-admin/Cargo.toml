@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-admin"
-version = "0.14.1"
+version = "0.15.0"
 
 [dependencies]
 anyhow = { version = "1.0", features = ["std"], default-features = false }
