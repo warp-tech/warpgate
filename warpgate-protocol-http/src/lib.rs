@@ -204,17 +204,15 @@ impl ProtocolServer for HTTPProtocolServer {
             }
         });
 
-        let config = self.services.config.lock().await;
+        let rustls_config = {
+            let config = self.services.config.lock().await;
+            make_rustls_config(&config).await?
+        };
 
         info!(?address, "Listening");
-        Server::new(
-            address
-                .poem_listener()
-                .await?
-                .rustls(make_rustls_config(&config).await?),
-        )
-        .run(app)
-        .await?;
+        Server::new(address.poem_listener().await?.rustls(rustls_config))
+            .run(app)
+            .await?;
 
         Ok(())
     }
