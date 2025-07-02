@@ -47,7 +47,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<AddSshKnownHostRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<AddSshKnownHostResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
 
@@ -77,7 +77,7 @@ impl Api {
     async fn get_ssh_known_hosts(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
 

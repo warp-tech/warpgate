@@ -53,7 +53,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUsersResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -79,7 +79,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateUserRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateUserResponse, WarpgateError> {
         if body.username.is_empty() {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
@@ -137,7 +137,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -154,7 +154,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<UserDataRequest>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -178,7 +178,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -233,7 +233,7 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -262,7 +262,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -298,7 +298,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
 

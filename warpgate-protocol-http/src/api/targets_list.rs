@@ -40,7 +40,7 @@ impl Api {
         services: Data<&Services>,
         auth: Data<&RequestAuthorization>,
         search: Query<Option<String>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetTargetsResponse> {
         let mut targets = {
             let mut config_provider = services.config_provider.lock().await;

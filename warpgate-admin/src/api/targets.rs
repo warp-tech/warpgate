@@ -53,7 +53,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -78,7 +78,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTargetResponse, WarpgateError> {
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
@@ -166,7 +166,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -183,7 +183,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -216,7 +216,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -258,7 +258,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -325,7 +325,7 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -354,7 +354,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -390,7 +390,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 

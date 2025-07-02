@@ -91,7 +91,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -115,7 +115,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -160,7 +160,7 @@ impl DetailApi {
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -193,7 +193,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 

@@ -34,7 +34,7 @@ impl Api {
     async fn api_ssh_get_own_keys(
         &self,
         config: Data<&Arc<Mutex<WarpgateConfig>>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
         let config = config.lock().await;
         let keys = warpgate_protocol_ssh::load_client_keys(&config)?;

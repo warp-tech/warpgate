@@ -42,7 +42,7 @@ impl Api {
         &self,
         services: Data<&Services>,
         body: Json<CheckSshHostKeyRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
         let mut handles = RemoteClient::create(Uuid::new_v4(), services.clone())?;
 

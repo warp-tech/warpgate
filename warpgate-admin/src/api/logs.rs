@@ -37,7 +37,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 

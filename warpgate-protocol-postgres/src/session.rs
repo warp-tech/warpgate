@@ -192,14 +192,14 @@ impl PostgresSession {
 
                                 let credential = AuthCredential::Password(password);
 
-                                if {
-                                    self.services
-                                        .config_provider
-                                        .lock()
-                                        .await
-                                        .validate_credential(&username, &credential)
-                                        .await?
-                                } {
+                                if self
+                                    .services
+                                    .config_provider
+                                    .lock()
+                                    .await
+                                    .validate_credential(&username, &credential)
+                                    .await?
+                                {
                                     state.add_valid_credential(credential);
                                 } else {
                                     // Postgres CLI will just send the same password in a loop without prompting the user again

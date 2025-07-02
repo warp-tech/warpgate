@@ -1,5 +1,4 @@
-use poem_openapi::auth::ApiKey;
-use poem_openapi::{OpenApi, SecurityScheme};
+use poem_openapi::OpenApi;
 
 mod api_tokens;
 pub mod auth;

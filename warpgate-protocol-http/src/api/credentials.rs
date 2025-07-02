@@ -180,7 +180,7 @@ impl Api {
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -231,7 +231,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<ChangePasswordRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -279,7 +279,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewPublicKeyCredential>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -315,7 +315,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -347,7 +347,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewOtpCredential>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -391,7 +391,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 

@@ -55,7 +55,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -79,7 +79,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewPasswordCredential>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -122,7 +122,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
