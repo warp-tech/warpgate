@@ -1,3 +1,4 @@
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -50,12 +51,11 @@ impl TlsCertificateBundle {
     }
 
     pub fn sni_names(&self) -> Result<Vec<String>, RustlsSetupError> {
-        if self.certificates.is_empty() {
-            return Ok(Vec::new());
-        }
-
         // Parse leaf certificate
-        let cert_der = &self.certificates[0];
+        let Some(cert_der) = self.certificates.first() else {
+            return Ok(Vec::new());
+        };
+
         let (_, cert) =
             X509Certificate::from_der(cert_der).map_err(|e| RustlsSetupError::X509(e.into()))?;
 
@@ -74,27 +74,21 @@ impl TlsCertificateBundle {
                             names.push(dns_name.to_string());
                         }
                         GeneralName::IPAddress(ip_bytes) => {
-                            // Convert IP bytes to string representation
                             if ip_bytes.len() == 4 {
-                                // IPv4
-                                names.push(format!(
-                                    "{}.{}.{}.{}",
-                                    ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]
-                                ));
+                                #[allow(clippy::unwrap_used)] // length checked
+                                names.push(
+                                    Ipv4Addr::from(<[u8; 4]>::try_from(*ip_bytes).unwrap())
+                                        .to_string(),
+                                );
                             } else if ip_bytes.len() == 16 {
-                                // IPv6
-                                let mut ipv6_parts = Vec::new();
-                                for chunk in ip_bytes.chunks(2) {
-                                    ipv6_parts.push(format!(
-                                        "{:02x}{:02x}",
-                                        chunk[0],
-                                        chunk.get(1).unwrap_or(&0)
-                                    ));
-                                }
-                                names.push(ipv6_parts.join(":"));
+                                #[allow(clippy::unwrap_used)] // length checked
+                                names.push(
+                                    Ipv6Addr::from(<[u8; 16]>::try_from(*ip_bytes).unwrap())
+                                        .to_string(),
+                                );
                             }
                         }
-                        _ => {} // Ignore other types like email, URI, etc.
+                        _ => {}
                     }
                 }
             }
@@ -214,10 +208,10 @@ pub async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
 ) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
     Ok(TlsCertificateAndPrivateKey {
         certificate: TlsCertificateBundle::from_file(
-            config.paths_relative_to.join(&from.certificate_path()),
+            config.paths_relative_to.join(from.certificate_path()),
         )
         .await?,
-        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(&from.key_path()))
+        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
             .await?,
     })
 }

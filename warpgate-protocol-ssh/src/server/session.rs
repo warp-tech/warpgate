@@ -1054,16 +1054,12 @@ impl ServerSession {
                 self.all_channels.push(uuid);
 
                 let recorder = self
-                    .traffic_recorder_for(
-                        TrafficRecorderKey::Socket(path.clone()),
-                        "direct-tcpip",
-                    )
+                    .traffic_recorder_for(TrafficRecorderKey::Socket(path.clone()), "direct-tcpip")
                     .await;
                 if let Some(recorder) = recorder {
                     #[allow(clippy::unwrap_used)]
-                    let mut recorder = recorder.connection(TrafficConnectionParams::Socket {
-                        socket_path: path,
-                    });
+                    let mut recorder =
+                        recorder.connection(TrafficConnectionParams::Socket { socket_path: path });
                     if let Err(error) = recorder.write_connection_setup().await {
                         error!(%channel, ?error, "Failed to record connection setup");
                     }

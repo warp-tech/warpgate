@@ -67,7 +67,7 @@ async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
 
     let mut cfg = RustlsConfig::new().fallback(certificate_and_key.into());
     for sni in &config.store.http.sni_certificates {
-        let certificate_and_key = load_certificate_and_key(sni, &config)
+        let certificate_and_key = load_certificate_and_key(sni, config)
             .await
             .with_context(|| format!("loading SNI TLS certificate: {sni:?}",))?;
 
