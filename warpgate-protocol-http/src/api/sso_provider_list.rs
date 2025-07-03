@@ -180,7 +180,14 @@ impl Api {
             ));
         };
 
-        let response = context.request.verify_code((*code).clone()).await?;
+        let response = context
+            .request
+            .verify_code((*code).clone())
+            .await
+            .inspect_err(|e| {
+                // More error details visible via Debug
+                warn!("Failed to verify SSO code: {e:?}");
+            })?;
 
         if !response.email_verified.unwrap_or(true) {
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));

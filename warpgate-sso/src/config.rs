@@ -185,7 +185,7 @@ impl SsoInternalProviderConfig {
     pub fn scopes(&self) -> Vec<String> {
         match self {
             SsoInternalProviderConfig::Google { .. } | SsoInternalProviderConfig::Azure { .. } => {
-                vec!["email".to_string()]
+                vec!["email".into(), "profile".into()]
             }
             SsoInternalProviderConfig::Custom { scopes, .. } => scopes.clone(),
             SsoInternalProviderConfig::Apple { .. } => vec![],
