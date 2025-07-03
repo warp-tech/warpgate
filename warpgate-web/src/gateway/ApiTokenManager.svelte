@@ -29,7 +29,10 @@
 
 <div class="page-summary-bar mt-4">
     <h1>API tokens</h1>
-    <a href={''} class="btn btn-primary ms-auto" onclick={e => {
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_missing_attribute -->
+    <a class="btn btn-primary ms-auto" onclick={e => {
         creatingToken = true
         e.preventDefault()
     }}>Create token</a>
@@ -54,7 +57,9 @@
     {/if}
 
     <div class="list-group list-group-flush mb-3">
-        {#each tokens as token}
+        {#each tokens as token (token.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_missing_attribute -->
         <div class="list-group-item d-flex align-items-center">
             <Fa fw icon={faKey} />
             <span class="label ms-3">{token.label}</span>
@@ -64,9 +69,9 @@
                 <Badge color="success" class="ms-2">{token.expiry.toLocaleDateString()}</Badge>
             {/if}
             <span class="ms-auto"></span>
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <a
                 color="link"
-                href={''}
                 class="ms-2"
                 onclick={e => {
                     deleteToken(token)

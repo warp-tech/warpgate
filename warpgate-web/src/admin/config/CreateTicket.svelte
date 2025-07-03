@@ -92,7 +92,7 @@ async function create () {
         {#if users}
         <FormGroup floating label="Authorize as user">
             <select bind:value={selectedUser} class="form-control">
-                {#each users as user}
+                {#each users as user (user.id)}
                     <option value={user}>
                         {user.username}
                     </option>
@@ -104,7 +104,7 @@ async function create () {
         {#if targets}
         <FormGroup floating label="Target">
             <select bind:value={selectedTarget} class="form-control">
-                {#each targets as target}
+                {#each targets as target (target.id)}
                     <option value={target}>
                         {target.name}
                     </option>

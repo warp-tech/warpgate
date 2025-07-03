@@ -106,7 +106,7 @@
     </div>
     {#if _items}
         <div class="list-group list-group-flush mb-3">
-            {#each _items as _item}
+            {#each _items as _item (_item)}
                 {@render item?.(_item)}
             {/each}
         </div>

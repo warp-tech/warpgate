@@ -127,7 +127,7 @@ onDestroy(() => {
     <div class="table-wrapper">
         <table class="w-100">
             <tbody>
-                {#each visibleItems as item}
+                {#each visibleItems as item (item.id)}
                     <tr>
                         <td class="timestamp pe-4">
                             {stringifyDate(item.timestamp)}
@@ -151,7 +151,7 @@ onDestroy(() => {
                                 {item.text}
                             </span>
 
-                            {#each Object.entries(item.values ?? {}) as pair}
+                            {#each Object.entries(item.values ?? {}) as pair (pair[0])}
                                 <span class="key">{pair[0]}:</span>
                                 <span class="value">{pair[1]}</span>
                             {/each}
@@ -193,7 +193,6 @@ onDestroy(() => {
         </table>
     </div>
 {/if}
-
 
 <style lang="scss">
     @import "../theme/vars.light";

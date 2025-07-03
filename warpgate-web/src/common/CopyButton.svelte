@@ -15,6 +15,7 @@
         children?: () => any
     }
 
+    // eslint-disable-next-line svelte/no-unused-props
     let {
         text,
         disabled = false,

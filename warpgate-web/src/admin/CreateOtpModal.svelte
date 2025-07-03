@@ -120,7 +120,7 @@
                     <Fa class="me-2" fw icon={faRefresh} />
                     Regenerate
                 </Button>
-                <CopyButton class="d-flex align-items-center" color="secondary" text={totpUri!} label={'Copy URI'} />
+                <CopyButton class="d-flex align-items-center" color="secondary" text={totpUri!} label='Copy URI' />
             </div>
             <FormGroup floating label="Paste the generated OTP code" class="mt-3" spacing="0">
                 <Input

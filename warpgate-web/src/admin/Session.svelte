@@ -120,7 +120,7 @@
     {#if recordings?.length }
         <h3 class="mt-4">Recordings</h3>
         <div class="list-group list-group-flush">
-            {#each recordings as recording}
+            {#each recordings as recording (recording.id)}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/recordings/{recording.id}"

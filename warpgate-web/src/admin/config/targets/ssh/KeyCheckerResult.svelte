@@ -55,7 +55,7 @@
         {#if result.trustedKeys.length}
             <strong>Known trusted keys:</strong>
             <div class="mb-2">
-                {#each result.trustedKeys as key}
+                {#each result.trustedKeys as key (key)}
                     <pre class="key-value">{key} <CopyButton link text={key.toString()} class="copy-button" /></pre>
                 {/each}
             </div>

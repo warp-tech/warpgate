@@ -36,7 +36,7 @@ async function deleteHost (host: SSHKnownHost) {
     <h2>Warpgate's own SSH keys</h2>
     <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
     <div class="list-group list-group-flush">
-        {#each ownKeys as key}
+        {#each ownKeys as key (key)}
             <div class="list-group-item d-flex">
                 <pre>{key.kind} {key.publicKeyBase64}</pre>
                 <div class="ms-auto">

@@ -47,7 +47,8 @@
 
         {#if tickets.length}
             <div class="list-group list-group-flush">
-                {#each tickets as ticket}
+                {#each tickets as ticket (ticket.id)}
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div class="list-group-item">
                         <div>
                             <strong>
@@ -79,7 +80,9 @@
                         <small class="text-muted me-4 ms-auto">
                             <RelativeDate date={ticket.created} />
                         </small>
-                        <a href={''} onclick={e => {
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <!-- svelte-ignore a11y_missing_attribute -->
+                        <a onclick={e => {
                             deleteTicket(ticket)
                             e.preventDefault()
                         }}>Delete</a>

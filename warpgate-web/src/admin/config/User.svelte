@@ -91,7 +91,7 @@
 
     <h4 class="mt-4">User roles</h4>
     <div class="list-group list-group-flush mb-3">
-        {#each allRoles as role}
+        {#each allRoles as role (role.id)}
             <label
                 for="role-{role.id}"
                 class="list-group-item list-group-item-action d-flex align-items-center"

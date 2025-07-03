@@ -78,9 +78,11 @@
             {/if}
 
             <span class="ms-auto"></span>
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_missing_attribute -->
             <a
                 class="ms-2"
-                href={''}
                 onclick={e => {
                     changingPassword = true
                     e.preventDefault()
@@ -107,21 +109,26 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">One-time passwords</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={e => {
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_missing_attribute -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <a color="link" onclick={e => {
             creatingOtpCredential = true
             e.preventDefault()
         }}>Add device</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.otp as credential}
+        {#each creds.otp as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faMobilePhone} />
             <span class="label ms-3">OTP device</span>
             <span class="ms-auto"></span>
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_missing_attribute -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <a
                 class="ms-2"
-                href={''}
                 onclick={e => {
                     deleteOtp(credential)
                     e.preventDefault()
@@ -142,14 +149,17 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={e => {
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_missing_attribute -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <a color="link" onclick={e => {
             creatingPublicKeyCredential = true
             e.preventDefault()
         }}>Add key</a>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.publicKeys as credential}
+        {#each creds.publicKeys as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
             <div class="main ms-3">
@@ -158,9 +168,11 @@
             </div>
             <span class="ms-auto"></span>
             <CredentialUsedStateBadge credential={credential} />
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_missing_attribute -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
             <a
                 class="ms-2"
-                href={''}
                 onclick={e => {
                     deletePublicKey(credential)
                     e.preventDefault()
@@ -184,7 +196,7 @@
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.sso as credential}
+        {#each creds.sso as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faIdBadge} />
             <span class="label ms-3">

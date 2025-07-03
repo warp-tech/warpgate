@@ -20,7 +20,6 @@ export default [
         '@stylistic': stylistic,
     },
     languageOptions: {
-      parser: svelteParser,
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,

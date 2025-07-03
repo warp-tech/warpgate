@@ -33,7 +33,7 @@
             <Fa icon={faAngleLeft} />
         </PaginationLink>
     </PaginationItem>
-    {#each pages as i}
+    {#each pages as i (i)}
         {#if i !== null}
             <PaginationItem active={page === i}>
                 <PaginationLink on:click={() => page = i} href="#">{i + 1}</PaginationLink>
