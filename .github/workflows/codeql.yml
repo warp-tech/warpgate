@@ -48,7 +48,7 @@ jobs:
         - language: javascript-typescript
           build-mode: none
         - language: rust
-          build-mode: autobuild
+          build-mode: none
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
