@@ -8,6 +8,7 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 
 #[enum_dispatch(ProtocolServer)]
 #[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
 pub enum ProtocolServerEnum {
     SSHProtocolServer,
     HTTPProtocolServer,
@@ -34,6 +35,15 @@ impl ProtocolServer for ProtocolServerEnum {
             ProtocolServerEnum::HTTPProtocolServer(s) => s.test_target(target).await,
             ProtocolServerEnum::MySQLProtocolServer(s) => s.test_target(target).await,
             ProtocolServerEnum::PostgresProtocolServer(s) => s.test_target(target).await,
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            ProtocolServerEnum::SSHProtocolServer(x) => x.name(),
+            ProtocolServerEnum::HTTPProtocolServer(x) => x.name(),
+            ProtocolServerEnum::MySQLProtocolServer(x) => x.name(),
+            ProtocolServerEnum::PostgresProtocolServer(x) => x.name(),
         }
     }
 }

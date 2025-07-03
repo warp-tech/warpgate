@@ -67,14 +67,16 @@ impl ProtocolServer for PostgresProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        info!(?address, "Listening");
-        let mut listener = address.tcp_accept_stream().await?;
+        let mut listener = address
+            .tcp_accept_stream()
+            .await
+            .context("accepting connection")?;
         loop {
             let Some(stream) = listener.try_next().await? else {
                 return Ok(());
             };
 
-            let remote_address = stream.peer_addr()?;
+            let remote_address = stream.peer_addr().context("getting peer address")?;
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();
@@ -133,6 +135,10 @@ impl ProtocolServer for PostgresProtocolServer {
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "PostgreSQL"
     }
 }
 

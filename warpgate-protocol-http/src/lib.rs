@@ -206,10 +206,9 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let rustls_config = {
             let config = self.services.config.lock().await;
-            make_rustls_config(&config).await?
+            make_rustls_config(&config).await.context("rustls setup")?
         };
 
-        info!(?address, "Listening");
         Server::new(address.poem_listener().await?.rustls(rustls_config))
             .run(app)
             .await?;
@@ -230,6 +229,10 @@ impl ProtocolServer for HTTPProtocolServer {
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "HTTP"
     }
 }
 

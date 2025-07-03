@@ -67,15 +67,13 @@ impl ProtocolServer for MySQLProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        info!(?address, "Listening");
-
         let mut listener = address.tcp_accept_stream().await?;
 
         loop {
-            let Some(stream) = listener.try_next().await? else {
+            let Some(stream) = listener.try_next().await.context("accepting connection")? else {
                 return Ok(());
             };
-            let remote_address = stream.peer_addr()?;
+            let remote_address = stream.peer_addr().context("getting peer address")?;
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();
@@ -93,7 +91,8 @@ impl ProtocolServer for MySQLProtocolServer {
                             handle: Box::new(session_handle),
                         },
                     )
-                    .await?;
+                    .await
+                    .context("registering session")?;
 
                 let session =
                     MySqlSession::new(server_handle, services, stream, tls_config, remote_address)
@@ -124,6 +123,10 @@ impl ProtocolServer for MySQLProtocolServer {
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "MySQL"
     }
 }
 

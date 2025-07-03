@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::TryStreamExt;
 use russh::keys::{Algorithm, HashAlg};
 use russh::{MethodKind, MethodSet, Preferred};
@@ -61,9 +61,8 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    info!(?address, "Listening");
-    while let Some(stream) = listener.try_next().await? {
-        let remote_address = stream.peer_addr()?;
+    while let Some(stream) = listener.try_next().await.context("accepting connection")? {
+        let remote_address = stream.peer_addr().context("getting peer address")?;
         let russh_config = russh_config.clone();
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
@@ -79,7 +78,8 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
                     handle: Box::new(session_handle),
                 },
             )
-            .await?;
+            .await
+            .context("registering session")?;
 
         let id = server_handle.lock().await.id();
 

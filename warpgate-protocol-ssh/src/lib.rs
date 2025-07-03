@@ -128,6 +128,10 @@ impl ProtocolServer for SSHProtocolServer {
 
         Ok(())
     }
+
+    fn name(&self) -> &'static str {
+        "SSH"
+    }
 }
 
 impl Debug for SSHProtocolServer {

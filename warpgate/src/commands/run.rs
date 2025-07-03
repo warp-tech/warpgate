@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::{FutureExt, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
 use tracing::*;
 use warpgate_common::version::warpgate_version;
+use warpgate_common::ListenEndpoint;
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
@@ -16,6 +17,18 @@ use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
+
+async fn run_protocol_server<T: ProtocolServer + Send + 'static>(
+    server: T,
+    address: ListenEndpoint,
+) -> Result<()> {
+    let name = server.name();
+    info!("Accepting {name} connections on {address:?}");
+    server
+        .run(address)
+        .await
+        .with_context(|| format!("protocol server: {name}"))
+}
 
 pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Result<()> {
     let version = warpgate_version();
@@ -40,41 +53,50 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
 
     install_database_logger(services.db.clone());
 
+    if console::user_attended() {
+        info!("--------------------------------------------");
+        info!("Warpgate is now running.");
+    }
+
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
     if config.store.ssh.enable {
         protocol_futures.push(
-            SSHProtocolServer::new(&services)
-                .await?
-                .run(config.store.ssh.listen.clone())
-                .boxed(),
+            run_protocol_server(
+                SSHProtocolServer::new(&services).await?,
+                config.store.ssh.listen.clone(),
+            )
+            .boxed(),
         );
     }
 
     if config.store.http.enable {
         protocol_futures.push(
-            HTTPProtocolServer::new(&services)
-                .await?
-                .run(config.store.http.listen.clone())
-                .boxed(),
+            run_protocol_server(
+                HTTPProtocolServer::new(&services).await?,
+                config.store.http.listen.clone(),
+            )
+            .boxed(),
         );
     }
 
     if config.store.mysql.enable {
         protocol_futures.push(
-            MySQLProtocolServer::new(&services)
-                .await?
-                .run(config.store.mysql.listen.clone())
-                .boxed(),
+            run_protocol_server(
+                MySQLProtocolServer::new(&services).await?,
+                config.store.mysql.listen.clone(),
+            )
+            .boxed(),
         );
     }
 
     if config.store.postgres.enable {
         protocol_futures.push(
-            PostgresProtocolServer::new(&services)
-                .await?
-                .run(config.store.postgres.listen.clone())
-                .boxed(),
+            run_protocol_server(
+                PostgresProtocolServer::new(&services).await?,
+                config.store.postgres.listen.clone(),
+            )
+            .boxed(),
         );
     }
 
@@ -99,33 +121,6 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
             }
         }
     });
-
-    if console::user_attended() {
-        info!("--------------------------------------------");
-        info!("Warpgate is now running.");
-        if config.store.ssh.enable {
-            info!("Accepting SSH connections on {:?}", config.store.ssh.listen);
-        }
-        if config.store.http.enable {
-            info!(
-                "Accepting HTTP connections on https://{:?}",
-                config.store.http.listen
-            );
-        }
-        if config.store.mysql.enable {
-            info!(
-                "Accepting MySQL connections on {:?}",
-                config.store.mysql.listen
-            );
-        }
-        if config.store.postgres.enable {
-            info!(
-                "Accepting PostgreSQL connections on {:?}",
-                config.store.postgres.listen
-            );
-        }
-        info!("--------------------------------------------");
-    }
 
     #[cfg(target_os = "linux")]
     if let Ok(true) = sd_notify::booted() {
