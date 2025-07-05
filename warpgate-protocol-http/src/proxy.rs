@@ -17,9 +17,7 @@ use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
-use warpgate_common::{
-    configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError,
-};
+use warpgate_common::{configure_tls_connector, try_block, TargetHTTPOptions, TlsMode};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
@@ -305,10 +303,6 @@ pub async fn proxy_normal_request(
     client_request = rewrite_request(client_request, options)?;
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
 
-    let authority_host = extract_authority_host(&uri)?;
-
-    client_request = client_request.header(http::header::HOST, authority_host);
-
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
         .execute(client_request)
@@ -400,26 +394,12 @@ pub async fn proxy_websocket_request(
         })
 }
 
-/// Remove the username/password from the URL before using it for the Host header
-fn extract_authority_host(uri: &Uri) -> anyhow::Result<String> {
-    let uri_authority = uri
-        .authority()
-        .ok_or(WarpgateError::NoHostInUrl)?
-        .to_string();
-    Ok(uri_authority
-        .split('@')
-        .last()
-        .context("URL authority is empty")?
-        .into())
-}
-
 async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
-    let authority_host = extract_authority_host(&uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
         .header(http::header::CONNECTION, "Upgrade")
@@ -428,8 +408,7 @@ async fn proxy_ws_inner(
         .header(
             http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
-        )
-        .header(http::header::HOST, authority_host);
+        );
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
