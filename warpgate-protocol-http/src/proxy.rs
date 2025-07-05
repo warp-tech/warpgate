@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cookie::Cookie;
+use data_encoding::BASE64;
 use delegate::delegate;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use http::header::HeaderName;
@@ -297,17 +298,19 @@ pub async fn proxy_normal_request(
 
     let client = client.build().context("Could not build request")?;
 
+    let (authorization_header, uri) = extract_basic_auth(uri)?;
+
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
+    if let Some(authorization_header) = authorization_header {
+        client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
+    }
+
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
-
-    let authority_host = extract_authority_host(&uri)?;
-
-    client_request = client_request.header(http::header::HOST, authority_host);
 
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
@@ -401,16 +404,33 @@ pub async fn proxy_websocket_request(
 }
 
 /// Remove the username/password from the URL before using it for the Host header
-fn extract_authority_host(uri: &Uri) -> anyhow::Result<String> {
+fn extract_basic_auth(uri: Uri) -> anyhow::Result<(Option<HeaderValue>, Uri)> {
     let uri_authority = uri
         .authority()
         .ok_or(WarpgateError::NoHostInUrl)?
         .to_string();
-    Ok(uri_authority
-        .split('@')
-        .last()
-        .context("URL authority is empty")?
-        .into())
+    let parts = uri_authority.split('@').collect::<Vec<_>>();
+
+    let host = parts.last().context("URL authority is empty")?;
+
+    let uri = {
+        let mut parts = uri.into_parts();
+        parts.authority = Some(Authority::from_str(host)?);
+        Uri::from_parts(parts)?
+    };
+
+    if parts.len() == 1 {
+        return Ok((None, uri));
+    }
+
+    #[allow(clippy::indexing_slicing)] // checked
+    let creds = parts[0];
+
+    let auth_header = format!("Basic {}", BASE64.encode(creds.as_bytes()));
+
+    let auth_value = HeaderValue::from_str(&auth_header)?;
+
+    Ok((Some(auth_value), uri))
 }
 
 async fn proxy_ws_inner(
@@ -419,7 +439,7 @@ async fn proxy_ws_inner(
     uri: Uri,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
-    let authority_host = extract_authority_host(&uri)?;
+    let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
         .header(http::header::CONNECTION, "Upgrade")
@@ -429,7 +449,18 @@ async fn proxy_ws_inner(
             http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         )
-        .header(http::header::HOST, authority_host);
+        // tungstenite requires an explicit Host header
+        .header(
+            http::header::HOST,
+            uri.authority()
+                .ok_or(WarpgateError::NoHostInUrl)
+                .context("no authority in the URL")?
+                .to_string(),
+        );
+
+    if let Some(authorization_header) = authorization_header {
+        client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
+    }
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
