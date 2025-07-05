@@ -10,7 +10,6 @@ import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
-import { makeTargetURL } from 'common/protocols'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
@@ -30,26 +29,18 @@ function loadTargets (options: LoadOptions): Observable<PaginatedResponse<Target
     )
 }
 
-function getTargetURL (target: TargetSnapshot): string | null {
+function selectTarget (target: TargetSnapshot) {
     if (target.kind === TargetKind.WebAdmin) {
-        return '/@warpgate/admin'
+        loadURL('/@warpgate/admin')
     } else if (target.kind === TargetKind.Http) {
-        return makeTargetURL({
-            serverInfo: $serverInfo,
-            targetName: target.name,
-            targetExternalHost: target.externalHost,
-        })
+        loadURL(`/?warpgate-target=${target.name}`)
+    } else {
+        selectedTarget = target
     }
-    return null
 }
 
-function selectTarget (target: TargetSnapshot) {
-    const url = getTargetURL(target)
-    if (url) {
-        location.href = url
-        return
-    }
-    selectedTarget = target
+function loadURL (url: string) {
+    location.href = url
 }
 
 </script>
@@ -67,7 +58,13 @@ function selectTarget (target: TargetSnapshot) {
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item"
-            href={getTargetURL(target)}
+            href={
+                target.kind === TargetKind.WebAdmin
+                    ? '/@warpgate/admin'
+                    : target.kind === TargetKind.Http
+                        ? `/?warpgate-target=${target.name}`
+                        : '/@warpgate/admin'
+            }
             onclick={e => {
                 if (e.metaKey || e.ctrlKey) {
                     return
