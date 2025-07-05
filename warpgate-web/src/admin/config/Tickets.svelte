@@ -7,6 +7,7 @@
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import { Button } from '@sveltestrap/sveltestrap'
 
     let error: string|undefined = $state()
     let tickets: Ticket[]|undefined = $state()
@@ -48,7 +49,6 @@
         {#if tickets.length}
             <div class="list-group list-group-flush">
                 {#each tickets as ticket (ticket.id)}
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div class="list-group-item">
                         <div>
                             <strong>
@@ -80,12 +80,10 @@
                         <small class="text-muted me-4 ms-auto">
                             <RelativeDate date={ticket.created} />
                         </small>
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_missing_attribute -->
-                        <a onclick={e => {
+                        <Button color="link" onclick={e => {
                             deleteTicket(ticket)
                             e.preventDefault()
-                        }}>Delete</a>
+                        }}>Delete</Button>
                     </div>
                 {/each}
             </div>
