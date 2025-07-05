@@ -96,12 +96,16 @@ impl ProtocolServer for PostgresProtocolServer {
                     )
                     .await?;
 
+                let config = services.config.lock().await;
+                // log_query_results is set per target in session, default to false here
+                let log_query_results = false;
                 let session = PostgresSession::new(
                     server_handle,
                     services,
                     stream,
                     tls_config,
                     remote_address,
+                    log_query_results,
                 )
                 .await;
 
