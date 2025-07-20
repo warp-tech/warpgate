@@ -28,6 +28,7 @@ RUN just npm ci \
 
 FROM debian:bullseye-20250520
 LABEL maintainer=heywoodlh
+ARG USER_ID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN <<EOF
@@ -39,6 +40,9 @@ RUN <<EOF
   rm -rf /var/lib/apt/lists/*
 EOF
 
+# RUN adduser warpgate --system --home /data
+RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin
+
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
@@ -47,5 +51,7 @@ HEALTHCHECK CMD wget --no-verbose --tries=1 --no-check-certificate --spider http
 
 ENV DOCKER=1
 
+USER warpgate
 ENTRYPOINT ["warpgate", "--config", "/data/warpgate.yaml"]
 CMD ["run"]
+
