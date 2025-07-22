@@ -2,7 +2,7 @@ name: Reproducibility test
 permissions:
   contents: read
 
-on: workflow_dispatch
+on: [push, pull_request]
 
 jobs:
   reprotest:
@@ -33,5 +33,4 @@ jobs:
 
       - name: Reprotest
         run: |
-          sudo ulimit -n 999999
           sudo env "PATH=$PATH" reprotest -vv --min-cpus=99999 --vary=environment,build_path,kernel,aslr,num_cpus,-time,-user_group,fileordering,domain_host,home,locales,exec_path,timezone,umask --build-command 'just npm ci; just npm run build; SOURCE_DATE_EPOCH=0 cargo build --all-features --release' . target/release/warpgate
