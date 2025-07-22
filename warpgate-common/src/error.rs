@@ -39,6 +39,8 @@ pub enum WarpgateError {
     RusshKeys(#[from] russh::keys::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    RateLimiterInsufficientCapacity(#[from] governor::InsufficientCapacity),
 
     #[error("Session end")]
     SessionEnd,

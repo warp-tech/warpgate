@@ -46,3 +46,4 @@ tokio-stream.workspace = true
 git-version = { version = "0.3.9", default-features = false }
 schemars.workspace = true
 x509-parser = "0.17.0"
+governor.workspace = true

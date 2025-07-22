@@ -42,6 +42,7 @@ warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = fal
 rustls.workspace = true
 rustls-pemfile.workspace = true
 webpki = { version = "0.22", default-features = false }
+governor.workspace = true
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
