@@ -27,6 +27,10 @@ jobs:
         run: |
           sudo env "PATH=$PATH" cargo install just
 
+      - name: Set open files limit
+        run: |
+          sudo prlimit --pid $$ --nofile=500000:500000
+
       - name: Reprotest
         run: |
           sudo ulimit -n 999999
