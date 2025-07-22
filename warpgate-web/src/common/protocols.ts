@@ -64,5 +64,9 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     ssh: new Set([CredentialKind.Password, CredentialKind.PublicKey, CredentialKind.Totp, CredentialKind.WebUserApproval]),
     http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
     mysql: new Set([CredentialKind.Password]),
-    postgres: new Set([CredentialKind.Password]),
+    postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
+}
+
+export function abbreviatePublicKey (key: string): string {
+    return key.slice(0, 16) + '...' + key.slice(-8)
 }

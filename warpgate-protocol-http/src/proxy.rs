@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cookie::Cookie;
+use data_encoding::BASE64;
 use delegate::delegate;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use http::header::HeaderName;
@@ -13,10 +15,12 @@ use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_with_config, tungstenite};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
-use warpgate_common::{try_block, TargetHTTPOptions, TlsMode, WarpgateError};
+use warpgate_common::{
+    configure_tls_connector, try_block, TargetHTTPOptions, TlsMode, WarpgateError,
+};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
@@ -104,7 +108,7 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
         .authority()
         .context("No authority in the URL")?
         .to_string();
-    let authority = authority.split('@').last().context("Authority is empty")?;
+
     let authority: Authority = authority.try_into()?;
     let mut uri = http::uri::Builder::new()
         .authority(authority)
@@ -264,6 +268,7 @@ pub async fn proxy_normal_request(
     tracing::debug!("URI: {:?}", uri);
 
     let mut client = reqwest::Client::builder()
+        .gzip(true)
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
@@ -293,19 +298,19 @@ pub async fn proxy_normal_request(
 
     let client = client.build().context("Could not build request")?;
 
+    let (authorization_header, uri) = extract_basic_auth(uri)?;
+
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
+    if let Some(authorization_header) = authorization_header {
+        client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
+    }
+
     client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
-    client_request = client_request.header(
-        http::header::HOST,
-        uri.authority()
-            .ok_or(WarpgateError::NoHostInUrl)?
-            .to_string(),
-    );
 
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
@@ -398,12 +403,43 @@ pub async fn proxy_websocket_request(
         })
 }
 
+/// Remove the username/password from the URL before using it for the Host header
+fn extract_basic_auth(uri: Uri) -> anyhow::Result<(Option<HeaderValue>, Uri)> {
+    let uri_authority = uri
+        .authority()
+        .ok_or(WarpgateError::NoHostInUrl)?
+        .to_string();
+    let parts = uri_authority.split('@').collect::<Vec<_>>();
+
+    let host = parts.last().context("URL authority is empty")?;
+
+    let uri = {
+        let mut parts = uri.into_parts();
+        parts.authority = Some(Authority::from_str(host)?);
+        Uri::from_parts(parts)?
+    };
+
+    if parts.len() == 1 {
+        return Ok((None, uri));
+    }
+
+    #[allow(clippy::indexing_slicing)] // checked
+    let creds = parts[0];
+
+    let auth_header = format!("Basic {}", BASE64.encode(creds.as_bytes()));
+
+    let auth_value = HeaderValue::from_str(&auth_header)?;
+
+    Ok((Some(auth_value), uri))
+}
+
 async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
+    let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
         .header(http::header::CONNECTION, "Upgrade")
@@ -413,24 +449,36 @@ async fn proxy_ws_inner(
             http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         )
+        // tungstenite requires an explicit Host header
         .header(
             http::header::HOST,
             uri.authority()
-                .ok_or(WarpgateError::NoHostInUrl)?
+                .ok_or(WarpgateError::NoHostInUrl)
+                .context("no authority in the URL")?
                 .to_string(),
         );
+
+    if let Some(authorization_header) = authorization_header {
+        client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
+    }
 
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, client_request)?;
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
-    let (client, client_response) = connect_async_with_config(
+    let tls_config = configure_tls_connector(!options.tls.verify, false, None)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+    let connector = Connector::Rustls(Arc::new(tls_config));
+
+    let (client, client_response) = connect_async_tls_with_config(
         client_request
             .body(())
             .map_err(poem::error::InternalServerError)?,
         None,
         true,
+        Some(connector),
     )
     .await
     .map_err(poem::error::BadGateway)?;

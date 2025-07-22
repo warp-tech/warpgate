@@ -94,7 +94,7 @@ impl SessionExt for Session {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthStateId(pub Uuid);
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum SessionAuthorization {
     User(String),
     Ticket {
@@ -112,7 +112,7 @@ impl SessionAuthorization {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
     UserToken { username: String },
@@ -129,7 +129,7 @@ impl RequestAuthorization {
     }
 }
 
-async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
+pub async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
     let services = Data::<&Services>::from_request_without_body(req).await?;
 
     let username = match auth {
@@ -176,22 +176,22 @@ pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     })
 }
 
-pub async fn _inner_auth<E: Endpoint + 'static>(
+pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
-) -> poem::Result<Option<E::Output>> {
+) -> poem::Result<E::Output> {
     let session = <&Session>::from_request_without_body(&req).await?;
     let services = Data::<&Services>::from_request_without_body(&req).await?;
 
     let auth = match session.get_auth() {
-        Some(auth) => RequestAuthorization::Session(auth),
+        Some(auth) => Some(RequestAuthorization::Session(auth)),
         None => match req.headers().get(&X_WARPGATE_TOKEN) {
             Some(token_from_header) => {
                 let token_from_header = token_from_header
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
                 if Some(token_from_header) == services.admin_token.lock().await.as_deref() {
-                    RequestAuthorization::AdminToken
+                    Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = services
                     .config_provider
                     .lock()
@@ -199,20 +199,37 @@ pub async fn _inner_auth<E: Endpoint + 'static>(
                     .validate_api_token(token_from_header)
                     .await?
                 {
-                    RequestAuthorization::UserToken {
+                    Some(RequestAuthorization::UserToken {
                         username: user.username,
-                    }
+                    })
                 } else {
-                    return Ok(None);
+                    None
                 }
             }
-            None => return Ok(None),
+            None => None,
         },
     };
 
-    Ok(Some(ep.data(auth).call(req).await?))
+    if let Some(auth) = auth {
+        // data_opt would change the return type from E::Output
+        Ok(ep.data(auth).call(req).await?)
+    } else {
+        Ok(ep.call(req).await?)
+    }
 }
 
+pub async fn _inner_auth<E: Endpoint + 'static>(
+    ep: Arc<E>,
+    req: Request,
+) -> poem::Result<Option<E::Output>> {
+    let auth = Option::<Data<&RequestAuthorization>>::from_request_without_body(&req).await?;
+    if auth.is_none() {
+        return Ok(None);
+    }
+    return ep.call(req).await.map(Some);
+}
+
+// TODO unify both based on the accept header
 pub fn endpoint_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint<Output = E::Output> {
     e.around(|ep, req| async move {
         _inner_auth(ep, req)

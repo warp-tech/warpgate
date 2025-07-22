@@ -1,5 +1,4 @@
-use poem_openapi::auth::ApiKey;
-use poem_openapi::{OpenApi, SecurityScheme};
+use poem_openapi::OpenApi;
 
 mod known_hosts_detail;
 mod known_hosts_list;
@@ -13,6 +12,7 @@ pub mod recordings_detail;
 mod roles;
 mod sessions_detail;
 pub mod sessions_list;
+mod ssh_connection_test;
 mod ssh_keys;
 mod sso_credentials;
 mod targets;
@@ -20,22 +20,7 @@ mod tickets_detail;
 mod tickets_list;
 pub mod users;
 
-#[derive(SecurityScheme)]
-#[oai(ty = "api_key", key_name = "X-Warpgate-Token", key_in = "header")]
-#[allow(dead_code)]
-pub struct TokenSecurityScheme(ApiKey);
-
-#[derive(SecurityScheme)]
-#[oai(ty = "api_key", key_name = "warpgate-http-session", key_in = "cookie")]
-#[allow(dead_code)]
-pub struct CookieSecurityScheme(ApiKey);
-
-#[derive(SecurityScheme)]
-#[allow(dead_code)]
-pub enum AnySecurityScheme {
-    Token(TokenSecurityScheme),
-    Cookie(CookieSecurityScheme),
-}
+pub use warpgate_common::api::AnySecurityScheme;
 
 pub fn get() -> impl OpenApi {
     (
@@ -59,5 +44,6 @@ pub fn get() -> impl OpenApi {
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
         parameters::Api,
+        ssh_connection_test::Api,
     )
 }

@@ -47,8 +47,10 @@ impl TryFrom<&NewPublicKeyCredential> for UserPublicKeyCredential {
     type Error = WarpgateError;
 
     fn try_from(credential: &NewPublicKeyCredential) -> Result<Self, WarpgateError> {
-        let key = russh::keys::PublicKey::from_openssh(&credential.openssh_public_key)
+        let mut key = russh::keys::PublicKey::from_openssh(&credential.openssh_public_key)
             .map_err(russh::keys::Error::from)?;
+
+        key.set_comment("");
 
         Ok(Self {
             key: key.to_openssh().map_err(russh::keys::Error::from)?.into(),
@@ -89,7 +91,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -113,7 +115,7 @@ impl ListApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -158,7 +160,7 @@ impl DetailApi {
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -191,7 +193,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 

@@ -5,10 +5,11 @@ import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
 import { api, type TargetSnapshot, TargetKind } from 'gateway/lib/api'
 import Fa from 'svelte-fa'
-import { Modal, ModalBody } from '@sveltestrap/sveltestrap'
+import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
-import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+import GettingStarted from 'common/GettingStarted.svelte'
+import EmptyState from 'common/EmptyState.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
@@ -44,7 +45,16 @@ function loadURL (url: string) {
 
 </script>
 
+{#if $serverInfo?.setupState}
+    <GettingStarted
+        setupState={$serverInfo?.setupState} />
+{/if}
+
 <ItemList load={loadTargets} showSearch={true}>
+    {#snippet empty()}
+        <EmptyState
+            title="You don't have access to any targets yet" />
+    {/snippet}
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item"
@@ -67,7 +77,12 @@ function loadURL (url: string) {
                 {#if target.kind === TargetKind.WebAdmin}
                     Manage Warpgate
                 {:else}
-                    {target.name}
+                    <div>
+                        {target.name}
+                    </div>
+                    {#if target.description}
+                        <small class="d-block text-muted">{target.description}</small>
+                    {/if}
                 {/if}
             </span>
             <small class="protocol text-muted ms-auto">
@@ -88,20 +103,30 @@ function loadURL (url: string) {
     {/snippet}
 </ItemList>
 
+{#if $serverInfo?.setupState && !$serverInfo.setupState.hasTargets}
+    <EmptyState
+        hint="Once you add targets and assign access, they will appear here"
+        title="No other targets yet" />
+{/if}
+
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
-    <ModalHeader toggle={() => selectedTarget = undefined}>
-        <div>
-            {selectedTarget?.name}
-        </div>
-    </ModalHeader>
     <ModalBody>
-        <h3>Connection instructions</h3>
         <ConnectionInstructions
             targetName={selectedTarget?.name}
             username={$serverInfo?.username}
             targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
         />
     </ModalBody>
+    <ModalFooter>
+        <Button
+            color="secondary"
+            class="modal-button"
+            block
+            on:click={() => { selectedTarget = undefined }}
+        >
+            Close
+        </Button>
+    </ModalFooter>
 </Modal>
 
 <style lang="scss">

@@ -5,7 +5,7 @@
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CredentialEditor from './CredentialEditor.svelte'
+    import CredentialEditor from '../CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
 
     interface Props {
@@ -65,59 +65,70 @@
     }
 </script>
 
-<Loadable promise={initPromise}>
-{#if user}
-<div class="page-summary-bar">
-    <div>
-        <h1>{user.username}</h1>
-        <div class="text-muted">User</div>
+<div class="container-max-md">
+    <Loadable promise={initPromise}>
+    {#if user}
+    <div class="page-summary-bar">
+        <div>
+            <h1>{user.username}</h1>
+            <div class="text-muted">User</div>
+        </div>
     </div>
-</div>
 
-<FormGroup floating label="Username">
-    <Input bind:value={user.username} />
-</FormGroup>
+    <FormGroup floating label="Username">
+        <Input bind:value={user.username} />
+    </FormGroup>
 
-<CredentialEditor
-    userId={user.id}
-    username={user.username}
-    bind:credentialPolicy={user.credentialPolicy!}
-/>
+    <FormGroup floating label="Description">
+        <Input bind:value={user.description} />
+    </FormGroup>
 
-<h4 class="mt-4">User roles</h4>
-<div class="list-group list-group-flush mb-3">
-    {#each allRoles as role}
-        <label
-            for="role-{role.id}"
-            class="list-group-item list-group-item-action d-flex align-items-center"
-        >
-            <Input
-                id="role-{role.id}"
-                class="mb-0 me-2"
-                type="switch"
-                on:change={() => toggleRole(role)}
-                checked={roleIsAllowed[role.id]} />
-            <div>{role.name}</div>
-        </label>
-    {/each}
-</div>
-{/if}
-</Loadable>
+    <CredentialEditor
+        userId={user.id}
+        username={user.username}
+        bind:credentialPolicy={user.credentialPolicy!}
+    />
 
-{#if error}
-    <Alert color="danger">{error}</Alert>
-{/if}
+    <h4 class="mt-4">User roles</h4>
+    <div class="list-group list-group-flush mb-3">
+        {#each allRoles as role (role.id)}
+            <label
+                for="role-{role.id}"
+                class="list-group-item list-group-item-action d-flex align-items-center"
+            >
+                <Input
+                    id="role-{role.id}"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => toggleRole(role)}
+                    checked={roleIsAllowed[role.id]} />
+                <div>
+                    <div>{role.name}</div>
+                    {#if role.description}
+                        <small class="text-muted">{role.description}</small>
+                    {/if}
+                </div>
+            </label>
+        {/each}
+    </div>
+    {/if}
+    </Loadable>
 
-<div class="d-flex">
-    <AsyncButton
-    color="primary"
-        class="ms-auto"
-        click={update}
-    >Update</AsyncButton>
+    {#if error}
+        <Alert color="danger">{error}</Alert>
+    {/if}
 
-    <AsyncButton
-        class="ms-2"
-        color="danger"
-        click={remove}
-    >Remove</AsyncButton>
+    <div class="d-flex">
+        <AsyncButton
+        color="primary"
+            class="ms-auto"
+            click={update}
+        >Update</AsyncButton>
+
+        <AsyncButton
+            class="ms-2"
+            color="danger"
+            click={remove}
+        >Remove</AsyncButton>
+    </div>
 </div>

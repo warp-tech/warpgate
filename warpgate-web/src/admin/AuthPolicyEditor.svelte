@@ -1,13 +1,17 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
 import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
-    import type { ExistingCredential } from './CredentialEditor.svelte'
+import type { ExistingCredential } from './CredentialEditor.svelte'
+import Fa from 'svelte-fa'
+import { faInfoCircle } from '@fortawesome/free-solid-svg-icons'
+
+type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres'
 
 interface Props {
     value: UserRequireCredentialsPolicy
     possibleCredentials: Set<CredentialKind>
     existingCredentials: ExistingCredential[]
-    protocolId: 'http' | 'ssh' | 'mysql' | 'postgres'
+    protocolId: ProtocolID
 }
 
 let {
@@ -25,7 +29,28 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
-let isAny = $state(false)
+const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
+    postgres: new Map([
+        [
+            [CredentialKind.WebUserApproval, true],
+            'Not all clients will show the 2FA auth prompt. The user might need to log in to the Warpgate UI to see the prompt.',
+        ],
+    ]),
+    http: new Map(),
+    mysql: new Map(),
+    ssh: new Map(),
+}
+
+let activeTips: string[] = $derived.by(() => {
+    let result = []
+    for (const [[kind, enabled], tip] of tips[protocolId]?.entries() ?? []) {
+        if (value[protocolId]?.includes(kind) === enabled) {
+            result.push(tip)
+        }
+    }
+    return result
+})
+
 const validCredentials = $derived.by(() => {
     let vc = new Set<CredentialKind>()
     vc = new Set(existingCredentials.map(x => x.kind as CredentialKind))
@@ -33,9 +58,7 @@ const validCredentials = $derived.by(() => {
     return vc
 })
 
-$effect(() => {
-    isAny = !value[protocolId]
-})
+let isAny = $derived(!value[protocolId])
 
 function updateAny () {
     if (isAny) {
@@ -67,7 +90,7 @@ function toggle (type: CredentialKind) {
         on:change={updateAny}
     />
     {#if !isAny}
-        {#each [...validCredentials] as type}
+        {#each [...validCredentials] as type (type)}
             {#if possibleCredentials.has(type)}
                 <Input
                     id={'policy-editor-' + protocolId + type}
@@ -80,6 +103,13 @@ function toggle (type: CredentialKind) {
         {/each}
     {/if}
 </div>
+
+{#each activeTips as tip (tip)}
+    <div class="text-muted d-flex align-items-center mt-2">
+        <Fa icon={faInfoCircle} class="me-2" />
+        <small>{tip}</small>
+    </div>
+{/each}
 
 <style lang="scss">
     .wrapper {

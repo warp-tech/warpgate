@@ -2,10 +2,10 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-web"
-version = "0.13.2"
+version = "0.15.0"
 
 [dependencies]
 serde.workspace = true
-rust-embed = "8.3"
+rust-embed = { version = "8.3", default-features = false }
 serde_json.workspace = true
-thiserror = "1.0"
+thiserror.workspace = true

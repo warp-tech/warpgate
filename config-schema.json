@@ -1,0 +1,482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WarpgateConfigStore",
+  "type": "object",
+  "properties": {
+    "database_url": {
+      "type": "string",
+      "default": "sqlite:data/db"
+    },
+    "external_host": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "http": {
+      "$ref": "#/$defs/HttpConfig",
+      "default": {
+        "certificate": "",
+        "cookie_max_age": "1day",
+        "enable": false,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:8888",
+        "session_max_age": "30m",
+        "sni_certificates": [],
+        "trust_x_forwarded_headers": false
+      }
+    },
+    "log": {
+      "$ref": "#/$defs/LogConfig",
+      "default": {
+        "retention": "7days",
+        "send_to": null
+      }
+    },
+    "mysql": {
+      "$ref": "#/$defs/MySqlConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:33306"
+      }
+    },
+    "postgres": {
+      "$ref": "#/$defs/PostgresConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:55432"
+      }
+    },
+    "recordings": {
+      "$ref": "#/$defs/RecordingsConfig",
+      "default": {
+        "enable": false,
+        "path": "./data/recordings"
+      }
+    },
+    "ssh": {
+      "$ref": "#/$defs/SshConfig",
+      "default": {
+        "enable": false,
+        "external_port": null,
+        "host_key_verification": "prompt",
+        "inactivity_timeout": "5m",
+        "keepalive_interval": null,
+        "keys": "./data/keys",
+        "listen": "[::]:2222"
+      }
+    },
+    "sso_providers": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SsoProviderConfig"
+      }
+    }
+  },
+  "$defs": {
+    "Duration": {
+      "type": "object",
+      "properties": {
+        "nanos": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "secs",
+        "nanos"
+      ]
+    },
+    "HttpConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "cookie_max_age": {
+          "type": "string",
+          "default": "1day"
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:8888"
+        },
+        "session_max_age": {
+          "type": "string",
+          "default": "30m"
+        },
+        "sni_certificates": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SniCertificateConfig"
+          }
+        },
+        "trust_x_forwarded_headers": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "ListenEndpoint": {
+      "type": "string"
+    },
+    "LogConfig": {
+      "type": "object",
+      "properties": {
+        "retention": {
+          "type": "string",
+          "default": "7days"
+        },
+        "send_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "MySqlConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:33306"
+        }
+      }
+    },
+    "PostgresConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:55432"
+        }
+      }
+    },
+    "RecordingsConfig": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "path": {
+          "type": "string",
+          "default": "./data/recordings"
+        }
+      }
+    },
+    "SniCertificateConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ]
+    },
+    "SshConfig": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "host_key_verification": {
+          "$ref": "#/$defs/SshHostKeyVerificationMode",
+          "default": "prompt"
+        },
+        "inactivity_timeout": {
+          "type": "string",
+          "default": "5m"
+        },
+        "keepalive_interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "keys": {
+          "type": "string",
+          "default": "./data/keys"
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:2222"
+        }
+      }
+    },
+    "SshHostKeyVerificationMode": {
+      "type": "string",
+      "enum": [
+        "prompt",
+        "auto_accept",
+        "auto_reject"
+      ]
+    },
+    "SsoInternalProviderConfig": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "google"
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "client_secret": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "client_secret"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "apple"
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "client_secret": {
+              "type": "string"
+            },
+            "key_id": {
+              "type": "string"
+            },
+            "team_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "client_secret",
+            "key_id",
+            "team_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "azure"
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "client_secret": {
+              "type": "string"
+            },
+            "tenant": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "client_secret",
+            "tenant"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "custom"
+            },
+            "additional_trusted_audiences": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "client_secret": {
+              "type": "string"
+            },
+            "issuer_url": {
+              "type": "string"
+            },
+            "role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "trust_unknown_audiences": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "client_secret",
+            "issuer_url",
+            "scopes"
+          ]
+        }
+      ]
+    },
+    "SsoProviderConfig": {
+      "type": "object",
+      "properties": {
+        "auto_create_users": {
+          "type": "boolean",
+          "default": false
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/SsoInternalProviderConfig"
+        },
+        "return_domain_whitelist": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "provider"
+      ]
+    }
+  }
+}

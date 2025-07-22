@@ -16,9 +16,10 @@
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
-    import { possibleCredentials } from 'common/protocols'
+    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import EmptyState from 'common/EmptyState.svelte'
 
     interface Props {
         userId: string
@@ -204,10 +205,6 @@
         editingPublicKeyCredentialInstance = null
     }
 
-    function abbreviatePublicKey (key: string) {
-        return key.slice(0, 16) + '...' + key.slice(-8)
-    }
-
     function assertDefined<T>(value: T|undefined): T {
         if (value === undefined) {
             throw new Error('Value is undefined')
@@ -234,8 +231,14 @@
 </div>
 
 <Loadable promise={loadPromise}>
+    {#if credentials.length === 0}
+        <EmptyState
+            title="No credentials added"
+            hint="Users need credentials to authenticate with Warpgate"
+        />
+    {/if}
     <div class="list-group list-group-flush mb-3">
-        {#each credentials as credential}
+        {#each credentials as credential (credential.id)}
         <div class="list-group-item credential">
             {#if credential.kind === CredentialKind.Password }
                 <Fa fw icon={faKeyboard} />
@@ -266,9 +269,9 @@
             {/if}
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
-            <a
-                class="ms-2"
-                href={''}
+            <Button
+                class="ms-2 px-0"
+                color="link"
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
@@ -281,26 +284,26 @@
                     e.preventDefault()
                 }}>
                 Change
-            </a>
+            </Button>
             {/if}
-            <a
-                class="ms-2"
-                href={''}
+            <Button
+                class="ms-2 px-0"
+                color="link"
                 onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()
                 }}>
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>
 
     <h4>Auth policy</h4>
     <div class="list-group list-group-flush mb-3">
-        {#each policyProtocols as protocol}
+        {#each policyProtocols as protocol (protocol)}
         <div class="list-group-item">
-            <div>
+            <div class="mb-1">
                 <strong>{protocol.name}</strong>
             </div>
             {#if possibleCredentials[protocol.id]}

@@ -133,6 +133,7 @@ pub struct Target {
     #[serde(default)]
     pub id: Uuid,
     pub name: String,
+    pub description: String,
     #[serde(default = "_default_empty_vec")]
     pub allow_roles: Vec<String>,
     #[serde(flatten)]

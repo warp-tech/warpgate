@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use common::page_admin_auth;
+use common::{inject_request_authorization, page_admin_auth};
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
 use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
@@ -27,9 +27,9 @@ use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
+use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    ListenEndpoint, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
-    TlsPrivateKey,
+    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
 };
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
@@ -55,16 +55,37 @@ fn make_session_storage() -> SharedSessionStorage {
     SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
 }
 
+async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
+    let certificate_and_key = load_certificate_and_key(&config.store.http, config)
+        .await
+        .with_context(|| {
+            format!(
+                "loading TLS certificate and key: {}",
+                config.store.http.certificate,
+            )
+        })?;
+
+    let mut cfg = RustlsConfig::new().fallback(certificate_and_key.into());
+    for sni in &config.store.http.sni_certificates {
+        let certificate_and_key = load_certificate_and_key(sni, config)
+            .await
+            .with_context(|| format!("loading SNI TLS certificate: {sni:?}",))?;
+
+        for name in certificate_and_key.certificate.sni_names()? {
+            debug!(?name, source=?sni, "Adding SNI certificate");
+            cfg = cfg.certificate(name, certificate_and_key.clone().into());
+        }
+    }
+    Ok(cfg)
+}
+
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let admin_api_app = admin_api_app(&self.services).into_endpoint();
-        let api_service = OpenApiService::new(
-            crate::api::get(),
-            "Warpgate user API",
-            env!("CARGO_PKG_VERSION"),
-        )
-        .server("/@warpgate/api");
-        let ui = api_service.swagger_ui();
+        let api_service =
+            OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
+                .server("/@warpgate/api");
+        let ui = api_service.stoplight_elements();
         let spec = api_service.spec_endpoint();
 
         let session_storage = make_session_storage();
@@ -97,7 +118,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .nest(
                 "/@warpgate",
                 Route::new()
-                    .nest("/api/swagger", ui)
+                    .nest("/api/playground", ui)
                     .nest("/api", api_service.with(cache_bust()))
                     .nest("/api/openapi.json", spec)
                     .nest_no_strip(
@@ -114,6 +135,10 @@ impl ProtocolServer for HTTPProtocolServer {
                             "src/admin/index.html",
                         )))
                         .with(cache_bust()),
+                    )
+                    .at(
+                        "/api/auth/web-auth-requests/stream",
+                        endpoint_auth(api::auth::api_get_web_auth_requests_stream),
                     )
                     .at(
                         "",
@@ -142,6 +167,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     })
                 }),
             )
+            .around(inject_request_authorization)
             .around(move |ep, req| async move {
                 let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?
@@ -178,37 +204,14 @@ impl ProtocolServer for HTTPProtocolServer {
             }
         });
 
-        let certificate_and_key = {
+        let rustls_config = {
             let config = self.services.config.lock().await;
-            let certificate_path = config
-                .paths_relative_to
-                .join(&config.store.http.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.http.key);
-
-            TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path)
-                    .await
-                    .with_context(|| {
-                        format!("reading TLS private key from '{}'", key_path.display())
-                    })?,
-                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                    format!(
-                        "reading TLS certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            }
+            make_rustls_config(&config).await.context("rustls setup")?
         };
 
-        info!(?address, "Listening");
-        Server::new(
-            address
-                .poem_listener()
-                .await?
-                .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
-        )
-        .run(app)
-        .await?;
+        Server::new(address.poem_listener().await?.rustls(rustls_config))
+            .run(app)
+            .await?;
 
         Ok(())
     }
@@ -226,6 +229,10 @@ impl ProtocolServer for HTTPProtocolServer {
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "HTTP"
     }
 }
 

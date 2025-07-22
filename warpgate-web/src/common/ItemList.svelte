@@ -94,18 +94,19 @@
     })
 </script>
 
-<div class="d-flex mb-2" hidden={!loaded}>
-    {#if showSearch}
-        <Input bind:value={filter} placeholder="Search..." class="flex-grow-1 border-0" />
-    {/if}
-    {@render header?.()}
-</div>
 {#await $items}
     <DelayedSpinner />
 {:then _items}
+    <div class="d-flex mb-2" hidden={!loaded}>
+        <!-- either filtering or not filtering and there are at least some items at all -->
+        {#if showSearch && (filter || !!_items?.length)}
+            <Input bind:value={filter} placeholder="Search..." class="flex-grow-1 border-0" />
+        {/if}
+        {@render header?.()}
+    </div>
     {#if _items}
         <div class="list-group list-group-flush mb-3">
-            {#each _items as _item}
+            {#each _items as _item (_item)}
                 {@render item?.(_item)}
             {/each}
         </div>
@@ -128,3 +129,9 @@
         <Pagination total={_total} bind:page={page} pageSize={pageSize} />
     {/if}
 {/await}
+
+<style lang="scss">
+    .list-group:empty {
+        display: none;
+    }
+</style>

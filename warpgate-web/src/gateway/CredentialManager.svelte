@@ -9,6 +9,7 @@
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { Button } from '@sveltestrap/sveltestrap'
 
     let creds: CredentialsState | undefined = $state()
 
@@ -78,9 +79,9 @@
             {/if}
 
             <span class="ms-auto"></span>
-            <a
+            <Button
                 class="ms-2"
-                href={''}
+                color="link"
                 onclick={e => {
                     changingPassword = true
                     e.preventDefault()
@@ -94,7 +95,7 @@
                 {#if creds.password === PasswordState.MultipleSet}
                     Reset password
                 {/if}
-            </a>
+            </Button>
         </div>
     </div>
 
@@ -107,27 +108,28 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">One-time passwords</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={() => {
+        <Button color="link" onclick={e => {
             creatingOtpCredential = true
-        }}>Add device</a>
+            e.preventDefault()
+        }}>Add device</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.otp as credential}
+        {#each creds.otp as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faMobilePhone} />
             <span class="label ms-3">OTP device</span>
             <span class="ms-auto"></span>
-            <a
+            <Button
                 class="ms-2"
-                href={''}
+                color="link"
                 onclick={e => {
                     deleteOtp(credential)
                     e.preventDefault()
                 }}
             >
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>
@@ -141,13 +143,14 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <a href={''} color="link" onclick={() => {
+        <Button color="link" onclick={e => {
             creatingPublicKeyCredential = true
-        }}>Add key</a>
+            e.preventDefault()
+        }}>Add key</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.publicKeys as credential}
+        {#each creds.publicKeys as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faKey} />
             <div class="main ms-3">
@@ -156,16 +159,16 @@
             </div>
             <span class="ms-auto"></span>
             <CredentialUsedStateBadge credential={credential} />
-            <a
-                class="ms-2"
-                href={''}
+            <Button
+            class="ms-2"
+                color="link"
                 onclick={e => {
                     deletePublicKey(credential)
                     e.preventDefault()
                 }}
             >
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>
@@ -182,7 +185,7 @@
     </div>
 
     <div class="list-group list-group-flush mb-3">
-        {#each creds.sso as credential}
+        {#each creds.sso as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faIdBadge} />
             <span class="label ms-3">
@@ -222,5 +225,7 @@
     .credential {
         display: flex;
         align-items: center;
+        padding-left: 0;
+        padding-right: 0;
     }
 </style>

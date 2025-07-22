@@ -32,7 +32,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTicketResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
         let db = db.lock().await;

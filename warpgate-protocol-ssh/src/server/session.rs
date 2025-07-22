@@ -551,6 +551,10 @@ impl ServerSession {
                 let _ = reply.send(self._channel_open_direct_tcpip(channel, params).await?);
             }
 
+            ServerHandlerEvent::ChannelOpenDirectStreamlocal(channel, path, reply) => {
+                let _ = reply.send(self._channel_open_direct_streamlocal(channel, path).await?);
+            }
+
             ServerHandlerEvent::EnvRequest(channel, name, value, reply) => {
                 self._channel_env_request(channel, name, value).await?;
                 let _ = reply.send(());
@@ -1027,6 +1031,48 @@ impl ServerSession {
         }
     }
 
+    async fn _channel_open_direct_streamlocal(
+        &mut self,
+        channel: ServerChannelId,
+        path: String,
+    ) -> Result<bool> {
+        let uuid = Uuid::new_v4();
+        self.channel_map.insert(channel, uuid);
+
+        info!(%channel, "Opening direct streamlocal channel to {}", path);
+
+        let _ = self.maybe_connect_remote().await;
+
+        match self
+            .send_command_and_wait(RCCommand::Channel(
+                uuid,
+                ChannelOperation::OpenDirectStreamlocal(path.clone()),
+            ))
+            .await
+        {
+            Ok(()) => {
+                self.all_channels.push(uuid);
+
+                let recorder = self
+                    .traffic_recorder_for(TrafficRecorderKey::Socket(path.clone()), "direct-tcpip")
+                    .await;
+                if let Some(recorder) = recorder {
+                    #[allow(clippy::unwrap_used)]
+                    let mut recorder =
+                        recorder.connection(TrafficConnectionParams::Socket { socket_path: path });
+                    if let Err(error) = recorder.write_connection_setup().await {
+                        error!(%channel, ?error, "Failed to record connection setup");
+                    }
+                    self.traffic_connection_recorders.insert(uuid, recorder);
+                }
+
+                Ok(true)
+            }
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(x) => Err(x.into()),
+        }
+    }
+
     async fn _window_change_request(
         &mut self,
         server_channel_id: ServerChannelId,
@@ -1297,10 +1343,9 @@ impl ServerSession {
         match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
-            _ => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            _ => russh::server::Auth::reject(),
         }
     }
 
@@ -1341,14 +1386,17 @@ impl ServerSession {
             }
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(MethodSet::all()),
+                partial_success: false,
             },
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }
@@ -1367,16 +1415,16 @@ impl ServerSession {
             .await
         {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }
@@ -1409,9 +1457,7 @@ impl ServerSession {
 
         match self.try_auth_lazy(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: None,
-            },
+            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
                 if kinds.contains(&CredentialKind::Totp) {
                     self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
@@ -1424,6 +1470,7 @@ impl ServerSession {
                     let Some(auth_state) = self.auth_state.as_ref() else {
                         return russh::server::Auth::Reject {
                             proceed_with_methods: None,
+                            partial_success: false,
                         };
                     };
                     let identification_string =
@@ -1438,24 +1485,20 @@ impl ServerSession {
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
-                    let mut login_url = match self
-                        .services
-                        .config
+                    let login_url = match auth_state
                         .lock()
                         .await
-                        .construct_external_url(None, None)
+                        .construct_web_approval_url(&*self.services.config.lock().await)
                     {
-                        Ok(url) => url,
+                        Ok(login_url) => login_url,
                         Err(error) => {
                             error!(?error, "Failed to construct external URL");
                             return russh::server::Auth::Reject {
                                 proceed_with_methods: None,
+                                partial_success: false,
                             };
                         }
                     };
-
-                    login_url.set_path("@warpgate");
-                    login_url.set_fragment(Some(&format!("/login/{auth_state_id}")));
 
                     russh::server::Auth::Partial {
                         name: Cow::Borrowed("Warpgate authentication"),
@@ -1479,6 +1522,7 @@ impl ServerSession {
                 } else {
                     russh::server::Auth::Reject {
                         proceed_with_methods: None,
+                        partial_success: false,
                     }
                 }
             }
@@ -1486,6 +1530,7 @@ impl ServerSession {
                 error!(?error, "Failed to verify credentials");
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
+                    partial_success: false,
                 }
             }
         }
@@ -1501,6 +1546,10 @@ impl ServerSession {
                 CredentialKind::PublicKey => m.push(MethodKind::PublicKey),
                 CredentialKind::Sso => m.push(MethodKind::KeyboardInteractive),
             }
+        }
+        if m.contains(&MethodKind::KeyboardInteractive) {
+            // Ensure keyboard-interactive is always the last method
+            m.push(MethodKind::KeyboardInteractive);
         }
         m
     }

@@ -18,7 +18,7 @@ class Test:
 
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
-            user = api.create_user(sdk.CreateUserRequest(username="user"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
@@ -29,7 +29,7 @@ class Test:
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",
-                            url=f"http://localhost:{echo_server_port}",
+                            url=f"http://user:pass@localhost:{echo_server_port}",
                             tls=sdk.Tls(
                                 mode=sdk.TlsMode.DISABLED,
                                 verify=False,
@@ -78,3 +78,4 @@ class Test:
         assert response.json()["path"] == "/some/path"
         assert response.json()["args"]["a"] == "b"
         assert response.json()["args"]["c"] == "d"
+        assert ['Authorization', 'Basic dXNlcjpwYXNz'] in response.json()["headers"]

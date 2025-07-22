@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, Environment, File};
+use config::{Config, Environment, File, FileFormat};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
@@ -11,7 +11,10 @@ use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
     let mut store: serde_yaml::Value = Config::builder()
-        .add_source(File::from(path))
+        .add_source(File::new(
+            path.to_str().context("Invalid config path")?,
+            FileFormat::Yaml,
+        ))
         .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?

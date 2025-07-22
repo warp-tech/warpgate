@@ -213,7 +213,7 @@
         <Loadable promise={ssoProvidersPromise}>
             {#snippet children(ssoProviders)}
                 <div class="mt-3 sso-buttons">
-                    {#each ssoProviders as ssoProvider}
+                    {#each ssoProviders as ssoProvider (ssoProvider.name)}
                         <button
                             class="btn btn-secondary"
                             disabled={busy}

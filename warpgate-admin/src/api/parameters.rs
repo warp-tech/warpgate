@@ -39,7 +39,7 @@ impl Api {
     async fn api_get(
         &self,
         services: Data<&Services>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
@@ -58,7 +58,7 @@ impl Api {
         &self,
         services: Data<&Services>,
         body: Json<ParameterUpdate>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
 

@@ -5,7 +5,7 @@ permissions:
 on: [push, pull_request]
 
 jobs:
-  Build:
+  build:
     strategy:
       matrix:
         include:
@@ -58,11 +58,12 @@ jobs:
       - name: Install tools
         run: |
           cargo install just
-          cargo install cargo-deny@^0.16
+          cargo install cargo-deny@^0.18
           cargo install cargo-cyclonedx@^0.5
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
+          rm -rf ~/.cargo/registry
 
       - name: cargo-deny
         run: |
@@ -127,3 +128,27 @@ jobs:
           generate_release_notes: true
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  config-schema:
+    name: Config schema check
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Setup
+        run: |
+          sudo apt update
+          sudo apt install --no-install-recommends -y libssl-dev pkg-config
+
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          cargo install just
+
+      - name: Ensure there are no changes in config schema
+        run: |
+          mkdir warpgate-web/dist
+          just config-schema
+          git diff --exit-code config-schema.json

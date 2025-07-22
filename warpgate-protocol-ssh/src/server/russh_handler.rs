@@ -43,6 +43,7 @@ pub enum ServerHandlerEvent {
     Signal(ServerChannelId, Sig, oneshot::Sender<()>),
     ExecRequest(ServerChannelId, Bytes, oneshot::Sender<bool>),
     ChannelOpenDirectTcpIp(ServerChannelId, DirectTCPIPParams, oneshot::Sender<bool>),
+    ChannelOpenDirectStreamlocal(ServerChannelId, String, oneshot::Sender<bool>),
     EnvRequest(ServerChannelId, String, String, oneshot::Sender<()>),
     X11Request(ServerChannelId, X11Request, oneshot::Sender<()>),
     TcpIpForward(String, u32, oneshot::Sender<bool>),
@@ -193,9 +194,7 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        Ok(rx.await.unwrap_or(Auth::Reject {
-            proceed_with_methods: None,
-        }))
+        Ok(rx.await.unwrap_or(Auth::reject()))
     }
 
     async fn auth_publickey(
@@ -412,6 +411,23 @@ impl russh::server::Handler for ServerHandler {
                 originator_address,
                 originator_port,
             },
+            tx,
+        ))?;
+        let allowed = rx.await.unwrap_or(false);
+        Ok(allowed)
+    }
+
+    async fn channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let socket_path = socket_path.to_string();
+        let (tx, rx) = oneshot::channel();
+        self.send_event(ServerHandlerEvent::ChannelOpenDirectStreamlocal(
+            ServerChannelId(channel.id()),
+            socket_path,
             tx,
         ))?;
         let allowed = rx.await.unwrap_or(false);

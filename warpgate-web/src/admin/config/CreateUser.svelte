@@ -16,7 +16,7 @@ async function create () {
                 username,
             },
         })
-        replace(`/users/${user.id}`)
+        replace(`/config/users/${user.id}`)
     } catch (err) {
         error = await stringifyError(err)
     }
@@ -24,23 +24,24 @@ async function create () {
 
 </script>
 
-{#if error}
-<Alert color="danger">{error}</Alert>
-{/if}
+<div class="container-max-md">
+    {#if error}
+    <Alert color="danger">{error}</Alert>
+    {/if}
 
+    <div class="page-summary-bar">
+        <h1>add a user</h1>
+    </div>
+    <div class="narrow-page">
+        <Form>
+            <FormGroup floating label="Username">
+                <input class="form-control" required bind:value={username} />
+            </FormGroup>
 
-<div class="page-summary-bar">
-    <h1>add a user</h1>
-</div>
-<div class="narrow-page">
-    <Form>
-        <FormGroup floating label="Username">
-            <input class="form-control" required bind:value={username} />
-        </FormGroup>
-
-        <AsyncButton
-        color="primary"
-            click={create}
-        >Create user</AsyncButton>
-    </Form>
+            <AsyncButton
+            color="primary"
+                click={create}
+            >Create user</AsyncButton>
+        </Form>
+    </div>
 </div>

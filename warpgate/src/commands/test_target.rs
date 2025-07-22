@@ -50,14 +50,14 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
         Err(TargetTestError::ConnectionError(error)) => {
             error!(?error, "Connection error");
         }
-        Err(TargetTestError::Io(error)) => {
-            error!(?error, "I/O error");
-        }
         Err(TargetTestError::Misconfigured(error)) => {
             error!(?error, "Misconfigured");
         }
         Err(TargetTestError::Unreachable) => {
             error!("Target is unreachable");
+        }
+        Err(other) => {
+            error!("Misc error: {other}");
         }
         Ok(()) => {
             info!("Connection successful!");

@@ -29,6 +29,7 @@ struct CreateTicketRequest {
     target_name: String,
     expiry: Option<DateTime<Utc>>,
     number_of_uses: Option<i16>,
+    description: Option<String>,
 }
 
 #[derive(Object)]
@@ -52,16 +53,12 @@ impl Api {
     async fn api_get_all_tickets(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
         let db = db.lock().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
-        let tickets = tickets
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<Ticket::Model>>();
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
 
@@ -70,7 +67,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<CreateTicketRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CreateTicketResponse> {
         use warpgate_db_entities::Ticket;
 
@@ -91,6 +88,7 @@ impl Api {
             created: Set(chrono::Utc::now()),
             expiry: Set(body.expiry),
             uses_left: Set(body.number_of_uses),
+            description: Set(body.description.clone().unwrap_or_default()),
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;

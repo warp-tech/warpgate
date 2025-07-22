@@ -2,6 +2,7 @@ from asyncio import subprocess
 from base64 import b64decode
 from uuid import uuid4
 import pyotp
+import pytest
 from pathlib import Path
 from textwrap import dedent
 
@@ -36,7 +37,7 @@ class Test:
                 user.id,
                 sdk.NewPublicKeyCredential(
                     label="Public Key",
-                    openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
+                    openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
                 ),
             )
             api.create_otp_credential(

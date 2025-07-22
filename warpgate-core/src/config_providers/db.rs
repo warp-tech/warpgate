@@ -43,6 +43,7 @@ impl DatabaseConfigProvider {
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
+            description: Set("".into()),
             credential_policy: Set(serde_json::to_value(
                 UserRequireCredentialsPolicy::default(),
             )?),
@@ -108,14 +109,33 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user = user_model.load_details(&db).await?;
 
-        let supported_credential_types: HashSet<CredentialKind> = user
+        let mut available_credential_types = user
             .credentials
             .iter()
             .map(|x| x.kind())
-            .filter(|x| supported_credential_types.contains(x))
-            .collect();
+            .collect::<HashSet<_>>();
+        available_credential_types.insert(CredentialKind::WebUserApproval);
+
+        let supported_credential_types = supported_credential_types
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .intersection(&available_credential_types)
+            .copied()
+            .collect::<HashSet<_>>();
+
+        // "Any single credential" policy should not include WebUserApproval
+        // if other authentication methods are available because it could lead to user confusion
         let default_policy = Box::new(AnySingleCredentialPolicy {
-            supported_credential_types: supported_credential_types.clone(),
+            supported_credential_types: if supported_credential_types.len() > 1 {
+                supported_credential_types
+                    .iter()
+                    .cloned()
+                    .filter(|x| x != &CredentialKind::WebUserApproval)
+                    .collect()
+            } else {
+                supported_credential_types.clone()
+            },
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
         if let Some(req) = user.credential_policy.clone() {

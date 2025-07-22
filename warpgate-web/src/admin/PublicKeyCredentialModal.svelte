@@ -9,7 +9,6 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { type ExistingPublicKeyCredential } from './lib/api'
 
     interface Props {
@@ -74,9 +73,6 @@
         _save()
         e.preventDefault()
     }}>
-        <ModalHeader toggle={_cancel}>
-            Add an SSH public key
-        </ModalHeader>
         <ModalBody>
             <FormGroup floating label="Label">
                 <Input
@@ -85,7 +81,7 @@
                     required
                     bind:value={label} />
             </FormGroup>
-            <FormGroup floating label="Public key in OpenSSH format">
+            <FormGroup floating label="Public key in OpenSSH format" spacing="0">
                 <Input
                     style="font-family: monospace; height: 15rem"
                     bind:inner={field}
@@ -96,19 +92,18 @@
             </FormGroup>
         </ModalBody>
         <ModalFooter>
-            <div class="d-flex">
-                <Button
-                    type="submit"
-                    class="ms-auto"
-                    on:click={() => validated = true}
-                >Save</Button>
+            <Button
+                type="submit"
+                color="primary"
+                class="modal-button"
+                on:click={() => validated = true}
+            >Save</Button>
 
-                <Button
-                    class="ms-2"
-                    color="danger"
-                    on:click={_cancel}
-                >Cancel</Button>
-            </div>
+            <Button
+                class="modal-button"
+                color="danger"
+                on:click={_cancel}
+            >Cancel</Button>
         </ModalFooter>
     </Form>
 </Modal>

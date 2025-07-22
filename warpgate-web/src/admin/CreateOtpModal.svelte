@@ -9,7 +9,6 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import QRCode from 'qrcode'
     import * as OTPAuth from 'otpauth'
     import base32Encode from 'base32-encode'
@@ -113,9 +112,6 @@
         _save()
         e.preventDefault()
     }}>
-        <ModalHeader toggle={_cancel}>
-            One-time password
-        </ModalHeader>
         <ModalBody>
             <img class="qr mb-3" bind:this={qrImage} alt="OTP QR code" />
 
@@ -124,9 +120,9 @@
                     <Fa class="me-2" fw icon={faRefresh} />
                     Regenerate
                 </Button>
-                <CopyButton class="d-flex align-items-center" color="secondary" text={totpUri!} label={'Copy URI'} />
+                <CopyButton class="d-flex align-items-center" color="secondary" text={totpUri!} label='Copy URI' />
             </div>
-            <FormGroup floating label="Paste the generated OTP code" class="mt-3">
+            <FormGroup floating label="Paste the generated OTP code" class="mt-3" spacing="0">
                 <Input
                     required
                     bind:feedback={validationFeedback}
@@ -140,19 +136,18 @@
             </FormGroup>
         </ModalBody>
         <ModalFooter>
-            <div class="d-flex">
-                <Button
-                    class="ms-auto"
-                    disabled={!totpValid}
-                    on:click={() => validated = true}
-                >Create</Button>
+            <Button
+                class="modal-button"
+                color="primary"
+                disabled={!totpValid}
+                on:click={() => validated = true}
+            >Create</Button>
 
-                <Button
-                    class="ms-2"
-                    color="danger"
-                    on:click={_cancel}
-                >Cancel</Button>
-            </div>
+            <Button
+                class="modal-button"
+                color="danger"
+                on:click={_cancel}
+            >Cancel</Button>
         </ModalFooter>
     </Form>
 </Modal>

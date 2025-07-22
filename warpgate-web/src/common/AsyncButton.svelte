@@ -22,6 +22,7 @@ interface Props {
     children: () => any
 }
 
+// eslint-disable-next-line svelte/no-unused-props
 let { children, click, color  = 'secondary', disabled = false, outline = false, type = 'submit', 'class': cls = '' }: Props = $props()
 
 let button: HTMLElement | undefined = $state()

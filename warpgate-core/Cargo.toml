@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.13.2"
+version = "0.15.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common" }
@@ -15,6 +15,7 @@ async-trait = "0.1"
 bytes.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
+dialoguer.workspace = true
 enum_dispatch.workspace = true
 humantime-serde = "1.1"
 futures.workspace = true
@@ -22,30 +23,25 @@ once_cell = "1.17"
 packet = "0.1"
 password-hash.workspace = true
 poem.workspace = true
-poem-openapi = { version = "5.1", features = [
-    "swagger-ui",
-    "chrono",
-    "uuid",
-    "static-files",
-] }
-rand = "0.8"
-rand_chacha = "0.3"
-rand_core = { version = "0.6", features = ["std"] }
+poem-openapi.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+rand_core.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror = "1.0"
-tokio = { version = "1.20", features = ["tracing"] }
-totp-rs = { version = "5.0", features = ["otpauth"] }
+thiserror.workspace = true
+tokio.workspace = true
+totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
-tracing-core = "0.1"
-tracing-subscriber = "0.3"
-url = "2.2"
-uuid = { version = "1.3", features = ["v4", "serde"] }
-warpgate-sso = { version = "*", path = "../warpgate-sso" }
+tracing-core = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+url = { version = "2.2", default-features = false }
+uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
+warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
 rustls.workspace = true
-rustls-pemfile = "1.0"
-webpki = "0.22"
+rustls-pemfile.workspace = true
+webpki = { version = "0.22", default-features = false }
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

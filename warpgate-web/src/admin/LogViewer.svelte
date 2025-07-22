@@ -22,13 +22,10 @@ let loading = $state(true)
 let endReached = $state(false)
 let loadOlderButton: HTMLButtonElement|undefined = $state()
 let reloadInterval: any
-let lastUpdate = $state(new Date())
-let isLive = $state(true)
 let searchQuery = $state('')
 const PAGE_SIZE = 1000
 
 function addItems (newItems: LogEntry[]) {
-    lastUpdate = new Date()
     let existingIds = new Set(items?.map(i => i.id) ?? [])
     newItems = newItems.filter(i => !existingIds.has(i.id))
     newItems.sort(firstBy('timestamp', -1))
@@ -103,7 +100,6 @@ loadOlder().catch(async e => {
 
 onMount(() => {
     reloadInterval = setInterval(() => {
-        isLive = Date.now() - lastUpdate.valueOf() < 3000
         if (!loading) {
             loadNewer()
         }
@@ -131,7 +127,7 @@ onDestroy(() => {
     <div class="table-wrapper">
         <table class="w-100">
             <tbody>
-                {#each visibleItems as item}
+                {#each visibleItems as item (item.id)}
                     <tr>
                         <td class="timestamp pe-4">
                             {stringifyDate(item.timestamp)}
@@ -155,7 +151,7 @@ onDestroy(() => {
                                 {item.text}
                             </span>
 
-                            {#each Object.entries(item.values ?? {}) as pair}
+                            {#each Object.entries(item.values ?? {}) as pair (pair[0])}
                                 <span class="key">{pair[0]}:</span>
                                 <span class="value">{pair[1]}</span>
                             {/each}
@@ -197,7 +193,6 @@ onDestroy(() => {
         </table>
     </div>
 {/if}
-
 
 <style lang="scss">
     @import "../theme/vars.light";

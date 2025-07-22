@@ -1,19 +1,19 @@
 <script lang="ts">
-    import { Input } from '@sveltestrap/sveltestrap'
-    import { api, type ParameterValues } from 'admin/lib/api'
-    import Loadable from 'common/Loadable.svelte'
+import { Input } from '@sveltestrap/sveltestrap'
+import { api, type ParameterValues } from 'admin/lib/api'
+import Loadable from 'common/Loadable.svelte'
 
-    let parameters: ParameterValues | undefined = $state()
-    const initPromise = init()
+let parameters: ParameterValues | undefined = $state()
+const initPromise = init()
 
-    async function init () {
-        parameters = await api.getParameters({})
-    }
+async function init () {
+    parameters = await api.getParameters({})
+}
 
 </script>
 
 <div class="page-summary-bar">
-    <h1>global parameters</h1>
+<h1>global parameters</h1>
 </div>
 
 <Loadable promise={initPromise}>

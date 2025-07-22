@@ -37,7 +37,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<GetLogsRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 
@@ -69,10 +69,6 @@ impl Api {
         }
 
         let logs = q.all(&*db).await?;
-        let logs = logs
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<LogEntry::Model>>();
         Ok(GetLogsResponse::Ok(Json(logs)))
     }
 }

@@ -1,4 +1,5 @@
 use rustls::server::VerifierBuilderError;
+use x509_parser::error::X509Error;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RustlsSetupError {
@@ -14,4 +15,6 @@ pub enum RustlsSetupError {
     Io(#[from] std::io::Error),
     #[error("PKI: {0}")]
     Pki(webpki::Error),
+    #[error("parsing certificate: {0}")]
+    X509(#[from] X509Error),
 }

@@ -55,6 +55,7 @@ pub struct X11Request {
 pub enum ChannelOperation {
     OpenShell,
     OpenDirectTCPIP(DirectTCPIPParams),
+    OpenDirectStreamlocal(String),
     OpenX11(String, u32),
     RequestPty(PtyRequest),
     ResizePty(PtyRequest),

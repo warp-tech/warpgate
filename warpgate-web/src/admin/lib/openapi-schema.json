@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "0.13.2"
+    "version": "v0.14.1-8-g2ef3553-modified"
   },
   "servers": [
     {
@@ -464,6 +464,94 @@
         "operationId": "delete_role"
       }
     },
+    "/role/{id}/targets": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Target"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_role_targets"
+      }
+    },
+    "/role/{id}/users": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_role_users"
+      }
+    },
     "/tickets": {
       "get": {
         "responses": {
@@ -570,6 +658,39 @@
       }
     },
     "/ssh/known-hosts": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSshKnownHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHKnownHost"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_ssh_known_host"
+      },
       "get": {
         "responses": {
           "200": {
@@ -758,6 +879,16 @@
               }
             }
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "400": {
             "description": "",
             "content": {
@@ -906,6 +1037,53 @@
           }
         ],
         "operationId": "delete_target"
+      }
+    },
+    "/targets/{id}/known-ssh-host-keys": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SSHKnownHost"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ssh_target_known_ssh_host_keys"
       }
     },
     "/targets/{id}/roles": {
@@ -2078,12 +2256,116 @@
         ],
         "operationId": "update_parameters"
       }
+    },
+    "/ssh/check-host-key": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckSshHostKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckSshHostKeyResponseBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_ssh_host_key"
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddSshKnownHostRequest": {
+        "type": "object",
+        "title": "AddSshKnownHostRequest",
+        "required": [
+          "host",
+          "port",
+          "key_type",
+          "key_base64"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "key_type": {
+            "type": "string"
+          },
+          "key_base64": {
+            "type": "string"
+          }
+        }
+      },
+      "CheckSshHostKeyRequest": {
+        "type": "object",
+        "title": "CheckSshHostKeyRequest",
+        "required": [
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          }
+        }
+      },
+      "CheckSshHostKeyResponseBody": {
+        "type": "object",
+        "title": "CheckSshHostKeyResponseBody",
+        "required": [
+          "remote_key_type",
+          "remote_key_base64"
+        ],
+        "properties": {
+          "remote_key_type": {
+            "type": "string"
+          },
+          "remote_key_base64": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTicketRequest": {
         "type": "object",
+        "title": "CreateTicketRequest",
         "required": [
           "username",
           "target_name"
@@ -2102,16 +2384,23 @@
           "number_of_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
       "CreateUserRequest": {
         "type": "object",
+        "title": "CreateUserRequest",
         "required": [
           "username"
         ],
         "properties": {
           "username": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           }
         }
@@ -2128,6 +2417,7 @@
       },
       "ExistingOtpCredential": {
         "type": "object",
+        "title": "ExistingOtpCredential",
         "required": [
           "id"
         ],
@@ -2140,6 +2430,7 @@
       },
       "ExistingPasswordCredential": {
         "type": "object",
+        "title": "ExistingPasswordCredential",
         "required": [
           "id"
         ],
@@ -2152,6 +2443,7 @@
       },
       "ExistingPublicKeyCredential": {
         "type": "object",
+        "title": "ExistingPublicKeyCredential",
         "required": [
           "id",
           "label",
@@ -2180,6 +2472,7 @@
       },
       "ExistingSsoCredential": {
         "type": "object",
+        "title": "ExistingSsoCredential",
         "required": [
           "id",
           "email"
@@ -2199,6 +2492,7 @@
       },
       "GetLogsRequest": {
         "type": "object",
+        "title": "GetLogsRequest",
         "properties": {
           "before": {
             "type": "string",
@@ -2226,6 +2520,7 @@
       },
       "LogEntry": {
         "type": "object",
+        "title": "LogEntry",
         "required": [
           "id",
           "text",
@@ -2257,6 +2552,7 @@
       },
       "NewOtpCredential": {
         "type": "object",
+        "title": "NewOtpCredential",
         "required": [
           "secret_key"
         ],
@@ -2272,6 +2568,7 @@
       },
       "NewPasswordCredential": {
         "type": "object",
+        "title": "NewPasswordCredential",
         "required": [
           "password"
         ],
@@ -2283,6 +2580,7 @@
       },
       "NewPublicKeyCredential": {
         "type": "object",
+        "title": "NewPublicKeyCredential",
         "required": [
           "label",
           "openssh_public_key"
@@ -2298,6 +2596,7 @@
       },
       "NewSsoCredential": {
         "type": "object",
+        "title": "NewSsoCredential",
         "required": [
           "email"
         ],
@@ -2312,6 +2611,7 @@
       },
       "PaginatedResponse_SessionSnapshot": {
         "type": "object",
+        "title": "PaginatedResponse_SessionSnapshot",
         "required": [
           "items",
           "offset",
@@ -2336,6 +2636,7 @@
       },
       "ParameterUpdate": {
         "type": "object",
+        "title": "ParameterUpdate",
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
@@ -2344,6 +2645,7 @@
       },
       "ParameterValues": {
         "type": "object",
+        "title": "ParameterValues",
         "required": [
           "allow_own_credential_management"
         ],
@@ -2355,6 +2657,7 @@
       },
       "Recording": {
         "type": "object",
+        "title": "Recording",
         "required": [
           "id",
           "name",
@@ -2396,9 +2699,11 @@
       },
       "Role": {
         "type": "object",
+        "title": "Role",
         "required": [
           "id",
-          "name"
+          "name",
+          "description"
         ],
         "properties": {
           "id": {
@@ -2407,22 +2712,30 @@
           },
           "name": {
             "type": "string"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
       "RoleDataRequest": {
         "type": "object",
+        "title": "RoleDataRequest",
         "required": [
           "name"
         ],
         "properties": {
           "name": {
             "type": "string"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
       "SSHKey": {
         "type": "object",
+        "title": "SSHKey",
         "required": [
           "kind",
           "public_key_base64"
@@ -2438,6 +2751,7 @@
       },
       "SSHKnownHost": {
         "type": "object",
+        "title": "SSHKnownHost",
         "required": [
           "id",
           "host",
@@ -2529,6 +2843,7 @@
       },
       "SessionSnapshot": {
         "type": "object",
+        "title": "SessionSnapshot",
         "required": [
           "id",
           "started",
@@ -2564,6 +2879,7 @@
       },
       "SshTargetPasswordAuth": {
         "type": "object",
+        "title": "SshTargetPasswordAuth",
         "required": [
           "password"
         ],
@@ -2574,13 +2890,16 @@
         }
       },
       "SshTargetPublicKeyAuth": {
-        "type": "object"
+        "type": "object",
+        "title": "SshTargetPublicKeyAuth"
       },
       "Target": {
         "type": "object",
+        "title": "Target",
         "required": [
           "id",
           "name",
+          "description",
           "allow_roles",
           "options"
         ],
@@ -2590,6 +2909,9 @@
             "format": "uuid"
           },
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "allow_roles": {
@@ -2605,12 +2927,16 @@
       },
       "TargetDataRequest": {
         "type": "object",
+        "title": "TargetDataRequest",
         "required": [
           "name",
           "options"
         ],
         "properties": {
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "options": {
@@ -2620,6 +2946,7 @@
       },
       "TargetHTTPOptions": {
         "type": "object",
+        "title": "TargetHTTPOptions",
         "required": [
           "url",
           "tls"
@@ -2644,6 +2971,7 @@
       },
       "TargetMySqlOptions": {
         "type": "object",
+        "title": "TargetMySqlOptions",
         "required": [
           "host",
           "port",
@@ -2811,6 +3139,7 @@
       },
       "TargetPostgresOptions": {
         "type": "object",
+        "title": "TargetPostgresOptions",
         "required": [
           "host",
           "port",
@@ -2838,6 +3167,7 @@
       },
       "TargetSSHOptions": {
         "type": "object",
+        "title": "TargetSSHOptions",
         "required": [
           "host",
           "port",
@@ -2864,13 +3194,16 @@
         }
       },
       "TargetWebAdminOptions": {
-        "type": "object"
+        "type": "object",
+        "title": "TargetWebAdminOptions"
       },
       "Ticket": {
         "type": "object",
+        "title": "Ticket",
         "required": [
           "id",
           "username",
+          "description",
           "target",
           "created"
         ],
@@ -2880,6 +3213,9 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "target": {
@@ -2901,6 +3237,7 @@
       },
       "TicketAndSecret": {
         "type": "object",
+        "title": "TicketAndSecret",
         "required": [
           "ticket",
           "secret"
@@ -2916,6 +3253,7 @@
       },
       "Tls": {
         "type": "object",
+        "title": "Tls",
         "required": [
           "mode",
           "verify"
@@ -2939,9 +3277,11 @@
       },
       "User": {
         "type": "object",
+        "title": "User",
         "required": [
           "id",
-          "username"
+          "username",
+          "description"
         ],
         "properties": {
           "id": {
@@ -2951,6 +3291,9 @@
           "username": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           }
@@ -2958,6 +3301,7 @@
       },
       "UserDataRequest": {
         "type": "object",
+        "title": "UserDataRequest",
         "required": [
           "username"
         ],
@@ -2967,11 +3311,15 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
       "UserRequireCredentialsPolicy": {
         "type": "object",
+        "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
             "type": "array",

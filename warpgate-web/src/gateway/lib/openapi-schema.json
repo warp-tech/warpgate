@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "0.13.2"
+    "version": "v0.14.1-13-ge76df34-modified"
   },
   "servers": [
     {
@@ -11,21 +11,6 @@
   ],
   "tags": [],
   "paths": {
-    "/__stub__": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "AnySecurityScheme": []
-          }
-        ],
-        "operationId": "__stub__"
-      }
-    },
     "/auth/login": {
       "post": {
         "requestBody": {
@@ -132,6 +117,29 @@
           }
         },
         "operationId": "cancelDefaultAuth"
+      }
+    },
+    "/auth/web-auth-requests": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuthStateResponseInternal"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_web_auth_requests"
       }
     },
     "/auth/state/{id}": {
@@ -279,6 +287,14 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_targets"
       }
     },
@@ -421,6 +437,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_credentials"
       }
     },
@@ -451,6 +475,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "change_my_password"
       }
     },
@@ -481,6 +513,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "add_my_public_key"
       }
     },
@@ -510,6 +550,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_public_key"
       }
     },
@@ -540,6 +588,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "add_my_otp"
       }
     },
@@ -569,6 +625,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_otp"
       }
     },
@@ -670,13 +734,18 @@
       },
       "AuthStateResponseInternal": {
         "type": "object",
+        "title": "AuthStateResponseInternal",
         "required": [
+          "id",
           "protocol",
           "started",
           "state",
           "identification_string"
         ],
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "protocol": {
             "type": "string"
           },
@@ -697,6 +766,7 @@
       },
       "ChangePasswordRequest": {
         "type": "object",
+        "title": "ChangePasswordRequest",
         "required": [
           "password"
         ],
@@ -718,6 +788,7 @@
       },
       "CredentialsState": {
         "type": "object",
+        "title": "CredentialsState",
         "required": [
           "password",
           "otp",
@@ -754,6 +825,7 @@
       },
       "ExistingApiToken": {
         "type": "object",
+        "title": "ExistingApiToken",
         "required": [
           "id",
           "label",
@@ -780,6 +852,7 @@
       },
       "ExistingOtpCredential": {
         "type": "object",
+        "title": "ExistingOtpCredential",
         "required": [
           "id"
         ],
@@ -792,6 +865,7 @@
       },
       "ExistingPublicKeyCredential": {
         "type": "object",
+        "title": "ExistingPublicKeyCredential",
         "required": [
           "id",
           "label",
@@ -820,6 +894,7 @@
       },
       "ExistingSsoCredential": {
         "type": "object",
+        "title": "ExistingSsoCredential",
         "required": [
           "id",
           "email"
@@ -839,6 +914,7 @@
       },
       "Info": {
         "type": "object",
+        "title": "Info",
         "required": [
           "ports",
           "authorized_via_ticket",
@@ -869,11 +945,15 @@
           },
           "own_credential_management_allowed": {
             "type": "boolean"
+          },
+          "setup_state": {
+            "$ref": "#/components/schemas/SetupState"
           }
         }
       },
       "LoginFailureResponse": {
         "type": "object",
+        "title": "LoginFailureResponse",
         "required": [
           "state"
         ],
@@ -885,6 +965,7 @@
       },
       "LoginRequest": {
         "type": "object",
+        "title": "LoginRequest",
         "required": [
           "username",
           "password"
@@ -900,6 +981,7 @@
       },
       "NewApiToken": {
         "type": "object",
+        "title": "NewApiToken",
         "required": [
           "label",
           "expiry"
@@ -916,6 +998,7 @@
       },
       "NewOtpCredential": {
         "type": "object",
+        "title": "NewOtpCredential",
         "required": [
           "secret_key"
         ],
@@ -931,6 +1014,7 @@
       },
       "NewPublicKeyCredential": {
         "type": "object",
+        "title": "NewPublicKeyCredential",
         "required": [
           "label",
           "openssh_public_key"
@@ -946,6 +1030,7 @@
       },
       "OtpLoginRequest": {
         "type": "object",
+        "title": "OtpLoginRequest",
         "required": [
           "otp"
         ],
@@ -965,6 +1050,7 @@
       },
       "PortsInfo": {
         "type": "object",
+        "title": "PortsInfo",
         "properties": {
           "ssh": {
             "type": "integer",
@@ -984,8 +1070,25 @@
           }
         }
       },
+      "SetupState": {
+        "type": "object",
+        "title": "SetupState",
+        "required": [
+          "has_targets",
+          "has_users"
+        ],
+        "properties": {
+          "has_targets": {
+            "type": "boolean"
+          },
+          "has_users": {
+            "type": "boolean"
+          }
+        }
+      },
       "SsoProviderDescription": {
         "type": "object",
+        "title": "SsoProviderDescription",
         "required": [
           "name",
           "label",
@@ -1014,6 +1117,7 @@
       },
       "StartSloResponseParams": {
         "type": "object",
+        "title": "StartSloResponseParams",
         "required": [
           "url"
         ],
@@ -1025,6 +1129,7 @@
       },
       "StartSsoResponseParams": {
         "type": "object",
+        "title": "StartSsoResponseParams",
         "required": [
           "url"
         ],
@@ -1046,12 +1151,17 @@
       },
       "TargetSnapshot": {
         "type": "object",
+        "title": "TargetSnapshot",
         "required": [
           "name",
+          "description",
           "kind"
         ],
         "properties": {
           "name": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "kind": {
@@ -1064,6 +1174,7 @@
       },
       "TokenAndSecret": {
         "type": "object",
+        "title": "TokenAndSecret",
         "required": [
           "token",
           "secret"
@@ -1079,6 +1190,7 @@
       },
       "UserRequireCredentialsPolicy": {
         "type": "object",
+        "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
             "type": "array",
@@ -1108,7 +1220,12 @@
       }
     },
     "securitySchemes": {
-      "AnySecurityScheme": {
+      "CookieSecurityScheme": {
+        "type": "apiKey",
+        "name": "warpgate-http-session",
+        "in": "cookie"
+      },
+      "TokenSecurityScheme": {
         "type": "apiKey",
         "name": "X-Warpgate-Token",
         "in": "header"

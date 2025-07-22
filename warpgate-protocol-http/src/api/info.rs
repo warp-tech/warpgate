@@ -1,14 +1,15 @@
+use anyhow::Context;
 use poem::session::Session;
 use poem::web::Data;
 use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
-use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common::version::warpgate_version;
+use warpgate_core::{ConfigProvider, Services};
 use warpgate_db_entities::Parameters;
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::{is_user_admin, RequestAuthorization, SessionAuthorization, SessionExt};
 
 pub struct Api;
 
@@ -18,6 +19,18 @@ pub struct PortsInfo {
     http: Option<u16>,
     mysql: Option<u16>,
     postgres: Option<u16>,
+}
+
+#[derive(Serialize, Object, Debug)]
+pub struct SetupState {
+    has_targets: bool,
+    has_users: bool,
+}
+
+impl SetupState {
+    pub fn completed(&self) -> bool {
+        self.has_targets && self.has_users
+    }
 }
 
 #[derive(Serialize, Object)]
@@ -30,6 +43,7 @@ pub struct Info {
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
+    setup_state: Option<SetupState>,
 }
 
 #[derive(ApiResponse)]
@@ -46,7 +60,8 @@ impl Api {
         req: &Request,
         session: &Session,
         services: Data<&Services>,
-    ) -> Result<InstanceInfoResponse, WarpgateError> {
+        request_authorization: Option<Data<&RequestAuthorization>>,
+    ) -> poem::Result<InstanceInfoResponse> {
         let config = services.config.lock().await;
         let external_host = config
             .construct_external_url(Some(req), None)
@@ -55,12 +70,43 @@ impl Api {
             .and_then(|x| x.host())
             .map(|x| x.to_string());
 
-        let parameters = Parameters::Entity::get(&*services.db.lock().await).await?;
+        let parameters = {
+            Parameters::Entity::get(&*services.db.lock().await)
+                .await
+                .context("loading parameters")?
+        };
+
+        let setup_state = {
+            let (users, targets) = {
+                let mut p = services.config_provider.lock().await;
+                let users = p.list_users().await?;
+                let targets = p.list_targets().await?;
+                (users, targets)
+            };
+            let user_is_admin = if let Some(auth) = request_authorization {
+                is_user_admin(req, &auth).await?
+            } else {
+                false
+            };
+            if user_is_admin {
+                let state = SetupState {
+                    has_targets: targets.len() > 1,
+                    has_users: users.len() > 1,
+                };
+                if !state.completed() {
+                    Some(state)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: session
                 .is_authenticated()
-                .then(|| env!("CARGO_PKG_VERSION").to_string()),
+                .then(|| warpgate_version().to_string()),
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,
@@ -103,6 +149,7 @@ impl Api {
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
+            setup_state,
         })))
     }
 }

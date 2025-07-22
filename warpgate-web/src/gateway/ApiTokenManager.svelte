@@ -8,6 +8,7 @@
     import CopyButton from 'common/CopyButton.svelte'
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import { Button } from '@sveltestrap/sveltestrap'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
@@ -29,10 +30,10 @@
 
 <div class="page-summary-bar mt-4">
     <h1>API tokens</h1>
-    <a href={''} class="btn btn-primary ms-auto" onclick={e => {
+    <Button color="primary" class="ms-auto" onclick={e => {
         creatingToken = true
         e.preventDefault()
-    }}>Create token</a>
+    }}>Create token</Button>
 </div>
 
 {#if lastCreatedSecret}
@@ -54,8 +55,8 @@
     {/if}
 
     <div class="list-group list-group-flush mb-3">
-        {#each tokens as token}
-        <div class="list-group-item d-flex align-items-center">
+        {#each tokens as token (token.id)}
+        <div class="list-group-item d-flex align-items-center pr-0">
             <Fa fw icon={faKey} />
             <span class="label ms-3">{token.label}</span>
             {#if token.expiry.getTime() < now}
@@ -64,9 +65,8 @@
                 <Badge color="success" class="ms-2">{token.expiry.toLocaleDateString()}</Badge>
             {/if}
             <span class="ms-auto"></span>
-            <a
+            <Button
                 color="link"
-                href={''}
                 class="ms-2"
                 onclick={e => {
                     deleteToken(token)
@@ -74,7 +74,7 @@
                 }}
             >
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>

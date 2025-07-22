@@ -1,17 +1,15 @@
 pub mod api;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
+use warpgate_common::version::warpgate_version;
 use warpgate_core::Services;
 
 pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
-    let api_service = OpenApiService::new(
-        crate::api::get(),
-        "Warpgate admin API",
-        env!("CARGO_PKG_VERSION"),
-    )
-    .server("/@warpgate/admin/api");
+    let api_service =
+        OpenApiService::new(crate::api::get(), "Warpgate admin API", warpgate_version())
+            .server("/@warpgate/admin/api");
 
-    let ui = api_service.swagger_ui();
+    let ui = api_service.stoplight_elements();
     let spec = api_service.spec_endpoint();
     let db = services.db.clone();
     let config = services.config.clone();
@@ -21,7 +19,7 @@ pub fn admin_api_app(services: &Services) -> impl IntoEndpoint {
 
     Route::new()
         .nest("", api_service)
-        .nest("/swagger", ui)
+        .nest("/playground", ui)
         .nest("/openapi.json", spec)
         .at(
             "/recordings/:id/cast",

@@ -16,3 +16,7 @@ Warpgate considers the following trusted inputs:
 * Network infrastructure and actuality and stability of target IPs/hostnames.
 
 In particular, this does not include the traffic from known Warpgate targets.
+
+---
+
+CNA: [GitHub](https://www.cve.org/PartnerInformation/ListofPartners/partner/GitHub_M)

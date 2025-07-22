@@ -2,7 +2,7 @@ mod client;
 mod common;
 mod compat;
 mod keys;
-mod known_hosts;
+pub mod known_hosts;
 mod server;
 use std::fmt::Debug;
 
@@ -127,6 +127,10 @@ impl ProtocolServer for SSHProtocolServer {
         }
 
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "SSH"
     }
 }
 

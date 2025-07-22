@@ -56,7 +56,7 @@
     <div class="mb-5">
         <div class="mb-2">Ensure this security key matches your authentication prompt:</div>
         <div class="identification-string">
-            {#each authState?.identificationString as char}
+            {#each authState?.identificationString as char (char)}
                 <div class="card bg-secondary text-light">
                     <div class="card-body">{char}</div>
                 </div>

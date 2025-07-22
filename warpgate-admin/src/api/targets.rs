@@ -10,16 +10,19 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{Role as RoleConfig, Target as TargetConfig, TargetOptions, WarpgateError};
+use warpgate_common::{
+    Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions, WarpgateError,
+};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
 
 use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct TargetDataRequest {
     name: String,
+    description: Option<String>,
     options: TargetOptions,
 }
 
@@ -28,10 +31,14 @@ enum GetTargetsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<TargetConfig>>),
 }
+
 #[derive(ApiResponse)]
 enum CreateTargetResponse {
     #[oai(status = 201)]
     Created(Json<TargetConfig>),
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
@@ -46,7 +53,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -71,7 +78,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTargetResponse, WarpgateError> {
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
@@ -82,10 +89,20 @@ impl ListApi {
         }
 
         let db = db.lock().await;
+        let existing = Target::Entity::find()
+            .filter(Target::Column::Name.eq(body.name.clone()))
+            .one(&*db)
+            .await?;
+        if existing.is_some() {
+            return Ok(CreateTargetResponse::Conflict(Json(
+                "Name already exists".into(),
+            )));
+        }
 
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
+            description: Set(body.description.clone().unwrap_or_default()),
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
         };
@@ -128,6 +145,18 @@ enum DeleteTargetResponse {
     NotFound,
 }
 
+#[derive(ApiResponse)]
+enum TargetKnownSshHostKeysResponse {
+    #[oai(status = 200)]
+    Found(Json<Vec<KnownHost::Model>>),
+
+    #[oai(status = 400)]
+    InvalidType,
+
+    #[oai(status = 404)]
+    NotFound,
+}
+
 pub struct DetailApi;
 
 #[OpenApi]
@@ -137,7 +166,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -154,7 +183,7 @@ impl DetailApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -168,6 +197,7 @@ impl DetailApi {
 
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
+        model.description = Set(body.description.clone().unwrap_or_default());
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         let target = model.update(&*db).await?;
@@ -186,7 +216,7 @@ impl DetailApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -203,8 +233,56 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        if target.kind == TargetKind::Ssh {
+            let options: TargetOptions = serde_json::from_value(target.options.clone())?;
+            if let TargetOptions::Ssh(ssh_options) = options {
+                use warpgate_db_entities::KnownHost;
+                KnownHost::Entity::delete_many()
+                    .filter(KnownHost::Column::Host.eq(&ssh_options.host))
+                    .filter(KnownHost::Column::Port.eq(ssh_options.port as i32))
+                    .exec(&*db)
+                    .await?;
+            }
+        }
+
         target.delete(&*db).await?;
         Ok(DeleteTargetResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/targets/:id/known-ssh-host-keys",
+        method = "get",
+        operation_id = "get_ssh_target_known_ssh_host_keys"
+    )]
+    async fn get_ssh_target_known_ssh_host_keys(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(TargetKnownSshHostKeysResponse::NotFound);
+        };
+
+        let target: TargetConfig = target.try_into()?;
+
+        let options: TargetSSHOptions = match target.options {
+            TargetOptions::Ssh(x) => x,
+            _ => return Ok(TargetKnownSshHostKeysResponse::InvalidType),
+        };
+
+        let known_hosts = KnownHost::Entity::find()
+            .filter(
+                KnownHost::Column::Host
+                    .eq(&options.host)
+                    .and(KnownHost::Column::Port.eq(options.port)),
+            )
+            .all(&*db)
+            .await?;
+
+        Ok(TargetKnownSshHostKeysResponse::Found(Json(known_hosts)))
     }
 }
 
@@ -247,7 +325,7 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -276,7 +354,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 
@@ -312,7 +390,7 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         let db = db.lock().await;
 

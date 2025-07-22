@@ -3,12 +3,12 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-migrations"
 publish = false
-version = "0.13.2"
+version = "0.15.0"
 
 [lib]
 
 [dependencies]
-tokio = { version = "1.20", features = ["macros", "rt-multi-thread"] }
+tokio.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
 sea-orm = { workspace = true, features = [

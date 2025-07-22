@@ -255,6 +255,8 @@ class ProcessManager:
                     str(postgres_port),
                     "--data-path",
                     data_dir,
+                    "--external-host",
+                    "external-host",
                 ],
                 env={"WARPGATE_ADMIN_PASSWORD": "123"},
             )
@@ -296,6 +298,7 @@ class ProcessManager:
                 "UserKnownHostsFile=/dev/null",
                 *args,
             ],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             **kwargs,
         )
@@ -346,7 +349,7 @@ def report_generation():
             "--all-features",
             "--no-report",
             "--",
-            "--version",
+            "version",
         ],
         cwd=cargo_root,
     )

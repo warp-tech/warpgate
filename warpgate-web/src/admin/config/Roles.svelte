@@ -15,28 +15,35 @@
     }
 </script>
 
-<div class="page-summary-bar">
-    <h1>roles</h1>
-    <a
-        class="btn btn-primary ms-auto"
-        href="/roles/create"
-        use:link>
-        Add a role
-    </a>
-</div>
-
-<ItemList load={getRoles} showSearch={true}>
-    {#snippet item(role)}
+<div class="container-max-md">
+    <div class="page-summary-bar">
+        <h1>roles</h1>
         <a
-            class="list-group-item list-group-item-action"
-            href="/roles/{role.id}"
+            class="btn btn-primary ms-auto"
+            href="/config/roles/create"
             use:link>
-            <strong class="me-auto">
-                {role.name}
-            </strong>
+            Add a role
         </a>
-    {/snippet}
-</ItemList>
+    </div>
+
+    <ItemList load={getRoles} showSearch={true}>
+        {#snippet item(role)}
+            <a
+                class="list-group-item list-group-item-action"
+                href="/config/roles/{role.id}"
+                use:link>
+                <div>
+                    <strong class="me-auto">
+                        {role.name}
+                    </strong>
+                    {#if role.description}
+                        <small class="d-block text-muted">{role.description}</small>
+                    {/if}
+                </div>
+            </a>
+        {/snippet}
+    </ItemList>
+</div>
 
 <style lang="scss">
     .list-group-item {

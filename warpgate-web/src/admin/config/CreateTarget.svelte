@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import RadioButton from 'common/RadioButton.svelte'
 
     let error: string|null = $state(null)
     let name = $state('')
@@ -63,56 +64,57 @@
                     options,
                 },
             })
-            replace(`/targets/${target.id}`)
+            replace(`/config/targets/${target.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
     }
 
+    const kinds: { name: string, value: TargetKind }[] = [
+        { name: 'SSH', value: TargetKind.Ssh },
+        { name: 'HTTP', value: TargetKind.Http },
+        { name: 'MySQL', value: TargetKind.MySql },
+        { name: 'PostgreSQL', value: TargetKind.Postgres },
+    ]
 </script>
 
-{#if error}
-<Alert color="danger">{error}</Alert>
-{/if}
+<div class="container-max-md">
+    {#if error}
+    <Alert color="danger">{error}</Alert>
+    {/if}
 
+    <div class="page-summary-bar">
+        <h1>add a target</h1>
+    </div>
 
-<div class="page-summary-bar">
-    <h1>add a target</h1>
-</div>
+    <div class="narrow-page">
+        <Form on:submit={e => {
+            create()
+            e.preventDefault()
+        }}>
+            <!-- Defualt button for key handling -->
+            <Button class="d-none" type="submit"></Button>
 
-<div class="narrow-page">
-    <Form on:submit={e => {
-        create()
-        e.preventDefault()
-    }}>
-        <!-- svelte-ignore a11y_label_has_associated_control -->
-        <label class="mb-2">Type</label>
-        <ButtonGroup class="w-100 mb-3">
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="mb-2">Type</label>
+            <ButtonGroup class="w-100 mb-3">
+                {#each kinds as kind (kind.value)}
+                    <RadioButton
+                        label={kind.name}
+                        value={kind.value}
+                        bind:group={type}
+                    />
+                {/each}
+            </ButtonGroup>
+
+            <FormGroup floating label="Name">
+                <input class="form-control" required bind:value={name} />
+            </FormGroup>
+
             <Button
-                active={type === TargetKind.Ssh}
-                on:click={() => type = TargetKind.Ssh}
-            >SSH</Button>
-            <Button
-                active={type === TargetKind.Http}
-                on:click={() => type = TargetKind.Http}
-            >HTTP</Button>
-            <Button
-                active={type === TargetKind.MySql}
-                on:click={() => type = TargetKind.MySql}
-            >MySQL</Button>
-            <Button
-                active={type === TargetKind.Postgres}
-                on:click={() => type = TargetKind.Postgres}
-            >PostgreSQL</Button>
-        </ButtonGroup>
-
-        <FormGroup floating label="Name">
-            <input class="form-control" required bind:value={name} />
-        </FormGroup>
-
-        <Button
-            color="primary"
-            type="submit"
-        >Create target</Button>
-    </Form>
+                color="primary"
+                type="submit"
+            >Create target</Button>
+        </Form>
+    </div>
 </div>

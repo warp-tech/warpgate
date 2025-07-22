@@ -5,13 +5,14 @@ use std::io::Write;
 use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
+use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
     UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
@@ -30,7 +31,8 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
             .default(format!("{default:?}"))
             .with_prompt(prompt)
             .interact_text()
-            .and_then(|v| v.to_socket_addrs());
+            .context("dialoguer")
+            .and_then(|v| v.to_socket_addrs().context("address resolution"));
         match v {
             Ok(mut addr) => match addr.next() {
                 Some(addr) => return ListenEndpoint::from(addr),
@@ -46,7 +48,7 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
 }
 
 pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
     if cli.config.exists() {
@@ -282,11 +284,20 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         },
     );
 
+    if let Commands::UnattendedSetup { external_host, .. } = &cli.command {
+        store.external_host = external_host.clone();
+    }
+
     // ---
 
     info!("Generated configuration:");
     let yaml = serde_yaml::to_string(&store)?;
     println!("{yaml}");
+
+    let yaml = format!(
+        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
+        version = warpgate_version()
+    );
 
     File::create(&cli.config)?.write_all(yaml.as_bytes())?;
     info!("Saved into {}", cli.config.display());
@@ -318,6 +329,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 let values = User::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
+                    description: Set("".into()),
                     credential_policy: Set(serde_json::to_value(
                         None::<UserRequireCredentialsPolicy>,
                     )?),

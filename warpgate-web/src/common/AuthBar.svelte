@@ -20,7 +20,7 @@ async function singleLogout () {
 
 {#if $serverInfo?.username}
     <div class="ms-auto">
-        <a href="/#/profile">
+        <a href="/@warpgate/#/profile">
             {$serverInfo.username}
         </a>
         {#if $serverInfo.authorizedViaTicket}

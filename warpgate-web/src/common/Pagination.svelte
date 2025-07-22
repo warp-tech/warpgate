@@ -11,20 +11,19 @@
 
     let { page = $bindable(0), pageSize = 1, total = 1 }: Props = $props()
 
-    let pages: (number|null)[] = $state([])
-
-    $effect(() => {
+    let pages: (number|null)[] = $derived.by(() => {
         let i = 0
-        pages = []
+        let result = []
         let totalPages = Math.floor((total - 1) / pageSize + 1)
         while (i < totalPages) {
             if (i < 2 || i > totalPages - 3 || Math.abs(i - page) < 3) {
-                pages.push(i)
-            } else if (pages[pages.length - 1]) {
-                pages.push(null)
+                result.push(i)
+            } else if (result[result.length - 1]) {
+                result.push(null)
             }
             i++
         }
+        return result
     })
 </script>
 
@@ -34,7 +33,7 @@
             <Fa icon={faAngleLeft} />
         </PaginationLink>
     </PaginationItem>
-    {#each pages as i}
+    {#each pages as i (i)}
         {#if i !== null}
             <PaginationItem active={page === i}>
                 <PaginationLink on:click={() => page = i} href="#">{i + 1}</PaginationLink>
