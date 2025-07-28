@@ -1,4 +1,3 @@
-version: '3'
 services:
   warpgate:
     image: ghcr.io/warp-tech/warpgate
