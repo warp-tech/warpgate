@@ -204,6 +204,15 @@
             <TlsConfiguration bind:value={target.options.tls} />
         {/if}
 
+        {#if target.options.kind === 'Postgres'}
+            <FormGroup check class="mb-3">
+                <Input type="checkbox" bind:checked={target.options.log_query_results} />
+                <label class="form-check-label ms-2">
+                    Log query results (for auditing)
+                </label>
+            </FormGroup>
+        {/if}
+
         <h4 class="mt-4">Allow access for roles</h4>
         <Loadable promise={loadRoles()}>
             {#snippet children(roles)}
