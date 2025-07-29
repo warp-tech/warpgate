@@ -105,6 +105,7 @@ impl ListApi {
             description: Set(body.description.clone().unwrap_or_default()),
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            rate_limit_bytes_per_second: Set(None),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;

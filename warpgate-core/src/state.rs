@@ -78,7 +78,7 @@ impl State {
                 self.db.clone(),
                 this,
                 state,
-            )))),
+            )?))),
             None => Err(anyhow!("State is being detroyed").into()),
         }
     }

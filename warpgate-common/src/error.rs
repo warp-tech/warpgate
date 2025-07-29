@@ -41,7 +41,8 @@ pub enum WarpgateError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     RateLimiterInsufficientCapacity(#[from] governor::InsufficientCapacity),
-
+    #[error("Invalid rate limiter quota: {0}")]
+    RateLimiterInvalidQuota(u32),
     #[error("Session end")]
     SessionEnd,
 }

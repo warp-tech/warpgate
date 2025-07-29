@@ -47,6 +47,7 @@ impl DatabaseConfigProvider {
             credential_policy: Set(serde_json::to_value(
                 UserRequireCredentialsPolicy::default(),
             )?),
+            rate_limit_bytes_per_second: Set(None),
         }
         .insert(db)
         .await?;

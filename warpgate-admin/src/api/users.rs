@@ -95,6 +95,7 @@ impl ListApi {
                     .map_err(WarpgateError::from)?,
             ),
             description: Set(body.description.clone().unwrap_or_default()),
+            rate_limit_bytes_per_second: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;

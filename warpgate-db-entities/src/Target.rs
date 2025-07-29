@@ -51,6 +51,7 @@ pub struct Model {
     pub description: String,
     pub kind: TargetKind,
     pub options: serde_json::Value,
+    pub rate_limit_bytes_per_second: Option<i64>,
 }
 
 impl Related<super::Role::Entity> for Entity {
