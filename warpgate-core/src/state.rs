@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Weak};
+use std::num::NonZero;
+use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
@@ -10,41 +11,46 @@ use uuid::Uuid;
 use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
+use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
     db: Arc<Mutex<DatabaseConnection>>,
-    this: Weak<Mutex<Self>>,
+    rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
 }
 
 impl State {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Arc<Mutex<Self>> {
+    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Result<Arc<Mutex<Self>>, WarpgateError> {
+        let per_second = 32000u32;
+        let per_second =
+            NonZero::new(per_second).ok_or(WarpgateError::RateLimiterInvalidQuota(per_second))?;
+
         let sender = broadcast::channel(2).0;
-        Arc::<Mutex<Self>>::new_cyclic(|me| {
-            Mutex::new(Self {
-                sessions: HashMap::new(),
-                db: db.clone(),
-                this: me.clone(),
-                change_sender: sender,
-            })
-        })
+        Ok(Arc::new(Mutex::new(Self {
+            sessions: HashMap::new(),
+            db: db.clone(),
+            rate_limiter_registry: Arc::new(Mutex::new(RateLimiterRegistry::new())),
+            change_sender: sender,
+        })))
     }
 
     pub async fn register_session(
-        &mut self,
+        this: &Arc<Mutex<Self>>,
         protocol: &ProtocolName,
         state: SessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+        let this_copy = this.clone();
+        let mut _self = this.lock().await;
         let id = uuid::Uuid::new_v4();
 
         let state = Arc::new(Mutex::new(SessionState::new(
             state,
-            self.change_sender.clone(),
+            _self.change_sender.clone(),
         )));
 
-        self.sessions.insert(id, state.clone());
+        _self.sessions.insert(id, state.clone());
 
         {
             use sea_orm::ActiveValue::Set;
@@ -62,7 +68,7 @@ impl State {
                 ..Default::default()
             };
 
-            let db = self.db.lock().await;
+            let db = _self.db.lock().await;
             values
                 .insert(&*db)
                 .await
@@ -70,17 +76,15 @@ impl State {
                 .map_err(WarpgateError::from)?;
         }
 
-        let _ = self.change_sender.send(());
+        let _ = _self.change_sender.send(());
 
-        match self.this.upgrade() {
-            Some(this) => Ok(Arc::new(Mutex::new(WarpgateServerHandle::new(
-                id,
-                self.db.clone(),
-                this,
-                state,
-            )?))),
-            None => Err(anyhow!("State is being detroyed").into()),
-        }
+        Ok(Arc::new(Mutex::new(WarpgateServerHandle::new(
+            id,
+            _self.db.clone(),
+            this_copy,
+            state,
+            _self.rate_limiter_registry.clone(),
+        )?)))
     }
 
     pub fn subscribe(&mut self) -> broadcast::Receiver<()> {

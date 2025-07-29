@@ -18,7 +18,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::rate_limiting::RateLimitedStream;
-use warpgate_core::{Services, SessionStateInit};
+use warpgate_core::{Services, SessionStateInit, State};
 
 use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
@@ -67,26 +67,23 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-        let server_handle = services
-            .state
-            .lock()
-            .await
-            .register_session(
-                &crate::PROTOCOL_NAME,
-                SessionStateInit {
-                    remote_address: Some(remote_address),
-                    handle: Box::new(session_handle),
-                },
-            )
-            .await
-            .context("registering session")?;
+        let server_handle = State::register_session(
+            &services.state,
+            &crate::PROTOCOL_NAME,
+            SessionStateInit {
+                remote_address: Some(remote_address),
+                handle: Box::new(session_handle),
+            },
+        )
+        .await
+        .context("registering session")?;
 
         let id = server_handle.lock().await.id();
-        let rate_limiter = server_handle.lock().await.global_rate_limiter().clone();
 
         let (event_tx, event_rx) = unbounded_channel();
 
         let handler = ServerHandler { event_tx };
+        let wrapped_stream = server_handle.lock().await.wrap_stream(stream);
 
         let session = match ServerSession::start(
             remote_address,
@@ -103,8 +100,6 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
                 continue;
             }
         };
-
-        let wrapped_stream = RateLimitedStream::new(stream, rate_limiter);
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} session"))

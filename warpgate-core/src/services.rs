@@ -50,7 +50,7 @@ impl Services {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db),
+            state: State::new(&db)?,
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),

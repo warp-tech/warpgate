@@ -2,21 +2,21 @@ use std::num::{NonZero, NonZeroU32};
 use std::sync::Arc;
 
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
-use governor::{DefaultDirectRateLimiter, NotUntil, Quota};
-use tokio::sync::{mpsc, watch, Mutex};
+use governor::{DefaultDirectRateLimiter, Quota};
+use tokio::sync::{watch, Mutex};
 use warpgate_common::WarpgateError;
 
 pub struct WarpgateRateLimiterHandle {
-    sender: watch::Sender<NonZeroU32>,
+    sender: watch::Sender<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
 }
 
 impl WarpgateRateLimiterHandle {
-    pub fn replace(&self, bytes_per_second: NonZeroU32) {
-        let _ = self.sender.send(bytes_per_second);
+    pub fn replace(&self, limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>) {
+        let _ = self.sender.send(limiter);
     }
 }
 
-fn _construct_limiter(bytes_per_second: NonZeroU32) -> DefaultDirectRateLimiter {
+pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> Arc<Mutex<DefaultDirectRateLimiter>> {
     let max_cells = NonZeroU32::MAX;
     let rate_limiter = DefaultDirectRateLimiter::direct(
         Quota::per_second(bytes_per_second).allow_burst(max_cells),
@@ -29,13 +29,14 @@ fn _construct_limiter(bytes_per_second: NonZeroU32) -> DefaultDirectRateLimiter 
             .try_into()
             .unwrap(),
     );
-    rate_limiter
+    Arc::new(Mutex::new(rate_limiter))
 }
 
+/// Houses a replaceable shared reference to a rate limiter
 pub struct WarpgateRateLimiter {
-    rate_limiter: Arc<Mutex<DefaultDirectRateLimiter>>,
-    receiver: watch::Receiver<NonZeroU32>,
-    sender: watch::Sender<NonZeroU32>,
+    rate_limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>,
+    receiver: watch::Receiver<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
+    sender: watch::Sender<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
 }
 
 impl WarpgateRateLimiter {
@@ -43,11 +44,20 @@ impl WarpgateRateLimiter {
         QuantaClock::default().now().into()
     }
 
-    pub fn new(bytes_per_second: NonZeroU32) -> Self {
-        let rate_limiter = _construct_limiter(bytes_per_second);
-        let (sender, receiver) = watch::channel(bytes_per_second);
+    pub fn empty() -> Self {
+        let (sender, receiver) = watch::channel(None);
         Self {
-            rate_limiter: Arc::new(Mutex::new(rate_limiter)),
+            rate_limiter: None,
+            receiver,
+            sender,
+        }
+    }
+
+    pub fn new(bytes_per_second: NonZeroU32) -> Self {
+        let rate_limiter = new_rate_limiter(bytes_per_second);
+        let (sender, receiver) = watch::channel(Some(rate_limiter));
+        Self {
+            rate_limiter: None,
             receiver,
             sender,
         }
@@ -59,21 +69,23 @@ impl WarpgateRateLimiter {
         }
     }
 
-    async fn _maybe_update(&self) {
-        let mut this_rl = self.rate_limiter.lock().await;
+    async fn _maybe_update(&mut self) {
         let _ref = self.receiver.borrow_and_update();
         if _ref.has_changed() {
-            *this_rl = _construct_limiter(*_ref);
+            self.rate_limiter = _ref.as_ref().cloned();
         }
     }
 
-    pub async fn until_bytes_ready(&self, bytes: usize) -> Result<(), WarpgateError> {
+    pub async fn until_bytes_ready(&mut self, bytes: usize) -> Result<(), WarpgateError> {
         self._maybe_update().await;
+        let Some(ref rate_limiter) = self.rate_limiter else {
+            return Ok(());
+        };
         let bytes = match NonZero::new(bytes as u32) {
             Some(bytes) => bytes,
             None => return Ok(()),
         };
-        self.rate_limiter.lock().await.until_n_ready(bytes).await?;
+        rate_limiter.lock().await.until_n_ready(bytes).await?;
         Ok(())
     }
 }

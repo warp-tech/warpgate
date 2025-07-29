@@ -2,11 +2,12 @@ use std::num::NonZero;
 use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
-use crate::rate_limiting::WarpgateRateLimiter;
+use crate::rate_limiting::{stack_rate_limiters, RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionState, State};
 
 pub trait SessionHandle {
@@ -18,7 +19,8 @@ pub struct WarpgateServerHandle {
     db: Arc<Mutex<DatabaseConnection>>,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
-    global_rate_limiter: Arc<WarpgateRateLimiter>,
+    rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
+    rate_limiter_handles: Vec<RateLimiterStackHandle>,
 }
 
 impl WarpgateServerHandle {
@@ -27,19 +29,15 @@ impl WarpgateServerHandle {
         db: Arc<Mutex<DatabaseConnection>>,
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<SessionState>>,
+        rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
     ) -> Result<Self, WarpgateError> {
-        let per_second = 32000u32;
-        let per_second =
-            NonZero::new(per_second).ok_or(WarpgateError::RateLimiterInvalidQuota(per_second))?;
-
-        let rate_limiter = WarpgateRateLimiter::new(per_second);
-
         Ok(WarpgateServerHandle {
             id: id.clone(),
             db,
             state,
             session_state,
-            global_rate_limiter: Arc::new(rate_limiter),
+            rate_limiters_registry,
+            rate_limiter_handles: vec![],
         })
     }
 
@@ -98,8 +96,17 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub fn global_rate_limiter(&self) -> &Arc<WarpgateRateLimiter> {
-        &self.global_rate_limiter
+    pub fn wrap_stream<S: AsyncRead + AsyncWrite + Unpin + Send>(
+        &self,
+        stream: S,
+    ) -> impl AsyncRead + AsyncWrite + Unpin + Send {
+        let rate_limiters_registry = self.rate_limiters_registry.clone();
+        let session_id = self.id;
+
+        let (stream, handle) = stack_rate_limiters(stream);
+        // remember handle
+
+        stream
     }
 }
 
