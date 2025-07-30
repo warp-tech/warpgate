@@ -10,7 +10,7 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, ConfigProvider, Services};
 use warpgate_sso::CoreIdToken;
@@ -277,7 +277,7 @@ pub async fn get_auth_state_for_request(
     if let Some(id) = session.get_auth_state_id() {
         let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
 
-        let existing_matched = state.lock().await.username() == username;
+        let existing_matched = state.lock().await.user_info().username == username;
         if existing_matched {
             return Ok(state);
         }
@@ -299,7 +299,7 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(req: &Request, username: String) -> Result<(), WarpgateError> {
+pub async fn authorize_session(req: &Request, user_info: AuthStateUserInfo) -> Result<(), WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
@@ -316,9 +316,9 @@ pub async fn authorize_session(req: &Request, username: String) -> Result<(), Wa
     server_handle
         .lock()
         .await
-        .set_username(username.clone())
+        .set_user_info(user_info.clone())
         .await?;
-    session.set_auth(SessionAuthorization::User(username));
+    session.set_auth(SessionAuthorization::User(user_info.username));
 
     Ok(())
 }

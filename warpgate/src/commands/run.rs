@@ -188,11 +188,14 @@ pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Resul
         let mut cp = services.config_provider.lock().await;
         for (id, session) in state.sessions.iter() {
             let mut session = session.lock().await;
-            if let (Some(username), Some(target)) =
-                (session.username.as_ref(), session.target.as_ref())
+            if let (Some(user_info), Some(target)) =
+                (session.user_info.as_ref(), session.target.as_ref())
             {
-                if !cp.authorize_target(username, &target.name).await? {
-                    warn!(sesson_id=%id, %username, target=&target.name, "Session no longer authorized after config reload");
+                if !cp
+                    .authorize_target(&user_info.username, &target.name)
+                    .await?
+                {
+                    warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
                     session.handle.close();
                 }
             }

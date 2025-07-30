@@ -53,7 +53,7 @@ impl AuthStateStore {
         for auth in self.store.values() {
             {
                 let inner = auth.0.lock().await;
-                if inner.username() != username {
+                if inner.user_info().username != username {
                     continue;
                 }
                 let AuthResult::Need(need) = inner.verify() else {
@@ -84,6 +84,20 @@ impl AuthStateStore {
         supported_credential_types: &[CredentialKind],
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
+
+        let Some(user) = self
+            .config_provider
+            .lock()
+            .await
+            .list_users()
+            .await?
+            .iter()
+            .find(|u| u.username == username)
+            .map(Clone::clone)
+        else {
+            return Err(WarpgateError::UserNotFound(username.into()));
+        };
+
         let policy = self
             .config_provider
             .lock()
@@ -107,7 +121,7 @@ impl AuthStateStore {
         let state = AuthState::new(
             id,
             session_id.copied(),
-            username.to_string(),
+            (&user).into(),
             protocol.to_string(),
             policy,
             state_change_tx,

@@ -10,6 +10,12 @@ async function init () {
     parameters = await api.getParameters({})
 }
 
+async function update() {
+    api.updateParameters({
+        parameterUpdate: parameters!,
+    })
+}
+
 </script>
 
 <div class="page-summary-bar">
@@ -28,14 +34,25 @@ async function init () {
             type="switch"
             on:change={() => {
                 parameters!.allowOwnCredentialManagement = !parameters!.allowOwnCredentialManagement
-                api.updateParameters({
-                    parameterUpdate: {
-                        allowOwnCredentialManagement: parameters!.allowOwnCredentialManagement,
-                    },
-                })
+                update()
             }}
             checked={parameters.allowOwnCredentialManagement} />
         <div>Allow users to manage their own credentials</div>
+    </label>
+
+    <label
+        for="globalRateLimit"
+        class="d-flex align-items-center"
+    >
+        <Input
+            id="globalRateLimit"
+            class="mb-0 me-2"
+            type="number"
+            min="0"
+            step="1"
+            bind:value={parameters.rateLimitBytesPerSecond}
+            on:change={update}
+            />
     </label>
 {/if}
 </Loadable>

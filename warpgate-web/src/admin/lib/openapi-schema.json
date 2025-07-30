@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.14.1-8-g2ef3553-modified"
+    "version": "v0.15.0-9-gd195628-modified"
   },
   "servers": [
     {
@@ -2230,7 +2230,7 @@
         ],
         "operationId": "get_parameters"
       },
-      "patch": {
+      "put": {
         "requestBody": {
           "content": {
             "application/json; charset=utf-8": {
@@ -2637,9 +2637,16 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
+        "required": [
+          "allow_own_credential_management"
+        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
           }
         }
       },
@@ -2652,6 +2659,10 @@
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
           }
         }
       },
@@ -3296,6 +3307,10 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

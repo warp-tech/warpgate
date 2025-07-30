@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::num::NonZero;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -8,6 +7,7 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
@@ -22,16 +22,15 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Result<Arc<Mutex<Self>>, WarpgateError> {
-        let per_second = 32000u32;
-        let per_second =
-            NonZero::new(per_second).ok_or(WarpgateError::RateLimiterInvalidQuota(per_second))?;
-
+    pub fn new(
+        db: &Arc<Mutex<DatabaseConnection>>,
+        rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
+    ) -> Result<Arc<Mutex<Self>>, WarpgateError> {
         let sender = broadcast::channel(2).0;
         Ok(Arc::new(Mutex::new(Self {
             sessions: HashMap::new(),
             db: db.clone(),
-            rate_limiter_registry: Arc::new(Mutex::new(RateLimiterRegistry::new())),
+            rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
         })))
     }
@@ -117,25 +116,27 @@ impl State {
 
 pub struct SessionState {
     pub remote_address: Option<SocketAddr>,
-    pub username: Option<String>,
+    pub user_info: Option<AuthStateUserInfo>,
     pub target: Option<Target>,
-    pub handle: Box<dyn SessionHandle + Send>,
+    pub handle: Box<dyn SessionHandle + Send + Sync>,
     change_sender: broadcast::Sender<()>,
+    pub rate_limiter_handles: Vec<RateLimiterStackHandle>,
 }
 
 pub struct SessionStateInit {
     pub remote_address: Option<SocketAddr>,
-    pub handle: Box<dyn SessionHandle + Send>,
+    pub handle: Box<dyn SessionHandle + Send + Sync>,
 }
 
 impl SessionState {
     fn new(init: SessionStateInit, change_sender: broadcast::Sender<()>) -> Self {
         SessionState {
             remote_address: init.remote_address,
-            username: None,
+            user_info: None,
             target: None,
             handle: init.handle,
             change_sender,
+            rate_limiter_handles: vec![],
         }
     }
 

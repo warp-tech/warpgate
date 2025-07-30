@@ -14,11 +14,13 @@ pub struct Api;
 #[derive(Serialize, Object)]
 struct ParameterValues {
     pub allow_own_credential_management: bool,
+    pub rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
-    pub allow_own_credential_management: Option<bool>,
+    pub allow_own_credential_management: bool,
+    pub rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -46,12 +48,13 @@ impl Api {
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
+            rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
         })))
     }
 
     #[oai(
         path = "/parameters",
-        method = "patch",
+        method = "put",
         operation_id = "update_parameters"
     )]
     async fn api_update_parameters(
@@ -62,16 +65,33 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let mut am = Parameters::ActiveModel {
+        let am = Parameters::ActiveModel {
             id: Set(Parameters::Entity::get(&db).await?.id),
+            allow_own_credential_management: Set(body.allow_own_credential_management),
+            rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
             ..Default::default()
         };
 
-        if let Some(value) = body.allow_own_credential_management {
-            am.allow_own_credential_management = Set(value);
-        };
-
         Parameters::Entity::update(am).exec(&*db).await?;
+        drop(db);
+
+        // TODO encapsulate
+        {
+            services
+                .rate_limiter_registry
+                .lock()
+                .await
+                .refresh()
+                .await?;
+            let mut rate_limiter_registry = services.rate_limiter_registry.lock().await;
+
+            for session_state in services.state.lock().await.sessions.values() {
+                let mut session_state = session_state.lock().await;
+                rate_limiter_registry
+                    .update_all_rate_limiters(&mut session_state)
+                    .await?;
+            }
+        }
 
         Ok(UpdateParametersResponse::Done)
     }

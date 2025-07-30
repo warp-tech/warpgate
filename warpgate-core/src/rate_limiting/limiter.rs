@@ -6,12 +6,12 @@ use governor::{DefaultDirectRateLimiter, Quota};
 use tokio::sync::{watch, Mutex};
 use warpgate_common::WarpgateError;
 
-pub struct WarpgateRateLimiterHandle {
-    sender: watch::Sender<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
+pub struct SwappableLimiterCellHandle {
+    sender: watch::Sender<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
 }
 
-impl WarpgateRateLimiterHandle {
-    pub fn replace(&self, limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>) {
+impl SwappableLimiterCellHandle {
+    pub fn replace(&self, limiter: Option<Arc<Mutex<WarpgateRateLimiter>>>) {
         let _ = self.sender.send(limiter);
     }
 }
@@ -32,39 +32,31 @@ pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> Arc<Mutex<DefaultDirect
     Arc::new(Mutex::new(rate_limiter))
 }
 
-/// Houses a replaceable shared reference to a rate limiter
-pub struct WarpgateRateLimiter {
-    rate_limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>,
-    receiver: watch::Receiver<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
-    sender: watch::Sender<Option<Arc<Mutex<DefaultDirectRateLimiter>>>>,
+pub fn assert_valid_quota(v: u32) -> Result<NonZeroU32, WarpgateError> {
+    NonZeroU32::new(v).ok_or(WarpgateError::RateLimiterInvalidQuota(v))
 }
 
-impl WarpgateRateLimiter {
-    pub fn now() -> QuantaInstant {
-        QuantaClock::default().now().into()
-    }
+/// Houses a replaceable shared reference to a `WarpgateRateLimiter` rate limiter.
+/// Cloning the cell will provide a copy that is synchronized with the original
+#[derive(Clone)]
+pub struct SwappableLimiterCell {
+    inner: Option<Arc<Mutex<WarpgateRateLimiter>>>,
+    receiver: watch::Receiver<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
+    sender: watch::Sender<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
+}
 
+impl SwappableLimiterCell {
     pub fn empty() -> Self {
         let (sender, receiver) = watch::channel(None);
         Self {
-            rate_limiter: None,
+            inner: None,
             receiver,
             sender,
         }
     }
 
-    pub fn new(bytes_per_second: NonZeroU32) -> Self {
-        let rate_limiter = new_rate_limiter(bytes_per_second);
-        let (sender, receiver) = watch::channel(Some(rate_limiter));
-        Self {
-            rate_limiter: None,
-            receiver,
-            sender,
-        }
-    }
-
-    pub fn handle(&self) -> WarpgateRateLimiterHandle {
-        WarpgateRateLimiterHandle {
+    pub fn handle(&self) -> SwappableLimiterCellHandle {
+        SwappableLimiterCellHandle {
             sender: self.sender.clone(),
         }
     }
@@ -72,12 +64,64 @@ impl WarpgateRateLimiter {
     async fn _maybe_update(&mut self) {
         let _ref = self.receiver.borrow_and_update();
         if _ref.has_changed() {
-            self.rate_limiter = _ref.as_ref().cloned();
+            self.inner = _ref.as_ref().cloned();
         }
     }
 
     pub async fn until_bytes_ready(&mut self, bytes: usize) -> Result<(), WarpgateError> {
         self._maybe_update().await;
+        let Some(ref rate_limiter) = self.inner else {
+            return Ok(());
+        };
+        rate_limiter.lock().await.until_bytes_ready(bytes).await?;
+        Ok(())
+    }
+}
+
+/// Houses a replaceable shared reference to a `governor` rate limiter
+///
+/// NB There are two types of "replacements" going on with rate limiters:
+/// * Swapping out a limiter in a RateLimitedStream e.g. when one logs in
+///   and now a user limit applies to them
+/// * Replacing the limit inside a limiter when the limit is changed
+///   by the admin. This is `WarpgateRateLimiter::replace()`
+pub struct WarpgateRateLimiter {
+    rate_limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>,
+}
+
+impl WarpgateRateLimiter {
+    pub fn now() -> QuantaInstant {
+        QuantaClock::default().now().into()
+    }
+
+    pub fn unlimited() -> Self {
+        Self { rate_limiter: None }
+    }
+
+    pub fn limited(bytes_per_second: NonZeroU32) -> Self {
+        let rate_limiter = new_rate_limiter(bytes_per_second);
+        Self {
+            rate_limiter: Some(rate_limiter),
+        }
+    }
+
+    pub fn new(bytes_per_second: Option<u32>) -> Result<Self, WarpgateError> {
+        match bytes_per_second {
+            Some(bytes) => Ok(Self::limited(assert_valid_quota(bytes)?)),
+            None => Ok(Self::unlimited()),
+        }
+    }
+
+    pub fn replace(&mut self, bytes_per_second: Option<u32>) -> Result<(), WarpgateError> {
+        let limiter = match bytes_per_second {
+            None => None,
+            Some(bytes) => Some(new_rate_limiter(assert_valid_quota(bytes)?)),
+        };
+        self.rate_limiter = limiter;
+        Ok(())
+    }
+
+    pub async fn until_bytes_ready(&mut self, bytes: usize) -> Result<(), WarpgateError> {
         let Some(ref rate_limiter) = self.rate_limiter else {
             return Ok(());
         };

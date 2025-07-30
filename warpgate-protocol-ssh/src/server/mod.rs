@@ -17,7 +17,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_core::rate_limiting::RateLimitedStream;
 use warpgate_core::{Services, SessionStateInit, State};
 
 use crate::keys::load_host_keys;
@@ -83,7 +82,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         let (event_tx, event_rx) = unbounded_channel();
 
         let handler = ServerHandler { event_tx };
-        let wrapped_stream = server_handle.lock().await.wrap_stream(stream);
+        let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
 
         let session = match ServerSession::start(
             remote_address,

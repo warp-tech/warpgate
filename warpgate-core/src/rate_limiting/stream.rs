@@ -1,17 +1,15 @@
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use tokio::sync::Mutex;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use warpgate_common::WarpgateError;
 
-use crate::rate_limiting::WarpgateRateLimiter;
+use crate::rate_limiting::limiter::{SwappableLimiterCell, SwappableLimiterCellHandle};
 
 pub struct RateLimitedStream<T> {
     inner: T,
-    limiter: Arc<Mutex<WarpgateRateLimiter>>,
+    limiter: SwappableLimiterCell,
     pending_read:
         Option<Pin<Box<dyn std::future::Future<Output = Result<(), WarpgateError>> + Send>>>,
     pending_write: Option<(
@@ -21,13 +19,27 @@ pub struct RateLimitedStream<T> {
 }
 
 impl<T> RateLimitedStream<T> {
-    pub fn new(inner: T, limiter: Arc<Mutex<WarpgateRateLimiter>>) -> Self {
+    pub fn new(inner: T, limiter: SwappableLimiterCell) -> Self {
         Self {
             inner,
             limiter,
             pending_read: None,
             pending_write: None,
         }
+    }
+
+    pub fn new_unlimited(inner: T) -> (Self, SwappableLimiterCellHandle) {
+        let limiter = SwappableLimiterCell::empty();
+        let handle = limiter.handle();
+        (
+            Self {
+                inner,
+                limiter,
+                pending_read: None,
+                pending_write: None,
+            },
+            handle,
+        )
     }
 }
 
@@ -41,11 +53,8 @@ impl<T: AsyncRead + Unpin + Send> AsyncRead for RateLimitedStream<T> {
         let to_read = buf.remaining();
         if to_read > 0 {
             if this.pending_read.is_none() {
-                let limiter = Arc::clone(&this.limiter);
-                let fut = Box::pin(async move {
-                    let mut guard = limiter.lock().await;
-                    guard.until_bytes_ready(to_read).await
-                });
+                let mut limiter = this.limiter.clone();
+                let fut = Box::pin(async move { limiter.until_bytes_ready(to_read).await });
                 this.pending_read = Some(fut);
             }
             let fut = this.pending_read.as_mut().unwrap();
@@ -73,11 +82,8 @@ impl<T: AsyncWrite + Unpin + Send> AsyncWrite for RateLimitedStream<T> {
         if !data.is_empty() {
             if this.pending_write.is_none() {
                 let len = data.len();
-                let limiter = Arc::clone(&this.limiter);
-                let fut = Box::pin(async move {
-                    let mut guard = limiter.lock().await;
-                    guard.until_bytes_ready(len).await
-                });
+                let mut limiter = this.limiter.clone();
+                let fut = Box::pin(async move { limiter.until_bytes_ready(len).await });
                 this.pending_write = Some((len, fut));
             }
             let (_len, fut) = this.pending_write.as_mut().unwrap();
