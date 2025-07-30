@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -7,15 +8,12 @@ use warpgate_common::WarpgateError;
 
 use crate::rate_limiting::limiter::{SwappableLimiterCell, SwappableLimiterCellHandle};
 
+type WaitFuture = Pin<Box<dyn Future<Output = Result<(), WarpgateError>> + Send>>;
 pub struct RateLimitedStream<T> {
     inner: T,
     limiter: SwappableLimiterCell,
-    pending_read:
-        Option<Pin<Box<dyn std::future::Future<Output = Result<(), WarpgateError>> + Send>>>,
-    pending_write: Option<(
-        usize,
-        Pin<Box<dyn std::future::Future<Output = Result<(), WarpgateError>> + Send>>,
-    )>,
+    pending_read: Option<WaitFuture>,
+    pending_write: Option<(usize, WaitFuture)>,
 }
 
 impl<T> RateLimitedStream<T> {

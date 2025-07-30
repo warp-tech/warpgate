@@ -7,7 +7,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
-use crate::rate_limiting::{stack_rate_limiters, RateLimiterRegistry, RateLimiterStackHandle};
+use crate::rate_limiting::{stack_rate_limiters, RateLimiterRegistry};
 use crate::{SessionState, State};
 
 pub trait SessionHandle {
@@ -31,7 +31,7 @@ impl WarpgateServerHandle {
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
     ) -> Result<Self, WarpgateError> {
         Ok(WarpgateServerHandle {
-            id: id.clone(),
+            id,
             db,
             state,
             session_state,

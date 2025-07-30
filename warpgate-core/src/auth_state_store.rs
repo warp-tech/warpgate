@@ -93,7 +93,7 @@ impl AuthStateStore {
             .await?
             .iter()
             .find(|u| u.username == username)
-            .map(Clone::clone)
+            .cloned()
         else {
             return Err(WarpgateError::UserNotFound(username.into()));
         };

@@ -8,7 +8,7 @@ pub use limiter::WarpgateRateLimiter;
 pub use registry::RateLimiterRegistry;
 pub use stream::RateLimitedStream;
 
-use crate::rate_limiting::limiter::{SwappableLimiterCellHandle, };
+use crate::rate_limiting::limiter::SwappableLimiterCellHandle;
 
 pub struct RateLimiterStackHandle {
     pub user: SwappableLimiterCellHandle,

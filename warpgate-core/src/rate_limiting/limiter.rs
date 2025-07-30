@@ -91,7 +91,7 @@ pub struct WarpgateRateLimiter {
 
 impl WarpgateRateLimiter {
     pub fn now() -> QuantaInstant {
-        QuantaClock::default().now().into()
+        QuantaClock::default().now()
     }
 
     pub fn unlimited() -> Self {

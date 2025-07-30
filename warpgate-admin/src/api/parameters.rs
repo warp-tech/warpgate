@@ -69,7 +69,6 @@ impl Api {
             id: Set(Parameters::Entity::get(&db).await?.id),
             allow_own_credential_management: Set(body.allow_own_credential_management),
             rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
-            ..Default::default()
         };
 
         Parameters::Entity::update(am).exec(&*db).await?;

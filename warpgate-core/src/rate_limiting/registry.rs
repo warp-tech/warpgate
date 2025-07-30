@@ -60,18 +60,18 @@ impl RateLimiterRegistry {
         &mut self,
         user_id: &Uuid,
     ) -> Result<Arc<Mutex<WarpgateRateLimiter>>, WarpgateError> {
-        if !self.user_rate_limiters.contains_key(&user_id) {
+        if !self.user_rate_limiters.contains_key(user_id) {
             let quota = self.quota_for_user(user_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.user_rate_limiters
-                .insert(user_id.clone(), Arc::new(Mutex::new(rate_limiter)));
+                .insert(*user_id, Arc::new(Mutex::new(rate_limiter)));
         }
         Ok(self.user_rate_limiters.get(user_id).unwrap().clone())
     }
 
     async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
         let db = self.db.lock().await;
-        let user = User::Entity::find_by_id(user_id.clone()).one(&*db).await?;
+        let user = User::Entity::find_by_id(*user_id).one(&*db).await?;
         Ok(user
             .and_then(|u| u.rate_limit_bytes_per_second)
             .map(|r| r as u32))
@@ -81,26 +81,27 @@ impl RateLimiterRegistry {
         &mut self,
         target_id: &Uuid,
     ) -> Result<Arc<Mutex<WarpgateRateLimiter>>, WarpgateError> {
-        if !self.target_rate_limiters.contains_key(&target_id) {
+        if !self.target_rate_limiters.contains_key(target_id) {
             let quota = self.quota_for_target(target_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.target_rate_limiters
-                .insert(target_id.clone(), Arc::new(Mutex::new(rate_limiter)));
+                .insert(*target_id, Arc::new(Mutex::new(rate_limiter)));
         }
         Ok(self.target_rate_limiters.get(target_id).unwrap().clone())
     }
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
         let db = self.db.lock().await;
-        let target = User::Entity::find_by_id(target_id.clone())
-            .one(&*db)
-            .await?;
+        let target = User::Entity::find_by_id(*target_id).one(&*db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)
             .map(|r| r as u32))
     }
 
-    pub async fn update_all_rate_limiters(&mut self, state: &mut SessionState) -> Result<(), WarpgateError> {
+    pub async fn update_all_rate_limiters(
+        &mut self,
+        state: &mut SessionState,
+    ) -> Result<(), WarpgateError> {
         let mut handles = std::mem::take(&mut state.rate_limiter_handles);
         for handle in handles.iter_mut() {
             self.update_rate_limiters(state, handle).await?;

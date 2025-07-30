@@ -299,7 +299,10 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(req: &Request, user_info: AuthStateUserInfo) -> Result<(), WarpgateError> {
+pub async fn authorize_session(
+    req: &Request,
+    user_info: AuthStateUserInfo,
+) -> Result<(), WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;

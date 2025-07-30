@@ -9,7 +9,9 @@ use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+};
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
@@ -279,8 +281,7 @@ impl PostgresSession {
 
                         self.stream
                             .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, user_info, ticket.target)
-                            .await
+                        self.run_authorized(startup, user_info, ticket.target).await
                     }
                     _ => fail(&mut self).await,
                 }
