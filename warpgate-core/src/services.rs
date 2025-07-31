@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateConfig;
 
 use crate::db::{connect_to_db, populate_db};
@@ -42,7 +43,7 @@ impl Services {
             let auth_state_store = auth_state_store.clone();
             async move {
                 loop {
-                    auth_state_store.lock().await.vacuum().await;
+                    auth_state_store.lock2().await.vacuum().await;
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             }

@@ -3,6 +3,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{EntityTrait, Set};
 use serde::Serialize;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
@@ -43,7 +44,7 @@ impl Api {
         services: Data<&Services>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -63,7 +64,7 @@ impl Api {
         body: Json<ParameterUpdate>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let am = Parameters::ActiveModel {
             id: Set(Parameters::Entity::get(&db).await?.id),
@@ -76,9 +77,9 @@ impl Api {
 
         services
             .rate_limiter_registry
-            .lock()
+            .lock2()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .apply_new_rate_limits(&mut *services.state.lock2().await)
             .await?;
 
         Ok(UpdateParametersResponse::Done)

@@ -6,6 +6,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{SessionId, WarpgateError};
 
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -52,7 +53,7 @@ impl AuthStateStore {
         let mut results = vec![];
         for auth in self.store.values() {
             {
-                let inner = auth.0.lock().await;
+                let inner = auth.0.lock2().await;
                 if inner.user_info().username != username {
                     continue;
                 }
@@ -87,7 +88,7 @@ impl AuthStateStore {
 
         let Some(user) = self
             .config_provider
-            .lock()
+            .lock2()
             .await
             .list_users()
             .await?
@@ -100,7 +101,7 @@ impl AuthStateStore {
 
         let policy = self
             .config_provider
-            .lock()
+            .lock2()
             .await
             .get_credential_policy(username, supported_credential_types)
             .await?;
@@ -150,7 +151,7 @@ impl AuthStateStore {
             return;
         };
         if let Some(sig) = self.completion_signals.remove(id) {
-            let _ = sig.sender.send(state.lock().await.verify());
+            let _ = sig.sender.send(state.lock2().await.verify());
         }
     }
 

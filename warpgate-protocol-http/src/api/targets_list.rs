@@ -4,6 +4,7 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::TargetOptions;
 use warpgate_core::{ConfigProvider, Services};
 use warpgate_db_entities::Target;
@@ -43,7 +44,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetTargetsResponse> {
         let mut targets = {
-            let mut config_provider = services.config_provider.lock().await;
+            let mut config_provider = services.config_provider.lock2().await;
             config_provider.list_targets().await?
         };
 
@@ -64,7 +65,7 @@ impl Api {
                             ..
                         }) => target_name == name,
                         _ => {
-                            let mut config_provider = services.config_provider.lock().await;
+                            let mut config_provider = services.config_provider.lock2().await;
                             let Some(username) = auth.username() else {
                                 return false;
                             };

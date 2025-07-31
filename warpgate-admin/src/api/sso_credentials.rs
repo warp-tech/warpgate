@@ -10,6 +10,7 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{UserSsoCredential, WarpgateError};
 use warpgate_db_entities::SsoCredential;
 
@@ -82,7 +83,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
@@ -106,7 +107,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let object = SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -146,7 +147,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let model = SsoCredential::ActiveModel {
             id: Set(id.0),
@@ -175,7 +176,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))

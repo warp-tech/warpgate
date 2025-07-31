@@ -22,6 +22,7 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
     WarpgateError,
@@ -134,7 +135,7 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
     ) -> Result<impl Future<Output = Result<()>>> {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock2().await.id();
 
         let _span = info_span!("SSH", session=%id);
         let _enter = _span.enter();
@@ -250,7 +251,7 @@ impl ServerSession {
                 .auth_state
                 .as_ref()
                 .unwrap()
-                .lock()
+                .lock2()
                 .await
                 .user_info()
                 .username
@@ -259,7 +260,7 @@ impl ServerSession {
             let state = self
                 .services
                 .auth_state_store
-                .lock()
+                .lock2()
                 .await
                 .create(
                     Some(&self.id),
@@ -919,7 +920,7 @@ impl ServerSession {
         let mode = self
             .services
             .config
-            .lock()
+            .lock2()
             .await
             .store
             .ssh
@@ -1139,7 +1140,7 @@ impl ServerSession {
             let mut recorder = self
                 .services
                 .recordings
-                .lock()
+                .lock2()
                 .await
                 .start::<TerminalRecorder>(&self.id, name)
                 .await?;
@@ -1203,7 +1204,7 @@ impl ServerSession {
             match self
                 .services
                 .recordings
-                .lock()
+                .lock2()
                 .await
                 .start(&self.id, format!("{tag}-{}", key.to_name()))
                 .await
@@ -1385,7 +1386,7 @@ impl ServerSession {
                 if let Err(err) = self
                     .services
                     .config_provider
-                    .lock()
+                    .lock2()
                     .await
                     .update_public_key_last_used(key.clone())
                     .await
@@ -1484,21 +1485,21 @@ impl ServerSession {
                         };
                     };
                     let identification_string =
-                        auth_state.lock().await.identification_string().to_owned();
-                    let auth_state_id = *auth_state.lock().await.id();
+                        auth_state.lock2().await.identification_string().to_owned();
+                    let auth_state_id = *auth_state.lock2().await.id();
                     let event = self
                         .services
                         .auth_state_store
-                        .lock()
+                        .lock2()
                         .await
                         .subscribe(auth_state_id);
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
                     let login_url = match auth_state
-                        .lock()
+                        .lock2()
                         .await
-                        .construct_web_approval_url(&*self.services.config.lock().await)
+                        .construct_web_approval_url(&*self.services.config.lock2().await)
                     {
                         Ok(login_url) => login_url,
                         Err(error) => {
@@ -1575,7 +1576,7 @@ impl ServerSession {
 
                 if let Some(credential) = credential {
                     return Ok(cp
-                        .lock()
+                        .lock2()
                         .await
                         .validate_credential(username, &credential)
                         .await?);
@@ -1631,11 +1632,11 @@ impl ServerSession {
                 let cp = self.services.config_provider.clone();
 
                 let state_arc = self.get_auth_state(username).await?;
-                let mut state = state_arc.lock().await;
+                let mut state = state_arc.lock2().await;
 
                 if let Some(credential) = credential {
                     if cp
-                        .lock()
+                        .lock2()
                         .await
                         .validate_credential(username, &credential)
                         .await?
@@ -1650,14 +1651,14 @@ impl ServerSession {
                     AuthResult::Accepted { user_info } => {
                         self.services
                             .auth_state_store
-                            .lock()
+                            .lock2()
                             .await
                             .complete(state.id())
                             .await;
                         let target_auth_result = {
                             self.services
                                 .config_provider
-                                .lock()
+                                .lock2()
                                 .await
                                 .authorize_target(&user_info.username, target_name)
                                 .await?
@@ -1698,7 +1699,7 @@ impl ServerSession {
         self.username = Some(user_info.username.clone());
         let _ = self
             .server_handle
-            .lock()
+            .lock2()
             .await
             .set_user_info(user_info.clone())
             .await;
@@ -1706,7 +1707,7 @@ impl ServerSession {
         let target = {
             self.services
                 .config_provider
-                .lock()
+                .lock2()
                 .await
                 .list_targets()
                 .await?
@@ -1730,7 +1731,7 @@ impl ServerSession {
             ssh_options.username = user_info.username.to_string();
         }
 
-        let _ = self.server_handle.lock().await.set_target(&target).await;
+        let _ = self.server_handle.lock2().await.set_target(&target).await;
         self.target = TargetSelection::Found(target, ssh_options);
         Ok(())
     }

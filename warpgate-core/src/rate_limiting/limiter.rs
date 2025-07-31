@@ -5,19 +5,20 @@ use std::time::Duration;
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::{DefaultDirectRateLimiter, Quota};
 use tokio::sync::{watch, Mutex};
+use warpgate_common::helpers::locks::{DebugLock, Mutex2};
 use warpgate_common::WarpgateError;
 
 pub struct SwappableLimiterCellHandle {
-    sender: watch::Sender<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
+    sender: watch::Sender<Option<Arc<Mutex2<WarpgateRateLimiter>>>>,
 }
 
 impl SwappableLimiterCellHandle {
-    pub fn replace(&self, limiter: Option<Arc<Mutex<WarpgateRateLimiter>>>) {
+    pub fn replace(&self, limiter: Option<Arc<Mutex2<WarpgateRateLimiter>>>) {
         let _ = self.sender.send(limiter);
     }
 }
 
-pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> Arc<Mutex<DefaultDirectRateLimiter>> {
+pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> Arc<Mutex2<DefaultDirectRateLimiter>> {
     let max_cells = NonZeroU32::MAX;
     let rate_limiter = DefaultDirectRateLimiter::direct(
         Quota::per_second(bytes_per_second).allow_burst(max_cells),
@@ -30,7 +31,7 @@ pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> Arc<Mutex<DefaultDirect
             .try_into()
             .unwrap(),
     );
-    Arc::new(Mutex::new(rate_limiter))
+    Arc::new(Mutex2::new(rate_limiter))
 }
 
 pub fn assert_valid_quota(v: u32) -> Result<NonZeroU32, WarpgateError> {
@@ -41,9 +42,9 @@ pub fn assert_valid_quota(v: u32) -> Result<NonZeroU32, WarpgateError> {
 /// Cloning the cell will provide a copy that is synchronized with the original
 #[derive(Clone)]
 pub struct SwappableLimiterCell {
-    inner: Option<Arc<Mutex<WarpgateRateLimiter>>>,
-    receiver: watch::Receiver<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
-    sender: watch::Sender<Option<Arc<Mutex<WarpgateRateLimiter>>>>,
+    inner: Option<Arc<Mutex2<WarpgateRateLimiter>>>,
+    receiver: watch::Receiver<Option<Arc<Mutex2<WarpgateRateLimiter>>>>,
+    sender: watch::Sender<Option<Arc<Mutex2<WarpgateRateLimiter>>>>,
 }
 
 impl SwappableLimiterCell {
@@ -90,7 +91,7 @@ impl SwappableLimiterCell {
 /// * Replacing the limit inside a limiter when the limit is changed
 ///   by the admin. This is `WarpgateRateLimiter::replace()`
 pub struct WarpgateRateLimiter {
-    rate_limiter: Option<Arc<Mutex<DefaultDirectRateLimiter>>>,
+    rate_limiter: Option<DefaultDirectRateLimiter>,
 }
 
 impl WarpgateRateLimiter {

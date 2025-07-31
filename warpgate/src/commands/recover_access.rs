@@ -4,6 +4,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, User};
@@ -20,7 +21,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Resu
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
     let theme = ColorfulTheme::default();
-    let db = services.db.lock().await;
+    let db = services.db.lock2().await;
 
     let users = User::Entity::find()
         .order_by_asc(User::Column::Username)

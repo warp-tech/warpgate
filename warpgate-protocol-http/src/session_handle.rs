@@ -6,6 +6,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::{FromRequest, Request, RequestBody};
 use tokio::sync::{mpsc, Mutex};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_core::{SessionHandle, WarpgateServerHandle};
 
 use crate::session::SessionStore;
@@ -48,7 +49,7 @@ impl<'a> FromRequest<'a> for WarpgateServerHandleFromRequest {
         let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
         let session = <&Session>::from_request_without_body(req).await?;
         Ok(sm
-            .lock()
+            .lock2()
             .await
             .handle_for(session)
             .map(WarpgateServerHandleFromRequest)

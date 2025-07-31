@@ -6,6 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_db_entities::ApiToken;
@@ -85,7 +86,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(*auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
@@ -110,7 +111,7 @@ impl Api {
         services: Data<&Services>,
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
@@ -147,7 +148,7 @@ impl Api {
         services: Data<&Services>,
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);

@@ -4,6 +4,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
@@ -52,12 +53,12 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
 
         {
-            let mut state = self.session_state.lock().await;
+            let mut state = self.session_state.lock2().await;
             state.user_info = Some(user_info.clone());
             state.emit_change()
         }
 
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
@@ -79,12 +80,12 @@ impl WarpgateServerHandle {
         // todo update rate limiters
         use sea_orm::ActiveValue::Set;
         {
-            let mut state = self.session_state.lock().await;
+            let mut state = self.session_state.lock2().await;
             state.target = Some(target.clone());
             state.emit_change()
         }
 
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
@@ -109,9 +110,9 @@ impl WarpgateServerHandle {
         stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send, WarpgateError> {
         let (stream, mut handle) = stack_rate_limiters(stream);
-        let mut ss = self.session_state.lock().await;
+        let mut ss = self.session_state.lock2().await;
         self.rate_limiters_registry
-            .lock()
+            .lock2()
             .await
             .update_rate_limiters(&ss, &mut handle)
             .await?;
@@ -120,8 +121,8 @@ impl WarpgateServerHandle {
     }
 
     async fn update_rate_limiters(&self) -> Result<(), WarpgateError> {
-        let mut state = self.session_state.lock().await;
-        let mut registry = self.rate_limiters_registry.lock().await;
+        let mut state = self.session_state.lock2().await;
+        let mut registry = self.rate_limiters_registry.lock2().await;
         registry.update_all_rate_limiters(&mut state).await?;
         Ok(())
     }
@@ -132,7 +133,7 @@ impl Drop for WarpgateServerHandle {
         let id = self.id;
         let state = self.state.clone();
         tokio::spawn(async move {
-            state.lock().await.remove_session(id).await;
+            state.lock2().await.remove_session(id).await;
         });
     }
 }

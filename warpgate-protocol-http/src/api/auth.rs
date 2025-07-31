@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_core::{ConfigProvider, Services};
 
@@ -136,7 +137,7 @@ impl Api {
         services: Data<&Services>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let mut auth_state_store = services.auth_state_store.lock().await;
+        let mut auth_state_store = services.auth_state_store.lock2().await;
         let state_arc = match get_auth_state_for_request(
             &body.username,
             session,
@@ -151,9 +152,9 @@ impl Api {
             }
             x => x,
         }?;
-        let mut state = state_arc.lock().await;
+        let mut state = state_arc.lock2().await;
 
-        let mut cp = services.config_provider.lock().await;
+        let mut cp = services.config_provider.lock2().await;
 
         let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
         if cp
@@ -188,7 +189,7 @@ impl Api {
     ) -> poem::Result<LoginResponse> {
         let state_id = session.get_auth_state_id();
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
+        let mut auth_state_store = services.auth_state_store.lock2().await;
 
         let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
@@ -196,9 +197,9 @@ impl Api {
             })));
         };
 
-        let mut state = state_arc.lock().await;
+        let mut state = state_arc.lock2().await;
 
-        let mut cp = services.config_provider.lock().await;
+        let mut cp = services.config_provider.lock2().await;
 
         let otp_cred = AuthCredential::Otp(body.otp.clone().into());
         if cp
@@ -226,7 +227,7 @@ impl Api {
         session: &Session,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
-        logout(session, session_middleware.lock().await.deref_mut());
+        logout(session, session_middleware.lock2().await.deref_mut());
         Ok(LogoutResponse::Success)
     }
 
@@ -243,7 +244,7 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let store = services.auth_state_store.lock().await;
+        let store = services.auth_state_store.lock2().await;
         let Some(state_arc) = store.get(&state_id.0) else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -266,11 +267,11 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let mut store = services.auth_state_store.lock().await;
+        let mut store = services.auth_state_store.lock2().await;
         let Some(state_arc) = store.get(&state_id.0) else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
+        state_arc.lock2().await.reject();
         store.complete(&state_id.0).await;
         session.clear_auth_state();
 
@@ -291,7 +292,7 @@ impl Api {
         services: Data<&Services>,
         auth: Option<Data<&RequestAuthorization>>,
     ) -> poem::Result<AuthStateListResponse> {
-        let store = services.auth_state_store.lock().await;
+        let store = services.auth_state_store.lock2().await;
 
         let Some(RequestAuthorization::Session(SessionAuthorization::User(username))) =
             auth.map(|x| x.0)
@@ -349,13 +350,13 @@ impl Api {
         };
 
         let auth_result = {
-            let mut state = state_arc.lock().await;
+            let mut state = state_arc.lock2().await;
             state.add_valid_credential(AuthCredential::WebUserApproval);
             state.verify()
         };
 
         if let AuthResult::Accepted { .. } = auth_result {
-            services.auth_state_store.lock().await.complete(&id).await;
+            services.auth_state_store.lock2().await.complete(&id).await;
         }
         serialize_auth_state_inner(state_arc, *services)
             .await
@@ -378,8 +379,8 @@ impl Api {
         let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
-        services.auth_state_store.lock().await.complete(&id).await;
+        state_arc.lock2().await.reject();
+        services.auth_state_store.lock2().await.complete(&id).await;
         serialize_auth_state_inner(state_arc, *services)
             .await
             .map(Json)
@@ -392,7 +393,7 @@ async fn get_auth_state(
     services: &Services,
     auth: Option<&RequestAuthorization>,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let store = services.auth_state_store.lock().await;
+    let store = services.auth_state_store.lock2().await;
 
     let RequestAuthorization::Session(SessionAuthorization::User(username)) = auth? else {
         return None;
@@ -401,7 +402,7 @@ async fn get_auth_state(
     let state_arc = store.get(id)?;
 
     {
-        let state = state_arc.lock().await;
+        let state = state_arc.lock2().await;
         if &state.user_info().username != username {
             return None;
         }
@@ -414,15 +415,15 @@ async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
     services: &Services,
 ) -> poem::Result<AuthStateResponseInternal> {
-    let state = state_arc.lock().await;
+    let state = state_arc.lock2().await;
 
-    let session_state_store = services.state.lock().await;
+    let session_state_store = services.state.lock2().await;
     let session_state = state
         .session_id()
         .and_then(|session_id| session_state_store.sessions.get(&session_id));
 
     let peer_addr = match session_state {
-        Some(x) => x.lock().await.remote_address,
+        Some(x) => x.lock2().await.remote_address,
         None => None,
     };
 
@@ -450,7 +451,7 @@ pub async fn api_get_web_auth_requests_stream(
     };
 
     let mut rx = {
-        let mut s = auth_state_store.lock().await;
+        let mut s = auth_state_store.lock2().await;
         s.subscribe_web_auth_request()
     };
 
@@ -458,9 +459,9 @@ pub async fn api_get_web_auth_requests_stream(
         let (mut sink, _) = socket.split();
 
         while let Ok(id) = rx.recv().await {
-            let auth_state_store = auth_state_store.lock().await;
+            let auth_state_store = auth_state_store.lock2().await;
             if let Some(state) = auth_state_store.get(&id) {
-                let state = state.lock().await;
+                let state = state.lock2().await;
                 if Some(state.user_info().username.as_ref()) == username.as_deref() {
                     sink.send(Message::Text(id.to_string())).await?;
                 }

@@ -12,6 +12,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
@@ -308,7 +309,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
     {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let admin_role = Role::Entity::find()
             .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))

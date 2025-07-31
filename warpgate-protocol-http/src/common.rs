@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, ConfigProvider, Services};
 use warpgate_sso::CoreIdToken;
@@ -139,7 +140,7 @@ pub async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::
         RequestAuthorization::AdminToken => return Ok(true),
     };
 
-    let mut config_provider = services.config_provider.lock().await;
+    let mut config_provider = services.config_provider.lock2().await;
     let targets = config_provider.list_targets().await?;
     for target in targets {
         if matches!(target.options, TargetOptions::WebAdmin(_))
@@ -190,11 +191,11 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                 let token_from_header = token_from_header
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
-                if Some(token_from_header) == services.admin_token.lock().await.as_deref() {
+                if Some(token_from_header) == services.admin_token.lock2().await.as_deref() {
                     Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = services
                     .config_provider
-                    .lock()
+                    .lock2()
                     .await
                     .validate_api_token(token_from_header)
                     .await?
@@ -277,7 +278,7 @@ pub async fn get_auth_state_for_request(
     if let Some(id) = session.get_auth_state_id() {
         let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
 
-        let existing_matched = state.lock().await.user_info().username == username;
+        let existing_matched = state.lock2().await.user_info().username == username;
         if existing_matched {
             return Ok(state);
         }
@@ -311,13 +312,13 @@ pub async fn authorize_session(
         .context("Session not in request")?;
 
     let server_handle = session_middleware
-        .lock()
+        .lock2()
         .await
         .create_handle_for(req)
         .await
         .context("create_handle_for")?;
     server_handle
-        .lock()
+        .lock2()
         .await
         .set_user_info(user_info.clone())
         .await?;

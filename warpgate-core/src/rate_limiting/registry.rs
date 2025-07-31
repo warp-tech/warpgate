@@ -4,6 +4,7 @@ use std::sync::Arc;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::{DebugLock, Mutex2};
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::{Parameters, User};
 
@@ -12,16 +13,16 @@ use crate::{SessionState, State};
 
 pub struct RateLimiterRegistry {
     db: Arc<Mutex<DatabaseConnection>>,
-    global_rate_limiter: Arc<Mutex<WarpgateRateLimiter>>,
-    user_rate_limiters: HashMap<Uuid, Arc<Mutex<WarpgateRateLimiter>>>,
-    target_rate_limiters: HashMap<Uuid, Arc<Mutex<WarpgateRateLimiter>>>,
+    global_rate_limiter: Arc<Mutex2<WarpgateRateLimiter>>,
+    user_rate_limiters: HashMap<Uuid, Arc<Mutex2<WarpgateRateLimiter>>>,
+    target_rate_limiters: HashMap<Uuid, Arc<Mutex2<WarpgateRateLimiter>>>,
 }
 
 impl RateLimiterRegistry {
     pub fn new(db: Arc<Mutex<DatabaseConnection>>) -> Self {
         Self {
             db,
-            global_rate_limiter: Arc::new(Mutex::new(WarpgateRateLimiter::unlimited())),
+            global_rate_limiter: Arc::new(Mutex2::new(WarpgateRateLimiter::unlimited())),
             user_rate_limiters: HashMap::new(),
             target_rate_limiters: HashMap::new(),
         }
@@ -46,12 +47,12 @@ impl RateLimiterRegistry {
         Ok(())
     }
 
-    pub fn global(&self) -> Arc<Mutex<WarpgateRateLimiter>> {
+    pub fn global(&self) -> Arc<Mutex2<WarpgateRateLimiter>> {
         self.global_rate_limiter.clone()
     }
 
     async fn global_quota(&mut self) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
         let parameters = Parameters::Entity::get(&db).await?;
         Ok(parameters.rate_limit_bytes_per_second.map(|x| x as u32))
     }
@@ -59,18 +60,18 @@ impl RateLimiterRegistry {
     pub async fn user(
         &mut self,
         user_id: &Uuid,
-    ) -> Result<Arc<Mutex<WarpgateRateLimiter>>, WarpgateError> {
+    ) -> Result<Arc<Mutex2<WarpgateRateLimiter>>, WarpgateError> {
         if !self.user_rate_limiters.contains_key(user_id) {
             let quota = self.quota_for_user(user_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.user_rate_limiters
-                .insert(*user_id, Arc::new(Mutex::new(rate_limiter)));
+                .insert(*user_id, Arc::new(Mutex2::new(rate_limiter)));
         }
         Ok(self.user_rate_limiters.get(user_id).unwrap().clone())
     }
 
     async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
         let user = User::Entity::find_by_id(*user_id).one(&*db).await?;
         Ok(user
             .and_then(|u| u.rate_limit_bytes_per_second)
@@ -80,18 +81,18 @@ impl RateLimiterRegistry {
     pub async fn target(
         &mut self,
         target_id: &Uuid,
-    ) -> Result<Arc<Mutex<WarpgateRateLimiter>>, WarpgateError> {
+    ) -> Result<Arc<Mutex2<WarpgateRateLimiter>>, WarpgateError> {
         if !self.target_rate_limiters.contains_key(target_id) {
             let quota = self.quota_for_target(target_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.target_rate_limiters
-                .insert(*target_id, Arc::new(Mutex::new(rate_limiter)));
+                .insert(*target_id, Arc::new(Mutex2::new(rate_limiter)));
         }
         Ok(self.target_rate_limiters.get(target_id).unwrap().clone())
     }
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
         let target = User::Entity::find_by_id(*target_id).one(&*db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)
@@ -154,7 +155,7 @@ impl RateLimiterRegistry {
 
         // Update all session rate limiters
         for session_state in state.sessions.values() {
-            let mut session_state = session_state.lock().await;
+            let mut session_state = session_state.lock2().await;
             self.update_all_rate_limiters(&mut session_state).await?;
         }
         Ok(())

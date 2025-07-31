@@ -10,6 +10,7 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::Ticket;
 
@@ -57,7 +58,7 @@ impl Api {
     ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
@@ -78,7 +79,7 @@ impl Api {
             return Ok(CreateTicketResponse::BadRequest(Json("target_name".into())));
         }
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::{ConfigProvider, Services};
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
@@ -95,7 +96,7 @@ impl Api {
         &self,
         services: Data<&Services>,
     ) -> Result<GetSsoProvidersResponse, WarpgateError> {
-        let mut providers = services.config.lock().await.store.sso_providers.clone();
+        let mut providers = services.config.lock2().await.store.sso_providers.clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
@@ -199,7 +200,7 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let providers_config = services.config.lock().await.store.sso_providers.clone();
+        let providers_config = services.config.lock2().await.store.sso_providers.clone();
         let mut iter = providers_config.iter();
         let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
             return Ok(Err(format!("No provider matching {}", context.provider)));
@@ -212,7 +213,7 @@ impl Api {
 
         let username = services
             .config_provider
-            .lock()
+            .lock2()
             .await
             .username_for_sso_credential(
                 &cred,
@@ -224,12 +225,12 @@ impl Api {
             return Ok(Err(format!("No user matching {email}")));
         };
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
+        let mut auth_state_store = services.auth_state_store.lock2().await;
         let state_arc =
             get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
 
-        let mut state = state_arc.lock().await;
-        let mut cp = services.config_provider.lock().await;
+        let mut state = state_arc.lock2().await;
+        let mut cp = services.config_provider.lock2().await;
 
         if state.user_info().username != username {
             return Ok(Err(format!(
@@ -304,7 +305,7 @@ impl Api {
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
-        let config = services.config.lock().await;
+        let config = services.config.lock2().await;
 
         let return_url = config.construct_external_url(Some(req), None)?;
         debug!("Return URL: {}", &return_url);
@@ -321,7 +322,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
         let logout_url = client.logout(state.token, return_url).await?;
 
-        logout(session, session_middleware.lock().await.deref_mut());
+        logout(session, session_middleware.lock2().await.deref_mut());
 
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),

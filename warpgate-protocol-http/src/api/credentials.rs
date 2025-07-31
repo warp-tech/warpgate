@@ -7,6 +7,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential};
@@ -155,7 +156,7 @@ enum CreateOtpCredentialResponse {
 pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
         let services = Data::<&Services>::from_request_without_body(&req).await?;
-        let parameters = Parameters::Entity::get(&*services.db.lock().await)
+        let parameters = Parameters::Entity::get(&*services.db.lock2().await)
             .await
             .map_err(WarpgateError::from)?;
         if !parameters.allow_own_credential_management {
@@ -182,7 +183,7 @@ impl Api {
         services: Data<&Services>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(*auth, &db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
@@ -233,7 +234,7 @@ impl Api {
         body: Json<ChangePasswordRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
@@ -281,7 +282,7 @@ impl Api {
         body: Json<NewPublicKeyCredential>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
@@ -317,7 +318,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
@@ -349,7 +350,7 @@ impl Api {
         body: Json<NewOtpCredential>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
@@ -393,7 +394,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);

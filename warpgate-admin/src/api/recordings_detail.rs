@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 
@@ -44,7 +45,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
@@ -64,7 +65,7 @@ pub async fn api_get_recording_cast(
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<String> {
-    let db = db.lock().await;
+    let db = db.lock2().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .one(&*db)
@@ -81,7 +82,7 @@ pub async fn api_get_recording_cast(
 
     let path = {
         recordings
-            .lock()
+            .lock2()
             .await
             .path_for(&recording.session_id, &recording.name)
     };
@@ -123,7 +124,7 @@ pub async fn api_get_recording_tcpdump(
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<Bytes> {
-    let db = db.lock().await;
+    let db = db.lock2().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .one(&*db)
@@ -140,7 +141,7 @@ pub async fn api_get_recording_tcpdump(
 
     let path = {
         recordings
-            .lock()
+            .lock2()
             .await
             .path_for(&recording.session_id, &recording.name)
     };
@@ -156,7 +157,7 @@ pub async fn api_get_recording_stream(
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> impl IntoResponse {
-    let recordings = recordings.lock().await;
+    let recordings = recordings.lock2().await;
     let receiver = recordings.subscribe_live(&id).await;
 
     ws.on_upgrade(|socket| async move {

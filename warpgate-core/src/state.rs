@@ -8,6 +8,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
@@ -41,7 +42,7 @@ impl State {
         state: SessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let this_copy = this.clone();
-        let mut _self = this.lock().await;
+        let mut _self = this.lock2().await;
         let id = uuid::Uuid::new_v4();
 
         let state = Arc::new(Mutex::new(SessionState::new(
@@ -58,7 +59,7 @@ impl State {
                 id: Set(id),
                 started: Set(chrono::Utc::now()),
                 remote_address: Set(state
-                    .lock()
+                    .lock2()
                     .await
                     .remote_address
                     .map(|x| x.to_string())
@@ -67,7 +68,7 @@ impl State {
                 ..Default::default()
             };
 
-            let db = _self.db.lock().await;
+            let db = _self.db.lock2().await;
             values
                 .insert(&*db)
                 .await
@@ -102,7 +103,7 @@ impl State {
 
     async fn mark_session_complete(&mut self, id: Uuid) -> Result<()> {
         use sea_orm::ActiveValue::Set;
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
         let session = Session::Entity::find_by_id(id)
             .one(&*db)
             .await?

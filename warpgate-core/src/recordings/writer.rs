@@ -11,6 +11,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
@@ -38,7 +39,7 @@ impl RecordingWriter {
 
         let live_sender = broadcast::channel(128).0;
         {
-            let mut live = live.lock().await;
+            let mut live = live.lock2().await;
             live.insert(model.id, live_sender.clone());
         }
 
@@ -47,7 +48,7 @@ impl RecordingWriter {
             let id = model.id;
             async move {
                 let _ = drop_receiver.recv().await;
-                let mut live = live.lock().await;
+                let mut live = live.lock2().await;
                 live.remove(&id);
             }
         });
@@ -80,7 +81,7 @@ impl RecordingWriter {
 
                 use sea_orm::ActiveValue::Set;
                 let id = model.id;
-                let db = db.lock().await;
+                let db = db.lock2().await;
                 let recording = Recording::Entity::find_by_id(id)
                     .one(&*db)
                     .await?

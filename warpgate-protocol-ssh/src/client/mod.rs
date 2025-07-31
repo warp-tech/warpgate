@@ -23,6 +23,7 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 
@@ -247,7 +248,7 @@ impl RemoteClient {
                 self.open_direct_streamlocal(channel_id, path).await?;
             }
             op => {
-                let mut channel_pipes = self.channel_pipes.lock().await;
+                let mut channel_pipes = self.channel_pipes.lock2().await;
                 match channel_pipes.get(&channel_id) {
                     Some(tx) => {
                         if tx.send(op).is_err() {
@@ -351,7 +352,7 @@ impl RemoteClient {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();
-        self.channel_pipes.lock().await.insert(id, tx);
+        self.channel_pipes.lock2().await.insert(id, tx);
 
         let session_channel = SessionChannel::new(channel, id, rx, self.tx.clone(), self.id);
 
@@ -557,7 +558,7 @@ impl RemoteClient {
                         SSHTargetAuth::PublicKey(_) => {
                             let best_hash = session.best_supported_rsa_hash().await?.flatten();
                             #[allow(clippy::explicit_auto_deref)]
-                            let keys = load_client_keys(&*self.services.config.lock().await)?;
+                            let keys = load_client_keys(&*self.services.config.lock2().await)?;
                             let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
                             for key in keys.into_iter() {
                                 let key = Arc::new(key);
@@ -714,11 +715,11 @@ impl RemoteClient {
 
     async fn open_shell(&mut self, channel_id: Uuid) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
+            let session = session.lock2().await;
             let channel = session.channel_open_session().await?;
 
             let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
+            self.channel_pipes.lock2().await.insert(channel_id, tx);
 
             let channel = SessionChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
             self.child_tasks.push(
@@ -737,7 +738,7 @@ impl RemoteClient {
         params: DirectTCPIPParams,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
+            let session = session.lock2().await;
             let channel = session
                 .channel_open_direct_tcpip(
                     params.host_to_connect,
@@ -748,7 +749,7 @@ impl RemoteClient {
                 .await?;
 
             let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
+            self.channel_pipes.lock2().await.insert(channel_id, tx);
 
             let channel =
                 DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
@@ -768,11 +769,11 @@ impl RemoteClient {
         path: String,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
+            let session = session.lock2().await;
             let channel = session.channel_open_direct_streamlocal(path).await?;
 
             let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
+            self.channel_pipes.lock2().await.insert(channel_id, tx);
 
             let channel =
                 DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
@@ -788,7 +789,7 @@ impl RemoteClient {
 
     async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let mut session = session.lock2().await;
             session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
@@ -802,7 +803,7 @@ impl RemoteClient {
         port: u32,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
+            let session = session.lock2().await;
             session.cancel_tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards
@@ -813,7 +814,7 @@ impl RemoteClient {
 
     async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let mut session = session.lock2().await;
             session.streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
@@ -826,7 +827,7 @@ impl RemoteClient {
         socket_path: String,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
+            let session = session.lock2().await;
             session.cancel_streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards
@@ -838,7 +839,7 @@ impl RemoteClient {
     async fn disconnect(&mut self) {
         if let Some(session) = &mut self.session {
             let _ = session
-                .lock()
+                .lock2()
                 .await
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;

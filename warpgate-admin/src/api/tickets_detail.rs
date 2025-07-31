@@ -6,6 +6,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 
 use super::AnySecurityScheme;
@@ -35,7 +36,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTicketResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let ticket = Ticket::Entity::find_by_id(id.0).one(&*db).await?;
 

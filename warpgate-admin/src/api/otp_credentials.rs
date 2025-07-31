@@ -9,6 +9,7 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{UserTotpCredential, WarpgateError};
 use warpgate_db_entities::OtpCredential;
 
@@ -65,7 +66,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetOtpCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let objects = OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(*user_id))
@@ -89,7 +90,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let object = OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -128,7 +129,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(role) = OtpCredential::Entity::find_by_id(id.0)
             .filter(OtpCredential::Column::UserId.eq(*user_id))
