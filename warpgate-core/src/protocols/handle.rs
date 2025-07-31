@@ -68,6 +68,10 @@ impl WarpgateServerHandle {
             .exec(&*db)
             .await?;
 
+        drop(db);
+
+        self.update_rate_limiters().await?;
+
         Ok(())
     }
 
@@ -93,6 +97,10 @@ impl WarpgateServerHandle {
             .exec(&*db)
             .await?;
 
+        drop(db);
+
+        self.update_rate_limiters().await?;
+
         Ok(())
     }
 
@@ -109,6 +117,13 @@ impl WarpgateServerHandle {
             .await?;
         ss.rate_limiter_handles.push(handle);
         Ok(stream)
+    }
+
+    async fn update_rate_limiters(&self) -> Result<(), WarpgateError> {
+        let mut state = self.session_state.lock().await;
+        let mut registry = self.rate_limiters_registry.lock().await;
+        registry.update_all_rate_limiters(&mut state).await?;
+        Ok(())
     }
 }
 

@@ -80,6 +80,7 @@ impl TryFrom<Model> for Target {
             description: model.description,
             allow_roles: vec![],
             options,
+            rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
         })
     }
 }

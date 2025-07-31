@@ -12,6 +12,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
     interface Props {
         params: { id: string };
@@ -230,6 +231,15 @@
                 </div>
             {/snippet}
         </Loadable>
+
+        <h4 class="mt-4">Traffic</h4>
+        <FormGroup floating label="Target bandwidth limit">
+            <RateLimitInput
+                bind:value={target.rateLimitBytesPerSecond}
+                change={update}
+            />
+        </FormGroup>
+
     {/if}
     </Loadable>
 

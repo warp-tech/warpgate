@@ -7,6 +7,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from '../CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
     interface Props {
         params: { id: string };
@@ -111,6 +112,14 @@
             </label>
         {/each}
     </div>
+
+    <h4 class="mt-4">Traffic</h4>
+    <FormGroup floating label="User bandwidth limit">
+        <RateLimitInput
+            bind:value={user.rateLimitBytesPerSecond}
+            change={update}
+        />
+    </FormGroup>
     {/if}
     </Loadable>
 

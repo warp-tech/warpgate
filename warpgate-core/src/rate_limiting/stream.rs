@@ -9,6 +9,7 @@ use warpgate_common::WarpgateError;
 use crate::rate_limiting::limiter::{SwappableLimiterCell, SwappableLimiterCellHandle};
 
 type WaitFuture = Pin<Box<dyn Future<Output = Result<(), WarpgateError>> + Send>>;
+
 pub struct RateLimitedStream<T> {
     inner: T,
     limiter: SwappableLimiterCell,
@@ -52,7 +53,12 @@ impl<T: AsyncRead + Unpin + Send> AsyncRead for RateLimitedStream<T> {
         if to_read > 0 {
             if this.pending_read.is_none() {
                 let mut limiter = this.limiter.clone();
-                let fut = Box::pin(async move { limiter.until_bytes_ready(to_read).await });
+                let fut = Box::pin(async move {
+                    if let Some(wait) = limiter.until_bytes_ready(to_read).await? {
+                        tokio::time::sleep(wait).await;
+                    };
+                    Ok(())
+                });
                 this.pending_read = Some(fut);
             }
             let fut = this.pending_read.as_mut().unwrap();
@@ -81,7 +87,12 @@ impl<T: AsyncWrite + Unpin + Send> AsyncWrite for RateLimitedStream<T> {
             if this.pending_write.is_none() {
                 let len = data.len();
                 let mut limiter = this.limiter.clone();
-                let fut = Box::pin(async move { limiter.until_bytes_ready(len).await });
+                let fut = Box::pin(async move {
+                    if let Some(wait) = limiter.until_bytes_ready(len).await? {
+                        tokio::time::sleep(wait).await;
+                    };
+                    Ok(())
+                });
                 this.pending_write = Some((len, fut));
             }
             let (_len, fut) = this.pending_write.as_mut().unwrap();

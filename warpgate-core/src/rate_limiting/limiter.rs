@@ -1,5 +1,6 @@
 use std::num::{NonZero, NonZeroU32};
 use std::sync::Arc;
+use std::time::Duration;
 
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::{DefaultDirectRateLimiter, Quota};
@@ -68,13 +69,16 @@ impl SwappableLimiterCell {
         }
     }
 
-    pub async fn until_bytes_ready(&mut self, bytes: usize) -> Result<(), WarpgateError> {
+    #[must_use]
+    pub async fn until_bytes_ready(
+        &mut self,
+        bytes: usize,
+    ) -> Result<Option<Duration>, WarpgateError> {
         self._maybe_update().await;
         let Some(ref rate_limiter) = self.inner else {
-            return Ok(());
+            return Ok(None);
         };
-        rate_limiter.lock().await.until_bytes_ready(bytes).await?;
-        Ok(())
+        rate_limiter.lock().await.until_bytes_ready(bytes).await
     }
 }
 
@@ -121,15 +125,24 @@ impl WarpgateRateLimiter {
         Ok(())
     }
 
-    pub async fn until_bytes_ready(&mut self, bytes: usize) -> Result<(), WarpgateError> {
+    #[must_use]
+    pub async fn until_bytes_ready(
+        &mut self,
+        bytes: usize,
+    ) -> Result<Option<Duration>, WarpgateError> {
         let Some(ref rate_limiter) = self.rate_limiter else {
-            return Ok(());
+            return Ok(None);
         };
         let bytes = match NonZero::new(bytes as u32) {
             Some(bytes) => bytes,
-            None => return Ok(()),
+            None => return Ok(None),
         };
-        rate_limiter.lock().await.until_n_ready(bytes).await?;
-        Ok(())
+        match rate_limiter.lock().await.check_n(bytes)? {
+            Ok(_) => Ok(None),
+            Err(e) => {
+                let wait = e.wait_time_from(Self::now());
+                Ok(Some(wait))
+            }
+        }
     }
 }

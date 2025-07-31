@@ -74,23 +74,12 @@ impl Api {
         Parameters::Entity::update(am).exec(&*db).await?;
         drop(db);
 
-        // TODO encapsulate
-        {
-            services
-                .rate_limiter_registry
-                .lock()
-                .await
-                .refresh()
-                .await?;
-            let mut rate_limiter_registry = services.rate_limiter_registry.lock().await;
-
-            for session_state in services.state.lock().await.sessions.values() {
-                let mut session_state = session_state.lock().await;
-                rate_limiter_registry
-                    .update_all_rate_limiters(&mut session_state)
-                    .await?;
-            }
-        }
+        services
+            .rate_limiter_registry
+            .lock()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .await?;
 
         Ok(UpdateParametersResponse::Done)
     }

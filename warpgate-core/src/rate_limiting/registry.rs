@@ -8,7 +8,7 @@ use warpgate_common::WarpgateError;
 use warpgate_db_entities::{Parameters, User};
 
 use crate::rate_limiting::{RateLimiterStackHandle, WarpgateRateLimiter};
-use crate::SessionState;
+use crate::{SessionState, State};
 
 pub struct RateLimiterRegistry {
     db: Arc<Mutex<DatabaseConnection>>,
@@ -102,6 +102,7 @@ impl RateLimiterRegistry {
         &mut self,
         state: &mut SessionState,
     ) -> Result<(), WarpgateError> {
+        // TODO figure something out so that handles do not get lost if update_rate_limiters fails for whatever reason
         let mut handles = std::mem::take(&mut state.rate_limiter_handles);
         for handle in handles.iter_mut() {
             self.update_rate_limiters(state, handle).await?;
@@ -116,21 +117,46 @@ impl RateLimiterRegistry {
         handle: &mut RateLimiterStackHandle,
     ) -> Result<(), WarpgateError> {
         if let Some(user_info) = &state.user_info {
+            dbg!();
             let user_limiter = self.user(&user_info.id).await?;
+            dbg!();
             handle.user.replace(Some(user_limiter));
+            dbg!();
         } else {
+            dbg!();
             handle.user.replace(None);
+            dbg!();
         }
 
         if let Some(target) = &state.target {
+            dbg!();
             let target_limiter = self.target(&target.id).await?;
+            dbg!();
             handle.target.replace(Some(target_limiter));
+            dbg!();
         } else {
+            dbg!();
             handle.target.replace(None);
+            dbg!();
         }
 
+            dbg!();
         handle.global.replace(Some(self.global()));
+            dbg!();
 
+        Ok(())
+    }
+
+    /// Force refresh all rate limiters in all sessions
+    pub async fn apply_new_rate_limits(&mut self, state: &mut State) -> Result<(), WarpgateError> {
+        // Refresh the global rate limiter
+        self.refresh().await?;
+
+        // Update all session rate limiters
+        for session_state in state.sessions.values() {
+            let mut session_state = session_state.lock().await;
+            self.update_all_rate_limiters(&mut session_state).await?;
+        }
         Ok(())
     }
 }

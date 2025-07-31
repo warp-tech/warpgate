@@ -14,6 +14,7 @@ use warpgate_common::{
     Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
+use warpgate_core::Services;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
 
@@ -24,6 +25,7 @@ struct TargetDataRequest {
     name: String,
     description: Option<String>,
     options: TargetOptions,
+    rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -181,12 +183,12 @@ impl DetailApi {
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
     async fn api_update_target(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        services: Data<&Services>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = services.db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -201,7 +203,17 @@ impl DetailApi {
         model.description = Set(body.description.clone().unwrap_or_default());
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         let target = model.update(&*db).await?;
+
+        drop(db);
+
+        services
+            .rate_limiter_registry
+            .lock()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .await?;
 
         Ok(UpdateTargetResponse::Ok(Json(
             target.try_into().map_err(WarpgateError::from)?,

@@ -1,21 +1,21 @@
 <script lang="ts">
-import { Input } from '@sveltestrap/sveltestrap'
-import { api, type ParameterValues } from 'admin/lib/api'
-import Loadable from 'common/Loadable.svelte'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { api, type ParameterValues } from 'admin/lib/api'
+    import Loadable from 'common/Loadable.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
-let parameters: ParameterValues | undefined = $state()
-const initPromise = init()
+    let parameters: ParameterValues | undefined = $state()
+    const initPromise = init()
 
-async function init () {
-    parameters = await api.getParameters({})
-}
+    async function init () {
+        parameters = await api.getParameters({})
+    }
 
-async function update() {
-    api.updateParameters({
-        parameterUpdate: parameters!,
-    })
-}
-
+    async function update() {
+        api.updateParameters({
+            parameterUpdate: parameters!,
+        })
+    }
 </script>
 
 <div class="page-summary-bar">
@@ -24,6 +24,7 @@ async function update() {
 
 <Loadable promise={initPromise}>
 {#if parameters}
+    <h4 class="mt-4">Credentials</h4>
     <label
         for="allowOwnCredentialManagement"
         class="d-flex align-items-center"
@@ -40,19 +41,12 @@ async function update() {
         <div>Allow users to manage their own credentials</div>
     </label>
 
-    <label
-        for="globalRateLimit"
-        class="d-flex align-items-center"
-    >
-        <Input
-            id="globalRateLimit"
-            class="mb-0 me-2"
-            type="number"
-            min="0"
-            step="1"
+    <h4 class="mt-4">Traffic</h4>
+    <FormGroup floating label="Global bandwidth limit">
+        <RateLimitInput
             bind:value={parameters.rateLimitBytesPerSecond}
-            on:change={update}
+            change={update}
             />
-    </label>
+    </FormGroup>
 {/if}
 </Loadable>
