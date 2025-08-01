@@ -9,6 +9,7 @@ use russh::keys::{Algorithm, PublicKey};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::KnownHost;
 
@@ -56,7 +57,7 @@ impl Api {
         PublicKey::from_openssh(&format!("{} {}", body.key_type, body.key_base64))
             .context("parsing key")?;
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let model = KnownHost::ActiveModel {
             id: Set(Uuid::new_v4()),
             host: Set(body.host.clone()),
@@ -81,7 +82,7 @@ impl Api {
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let hosts = KnownHost::Entity::find().all(&*db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }

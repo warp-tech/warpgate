@@ -1,11 +1,12 @@
-mod handle;
-
 use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
-pub use handle::{SessionHandle, WarpgateServerHandle};
 use warpgate_common::{ListenEndpoint, Target};
+
+mod handle;
+
+pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {

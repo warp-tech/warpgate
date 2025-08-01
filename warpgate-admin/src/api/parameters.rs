@@ -3,6 +3,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{EntityTrait, Set};
 use serde::Serialize;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
@@ -14,11 +15,13 @@ pub struct Api;
 #[derive(Serialize, Object)]
 struct ParameterValues {
     pub allow_own_credential_management: bool,
+    pub rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
-    pub allow_own_credential_management: Option<bool>,
+    pub allow_own_credential_management: bool,
+    pub rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -41,17 +44,18 @@ impl Api {
         services: Data<&Services>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
+            rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
         })))
     }
 
     #[oai(
         path = "/parameters",
-        method = "patch",
+        method = "put",
         operation_id = "update_parameters"
     )]
     async fn api_update_parameters(
@@ -60,18 +64,23 @@ impl Api {
         body: Json<ParameterUpdate>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = services.db.lock2().await;
 
-        let mut am = Parameters::ActiveModel {
+        let am = Parameters::ActiveModel {
             id: Set(Parameters::Entity::get(&db).await?.id),
-            ..Default::default()
-        };
-
-        if let Some(value) = body.allow_own_credential_management {
-            am.allow_own_credential_management = Set(value);
+            allow_own_credential_management: Set(body.allow_own_credential_management),
+            rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
         };
 
         Parameters::Entity::update(am).exec(&*db).await?;
+        drop(db);
+
+        services
+            .rate_limiter_registry
+            .lock2()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock2().await)
+            .await?;
 
         Ok(UpdateParametersResponse::Done)
     }

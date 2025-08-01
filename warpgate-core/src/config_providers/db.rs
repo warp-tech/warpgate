@@ -15,6 +15,7 @@ use warpgate_common::auth::{
     CredentialPolicy, PerProtocolCredentialPolicy,
 };
 use warpgate_common::helpers::hash::verify_password_hash;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
     Role, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
@@ -47,6 +48,7 @@ impl DatabaseConfigProvider {
             credential_policy: Set(serde_json::to_value(
                 UserRequireCredentialsPolicy::default(),
             )?),
+            rate_limit_bytes_per_second: Set(None),
         }
         .insert(db)
         .await?;
@@ -65,7 +67,7 @@ impl DatabaseConfigProvider {
 
 impl ConfigProvider for DatabaseConfigProvider {
     async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let users = entities::User::Entity::find()
             .order_by_asc(entities::User::Column::Username)
@@ -78,7 +80,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let targets = entities::Target::Entity::find()
             .order_by_asc(entities::Target::Column::Name)
@@ -95,7 +97,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Column::Username.eq(username))
@@ -195,7 +197,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         preferred_username: Option<String>,
         sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let AuthCredential::Sso {
             provider: client_provider,
@@ -249,7 +251,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         client_credential: &AuthCredential,
     ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Column::Username.eq(username))
@@ -345,7 +347,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let target_model = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(target_name))
@@ -396,7 +398,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         managed_role_names: Option<Vec<String>>,
         assigned_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Column::Username.eq(username))
@@ -453,7 +455,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         &self,
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
 
         let Some(AuthCredential::PublicKey {
             kind,
@@ -504,7 +506,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = self.db.lock2().await;
         let Some(ticket) = entities::ApiToken::Entity::find()
             .filter(
                 entities::ApiToken::Column::Secret

@@ -7,19 +7,34 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::{SessionId, WarpgateConfig, WarpgateError};
+use crate::{SessionId, User, WarpgateConfig, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
-    Accepted { username: String },
+    Accepted { user_info: AuthStateUserInfo },
     Need(HashSet<CredentialKind>),
     Rejected,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthStateUserInfo {
+    pub id: Uuid,
+    pub username: String,
+}
+
+impl From<&User> for AuthStateUserInfo {
+    fn from(user: &User) -> Self {
+        AuthStateUserInfo {
+            id: user.id,
+            username: user.username.clone(),
+        }
+    }
+}
+
 pub struct AuthState {
     id: Uuid,
+    user_info: AuthStateUserInfo,
     session_id: Option<Uuid>,
-    username: String,
     protocol: String,
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
@@ -43,7 +58,7 @@ impl AuthState {
     pub fn new(
         id: Uuid,
         session_id: Option<SessionId>,
-        username: String,
+        user_info: AuthStateUserInfo,
         protocol: String,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         state_change_signal: broadcast::Sender<AuthResult>,
@@ -51,7 +66,7 @@ impl AuthState {
         let mut this = Self {
             id,
             session_id,
-            username,
+            user_info,
             protocol,
             force_rejected: false,
             policy,
@@ -73,8 +88,8 @@ impl AuthState {
         &self.session_id
     }
 
-    pub fn username(&self) -> &str {
-        &self.username
+    pub fn user_info(&self) -> &AuthStateUserInfo {
+        &self.user_info
     }
 
     pub fn protocol(&self) -> &str {
@@ -112,7 +127,7 @@ impl AuthState {
         {
             CredentialPolicyResponse::Ok => {
                 info!(
-                    username=%self.username,
+                    username=%self.user_info.username,
                     credentials=%self.valid_credentials
                         .iter()
                         .map(|x| x.safe_description())
@@ -121,7 +136,7 @@ impl AuthState {
                     "Authenticated",
                 );
                 AuthResult::Accepted {
-                    username: self.username.clone(),
+                    user_info: self.user_info.clone(),
                 }
             }
             CredentialPolicyResponse::Need(kinds) => AuthResult::Need(kinds),

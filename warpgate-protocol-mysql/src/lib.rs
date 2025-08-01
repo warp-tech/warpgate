@@ -13,11 +13,12 @@ use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tracing::*;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
 };
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
 
 use crate::session::MySqlSession;
 use crate::session_handle::MySqlSessionHandle;
@@ -37,7 +38,7 @@ impl MySQLProtocolServer {
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
-            let config = self.services.config.lock().await;
+            let config = self.services.config.lock2().await;
             let certificate_path = config
                 .paths_relative_to
                 .join(&config.store.mysql.certificate);
@@ -80,19 +81,16 @@ impl ProtocolServer for MySQLProtocolServer {
             tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
-                let server_handle = services
-                    .state
-                    .lock()
-                    .await
-                    .register_session(
-                        &crate::common::PROTOCOL_NAME,
-                        SessionStateInit {
-                            remote_address: Some(remote_address),
-                            handle: Box::new(session_handle),
-                        },
-                    )
-                    .await
-                    .context("registering session")?;
+                let server_handle = State::register_session(
+                    &services.state,
+                    &crate::common::PROTOCOL_NAME,
+                    SessionStateInit {
+                        remote_address: Some(remote_address),
+                        handle: Box::new(session_handle),
+                    },
+                )
+                .await
+                .context("registering session")?;
 
                 let session =
                     MySqlSession::new(server_handle, services, stream, tls_config, remote_address)

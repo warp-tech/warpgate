@@ -39,7 +39,10 @@ pub enum WarpgateError {
     RusshKeys(#[from] russh::keys::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-
+    #[error(transparent)]
+    RateLimiterInsufficientCapacity(#[from] governor::InsufficientCapacity),
+    #[error("Invalid rate limiter quota: {0}")]
+    RateLimiterInvalidQuota(u32),
     #[error("Session end")]
     SessionEnd,
 }

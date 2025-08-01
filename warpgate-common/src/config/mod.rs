@@ -136,6 +136,7 @@ pub struct User {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
+    pub rate_limit_bytes_per_second: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]

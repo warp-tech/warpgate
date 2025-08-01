@@ -10,10 +10,12 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
+use warpgate_core::Services;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
 
@@ -24,6 +26,7 @@ struct TargetDataRequest {
     name: String,
     description: Option<String>,
     options: TargetOptions,
+    rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -55,7 +58,7 @@ impl ListApi {
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let mut targets = Target::Entity::find().order_by_asc(Target::Column::Name);
 
@@ -88,7 +91,7 @@ impl ListApi {
             return Ok(CreateTargetResponse::BadRequest(Json("kind".into())));
         }
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -105,6 +108,7 @@ impl ListApi {
             description: Set(body.description.clone().unwrap_or_default()),
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            rate_limit_bytes_per_second: Set(None),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -168,7 +172,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetTargetResponse::NotFound);
@@ -180,12 +184,12 @@ impl DetailApi {
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
     async fn api_update_target(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        services: Data<&Services>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -200,7 +204,17 @@ impl DetailApi {
         model.description = Set(body.description.clone().unwrap_or_default());
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         let target = model.update(&*db).await?;
+
+        drop(db);
+
+        services
+            .rate_limiter_registry
+            .lock2()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock2().await)
+            .await?;
 
         Ok(UpdateTargetResponse::Ok(Json(
             target.try_into().map_err(WarpgateError::from)?,
@@ -218,7 +232,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
@@ -260,7 +274,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
@@ -327,7 +341,7 @@ impl RolesApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -356,7 +370,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -392,7 +406,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetRoleResponse::NotFound);

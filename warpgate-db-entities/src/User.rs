@@ -17,6 +17,7 @@ pub struct Model {
     pub credential_policy: serde_json::Value,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    pub rate_limit_bytes_per_second: Option<i64>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -107,6 +108,7 @@ impl TryFrom<Model> for User {
             username: model.username,
             credential_policy: serde_json::from_value(model.credential_policy)?,
             description: model.description,
+            rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
         })
     }
 }
@@ -169,6 +171,7 @@ impl TryFrom<User> for ActiveModel {
             username: Set(user.username),
             credential_policy: Set(serde_json::to_value(&user.credential_policy)?),
             description: Set(user.description),
+            rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
         })
     }
 }

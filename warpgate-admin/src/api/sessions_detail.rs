@@ -7,6 +7,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::{SessionSnapshot, State};
 use warpgate_db_entities::{Recording, Session};
@@ -47,7 +48,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSessionResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let session = Session::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -68,7 +69,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSessionRecordingsResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
             .order_by_desc(Recording::Column::Started)
             .filter(Recording::Column::SessionId.eq(id.0))
@@ -88,10 +89,10 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CloseSessionResponse, WarpgateError> {
-        let state = state.lock().await;
+        let state = state.lock2().await;
 
         if let Some(s) = state.sessions.get(&id) {
-            let mut session = s.lock().await;
+            let mut session = s.lock2().await;
             session.handle.close();
             Ok(CloseSessionResponse::Ok)
         } else {

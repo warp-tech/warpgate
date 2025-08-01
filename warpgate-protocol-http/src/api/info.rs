@@ -5,6 +5,7 @@ use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::version::warpgate_version;
 use warpgate_core::{ConfigProvider, Services};
 use warpgate_db_entities::Parameters;
@@ -62,7 +63,7 @@ impl Api {
         services: Data<&Services>,
         request_authorization: Option<Data<&RequestAuthorization>>,
     ) -> poem::Result<InstanceInfoResponse> {
-        let config = services.config.lock().await;
+        let config = services.config.lock2().await;
         let external_host = config
             .construct_external_url(Some(req), None)
             .ok()
@@ -71,14 +72,14 @@ impl Api {
             .map(|x| x.to_string());
 
         let parameters = {
-            Parameters::Entity::get(&*services.db.lock().await)
+            Parameters::Entity::get(&*services.db.lock2().await)
                 .await
                 .context("loading parameters")?
         };
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = services.config_provider.lock().await;
+                let mut p = services.config_provider.lock2().await;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)

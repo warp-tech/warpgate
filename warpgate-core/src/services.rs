@@ -4,9 +4,11 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateConfig;
 
 use crate::db::{connect_to_db, populate_db};
+use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
 
@@ -19,6 +21,7 @@ pub struct Services {
     pub config_provider: Arc<Mutex<ConfigProviderEnum>>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
+    pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
 }
 
 impl Services {
@@ -40,17 +43,22 @@ impl Services {
             let auth_state_store = auth_state_store.clone();
             async move {
                 loop {
-                    auth_state_store.lock().await.vacuum().await;
+                    auth_state_store.lock2().await.vacuum().await;
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             }
         });
 
+        let mut rate_limiter_registry = RateLimiterRegistry::new(db.clone());
+        rate_limiter_registry.refresh().await?;
+        let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
+
         Ok(Self {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db),
+            state: State::new(&db, &rate_limiter_registry)?,
+            rate_limiter_registry,
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),

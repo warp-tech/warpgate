@@ -10,9 +10,11 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_core::Services;
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
@@ -28,6 +30,7 @@ struct UserDataRequest {
     username: String,
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
+    rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -55,7 +58,7 @@ impl ListApi {
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUsersResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
@@ -85,7 +88,7 @@ impl ListApi {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -95,6 +98,7 @@ impl ListApi {
                     .map_err(WarpgateError::from)?,
             ),
             description: Set(body.description.clone().unwrap_or_default()),
+            rate_limit_bytes_per_second: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -139,7 +143,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetUserResponse::NotFound);
@@ -151,12 +155,12 @@ impl DetailApi {
     #[oai(path = "/users/:id", method = "put", operation_id = "update_user")]
     async fn api_update_user(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        services: Data<&Services>,
         body: Json<UserDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = services.db.lock2().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
@@ -168,7 +172,17 @@ impl DetailApi {
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         let user = model.update(&*db).await?;
+
+        drop(db);
+
+        services
+            .rate_limiter_registry
+            .lock2()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock2().await)
+            .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }
@@ -180,7 +194,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserResponse::NotFound);
@@ -235,7 +249,7 @@ impl RolesApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRolesResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -264,7 +278,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         if !UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
@@ -300,7 +314,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = db.lock2().await;
 
         let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);

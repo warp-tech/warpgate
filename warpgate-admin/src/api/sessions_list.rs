@@ -10,6 +10,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_core::{SessionSnapshot, State};
 
 use super::pagination::{PaginatedResponse, PaginationParams};
@@ -43,7 +44,7 @@ impl Api {
     ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
 
-        let db = db.lock().await;
+        let db = db.lock2().await;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {
@@ -78,10 +79,10 @@ impl Api {
         session: &Session,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CloseAllSessionsResponse> {
-        let state = state.lock().await;
+        let state = state.lock2().await;
 
         for s in state.sessions.values() {
-            let mut session = s.lock().await;
+            let mut session = s.lock2().await;
             session.handle.close();
         }
 
@@ -96,7 +97,7 @@ pub async fn api_get_sessions_changes_stream(
     ws: WebSocket,
     state: Data<&Arc<Mutex<State>>>,
 ) -> impl IntoResponse {
-    let mut receiver = state.lock().await.subscribe();
+    let mut receiver = state.lock2().await.subscribe();
 
     ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();

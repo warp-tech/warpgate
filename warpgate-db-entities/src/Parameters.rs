@@ -8,6 +8,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub allow_own_credential_management: bool,
+    pub rate_limit_bytes_per_second: Option<i64>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -23,6 +24,7 @@ impl Entity {
                 ActiveModel {
                     id: Set(Uuid::new_v4()),
                     allow_own_credential_management: Set(true),
+                    rate_limit_bytes_per_second: Set(None),
                 }
                 .insert(db)
                 .await

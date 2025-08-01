@@ -61,11 +61,13 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             if let Some(ticket) = ticket_value {
                 let services = Data::<&Services>::from_request_without_body(&req).await?;
 
-                if let Some(ticket_model) = {
-                    let ticket = Secret::new(ticket);
-                    if let Some(res) = authorize_ticket(&services.db, &ticket).await? {
-                        consume_ticket(&services.db, &res.id).await?;
-                        Some(res)
+                if let Some((ticket_model, _user_info)) = {
+                    let ticket_secret = Secret::new(ticket);
+                    if let Some((ticket, user_info)) =
+                        authorize_ticket(&services.db, &ticket_secret).await?
+                    {
+                        consume_ticket(&services.db, &ticket.id).await?;
+                        Some((ticket, user_info))
                     } else {
                         None
                     }

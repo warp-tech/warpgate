@@ -138,6 +138,7 @@ pub struct Target {
     pub allow_roles: Vec<String>,
     #[serde(flatten)]
     pub options: TargetOptions,
+    pub rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
