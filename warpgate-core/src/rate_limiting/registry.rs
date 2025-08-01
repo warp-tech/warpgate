@@ -4,25 +4,26 @@ use std::sync::Arc;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::{DebugLock, Mutex2};
+use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::{Parameters, User};
 
+use crate::rate_limiting::limiter::SharedWarpgateRateLimiter;
 use crate::rate_limiting::{RateLimiterStackHandle, WarpgateRateLimiter};
 use crate::{SessionState, State};
 
 pub struct RateLimiterRegistry {
     db: Arc<Mutex<DatabaseConnection>>,
-    global_rate_limiter: Arc<Mutex2<WarpgateRateLimiter>>,
-    user_rate_limiters: HashMap<Uuid, Arc<Mutex2<WarpgateRateLimiter>>>,
-    target_rate_limiters: HashMap<Uuid, Arc<Mutex2<WarpgateRateLimiter>>>,
+    global_rate_limiter: SharedWarpgateRateLimiter,
+    user_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
+    target_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
 }
 
 impl RateLimiterRegistry {
     pub fn new(db: Arc<Mutex<DatabaseConnection>>) -> Self {
         Self {
             db,
-            global_rate_limiter: Arc::new(Mutex2::new(WarpgateRateLimiter::unlimited())),
+            global_rate_limiter: WarpgateRateLimiter::unlimited(),
             user_rate_limiters: HashMap::new(),
             target_rate_limiters: HashMap::new(),
         }
@@ -31,23 +32,20 @@ impl RateLimiterRegistry {
     // TODO granular refresh
     pub async fn refresh(&mut self) -> Result<(), WarpgateError> {
         let global_quota = self.global_quota().await?;
-        self.global_rate_limiter
-            .lock()
-            .await
-            .replace(global_quota)?;
+        self.global_rate_limiter.lock().replace(global_quota)?;
 
         for (user_id, limiter) in self.user_rate_limiters.iter() {
             let quota = self.quota_for_user(user_id).await?;
-            limiter.lock().await.replace(quota)?;
+            limiter.lock().replace(quota)?;
         }
         for (target_id, limiter) in self.target_rate_limiters.iter() {
             let quota = self.quota_for_target(target_id).await?;
-            limiter.lock().await.replace(quota)?;
+            limiter.lock().replace(quota)?;
         }
         Ok(())
     }
 
-    pub fn global(&self) -> Arc<Mutex2<WarpgateRateLimiter>> {
+    pub fn global(&self) -> SharedWarpgateRateLimiter {
         self.global_rate_limiter.clone()
     }
 
@@ -60,12 +58,11 @@ impl RateLimiterRegistry {
     pub async fn user(
         &mut self,
         user_id: &Uuid,
-    ) -> Result<Arc<Mutex2<WarpgateRateLimiter>>, WarpgateError> {
+    ) -> Result<SharedWarpgateRateLimiter, WarpgateError> {
         if !self.user_rate_limiters.contains_key(user_id) {
             let quota = self.quota_for_user(user_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
-            self.user_rate_limiters
-                .insert(*user_id, Arc::new(Mutex2::new(rate_limiter)));
+            self.user_rate_limiters.insert(*user_id, rate_limiter);
         }
         Ok(self.user_rate_limiters.get(user_id).unwrap().clone())
     }
@@ -81,12 +78,11 @@ impl RateLimiterRegistry {
     pub async fn target(
         &mut self,
         target_id: &Uuid,
-    ) -> Result<Arc<Mutex2<WarpgateRateLimiter>>, WarpgateError> {
+    ) -> Result<SharedWarpgateRateLimiter, WarpgateError> {
         if !self.target_rate_limiters.contains_key(target_id) {
             let quota = self.quota_for_target(target_id).await?;
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
-            self.target_rate_limiters
-                .insert(*target_id, Arc::new(Mutex2::new(rate_limiter)));
+            self.target_rate_limiters.insert(*target_id, rate_limiter);
         }
         Ok(self.target_rate_limiters.get(target_id).unwrap().clone())
     }

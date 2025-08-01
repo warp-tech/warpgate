@@ -29,7 +29,7 @@ impl<'a, T> MutexGuard<'a, T> {
     pub fn new(inner: tokio::sync::MutexGuard<'a, T>, poisoned: &'a AtomicBool) -> Self {
         let this = Self { inner, poisoned };
         let mut ids = LOCK_IDENTITIES.lock().unwrap();
-        let identities = ids.entry(tokio::task::try_id()).or_insert(vec![]);
+        let identities = ids.entry(tokio::task::try_id()).or_default();
         let id = this.identity();
         identities.push(id);
         // eprintln!("Locking {} @ {:?}", this.identity(), tokio::task::try_id());
@@ -91,12 +91,12 @@ impl<T> Mutex2<T> {
         }
     }
 
-    pub async fn lock<'a>(&'a self) -> MutexGuard<'a, T> {
+    pub async fn lock(&self) -> MutexGuard<'_, T> {
         self._lock().await
     }
 
     #[cfg(debug_assertions)]
-    async fn _lock<'a>(&'a self) -> MutexGuard<'a, T> {
+    async fn _lock(&self) -> MutexGuard<'_, T> {
         use std::time::Duration;
 
         tokio::select! {
@@ -111,7 +111,7 @@ impl<T> Mutex2<T> {
     }
 
     #[cfg(not(debug_assertions))]
-    async fn _lock<'a>(&'a self) -> MutexGuard<'a, T> {
+    async fn _lock(&self) -> MutexGuard<'_, T> {
         self.inner.lock().await
     }
 }
