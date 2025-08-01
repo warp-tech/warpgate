@@ -1,7 +1,7 @@
+use std::fmt::Debug;
 use std::num::{NonZero, NonZeroU32};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::time::Duration;
 
 use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::{DefaultKeyedRateLimiter, Quota};
@@ -11,7 +11,7 @@ use warpgate_common::WarpgateError;
 mod shared_limiter {
     use super::*;
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct SharedWarpgateRateLimiter {
         inner: Arc<std::sync::Mutex<WarpgateRateLimiter>>,
     }
@@ -88,8 +88,9 @@ pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> InnerRateLimiter {
     let max_cells = NonZeroU32::MAX;
     let rate_limiter =
         InnerRateLimiter::keyed(Quota::per_second(bytes_per_second).allow_burst(max_cells));
-    // We keep the burst capacity high to allow checking in large buffers but
-    // consume (burst - per_second) tokens initially to ensure that the rate limiter is in its "normal" state
+    // Keep the burst capacity high to allow checking in large buffers but
+    // consume (burst - per_second) cells initially to ensure that
+    // the rate limiter is in its "normal" state
     #[allow(clippy::unwrap_used)] // checked
     for key in [RateLimiterDirection::Read, RateLimiterDirection::Write] {
         let _ = rate_limiter.check_key_n(
@@ -117,6 +118,7 @@ pub struct SwappableLimiterCell {
 
 impl SwappableLimiterCell {
     pub fn empty() -> Self {
+        eprintln!("new empty cell");
         let (sender, receiver) = watch::channel(None);
         Self {
             inner: None,
@@ -134,21 +136,30 @@ impl SwappableLimiterCell {
     fn _maybe_update(&mut self) {
         let _ref = self.receiver.borrow_and_update();
         if _ref.has_changed() {
-            self.inner = _ref.as_ref().cloned();
+            let limiter = _ref.as_ref().cloned();
+            match &limiter {
+                Some(x) => {
+                    eprintln!("cell updated with {:?}", &*x.lock());
+                }
+                None => {
+                    eprintln!("cell updated with None");
+                }
+            }
+            self.inner = limiter;
         }
     }
 
-    #[must_use = "Must use the duration and wait"]
-    pub fn until_bytes_ready(
+    #[must_use = "Must use the Instant to wait"]
+    pub fn bytes_ready_at(
         &mut self,
         direction: RateLimiterDirection,
         bytes: usize,
-    ) -> Result<Option<Duration>, WarpgateError> {
+    ) -> Result<Option<QuantaInstant>, WarpgateError> {
         self._maybe_update();
         let Some(ref rate_limiter) = self.inner else {
             return Ok(None);
         };
-        rate_limiter.lock().until_bytes_ready(direction, bytes)
+        rate_limiter.lock().bytes_ready_at(direction, bytes)
     }
 }
 
@@ -172,7 +183,15 @@ impl SwappableLimiterCell {
 /// * Replacing the limit inside a limiter when the limit is changed
 ///   by the admin. This is `WarpgateRateLimiter::replace()`
 pub struct WarpgateRateLimiter {
-    rate_limiter: Option<InnerRateLimiter>,
+    inner: Option<(InnerRateLimiter, NonZeroU32)>,
+}
+
+impl Debug for WarpgateRateLimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WarpgateRateLimiter")
+            .field("bytes_per_second", &self.inner.as_ref().map(|x| x.1))
+            .finish()
+    }
 }
 
 impl WarpgateRateLimiter {
@@ -181,13 +200,15 @@ impl WarpgateRateLimiter {
     }
 
     pub fn unlimited() -> SharedWarpgateRateLimiter {
-        Self { rate_limiter: None }.share()
+        eprintln!("new unlimited limiter");
+        Self { inner: None }.share()
     }
 
     pub fn limited(bytes_per_second: NonZeroU32) -> SharedWarpgateRateLimiter {
+        eprintln!("new limited limiter {:?}", bytes_per_second);
         let rate_limiter = new_rate_limiter(bytes_per_second);
         Self {
-            rate_limiter: Some(rate_limiter),
+            inner: Some((rate_limiter, bytes_per_second)),
         }
         .share()
     }
@@ -201,33 +222,35 @@ impl WarpgateRateLimiter {
     }
 
     pub fn replace(&mut self, bytes_per_second: Option<u32>) -> Result<(), WarpgateError> {
-        let limiter = match bytes_per_second {
-            None => None,
-            Some(bytes) => Some(new_rate_limiter(assert_valid_quota(bytes)?)),
+        eprintln!("replacing {:?} {:?}", &self, bytes_per_second);
+        match bytes_per_second {
+            None => {
+                self.inner = None;
+            }
+            Some(bytes) => {
+                let bps = assert_valid_quota(bytes)?;
+                self.inner = Some((new_rate_limiter(bps), bps))
+            }
         };
-        self.rate_limiter = limiter;
         Ok(())
     }
 
-    #[must_use = "Must use the duration and wait"]
-    pub fn until_bytes_ready(
-        &mut self,
+    #[must_use = "Must use the Instant to wait"]
+    pub fn bytes_ready_at(
+        &self,
         direction: RateLimiterDirection,
         bytes: usize,
-    ) -> Result<Option<Duration>, WarpgateError> {
-        let Some(ref rate_limiter) = self.rate_limiter else {
+    ) -> Result<Option<QuantaInstant>, WarpgateError> {
+        let Some(ref inner) = self.inner else {
             return Ok(None);
         };
         let bytes = match NonZero::new(bytes as u32) {
             Some(bytes) => bytes,
             None => return Ok(None),
         };
-        match rate_limiter.check_key_n(&direction, bytes)? {
+        match inner.0.check_key_n(&direction, bytes)? {
             Ok(_) => Ok(None),
-            Err(e) => {
-                let wait = e.wait_time_from(Self::now());
-                Ok(Some(wait))
-            }
+            Err(e) => Ok(Some(e.earliest_possible())),
         }
     }
 

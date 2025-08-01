@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
+use tracing::debug;
 use uuid::Uuid;
 use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
-use warpgate_db_entities::{Parameters, User};
+use warpgate_db_entities::{Parameters, Target, User};
 
 use crate::rate_limiting::limiter::SharedWarpgateRateLimiter;
 use crate::rate_limiting::{RateLimiterStackHandle, WarpgateRateLimiter};
@@ -89,7 +90,7 @@ impl RateLimiterRegistry {
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
         let db = self.db.lock2().await;
-        let target = User::Entity::find_by_id(*target_id).one(&*db).await?;
+        let target = Target::Entity::find_by_id(*target_id).one(&*db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)
             .map(|r| r as u32))
@@ -115,6 +116,7 @@ impl RateLimiterRegistry {
     ) -> Result<(), WarpgateError> {
         if let Some(user_info) = &state.user_info {
             let user_limiter = self.user(&user_info.id).await?;
+            debug!("Setting user rate limit {user_limiter:?}");
             handle.user.replace(Some(user_limiter));
         } else {
             handle.user.replace(None);
@@ -122,12 +124,15 @@ impl RateLimiterRegistry {
 
         if let Some(target) = &state.target {
             let target_limiter = self.target(&target.id).await?;
+            debug!("Setting user rate limit {target_limiter:?}");
             handle.target.replace(Some(target_limiter));
         } else {
             handle.target.replace(None);
         }
 
-        handle.global.replace(Some(self.global()));
+        let global = self.global();
+        debug!("Setting global rate limit {global:?}");
+        handle.global.replace(Some(global));
 
         Ok(())
     }

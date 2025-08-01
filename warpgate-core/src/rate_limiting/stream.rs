@@ -2,21 +2,26 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use futures::FutureExt;
+use governor::clock::Reference;
+use governor::Jitter;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::rate_limiting::limiter::{
     RateLimiterDirection, SwappableLimiterCell, SwappableLimiterCellHandle,
 };
+use crate::rate_limiting::WarpgateRateLimiter;
 
 type WaitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 enum PendingWaitState {
-    /// No active wait -> may start new wait on poll
-    Empty,
+    /// No active wait -> may start new wait on poll.
+    /// The usize is the number of bytes processed in the last operation.
+    Empty(usize),
     /// Active wait is pending -> polls the wait
-    Waiting(WaitFuture),
+    Waiting(usize, WaitFuture),
     /// Active wait has ended -> polls as Ready
     Ready,
 }
@@ -33,49 +38,69 @@ struct PendingWait {
 impl PendingWait {
     pub fn new(direction: RateLimiterDirection) -> Self {
         Self {
-            state: PendingWaitState::Empty,
+            state: PendingWaitState::Empty(0),
             direction,
         }
     }
 
     fn poll_rate_limit(
-        self: &mut PendingWait,
+        &mut self,
         limiter: &mut SwappableLimiterCell,
-        len: usize,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
-        if let PendingWaitState::Empty = self.state {
-            // Check if we need to wait
-            match limiter.until_bytes_ready(self.direction, len) {
-                Ok(None) => {
-                    self.state = PendingWaitState::Ready;
-                }
-                Ok(Some(dur)) => {
-                    let fut = tokio::time::sleep(dur).boxed();
-                    self.state = PendingWaitState::Waiting(fut);
-                }
-                Err(e) => {
-                    self.state = PendingWaitState::Empty;
-                    return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e.to_string())));
-                }
+        // The loop runs at most 2x
+        loop {
+            if let PendingWaitState::Empty(len) = self.state {
+                // Check if we need to wait
+                match limiter.bytes_ready_at(self.direction, len) {
+                    Ok(None) => {
+                        self.state = PendingWaitState::Ready;
+                    }
+                    Ok(Some(at)) => {
+                        let now_quanta = WarpgateRateLimiter::now();
+                        let now_tokio = Instant::now();
+
+                        let delta = Duration::from(at.duration_since(now_quanta));
+                        let a = 10; // percent
+                        let tokio_deadline =
+                            Jitter::new(delta * (100 - a) / 100, delta * a * 2 / 100) + now_tokio;
+
+                        let fut = tokio::time::sleep_until(tokio_deadline.into()).boxed();
+
+                        self.state = PendingWaitState::Waiting(len, fut);
+                    }
+                    Err(e) => {
+                        self.state = PendingWaitState::Empty(0);
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            e.to_string(),
+                        )));
+                    }
+                };
             };
-        };
-        match self.state {
-            PendingWaitState::Empty => unreachable!(),
-            PendingWaitState::Waiting(ref mut fut) => match fut.as_mut().poll(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(_) => {
-                    self.state = PendingWaitState::Ready;
-                }
-            },
-            PendingWaitState::Ready => {}
+            match self.state {
+                PendingWaitState::Empty(_) => unreachable!(),
+                PendingWaitState::Waiting(len, ref mut fut) => match fut.as_mut().poll(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(_) => {
+                        // !!
+                        // Since we did not consume any cells
+                        // we need to try again and maybe wait
+                        // again if there aren't enough available yet.
+                        self.state = PendingWaitState::Empty(len);
+                        continue;
+                    }
+                },
+                PendingWaitState::Ready => {}
+            }
+            break;
         }
 
         Poll::Ready(Ok(()))
     }
 
-    pub fn reset(&mut self) {
-        self.state = PendingWaitState::Empty;
+    pub fn reset(&mut self, last_chunk_size: usize) {
+        self.state = PendingWaitState::Empty(last_chunk_size);
     }
 }
 
@@ -121,10 +146,12 @@ impl<T: AsyncRead + Unpin + Send> RateLimitedStream<T> {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), io::Error>> {
+        let prev_remaining = buf.remaining();
         let ret = Pin::new(&mut self.inner).poll_read(cx, buf);
         if ret.is_ready() {
+            let read = prev_remaining - buf.remaining();
             // Read completed, reset waiter
-            self.read_wait.reset();
+            self.read_wait.reset(read);
         }
         ret
     }
@@ -137,9 +164,12 @@ impl<T: AsyncWrite + Unpin + Send> RateLimitedStream<T> {
         data: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
         let ret = Pin::new(&mut self.inner).poll_write(cx, data);
-        if ret.is_ready() {
-            // Read completed, reset waiter
-            self.write_wait.reset();
+        if let Poll::Ready(result) = &ret {
+            // Write completed, reset waiter
+            self.write_wait.reset(match result {
+                Ok(bytes_written) => *bytes_written,
+                Err(_) => 0,
+            });
         }
         ret
     }
@@ -158,10 +188,7 @@ impl<T: AsyncRead + Unpin + Send> AsyncRead for RateLimitedStream<T> {
             return Pin::new(&mut this.inner).poll_read(cx, buf);
         }
 
-        match this
-            .read_wait
-            .poll_rate_limit(&mut this.limiter, to_read, cx)
-        {
+        match this.read_wait.poll_rate_limit(&mut this.limiter, cx) {
             Poll::Ready(Ok(())) => this.poll_read_nowait(cx, buf),
             x => x,
         }
@@ -181,10 +208,7 @@ impl<T: AsyncWrite + Unpin + Send> AsyncWrite for RateLimitedStream<T> {
             return Pin::new(&mut this.inner).poll_write(cx, data);
         }
 
-        match this
-            .write_wait
-            .poll_rate_limit(&mut this.limiter, data.len(), cx)
-        {
+        match this.write_wait.poll_rate_limit(&mut this.limiter, cx) {
             Poll::Ready(Ok(())) => this.poll_write_nowait(cx, data),
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Pending => Poll::Pending,
