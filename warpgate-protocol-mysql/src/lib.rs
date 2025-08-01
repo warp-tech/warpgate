@@ -92,8 +92,10 @@ impl ProtocolServer for MySQLProtocolServer {
                 .await
                 .context("registering session")?;
 
+                let wrapped_stream = server_handle.lock2().await.wrap_stream(stream).await?;
+
                 let session =
-                    MySqlSession::new(server_handle, services, stream, tls_config, remote_address)
+                    MySqlSession::new(server_handle, services, wrapped_stream, tls_config, remote_address)
                         .await;
                 let span = session.make_logging_span();
                 tokio::select! {

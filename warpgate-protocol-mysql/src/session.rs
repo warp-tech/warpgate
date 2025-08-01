@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bytes::{Buf, Bytes, BytesMut};
 use rand::Rng;
 use rustls::ServerConfig;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
@@ -31,8 +31,8 @@ use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
-pub struct MySqlSession {
-    stream: MySqlStream<tokio_rustls::server::TlsStream<TcpStream>>,
+pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
+    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,
@@ -44,11 +44,11 @@ pub struct MySqlSession {
     remote_address: SocketAddr,
 }
 
-impl MySqlSession {
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
-        stream: TcpStream,
+        stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
@@ -173,7 +173,9 @@ impl MySqlSession {
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
 
-        async fn fail(this: &mut MySqlSession) -> Result<(), MySqlError> {
+        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
+            this: &mut MySqlSession<S>,
+        ) -> Result<(), MySqlError> {
             this.stream.push(
                 &ErrPacket {
                     error_code: 1,

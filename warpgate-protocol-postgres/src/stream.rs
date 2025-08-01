@@ -4,7 +4,6 @@ use bytes::BytesMut;
 use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tracing::*;
 use warpgate_common::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
@@ -85,22 +84,24 @@ impl<T: pgwire::messages::Message> PostgresEncode for T {
     }
 }
 
-pub(crate) struct PostgresStream<TS>
+pub(crate) struct PostgresStream<S, TS>
 where
-    TcpStream: UpgradableStream<TS>,
+    S: UpgradableStream<TS>,
+    S: AsyncRead + AsyncWrite + Send + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
-    stream: MaybeTlsStream<TcpStream, TS>,
+    stream: MaybeTlsStream<S, TS>,
     inbound_buffer: BytesMut,
     outbound_buffer: BytesMut,
 }
 
-impl<TS> PostgresStream<TS>
+impl<S, TS> PostgresStream<S, TS>
 where
-    TcpStream: UpgradableStream<TS>,
+    S: UpgradableStream<TS>,
+    S: AsyncRead + AsyncWrite + Send + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: S) -> Self {
         Self {
             stream: MaybeTlsStream::new(stream),
             inbound_buffer: BytesMut::new(),
@@ -142,7 +143,7 @@ where
 
     pub(crate) async fn upgrade(
         mut self,
-        config: <TcpStream as UpgradableStream<TS>>::UpgradeConfig,
+        config: <S as UpgradableStream<TS>>::UpgradeConfig,
     ) -> Result<Self, MaybeTlsStreamError> {
         self.stream = self.stream.upgrade(config).await?;
         Ok(self)

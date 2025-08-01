@@ -17,7 +17,7 @@ use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
-    pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,
+    pub stream: MySqlStream<TcpStream, tokio_rustls::client::TlsStream<TcpStream>>,
     pub _capabilities: Capabilities,
 }
 

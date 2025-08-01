@@ -4,7 +4,7 @@ use std::sync::Arc;
 use pgwire::error::ErrorInfo;
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use rustls::ServerConfig;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tracing::*;
@@ -22,8 +22,8 @@ use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericFrontendMessage, PgWireStartupOrSslRequest, PostgresStream};
 
-pub struct PostgresSession {
-    stream: PostgresStream<TlsStream<TcpStream>>,
+pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
+    stream: PostgresStream<S, TlsStream<S>>,
     tls_config: Arc<ServerConfig>,
     username: Option<String>,
     database: Option<String>,
@@ -33,11 +33,11 @@ pub struct PostgresSession {
     remote_address: SocketAddr,
 }
 
-impl PostgresSession {
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
-        stream: TcpStream,
+        stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
@@ -105,7 +105,9 @@ impl PostgresSession {
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
 
-        async fn fail(this: &mut PostgresSession) -> Result<(), PostgresError> {
+        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
+            this: &mut PostgresSession<S>,
+        ) -> Result<(), PostgresError> {
             let error_info = ErrorInfo::new(
                 "FATAL".to_owned(),
                 "28P01".to_owned(),
