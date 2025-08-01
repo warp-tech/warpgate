@@ -114,10 +114,11 @@
     </div>
 
     <h4 class="mt-4">Traffic</h4>
-    <FormGroup floating label="User bandwidth limit">
+    <FormGroup class="mb-5">
+        <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
         <RateLimitInput
+            id="rateLimitBytesPerSecond"
             bind:value={user.rateLimitBytesPerSecond}
-            change={update}
         />
     </FormGroup>
     {/if}

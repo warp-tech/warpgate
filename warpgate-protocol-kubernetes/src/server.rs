@@ -749,7 +749,6 @@ async fn validate_client_certificate(
             let stored_cert = normalize_certificate_pem(&cert_credential.certificate);
             let provided_cert = normalize_certificate_pem(&cert_pem);
 
-            dbg!(&stored_cert, &provided_cert);
             if stored_cert == provided_cert {
                 info!(
                     user = user.username,

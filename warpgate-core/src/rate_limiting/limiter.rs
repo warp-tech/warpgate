@@ -118,7 +118,6 @@ pub struct SwappableLimiterCell {
 
 impl SwappableLimiterCell {
     pub fn empty() -> Self {
-        eprintln!("new empty cell");
         let (sender, receiver) = watch::channel(None);
         Self {
             inner: None,
@@ -138,12 +137,8 @@ impl SwappableLimiterCell {
         if _ref.has_changed() {
             let limiter = _ref.as_ref().cloned();
             match &limiter {
-                Some(x) => {
-                    eprintln!("cell updated with {:?}", &*x.lock());
-                }
-                None => {
-                    eprintln!("cell updated with None");
-                }
+                Some(x) => {}
+                None => {}
             }
             self.inner = limiter;
         }
@@ -200,12 +195,10 @@ impl WarpgateRateLimiter {
     }
 
     pub fn unlimited() -> SharedWarpgateRateLimiter {
-        eprintln!("new unlimited limiter");
         Self { inner: None }.share()
     }
 
     pub fn limited(bytes_per_second: NonZeroU32) -> SharedWarpgateRateLimiter {
-        eprintln!("new limited limiter {:?}", bytes_per_second);
         let rate_limiter = new_rate_limiter(bytes_per_second);
         Self {
             inner: Some((rate_limiter, bytes_per_second)),
@@ -222,7 +215,6 @@ impl WarpgateRateLimiter {
     }
 
     pub fn replace(&mut self, bytes_per_second: Option<u32>) -> Result<(), WarpgateError> {
-        eprintln!("replacing {:?} {:?}", &self, bytes_per_second);
         match bytes_per_second {
             None => {
                 self.inner = None;

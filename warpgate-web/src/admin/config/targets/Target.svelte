@@ -233,13 +233,13 @@
         </Loadable>
 
         <h4 class="mt-4">Traffic</h4>
-        <FormGroup floating label="Target bandwidth limit">
+        <FormGroup class="mb-5">
+            <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput
+                id="rateLimitBytesPerSecond"
                 bind:value={target.rateLimitBytesPerSecond}
-                change={update}
             />
         </FormGroup>
-
     {/if}
     </Loadable>
 
