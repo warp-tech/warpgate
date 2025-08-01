@@ -112,7 +112,7 @@ impl<T> Mutex2<T> {
 
     #[cfg(not(debug_assertions))]
     async fn _lock(&self) -> MutexGuard<'_, T> {
-        self.inner.lock().await
+        MutexGuard::new(self.inner.lock().await, &self.poisoned)
     }
 }
 
