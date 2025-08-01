@@ -118,32 +118,20 @@ impl RateLimiterRegistry {
         handle: &mut RateLimiterStackHandle,
     ) -> Result<(), WarpgateError> {
         if let Some(user_info) = &state.user_info {
-            dbg!();
             let user_limiter = self.user(&user_info.id).await?;
-            dbg!();
             handle.user.replace(Some(user_limiter));
-            dbg!();
         } else {
-            dbg!();
             handle.user.replace(None);
-            dbg!();
         }
 
         if let Some(target) = &state.target {
-            dbg!();
             let target_limiter = self.target(&target.id).await?;
-            dbg!();
             handle.target.replace(Some(target_limiter));
-            dbg!();
         } else {
-            dbg!();
             handle.target.replace(None);
-            dbg!();
         }
 
-            dbg!();
         handle.global.replace(Some(self.global()));
-            dbg!();
 
         Ok(())
     }

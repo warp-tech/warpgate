@@ -221,7 +221,7 @@ impl ServerSession {
 
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
-            let sender = event_sender.clone();
+            let sender: EventSender<Event> = event_sender.clone();
             async move {
                 while let Some(e) = handler_event_rx.recv().await {
                     if sender.send_once(Event::ServerHandler(e)).await.is_err() {

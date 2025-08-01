@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
 
-use crate::helpers::locks::{DebugLock, Mutex2, MutexGuard};
+use crate::helpers::locks::{Mutex2, MutexGuard};
 
 pub struct EventSender<E> {
     subscriptions: SubscriptionStore<E>,
