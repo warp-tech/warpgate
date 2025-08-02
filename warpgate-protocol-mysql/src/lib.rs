@@ -75,6 +75,8 @@ impl ProtocolServer for MySQLProtocolServer {
             };
             let remote_address = stream.peer_addr().context("getting peer address")?;
 
+            stream.set_nodelay(true)?;
+
             let tls_config = tls_config.clone();
             let services = self.services.clone();
             tokio::spawn(async move {

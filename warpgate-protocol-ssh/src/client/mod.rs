@@ -489,6 +489,7 @@ impl RemoteClient {
 
         let config = russh::client::Config {
             preferred: algos,
+            nodelay: true,
             ..Default::default()
         };
         let config = Arc::new(config);
