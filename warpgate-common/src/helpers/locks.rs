@@ -13,6 +13,7 @@ mod deadlock_detecting_mutex {
 
     fn log_state() {
         eprintln!("Tokio task: {:?}", tokio::task::try_id());
+        #[allow(clippy::unwrap_used)]
         let ids = LOCK_IDENTITIES.lock().unwrap();
         let identities = ids.get(&tokio::task::try_id()).cloned().unwrap_or_default();
         if !identities.is_empty() {
@@ -22,13 +23,13 @@ mod deadlock_detecting_mutex {
 
     pub struct MutexGuard<'a, T> {
         inner: tokio::sync::MutexGuard<'a, T>,
-        #[cfg(debug_assertions)]
         poisoned: &'a AtomicBool,
     }
 
     impl<'a, T> MutexGuard<'a, T> {
         pub fn new(inner: tokio::sync::MutexGuard<'a, T>, poisoned: &'a AtomicBool) -> Self {
             let this = Self { inner, poisoned };
+            #[allow(clippy::unwrap_used)]
             let mut ids = LOCK_IDENTITIES.lock().unwrap();
             let identities = ids.entry(tokio::task::try_id()).or_default();
             let id = this.identity();
@@ -60,18 +61,19 @@ mod deadlock_detecting_mutex {
         }
     }
 
-    #[cfg(debug_assertions)]
     impl<T> Drop for MutexGuard<'_, T> {
         fn drop(&mut self) {
             let self_id = self.identity();
             // eprintln!("Unlocking {} @ {:?}", self.identity(), tokio::task::try_id());
 
+            #[allow(clippy::panic)]
             if self.poisoned.load(Ordering::Relaxed) {
                 eprintln!("[!!] MutexGuard dropped while poisoned");
                 log_state();
                 panic!();
             }
 
+            #[allow(clippy::unwrap_used)]
             let mut ids = LOCK_IDENTITIES.lock().unwrap();
             if let Some(identities) = ids.get_mut(&tokio::task::try_id()) {
                 identities.retain(|id| id != &self_id);
@@ -96,7 +98,7 @@ mod deadlock_detecting_mutex {
             self._lock().await
         }
 
-        #[cfg(debug_assertions)]
+        #[allow(clippy::panic)]
         async fn _lock(&self) -> MutexGuard<'_, T> {
             use std::time::Duration;
 
@@ -106,15 +108,9 @@ mod deadlock_detecting_mutex {
                     self.poisoned.store(true, Ordering::Relaxed);
                     eprintln!("[!!] Mutex lock took too long");
                     log_state();
-                #[allow(clippy::panic)]
                     panic!();
                 }
             }
-        }
-
-        #[cfg(not(debug_assertions))]
-        async fn _lock(&self) -> MutexGuard<'_, T> {
-            MutexGuard::new(self.inner.lock().await, &self.poisoned)
         }
     }
 }
