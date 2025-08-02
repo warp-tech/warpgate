@@ -8,7 +8,6 @@ use tracing::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_db_entities::LogEntry;
 
 use super::layer::ValuesLogLayer;
@@ -42,7 +41,7 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
             match receiver.recv().await {
                 Err(_) => break,
                 Ok(log_entry) => {
-                    let database = database.lock2().await;
+                    let database = database.lock().await;
                     if let Err(error) = log_entry.insert(&*database).await {
                         error!(?error, "Failed to store log entry");
                     }

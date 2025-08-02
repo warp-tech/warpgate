@@ -8,7 +8,6 @@ use poem::{FromRequest, Request};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::SessionId;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 
@@ -27,7 +26,7 @@ impl SessionStorage for SharedSessionStorage {
         &'a self,
         session_id: &'a str,
     ) -> poem::Result<Option<BTreeMap<String, Value>>> {
-        self.0.lock2().await.load_session(session_id).await.map(|o| {
+        self.0.lock().await.load_session(session_id).await.map(|o| {
             o.map(|mut s| {
                 s.insert(
                     POEM_SESSION_ID_SESSION_KEY.to_string(),
@@ -46,7 +45,7 @@ impl SessionStorage for SharedSessionStorage {
         expires: Option<Duration>,
     ) -> poem::Result<()> {
         self.0
-            .lock2()
+            .lock()
             .await
             .update_session(session_id, entries, expires)
             .await
@@ -54,7 +53,7 @@ impl SessionStorage for SharedSessionStorage {
 
     /// Remove a session by session id.
     async fn remove_session<'a>(&'a self, session_id: &'a str) -> poem::Result<()> {
-        self.0.lock2().await.remove_session(session_id).await
+        self.0.lock().await.remove_session(session_id).await
     }
 }
 
@@ -120,7 +119,7 @@ impl SessionStore {
         )
         .await?;
 
-        let id = server_handle.lock2().await.id();
+        let id = server_handle.lock().await.id();
         self.session_handles.insert(id, server_handle.clone());
 
         session.set(SESSION_ID_SESSION_KEY, id);
@@ -139,7 +138,7 @@ impl SessionStore {
                                 let _ = session_storage.remove_session(poem_session_id).await;
                             }
                             info!(%id, "Removed HTTP session");
-                            let mut that = this.lock2().await;
+                            let mut that = this.lock().await;
                             that.session_handles.remove(&id);
                             that.session_timestamps.remove(&id);
                         }

@@ -6,7 +6,6 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
@@ -52,7 +51,7 @@ impl Api {
         name: Path<String>,
         next: Query<Option<String>>,
     ) -> Result<StartSsoResponse, WarpgateError> {
-        let config = services.config.lock2().await;
+        let config = services.config.lock().await;
 
         let name = name.0;
 

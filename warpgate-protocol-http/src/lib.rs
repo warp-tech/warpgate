@@ -27,7 +27,6 @@ use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
@@ -108,7 +107,7 @@ impl ProtocolServer for HTTPProtocolServer {
         };
 
         let (cookie_max_age, session_max_age) = {
-            let config = self.services.config.lock2().await;
+            let config = self.services.config.lock().await;
             (
                 config.store.http.cookie_max_age,
                 config.store.http.session_max_age,
@@ -174,7 +173,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     .await?
                     .clone();
 
-                let req = { sm.lock2().await.process_request(req).await? };
+                let req = { sm.lock().await.process_request(req).await? };
 
                 let span = span_for_request(&req).await?;
 
@@ -200,13 +199,13 @@ impl ProtocolServer for HTTPProtocolServer {
 
         tokio::spawn(async move {
             loop {
-                session_store.lock2().await.vacuum(session_max_age).await;
+                session_store.lock().await.vacuum(session_max_age).await;
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 
         let rustls_config = {
-            let config = self.services.config.lock2().await;
+            let config = self.services.config.lock().await;
             make_rustls_config(&config).await.context("rustls setup")?
         };
 

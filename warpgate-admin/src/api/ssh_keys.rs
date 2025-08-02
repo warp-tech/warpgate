@@ -6,7 +6,6 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
 use tokio::sync::Mutex;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{WarpgateConfig, WarpgateError};
 
 use super::AnySecurityScheme;
@@ -37,7 +36,7 @@ impl Api {
         config: Data<&Arc<Mutex<WarpgateConfig>>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
-        let config = config.lock2().await;
+        let config = config.lock().await;
         let keys = warpgate_protocol_ssh::load_client_keys(&config)?;
 
         let keys = keys

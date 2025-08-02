@@ -4,7 +4,6 @@ use http::{Method, StatusCode, Uri};
 use poem::web::Data;
 use poem::{FromRequest, Request};
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_core::Services;
 
 use crate::session_handle::WarpgateServerHandleFromRequest;
@@ -16,8 +15,8 @@ pub async fn span_for_request(req: &Request) -> poem::Result<Span> {
 
     Ok(match handle {
         Ok(ref handle) => {
-            let handle = handle.lock2().await;
-            let ss = handle.session_state().lock2().await;
+            let handle = handle.lock().await;
+            let ss = handle.session_state().lock().await;
             match ss.user_info.clone() {
                 Some(ref user_info) => {
                     info_span!("HTTP", session=%handle.id(), session_username=%user_info.username, %client_ip)
@@ -44,7 +43,7 @@ pub fn log_request_error<E: Error>(method: &Method, url: &Uri, client_ip: &str, 
 pub async fn get_client_ip(req: &Request) -> poem::Result<String> {
     let services = Data::<&Services>::from_request_without_body(req).await.ok();
     let trust_x_forwarded_headers = if let Some(services) = services {
-        let config = services.config.lock2().await;
+        let config = services.config.lock().await;
         config.store.http.trust_x_forwarded_headers
     } else {
         false

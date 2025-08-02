@@ -6,7 +6,6 @@ use futures::{FutureExt, StreamExt};
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::db::cleanup_db;
@@ -105,12 +104,12 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         let services = services.clone();
         async move {
             loop {
-                let retention = { services.config.lock2().await.store.log.retention };
+                let retention = { services.config.lock().await.store.log.retention };
                 let interval = retention / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
-                    &mut *services.db.lock2().await,
-                    &mut *services.recordings.lock2().await,
+                    &mut *services.db.lock().await,
+                    &mut *services.recordings.lock().await,
                     &retention,
                 )
                 .await
@@ -185,10 +184,10 @@ pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Resul
     let mut reload_event = watch_config(path, services.config.clone())?;
 
     while let Ok(()) = reload_event.recv().await {
-        let state = services.state.lock2().await;
-        let mut cp = services.config_provider.lock2().await;
+        let state = services.state.lock().await;
+        let mut cp = services.config_provider.lock().await;
         for (id, session) in state.sessions.iter() {
-            let mut session = session.lock2().await;
+            let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
                 (session.user_info.as_ref(), session.target.as_ref())
             {

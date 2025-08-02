@@ -7,7 +7,6 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::LogEntry;
 
@@ -42,7 +41,7 @@ impl Api {
     ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 
-        let db = db.lock2().await;
+        let db = db.lock().await;
         let mut q = LogEntry::Entity::find()
             .order_by_desc(LogEntry::Column::Timestamp)
             .limit(body.limit.unwrap_or(100));

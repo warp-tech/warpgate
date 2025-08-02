@@ -7,7 +7,6 @@ use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{WarpgateConfig, WarpgateConfigStore};
 
 pub fn load_config(path: &Path, secure: bool) -> Result<WarpgateConfig> {
@@ -97,7 +96,7 @@ pub fn watch_config<P: AsRef<Path> + Send + 'static>(
                     if event.kind.is_modify() {
                         match load_config(&path, false) {
                             Ok(new_config) => {
-                                *(config.lock2().await) = new_config;
+                                *(config.lock().await) = new_config;
                                 let _ = tx2.send(());
                                 info!("Reloaded config");
                             }

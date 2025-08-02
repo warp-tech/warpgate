@@ -13,7 +13,6 @@ use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
@@ -38,7 +37,7 @@ impl MySQLProtocolServer {
 impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
-            let config = self.services.config.lock2().await;
+            let config = self.services.config.lock().await;
             let certificate_path = config
                 .paths_relative_to
                 .join(&config.store.mysql.certificate);
@@ -94,7 +93,7 @@ impl ProtocolServer for MySQLProtocolServer {
                 .await
                 .context("registering session")?;
 
-                let wrapped_stream = server_handle.lock2().await.wrap_stream(stream).await?;
+                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
 
                 let session =
                     MySqlSession::new(server_handle, services, wrapped_stream, tls_config, remote_address)

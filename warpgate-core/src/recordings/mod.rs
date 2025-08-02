@@ -8,7 +8,6 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{RecordingsConfig, SessionId, WarpgateConfig};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod terminal;
@@ -92,7 +91,7 @@ impl SessionRecordings {
                 ..Default::default()
             };
 
-            let db = self.db.lock2().await;
+            let db = self.db.lock().await;
             values.insert(&*db).await.map_err(Error::Database)?
         };
 
@@ -101,7 +100,7 @@ impl SessionRecordings {
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
-        let live = self.live.lock2().await;
+        let live = self.live.lock().await;
         live.get(id).map(|sender| sender.subscribe())
     }
 

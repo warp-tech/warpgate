@@ -4,7 +4,6 @@ use russh::keys::{PublicKey, PublicKeyBase64};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_db_entities::KnownHost;
 
 pub struct KnownHosts {
@@ -31,7 +30,7 @@ impl KnownHosts {
         port: u16,
         key: &PublicKey,
     ) -> Result<KnownHostValidationResult, sea_orm::DbErr> {
-        let db = self.db.lock2().await;
+        let db = self.db.lock().await;
         let entries = KnownHost::Entity::find()
             .filter(KnownHost::Column::Host.eq(host))
             .filter(KnownHost::Column::Port.eq(port))
@@ -68,7 +67,7 @@ impl KnownHosts {
             key_base64: Set(key.public_key_base64()),
         };
 
-        let db = self.db.lock2().await;
+        let db = self.db.lock().await;
         values.insert(&*db).await?;
 
         Ok(())

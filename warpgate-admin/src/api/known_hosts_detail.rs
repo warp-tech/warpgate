@@ -6,7 +6,6 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 
 use super::AnySecurityScheme;
@@ -35,7 +34,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let known_host = KnownHost::Entity::find_by_id(id.0).one(&*db).await?;
 

@@ -12,7 +12,6 @@ use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
@@ -41,7 +40,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock2().await.id();
+        let id = server_handle.lock().await.id();
 
         Self {
             services,
@@ -128,10 +127,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 let state_arc = self
                     .services
                     .auth_state_store
-                    .lock2()
+                    .lock()
                     .await
                     .create(
-                        Some(&self.server_handle.lock2().await.id()),
+                        Some(&self.server_handle.lock().await.id()),
                         &username,
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],
@@ -142,20 +141,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 let mut auth_ok_sent = false;
 
                 loop {
-                    let user_auth_result = state_arc.lock2().await.verify();
+                    let user_auth_result = state_arc.lock().await.verify();
 
                     match user_auth_result {
                         AuthResult::Accepted { user_info } => {
                             self.services
                                 .auth_state_store
-                                .lock2()
+                                .lock()
                                 .await
-                                .complete(state_arc.lock2().await.id())
+                                .complete(state_arc.lock().await.id())
                                 .await;
                             let target_auth_result = {
                                 self.services
                                     .config_provider
-                                    .lock2()
+                                    .lock()
                                     .await
                                     .authorize_target(&user_info.username, &target_name)
                                     .await
@@ -193,14 +192,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                         .password,
                                 );
 
-                                let mut state = state_arc.lock2().await;
+                                let mut state = state_arc.lock().await;
 
                                 let credential = AuthCredential::Password(password);
 
                                 if self
                                     .services
                                     .config_provider
-                                    .lock2()
+                                    .lock()
                                     .await
                                     .validate_credential(&username, &credential)
                                     .await?
@@ -214,18 +213,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
 
                                 let identification_string =
-                                    state_arc.lock2().await.identification_string().to_owned();
-                                let auth_state_id = *state_arc.lock2().await.id();
+                                    state_arc.lock().await.identification_string().to_owned();
+                                let auth_state_id = *state_arc.lock().await.id();
                                 let mut event = self
                                     .services
                                     .auth_state_store
-                                    .lock2()
+                                    .lock()
                                     .await
                                     .subscribe(auth_state_id);
 
                                 let login_url_result =
-                                    state_arc.lock2().await.construct_web_approval_url(
-                                        &*self.services.config.lock2().await,
+                                    state_arc.lock().await.construct_web_approval_url(
+                                        &*self.services.config.lock().await,
                                     );
                                 let login_url = match login_url_result {
                                     Ok(login_url) => login_url,
@@ -303,7 +302,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let target = {
             self.services
                 .config_provider
-                .lock2()
+                .lock()
                 .await
                 .list_targets()
                 .await?
@@ -327,7 +326,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         };
 
         {
-            let handle = self.server_handle.lock2().await;
+            let handle = self.server_handle.lock().await;
             handle.set_user_info(user_info).await?;
             handle.set_target(&target).await?;
         }

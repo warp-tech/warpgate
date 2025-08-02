@@ -1,6 +1,5 @@
 use anyhow::Result;
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::TargetOptions;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services, TargetTestError};
 
@@ -13,7 +12,7 @@ pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()
 
     let Some(target) = services
         .config_provider
-        .lock2()
+        .lock()
         .await
         .list_targets()
         .await?

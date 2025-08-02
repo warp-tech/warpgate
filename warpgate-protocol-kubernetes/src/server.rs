@@ -190,7 +190,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     info!(?address, "Kubernetes protocol listening");
 
     let certificate_and_key = {
-        let config = services.config.lock2().await;
+        let config = services.config.lock().await;
         let certificate_path = config
             .paths_relative_to
             .join(&config.store.kubernetes.certificate);
@@ -323,7 +323,7 @@ async fn handle_api_request(
     // Record the request if recording is enabled
     let mut recorder_opt = {
         // Check if recording is enabled in the config
-        let config = services.config.lock2().await;
+        let config = services.config.lock().await;
         if config.store.recordings.enable {
             drop(config);
 
@@ -518,7 +518,7 @@ async fn authenticate_and_get_target(
     if let Some(auth_header) = req.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                let mut config_provider = services.config_provider.lock2().await;
+                let mut config_provider = services.config_provider.lock().await;
                 if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
                     // Look up the specific target by name from the URL
                     let targets = config_provider.list_targets().await.map_err(|e| {
@@ -573,7 +573,7 @@ async fn authenticate_and_get_target(
                 );
 
                 // Look up the specific target by name from the URL
-                let mut config_provider = services.config_provider.lock2().await;
+                let mut config_provider = services.config_provider.lock().await;
                 let targets = config_provider.list_targets().await.map_err(|e| {
                     poem::Error::from_string(
                         format!("Failed to list targets: {}", e),
@@ -705,7 +705,7 @@ async fn create_temporary_session(
         ..Default::default()
     };
 
-    let db = services.db.lock2().await;
+    let db = services.db.lock().await;
     session_model.insert(&*db).await?;
 
     Ok(())
@@ -715,7 +715,7 @@ async fn start_recording(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> Result<KubernetesRecorder, poem::Error> {
-    let mut recordings = recordings.lock2().await;
+    let mut recordings = recordings.lock().await;
     recordings
         .start::<KubernetesRecorder>(session_id, "kubernetes-api".to_string())
         .await
@@ -735,7 +735,7 @@ async fn validate_client_certificate(
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der)?;
 
-    let db = services.db.lock2().await;
+    let db = services.db.lock().await;
 
     // Find all certificate credentials and match against the provided certificate
     let cert_credentials = CertificateCredential::Entity::find()

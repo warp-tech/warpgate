@@ -10,7 +10,6 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
 };
@@ -58,7 +57,7 @@ impl ListApi {
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUsersResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
@@ -88,7 +87,7 @@ impl ListApi {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -143,7 +142,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetUserResponse::NotFound);
@@ -160,7 +159,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserResponse, WarpgateError> {
-        let db = services.db.lock2().await;
+        let db = services.db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
@@ -179,9 +178,9 @@ impl DetailApi {
 
         services
             .rate_limiter_registry
-            .lock2()
+            .lock()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock2().await)
+            .apply_new_rate_limits(&mut *services.state.lock().await)
             .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
@@ -194,7 +193,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserResponse::NotFound);
@@ -249,7 +248,7 @@ impl RolesApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRolesResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -278,7 +277,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         if !UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
@@ -314,7 +313,7 @@ impl RolesApi {
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);

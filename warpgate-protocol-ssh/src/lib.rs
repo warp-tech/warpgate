@@ -12,7 +12,6 @@ pub use common::*;
 pub use keys::*;
 pub use server::run_server;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     ListenEndpoint, ProtocolName, SshHostKeyVerificationMode, Target, TargetOptions,
 };
@@ -27,7 +26,7 @@ pub struct SSHProtocolServer {
 
 impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
-        let config = services.config.lock2().await;
+        let config = services.config.lock().await;
         generate_host_keys(&config)?;
         generate_client_keys(&config)?;
         Ok(SSHProtocolServer {
@@ -70,7 +69,7 @@ impl ProtocolServer for SSHProtocolServer {
                     match self
                         .services
                         .config
-                        .lock2()
+                        .lock()
                         .await
                         .store
                         .ssh

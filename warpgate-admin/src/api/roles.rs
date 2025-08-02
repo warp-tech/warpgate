@@ -10,7 +10,6 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{
     Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
@@ -50,7 +49,7 @@ impl ListApi {
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRolesResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
@@ -79,7 +78,7 @@ impl ListApi {
             return Ok(CreateRoleResponse::BadRequest(Json("name".into())));
         }
 
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let values = Role::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -148,7 +147,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -166,7 +165,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateRoleResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
@@ -191,7 +190,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteRoleResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
@@ -216,7 +215,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleTargetsResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleTargetsResponse::NotFound);
@@ -243,7 +242,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleUsersResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleUsersResponse::NotFound);

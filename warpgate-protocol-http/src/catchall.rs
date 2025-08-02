@@ -7,7 +7,6 @@ use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::*;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_core::{ConfigProvider, Services, WarpgateServerHandle};
 
@@ -41,7 +40,7 @@ pub async fn catchall_endpoint(
     session.set_target_name(target.name.clone());
 
     if let Some(server_handle) = server_handle {
-        server_handle.lock2().await.set_target(&target).await?;
+        server_handle.lock().await.set_target(&target).await?;
     }
 
     let span = info_span!("", target=%target.name);
@@ -72,7 +71,7 @@ async fn get_target_for_request(
     let host_based_target_name = if let Some(host) = req.original_uri().host() {
         services
             .config_provider
-            .lock2()
+            .lock()
             .await
             .list_targets()
             .await?
@@ -116,7 +115,7 @@ async fn get_target_for_request(
         let target = {
             services
                 .config_provider
-                .lock2()
+                .lock()
                 .await
                 .list_targets()
                 .await?
@@ -134,7 +133,7 @@ async fn get_target_for_request(
             if need_role_auth
                 && !services
                     .config_provider
-                    .lock2()
+                    .lock()
                     .await
                     .authorize_target(username, &target.0.name)
                     .await?

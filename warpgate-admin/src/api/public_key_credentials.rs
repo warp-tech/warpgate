@@ -11,7 +11,6 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{UserPublicKeyCredential, WarpgateError};
 use warpgate_db_entities::PublicKeyCredential;
 
@@ -94,7 +93,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
@@ -118,7 +117,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -163,7 +162,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
@@ -196,7 +195,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))

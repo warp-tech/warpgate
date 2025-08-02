@@ -9,7 +9,6 @@ use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
@@ -71,7 +70,7 @@ pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
 ) -> Result<Option<(e::Ticket::Model, AuthStateUserInfo)>, WarpgateError> {
-    let db = db.lock2().await;
+    let db = db.lock().await;
     let ticket = {
         e::Ticket::Entity::find()
             .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
@@ -115,7 +114,7 @@ pub async fn consume_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     ticket_id: &Uuid,
 ) -> Result<(), WarpgateError> {
-    let db = db.lock2().await;
+    let db = db.lock().await;
     let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
     let Some(ticket) = ticket else {
         return Err(WarpgateError::InvalidTicket(*ticket_id));

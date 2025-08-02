@@ -9,7 +9,6 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::{Secret, UserPasswordCredential, WarpgateError};
 use warpgate_db_entities::PasswordCredential;
 
@@ -58,7 +57,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let objects = PasswordCredential::Entity::find()
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
@@ -82,7 +81,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let object = PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -125,7 +124,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock2().await;
+        let db = db.lock().await;
 
         let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))

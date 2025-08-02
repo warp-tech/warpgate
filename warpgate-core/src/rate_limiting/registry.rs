@@ -5,7 +5,6 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
-use warpgate_common::helpers::locks::DebugLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::{Parameters, Target, User};
 
@@ -51,7 +50,7 @@ impl RateLimiterRegistry {
     }
 
     async fn global_quota(&mut self) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock2().await;
+        let db = self.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
         Ok(parameters.rate_limit_bytes_per_second.map(|x| x as u32))
     }
@@ -69,7 +68,7 @@ impl RateLimiterRegistry {
     }
 
     async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock2().await;
+        let db = self.db.lock().await;
         let user = User::Entity::find_by_id(*user_id).one(&*db).await?;
         Ok(user
             .and_then(|u| u.rate_limit_bytes_per_second)
@@ -89,7 +88,7 @@ impl RateLimiterRegistry {
     }
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock2().await;
+        let db = self.db.lock().await;
         let target = Target::Entity::find_by_id(*target_id).one(&*db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)
@@ -144,7 +143,7 @@ impl RateLimiterRegistry {
 
         // Update all session rate limiters
         for session_state in state.sessions.values() {
-            let mut session_state = session_state.lock2().await;
+            let mut session_state = session_state.lock().await;
             self.update_all_rate_limiters(&mut session_state).await?;
         }
         Ok(())
