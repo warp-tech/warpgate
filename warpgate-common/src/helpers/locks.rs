@@ -69,7 +69,6 @@ mod deadlock_detecting_mutex {
             if self.poisoned.load(Ordering::Relaxed) {
                 eprintln!("[!!] MutexGuard dropped while poisoned");
                 log_state();
-                #[allow(clippy::panic)]
                 panic!();
             }
 
