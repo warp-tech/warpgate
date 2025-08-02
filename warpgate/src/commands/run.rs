@@ -186,6 +186,7 @@ pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Resul
     while let Ok(()) = reload_event.recv().await {
         let state = services.state.lock().await;
         let mut cp = services.config_provider.lock().await;
+        // TODO no longer happens since everything is in the DB
         for (id, session) in state.sessions.iter() {
             let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
