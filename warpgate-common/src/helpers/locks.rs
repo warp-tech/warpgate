@@ -1,12 +1,11 @@
 #[cfg(debug_assertions)]
-mod custom_mutex {
+mod deadlock_detecting_mutex {
     use std::any::type_name;
     use std::collections::HashMap;
     use std::ops::{Deref, DerefMut};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use once_cell::sync::Lazy;
-    use tokio::sync::Mutex;
     use tokio::task::Id;
 
     static LOCK_IDENTITIES: Lazy<std::sync::Mutex<HashMap<Option<Id>, Vec<String>>>> =
@@ -80,15 +79,15 @@ mod custom_mutex {
         }
     }
 
-    pub struct Mutex2<T> {
-        inner: Mutex<T>,
+    pub struct Mutex<T> {
+        inner: tokio::sync::Mutex<T>,
         poisoned: AtomicBool,
     }
 
-    impl<T> Mutex2<T> {
+    impl<T> Mutex<T> {
         pub fn new(data: T) -> Self {
             Self {
-                inner: Mutex::new(data),
+                inner: tokio::sync::Mutex::new(data),
                 poisoned: AtomicBool::new(false),
             }
         }
@@ -120,6 +119,6 @@ mod custom_mutex {
 }
 
 #[cfg(debug_assertions)]
-pub use custom_mutex::{Mutex2, MutexGuard};
+pub use deadlock_detecting_mutex::{Mutex, MutexGuard};
 #[cfg(not(debug_assertions))]
-pub use tokio::sync::{Mutex as Mutex2, MutexGuard};
+pub use tokio::sync::{Mutex, MutexGuard};

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-use crate::helpers::locks::{Mutex2, MutexGuard};
+use crate::helpers::locks::{Mutex, MutexGuard};
 
 pub struct EventSender<E> {
     subscriptions: SubscriptionStore<E>,
@@ -65,7 +65,7 @@ impl<E> EventSubscription<E> {
 }
 
 type SubscriptionStoreInner<E> = Vec<(Box<dyn Fn(&E) -> bool + Send>, UnboundedSender<E>)>;
-type SubscriptionStore<E> = Arc<Mutex2<SubscriptionStoreInner<E>>>;
+type SubscriptionStore<E> = Arc<Mutex<SubscriptionStoreInner<E>>>;
 
 pub struct EventHub<E: Send> {
     subscriptions: SubscriptionStore<E>,
@@ -73,7 +73,7 @@ pub struct EventHub<E: Send> {
 
 impl<E: Send> EventHub<E> {
     pub fn setup() -> (Self, EventSender<E>) {
-        let subscriptions = Arc::new(Mutex2::new(vec![]));
+        let subscriptions = Arc::new(Mutex::new(vec![]));
         (
             Self {
                 subscriptions: subscriptions.clone(),
