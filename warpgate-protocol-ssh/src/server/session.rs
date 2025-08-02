@@ -706,10 +706,12 @@ impl ServerSession {
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                if let Some(session) = self.session_handle.as_mut() {
-                    let _ = session
-                        .data(server_channel_id.0, CryptoVec::from_slice(&data))
-                        .await;
+                if let Some(session) = self.session_handle.clone() {
+                    self.channel_writer.write(
+                        session,
+                        server_channel_id.0,
+                        CryptoVec::from_slice(&data),
+                    );
                 }
             }
             RCEvent::Success(channel) => {
@@ -798,15 +800,14 @@ impl ServerSession {
                     }
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                self.maybe_with_session(|handle| async move {
-                    handle
-                        .extended_data(server_channel_id.0, ext, CryptoVec::from_slice(&data))
-                        .await
-                        .map_err(|_| ())
-                        .context("failed to send extended data")?;
-                    Ok(())
-                })
-                .await?;
+                if let Some(session) = self.session_handle.clone() {
+                    self.channel_writer.write_extended(
+                        session,
+                        server_channel_id.0,
+                        ext,
+                        CryptoVec::from_slice(&data),
+                    );
+                }
             }
             RCEvent::HostKeyReceived(key) => {
                 self.emit_service_message(&format!(

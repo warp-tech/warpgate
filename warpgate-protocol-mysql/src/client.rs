@@ -57,8 +57,10 @@ impl MySqlClient {
         target: &TargetMySqlOptions,
         mut options: ConnectionOptions,
     ) -> Result<Self, MySqlError> {
-        let mut stream =
-            MySqlStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
+        stream.set_nodelay(true)?;
+
+        let mut stream = MySqlStream::new(stream);
 
         options.capabilities.remove(Capabilities::SSL);
         if target.tls.mode != TlsMode::Disabled {

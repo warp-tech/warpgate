@@ -56,8 +56,10 @@ impl PostgresClient {
         target: &TargetPostgresOptions,
         options: ConnectionOptions,
     ) -> Result<Self, PostgresError> {
-        let mut stream =
-            PostgresStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
+        stream.set_nodelay(true)?;
+
+        let mut stream = PostgresStream::new(stream);
 
         if target.tls.mode != TlsMode::Disabled {
             stream.push(pgwire::messages::startup::SslRequest::new())?;

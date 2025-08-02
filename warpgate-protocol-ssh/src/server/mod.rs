@@ -40,6 +40,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             ),
             keys: vec![load_host_keys(&config)?],
             event_buffer_size: 100,
+            nodelay: true,
             preferred: Preferred {
                 key: Cow::Borrowed(&[
                     Algorithm::Ed25519,
