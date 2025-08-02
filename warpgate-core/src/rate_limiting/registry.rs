@@ -8,8 +8,8 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::{Parameters, Target, User};
 
-use crate::rate_limiting::limiter::SharedWarpgateRateLimiter;
-use crate::rate_limiting::{RateLimiterStackHandle, WarpgateRateLimiter};
+use super::shared_limiter::SharedWarpgateRateLimiter;
+use super::{RateLimiterStackHandle, WarpgateRateLimiter};
 use crate::{SessionState, State};
 
 pub struct RateLimiterRegistry {

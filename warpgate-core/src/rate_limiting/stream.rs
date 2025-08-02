@@ -9,10 +9,9 @@ use governor::clock::Reference;
 use governor::Jitter;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-use crate::rate_limiting::limiter::{
-    RateLimiterDirection, SwappableLimiterCell, SwappableLimiterCellHandle,
+use crate::rate_limiting::{
+    RateLimiterDirection, SwappableLimiterCell, SwappableLimiterCellHandle, WarpgateRateLimiter,
 };
-use crate::rate_limiting::WarpgateRateLimiter;
 
 type WaitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
