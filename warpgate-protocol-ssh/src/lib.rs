@@ -128,10 +128,14 @@ impl ProtocolServer for SSHProtocolServer {
 
         Ok(())
     }
+
+    fn name(&self) -> &'static str {
+        "SSH"
+    }
 }
 
 impl Debug for SSHProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SSHProtocolServer")
+        f.debug_struct("SSHProtocolServer").finish()
     }
 }

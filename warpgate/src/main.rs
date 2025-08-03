@@ -108,7 +108,7 @@ async fn _main() -> Result<()> {
     match &cli.command {
         Commands::Version => {
             println!("warpgate {}", warpgate_version());
-            return Ok(());
+            Ok(())
         }
         Commands::Run { enable_admin_token } => {
             crate::commands::run::command(&cli, *enable_admin_token).await

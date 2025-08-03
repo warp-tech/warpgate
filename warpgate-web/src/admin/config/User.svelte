@@ -7,6 +7,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from '../CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
     interface Props {
         params: { id: string };
@@ -91,7 +92,7 @@
 
     <h4 class="mt-4">User roles</h4>
     <div class="list-group list-group-flush mb-3">
-        {#each allRoles as role}
+        {#each allRoles as role (role.id)}
             <label
                 for="role-{role.id}"
                 class="list-group-item list-group-item-action d-flex align-items-center"
@@ -111,6 +112,15 @@
             </label>
         {/each}
     </div>
+
+    <h4 class="mt-4">Traffic</h4>
+    <FormGroup class="mb-5">
+        <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+        <RateLimitInput
+            id="rateLimitBytesPerSecond"
+            bind:value={user.rateLimitBytesPerSecond}
+        />
+    </FormGroup>
     {/if}
     </Loadable>
 

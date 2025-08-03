@@ -18,7 +18,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+};
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
@@ -68,7 +70,7 @@ enum KeyboardInteractiveState {
 
 struct CachedSuccessfulTicketAuth {
     ticket: Secret<String>,
-    username: String,
+    user_info: AuthStateUserInfo,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -218,7 +220,7 @@ impl ServerSession {
 
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
-            let sender = event_sender.clone();
+            let sender: EventSender<Event> = event_sender.clone();
             async move {
                 while let Some(e) = handler_event_rx.recv().await {
                     if sender.send_once(Event::ServerHandler(e)).await.is_err() {
@@ -244,7 +246,15 @@ impl ServerSession {
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
-            || self.auth_state.as_ref().unwrap().lock().await.username() != username
+            || self
+                .auth_state
+                .as_ref()
+                .unwrap()
+                .lock()
+                .await
+                .user_info()
+                .username
+                != username
         {
             let state = self
                 .services
@@ -551,6 +561,10 @@ impl ServerSession {
                 let _ = reply.send(self._channel_open_direct_tcpip(channel, params).await?);
             }
 
+            ServerHandlerEvent::ChannelOpenDirectStreamlocal(channel, path, reply) => {
+                let _ = reply.send(self._channel_open_direct_streamlocal(channel, path).await?);
+            }
+
             ServerHandlerEvent::EnvRequest(channel, name, value, reply) => {
                 self._channel_env_request(channel, name, value).await?;
                 let _ = reply.send(());
@@ -691,10 +705,12 @@ impl ServerSession {
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                if let Some(session) = self.session_handle.as_mut() {
-                    let _ = session
-                        .data(server_channel_id.0, CryptoVec::from_slice(&data))
-                        .await;
+                if let Some(session) = self.session_handle.clone() {
+                    self.channel_writer.write(
+                        session,
+                        server_channel_id.0,
+                        CryptoVec::from_slice(&data),
+                    );
                 }
             }
             RCEvent::Success(channel) => {
@@ -718,6 +734,9 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::Close(channel) => {
+                // Flush any pending writes before closing the channel
+                let _ = self.channel_writer.flush().await;
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 let _ = self
                     .maybe_with_session(|handle| async move {
@@ -729,6 +748,9 @@ impl ServerSession {
                     .await;
             }
             RCEvent::Eof(channel) => {
+                // Flush any pending writes before sending EOF
+                let _ = self.channel_writer.flush().await;
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 self.maybe_with_session(|handle| async move {
                     handle
@@ -739,6 +761,9 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::ExitStatus(channel, code) => {
+                // Flush any pending writes before sending exit status
+                let _ = self.channel_writer.flush().await;
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 self.maybe_with_session(|handle| async move {
                     handle
@@ -783,15 +808,14 @@ impl ServerSession {
                     }
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
-                self.maybe_with_session(|handle| async move {
-                    handle
-                        .extended_data(server_channel_id.0, ext, CryptoVec::from_slice(&data))
-                        .await
-                        .map_err(|_| ())
-                        .context("failed to send extended data")?;
-                    Ok(())
-                })
-                .await?;
+                if let Some(session) = self.session_handle.clone() {
+                    self.channel_writer.write_extended(
+                        session,
+                        server_channel_id.0,
+                        ext,
+                        CryptoVec::from_slice(&data),
+                    );
+                }
             }
             RCEvent::HostKeyReceived(key) => {
                 self.emit_service_message(&format!(
@@ -1014,6 +1038,48 @@ impl ServerSession {
                         src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
                         src_port: params.originator_port as u16,
                     });
+                    if let Err(error) = recorder.write_connection_setup().await {
+                        error!(%channel, ?error, "Failed to record connection setup");
+                    }
+                    self.traffic_connection_recorders.insert(uuid, recorder);
+                }
+
+                Ok(true)
+            }
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(x) => Err(x.into()),
+        }
+    }
+
+    async fn _channel_open_direct_streamlocal(
+        &mut self,
+        channel: ServerChannelId,
+        path: String,
+    ) -> Result<bool> {
+        let uuid = Uuid::new_v4();
+        self.channel_map.insert(channel, uuid);
+
+        info!(%channel, "Opening direct streamlocal channel to {}", path);
+
+        let _ = self.maybe_connect_remote().await;
+
+        match self
+            .send_command_and_wait(RCCommand::Channel(
+                uuid,
+                ChannelOperation::OpenDirectStreamlocal(path.clone()),
+            ))
+            .await
+        {
+            Ok(()) => {
+                self.all_channels.push(uuid);
+
+                let recorder = self
+                    .traffic_recorder_for(TrafficRecorderKey::Socket(path.clone()), "direct-tcpip")
+                    .await;
+                if let Some(recorder) = recorder {
+                    #[allow(clippy::unwrap_used)]
+                    let mut recorder =
+                        recorder.connection(TrafficConnectionParams::Socket { socket_path: path });
                     if let Err(error) = recorder.write_connection_setup().await {
                         error!(%channel, ?error, "Failed to record connection setup");
                     }
@@ -1548,16 +1614,16 @@ impl ServerSession {
                 // between auth attempts
                 if &csta.ticket == secret {
                     return Ok(AuthResult::Accepted {
-                        username: csta.username.clone(),
+                        user_info: csta.user_info.clone(),
                     });
                 }
             }
 
             let result = self.try_auth_eager(selector, credential).await?;
-            if let AuthResult::Accepted { ref username } = result {
+            if let AuthResult::Accepted { ref user_info } = result {
                 self.cached_successful_ticket_auth = Some(CachedSuccessfulTicketAuth {
                     ticket: secret.clone(),
-                    username: username.clone(),
+                    user_info: user_info.clone(),
                 });
             }
 
@@ -1595,7 +1661,7 @@ impl ServerSession {
                 let user_auth_result = state.verify();
 
                 match user_auth_result {
-                    AuthResult::Accepted { username } => {
+                    AuthResult::Accepted { user_info } => {
                         self.services
                             .auth_state_store
                             .lock()
@@ -1607,7 +1673,7 @@ impl ServerSession {
                                 .config_provider
                                 .lock()
                                 .await
-                                .authorize_target(&username, target_name)
+                                .authorize_target(&user_info.username, target_name)
                                 .await?
                         };
                         if !target_auth_result {
@@ -1617,21 +1683,20 @@ impl ServerSession {
                             );
                             return Ok(AuthResult::Rejected);
                         }
-                        self._auth_accept(&username, target_name).await?;
-                        Ok(AuthResult::Accepted { username })
+                        self._auth_accept(user_info.clone(), target_name).await?;
+                        Ok(AuthResult::Accepted { user_info })
                     }
                     x => Ok(x),
                 }
             }
             AuthSelector::Ticket { secret } => {
                 match authorize_ticket(&self.services.db, secret).await? {
-                    Some(ticket) => {
+                    Some((ticket, user_info)) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(&ticket.username, &ticket.target).await?;
-                        Ok(AuthResult::Accepted {
-                            username: ticket.username.clone(),
-                        })
+                        self._auth_accept(user_info.clone(), &ticket.target).await?;
+
+                        Ok(AuthResult::Accepted { user_info })
                     }
                     None => Ok(AuthResult::Rejected),
                 }
@@ -1641,16 +1706,16 @@ impl ServerSession {
 
     async fn _auth_accept(
         &mut self,
-        username: &str,
+        user_info: AuthStateUserInfo,
         target_name: &str,
     ) -> Result<(), WarpgateError> {
+        self.username = Some(user_info.username.clone());
         let _ = self
             .server_handle
             .lock()
             .await
-            .set_username(username.to_string())
+            .set_user_info(user_info.clone())
             .await;
-        self.username = Some(username.to_string());
 
         let target = {
             self.services
@@ -1676,7 +1741,7 @@ impl ServerSession {
 
         // Forward username from the authenticated user to the target, if target has no username
         if ssh_options.username.is_empty() {
-            ssh_options.username = username.to_string();
+            ssh_options.username = user_info.username.to_string();
         }
 
         let _ = self.server_handle.lock().await.set_target(&target).await;

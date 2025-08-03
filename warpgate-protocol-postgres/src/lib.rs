@@ -20,7 +20,7 @@ use warpgate_common::{
     ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
 };
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -67,37 +67,39 @@ impl ProtocolServer for PostgresProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        info!(?address, "Listening");
-        let mut listener = address.tcp_accept_stream().await?;
+        let mut listener = address
+            .tcp_accept_stream()
+            .await
+            .context("accepting connection")?;
         loop {
             let Some(stream) = listener.try_next().await? else {
                 return Ok(());
             };
 
-            let remote_address = stream.peer_addr()?;
+            let remote_address = stream.peer_addr().context("getting peer address")?;
+            stream.set_nodelay(true)?;
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();
             tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
-                let server_handle = services
-                    .state
-                    .lock()
-                    .await
-                    .register_session(
-                        &crate::common::PROTOCOL_NAME,
-                        SessionStateInit {
-                            remote_address: Some(remote_address),
-                            handle: Box::new(session_handle),
-                        },
-                    )
-                    .await?;
+                let server_handle = State::register_session(
+                    &services.state,
+                    &crate::common::PROTOCOL_NAME,
+                    SessionStateInit {
+                        remote_address: Some(remote_address),
+                        handle: Box::new(session_handle),
+                    },
+                )
+                .await?;
+
+                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
 
                 let session = PostgresSession::new(
                     server_handle,
                     services,
-                    stream,
+                    wrapped_stream,
                     tls_config,
                     remote_address,
                 )
@@ -134,10 +136,14 @@ impl ProtocolServer for PostgresProtocolServer {
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
+
+    fn name(&self) -> &'static str {
+        "PostgreSQL"
+    }
 }
 
 impl Debug for PostgresProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PostgresProtocolServer")
+        f.debug_struct("PostgresProtocolServer").finish()
     }
 }

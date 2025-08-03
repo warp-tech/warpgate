@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
-use secrecy::ExposeSecret;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserCertificateCredential};

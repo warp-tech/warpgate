@@ -24,6 +24,7 @@
         "key": "",
         "listen": "[::]:8888",
         "session_max_age": "30m",
+        "sni_certificates": [],
         "trust_x_forwarded_headers": false
       }
     },
@@ -138,6 +139,13 @@
           "type": "string",
           "default": "30m"
         },
+        "sni_certificates": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SniCertificateConfig"
+          }
+        },
         "trust_x_forwarded_headers": {
           "type": "boolean",
           "default": false
@@ -237,6 +245,21 @@
           "default": "./data/recordings"
         }
       }
+    },
+    "SniCertificateConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ]
     },
     "SshConfig": {
       "type": "object",

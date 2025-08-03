@@ -17,7 +17,7 @@ use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
-    pub stream: MySqlStream<tokio_rustls::client::TlsStream<TcpStream>>,
+    pub stream: MySqlStream<TcpStream, tokio_rustls::client::TlsStream<TcpStream>>,
     pub _capabilities: Capabilities,
 }
 
@@ -57,8 +57,10 @@ impl MySqlClient {
         target: &TargetMySqlOptions,
         mut options: ConnectionOptions,
     ) -> Result<Self, MySqlError> {
-        let mut stream =
-            MySqlStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
+        stream.set_nodelay(true)?;
+
+        let mut stream = MySqlStream::new(stream);
 
         options.capabilities.remove(Capabilities::SSL);
         if target.tls.mode != TlsMode::Disabled {

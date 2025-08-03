@@ -1,15 +1,21 @@
 <script lang="ts">
-import { Input } from '@sveltestrap/sveltestrap'
-import { api, type ParameterValues } from 'admin/lib/api'
-import Loadable from 'common/Loadable.svelte'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { api, type ParameterValues } from 'admin/lib/api'
+    import Loadable from 'common/Loadable.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
-let parameters: ParameterValues | undefined = $state()
-const initPromise = init()
+    let parameters: ParameterValues | undefined = $state()
+    const initPromise = init()
 
-async function init () {
-    parameters = await api.getParameters({})
-}
+    async function init () {
+        parameters = await api.getParameters({})
+    }
 
+    async function update() {
+        api.updateParameters({
+            parameterUpdate: parameters!,
+        })
+    }
 </script>
 
 <div class="page-summary-bar">
@@ -18,6 +24,7 @@ async function init () {
 
 <Loadable promise={initPromise}>
 {#if parameters}
+    <h4 class="mt-4">Credentials</h4>
     <label
         for="allowOwnCredentialManagement"
         class="d-flex align-items-center"
@@ -28,14 +35,19 @@ async function init () {
             type="switch"
             on:change={() => {
                 parameters!.allowOwnCredentialManagement = !parameters!.allowOwnCredentialManagement
-                api.updateParameters({
-                    parameterUpdate: {
-                        allowOwnCredentialManagement: parameters!.allowOwnCredentialManagement,
-                    },
-                })
+                update()
             }}
             checked={parameters.allowOwnCredentialManagement} />
         <div>Allow users to manage their own credentials</div>
     </label>
+
+    <h4 class="mt-4">Traffic</h4>
+    <FormGroup>
+        <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+        <RateLimitInput
+            id="rateLimitBytesPerSecond"
+            bind:value={parameters.rateLimitBytesPerSecond}
+            change={update} />
+    </FormGroup>
 {/if}
 </Loadable>

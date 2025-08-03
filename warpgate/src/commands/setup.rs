@@ -110,8 +110,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                 .interact_text()?
         }
     };
+
+    let data_path = config_dir.join(PathBuf::from(&data_path)).canonicalize()?;
     create_dir_all(&data_path)?;
-    let data_path = PathBuf::from(&data_path).canonicalize()?;
 
     let db_path = data_path.join("db");
     create_dir_all(&db_path)?;
@@ -333,6 +334,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                     credential_policy: Set(serde_json::to_value(
                         None::<UserRequireCredentialsPolicy>,
                     )?),
+                    rate_limit_bytes_per_second: Set(None),
                 };
                 values.insert(&*db).await.map_err(WarpgateError::from)?
             }

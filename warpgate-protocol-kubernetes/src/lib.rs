@@ -2,6 +2,8 @@ mod client;
 mod recording;
 mod server;
 
+use std::fmt::Debug;
+
 use anyhow::Result;
 pub use client::*;
 pub use recording::*;
@@ -40,6 +42,16 @@ impl ProtocolServer for KubernetesProtocolServer {
 
         test_kubernetes_target(options.clone()).await
     }
+
+    fn name(&self) -> &'static str {
+        "Kubernetes"
+    }
+}
+
+impl Debug for KubernetesProtocolServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KubernetesProtocolServer").finish()
+    }
 }
 
 async fn test_kubernetes_target(options: TargetKubernetesOptions) -> Result<(), TargetTestError> {
@@ -49,7 +61,8 @@ async fn test_kubernetes_target(options: TargetKubernetesOptions) -> Result<(), 
         Err(e) => {
             if e.to_string().contains("authentication") || e.to_string().contains("Unauthorized") {
                 Err(TargetTestError::AuthenticationError)
-            } else if e.to_string().contains("connection") || e.to_string().contains("unreachable") {
+            } else if e.to_string().contains("connection") || e.to_string().contains("unreachable")
+            {
                 Err(TargetTestError::Unreachable)
             } else {
                 Err(TargetTestError::ConnectionError(e.to_string()))

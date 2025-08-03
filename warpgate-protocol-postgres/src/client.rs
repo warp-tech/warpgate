@@ -15,7 +15,7 @@ use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
 
 pub struct PostgresClient {
-    pub stream: PostgresStream<TlsStream<TcpStream>>,
+    pub stream: PostgresStream<TcpStream, TlsStream<TcpStream>>,
 }
 
 pub struct ConnectionOptions {
@@ -56,8 +56,10 @@ impl PostgresClient {
         target: &TargetPostgresOptions,
         options: ConnectionOptions,
     ) -> Result<Self, PostgresError> {
-        let mut stream =
-            PostgresStream::new(TcpStream::connect((target.host.clone(), target.port)).await?);
+        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
+        stream.set_nodelay(true)?;
+
+        let mut stream = PostgresStream::new(stream);
 
         if target.tls.mode != TlsMode::Disabled {
             stream.push(pgwire::messages::startup::SslRequest::new())?;
@@ -185,7 +187,7 @@ impl PostgresClient {
     }
 
     async fn run_sasl_auth(
-        stream: &mut PostgresStream<TlsStream<TcpStream>>,
+        stream: &mut PostgresStream<TcpStream, TlsStream<TcpStream>>,
         mechanisms: Vec<String>,
         username: &str,
         password: &str,

@@ -10,7 +10,7 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, ConfigProvider, Services};
 use warpgate_sso::CoreIdToken;
@@ -35,7 +35,6 @@ pub struct SsoLoginState {
 pub trait SessionExt {
     fn get_target_name(&self) -> Option<String>;
     fn set_target_name(&self, target_name: String);
-    fn is_authenticated(&self) -> bool;
     fn get_username(&self) -> Option<String>;
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
@@ -53,10 +52,6 @@ impl SessionExt for Session {
 
     fn set_target_name(&self, target_name: String) {
         self.set(TARGET_SESSION_KEY, target_name);
-    }
-
-    fn is_authenticated(&self) -> bool {
-        self.get_username().is_some()
     }
 
     fn get_username(&self) -> Option<String> {
@@ -277,7 +272,7 @@ pub async fn get_auth_state_for_request(
     if let Some(id) = session.get_auth_state_id() {
         let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
 
-        let existing_matched = state.lock().await.username() == username;
+        let existing_matched = state.lock().await.user_info().username == username;
         if existing_matched {
             return Ok(state);
         }
@@ -299,7 +294,10 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(req: &Request, username: String) -> Result<(), WarpgateError> {
+pub async fn authorize_session(
+    req: &Request,
+    user_info: AuthStateUserInfo,
+) -> Result<(), WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
@@ -316,9 +314,9 @@ pub async fn authorize_session(req: &Request, username: String) -> Result<(), Wa
     server_handle
         .lock()
         .await
-        .set_username(username.clone())
+        .set_user_info(user_info.clone())
         .await?;
-    session.set_auth(SessionAuthorization::User(username));
+    session.set_auth(SessionAuthorization::User(user_info.username));
 
     Ok(())
 }

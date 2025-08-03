@@ -17,9 +17,9 @@ pub async fn span_for_request(req: &Request) -> poem::Result<Span> {
         Ok(ref handle) => {
             let handle = handle.lock().await;
             let ss = handle.session_state().lock().await;
-            match ss.username.clone() {
-                Some(ref username) => {
-                    info_span!("HTTP", session=%handle.id(), session_username=%username, %client_ip)
+            match ss.user_info.clone() {
+                Some(ref user_info) => {
+                    info_span!("HTTP", session=%handle.id(), session_username=%user_info.username, %client_ip)
                 }
                 None => info_span!("HTTP", session=%handle.id(), %client_ip),
             }

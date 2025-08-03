@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-common"
-version = "0.14.1"
+version = "0.15.0"
 
 [[bin]]
 name = "config-schema"
@@ -45,3 +45,5 @@ webpki = { version = "0.22", default-features = false }
 tokio-stream.workspace = true
 git-version = { version = "0.3.9", default-features = false }
 schemars.workspace = true
+x509-parser = "0.17.0"
+governor.workspace = true

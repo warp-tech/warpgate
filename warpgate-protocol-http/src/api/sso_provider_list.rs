@@ -180,7 +180,14 @@ impl Api {
             ));
         };
 
-        let response = context.request.verify_code((*code).clone()).await?;
+        let response = context
+            .request
+            .verify_code((*code).clone())
+            .await
+            .inspect_err(|e| {
+                // More error details visible via Debug
+                warn!("Failed to verify SSO code: {e:?}");
+            })?;
 
         if !response.email_verified.unwrap_or(true) {
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));
@@ -224,7 +231,7 @@ impl Api {
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;
 
-        if state.username() != username {
+        if state.user_info().username != username {
             return Ok(Err(format!(
                 "Incorrect account for SSO authentication ({username})"
             )));
@@ -238,9 +245,9 @@ impl Api {
             )));
         }
 
-        if let AuthResult::Accepted { username } = state.verify() {
+        if let AuthResult::Accepted { user_info } = state.verify() {
             auth_state_store.complete(state.id()).await;
-            authorize_session(req, username).await?;
+            authorize_session(req, user_info).await?;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token,

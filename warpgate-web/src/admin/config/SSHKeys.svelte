@@ -1,26 +1,27 @@
 <script lang="ts">
-import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-import CopyButton from 'common/CopyButton.svelte'
-import { stringifyError } from 'common/errors'
+    import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import CopyButton from 'common/CopyButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import { Button } from '@sveltestrap/sveltestrap'
 
-let error: string|undefined = $state()
-let knownHosts: SSHKnownHost[]|undefined = $state()
-let ownKeys: SSHKey[]|undefined = $state()
+    let error: string|undefined = $state()
+    let knownHosts: SSHKnownHost[]|undefined = $state()
+    let ownKeys: SSHKey[]|undefined = $state()
 
-async function load () {
-    ownKeys = await api.getSshOwnKeys()
-    knownHosts = await api.getSshKnownHosts()
-}
+    async function load () {
+        ownKeys = await api.getSshOwnKeys()
+        knownHosts = await api.getSshKnownHosts()
+    }
 
-load().catch(async e => {
-    error = await stringifyError(e)
-})
+    load().catch(async e => {
+        error = await stringifyError(e)
+    })
 
-async function deleteHost (host: SSHKnownHost) {
-    await api.deleteSshKnownHost(host)
-    load()
-}
+    async function deleteHost (host: SSHKnownHost) {
+        await api.deleteSshKnownHost(host)
+        load()
+    }
 
 </script>
 
@@ -36,11 +37,11 @@ async function deleteHost (host: SSHKnownHost) {
     <h2>Warpgate's own SSH keys</h2>
     <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
     <div class="list-group list-group-flush">
-        {#each ownKeys as key}
+        {#each ownKeys as key (key)}
             <div class="list-group-item d-flex">
                 <pre>{key.kind} {key.publicKeyBase64}</pre>
                 <div class="ms-auto">
-                    <CopyButton class="ms-3" link text={key.kind + ' ' + key.publicKeyBase64} />
+                    <CopyButton class="ms-3 px-0" text={key.kind + ' ' + key.publicKeyBase64} />
                 </div>
             </div>
         {/each}
@@ -62,11 +63,10 @@ async function deleteHost (host: SSHKnownHost) {
                         {host.host}:{host.port}
                     </strong>
 
-                    <!-- svelte-ignore a11y_invalid_attribute -->
-                    <a class="ms-auto" href="" onclick={e => {
+                    <Button class="ms-auto" color="link px-0" onclick={e => {
                         e.preventDefault()
                         deleteHost(host)
-                    }}>Delete</a>
+                    }}>Delete</Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>

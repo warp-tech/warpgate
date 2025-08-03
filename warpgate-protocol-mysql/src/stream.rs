@@ -2,7 +2,6 @@ use bytes::{Bytes, BytesMut};
 use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::proto::codec::PacketCodec;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tracing::*;
 use warpgate_common::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 use warpgate_database_protocols::io::Encode;
@@ -15,23 +14,25 @@ pub enum MySqlStreamError {
     Io(#[from] std::io::Error),
 }
 
-pub struct MySqlStream<TS>
+pub struct MySqlStream<S, TS>
 where
-    TcpStream: UpgradableStream<TS>,
+    S: UpgradableStream<TS>,
+    S: AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
-    stream: MaybeTlsStream<TcpStream, TS>,
+    stream: MaybeTlsStream<S, TS>,
     codec: PacketCodec,
     inbound_buffer: BytesMut,
     outbound_buffer: BytesMut,
 }
 
-impl<TS> MySqlStream<TS>
+impl<S, TS> MySqlStream<S, TS>
 where
-    TcpStream: UpgradableStream<TS>,
+    S: UpgradableStream<TS>,
+    S: AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: S) -> Self {
         Self {
             stream: MaybeTlsStream::new(stream),
             codec: PacketCodec::default(),
@@ -83,7 +84,7 @@ where
 
     pub async fn upgrade(
         mut self,
-        config: <TcpStream as UpgradableStream<TS>>::UpgradeConfig,
+        config: <S as UpgradableStream<TS>>::UpgradeConfig,
     ) -> Result<Self, MaybeTlsStreamError> {
         self.stream = self.stream.upgrade(config).await?;
         Ok(self)

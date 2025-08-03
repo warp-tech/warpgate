@@ -319,10 +319,9 @@
             {/if}
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Certificate || credential.kind === CredentialKind.Sso}
-            <!-- svelte-ignore a11y_invalid_attribute -->
-            <a
-                class="ms-2"
-                href=""
+            <Button
+                class="ms-2 px-0"
+                color="link"
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
@@ -339,18 +338,17 @@
                     e.preventDefault()
                 }}>
                 Change
-            </a>
+            </Button>
             {/if}
-            <!-- svelte-ignore a11y_invalid_attribute -->
-            <a
-                class="ms-2"
-                href=""
+            <Button
+                class="ms-2 px-0"
+                color="link"
                 onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()
                 }}>
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>

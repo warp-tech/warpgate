@@ -12,6 +12,7 @@ use warpgate_core::Services;
 use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential, CertificateCredential};
 
 use super::common::get_user;
+use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization};
 
 fn validate_certificate_pem(cert: &str) -> Result<(), WarpgateError> {
@@ -269,6 +270,7 @@ impl Api {
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -326,6 +328,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<ChangePasswordRequest>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -373,6 +376,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewPublicKeyCredential>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -408,6 +412,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -439,6 +444,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         body: Json<NewOtpCredential>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
@@ -482,6 +488,7 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 

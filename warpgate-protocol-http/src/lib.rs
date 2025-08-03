@@ -29,8 +29,7 @@ use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    ListenEndpoint, Target, TargetOptions, TlsCertificateAndPrivateKey, TlsCertificateBundle,
-    TlsPrivateKey,
+    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
 };
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_web::Assets;
@@ -54,6 +53,30 @@ impl HTTPProtocolServer {
 
 fn make_session_storage() -> SharedSessionStorage {
     SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
+}
+
+async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
+    let certificate_and_key = load_certificate_and_key(&config.store.http, config)
+        .await
+        .with_context(|| {
+            format!(
+                "loading TLS certificate and key: {}",
+                config.store.http.certificate,
+            )
+        })?;
+
+    let mut cfg = RustlsConfig::new().fallback(certificate_and_key.into());
+    for sni in &config.store.http.sni_certificates {
+        let certificate_and_key = load_certificate_and_key(sni, config)
+            .await
+            .with_context(|| format!("loading SNI TLS certificate: {sni:?}",))?;
+
+        for name in certificate_and_key.certificate.sni_names()? {
+            debug!(?name, source=?sni, "Adding SNI certificate");
+            cfg = cfg.certificate(name, certificate_and_key.clone().into());
+        }
+    }
+    Ok(cfg)
 }
 
 impl ProtocolServer for HTTPProtocolServer {
@@ -181,37 +204,14 @@ impl ProtocolServer for HTTPProtocolServer {
             }
         });
 
-        let certificate_and_key = {
+        let rustls_config = {
             let config = self.services.config.lock().await;
-            let certificate_path = config
-                .paths_relative_to
-                .join(&config.store.http.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.http.key);
-
-            TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path)
-                    .await
-                    .with_context(|| {
-                        format!("reading TLS private key from '{}'", key_path.display())
-                    })?,
-                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                    format!(
-                        "reading TLS certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            }
+            make_rustls_config(&config).await.context("rustls setup")?
         };
 
-        info!(?address, "Listening");
-        Server::new(
-            address
-                .poem_listener()
-                .await?
-                .rustls(RustlsConfig::new().fallback(certificate_and_key.into())),
-        )
-        .run(app)
-        .await?;
+        Server::new(address.poem_listener().await?.rustls(rustls_config))
+            .run(app)
+            .await?;
 
         Ok(())
     }
@@ -229,6 +229,10 @@ impl ProtocolServer for HTTPProtocolServer {
             .await
             .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "HTTP"
     }
 }
 

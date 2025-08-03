@@ -56,12 +56,14 @@
     <div class="mb-5">
         <div class="mb-2">Ensure this security key matches your authentication prompt:</div>
         <div class="identification-string">
+            <!-- eslint-disable-next-line svelte/require-each-key -->
             {#each authState?.identificationString as char}
                 <div class="card bg-secondary text-light">
                     <div class="card-body">{char}</div>
                 </div>
             {/each}
-        </div>    </div>
+        </div>
+    </div>
 
     <div class="mb-3">
         <div>

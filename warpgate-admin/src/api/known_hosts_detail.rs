@@ -31,7 +31,7 @@ impl Api {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
         use warpgate_db_entities::KnownHost;
         let db = db.lock().await;

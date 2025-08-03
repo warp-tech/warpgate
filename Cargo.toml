@@ -22,10 +22,10 @@ resolver = "2"
 
 [workspace.dependencies]
 bytes = { version = "1.4", default-features = false }
-data-encoding = { version = "2.3", default-features = false }
+data-encoding = { version = "2.3", default-features = false, features = ["alloc", "std"] }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
-russh = { version = "0.52.1", features = ["des"], default-features = false }
+russh = { version = "0.54.0", features = ["des", "rsa", "aws-lc-rs"], default-features = false }
 futures = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1.17", features = ["net"], default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
@@ -65,6 +65,7 @@ dialoguer = { version = "0.11", default-features = false, features = ["editor", 
 tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
 kube = { version = "0.96", features = ["client", "rustls-tls"], default-features = false }
 k8s-openapi = { version = "0.23", features = ["latest"], default-features = false }
+governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
 
 [profile.release]
 lto = true

@@ -74,7 +74,7 @@
                             type="select"
                         >
                             <option value={null} selected>Any</option>
-                            {#each providers as provider}
+                            {#each providers as provider (provider.name)}
                             <option value={provider.name}>{provider.label ?? provider.name}</option>
                             {/each}
                         </Input>

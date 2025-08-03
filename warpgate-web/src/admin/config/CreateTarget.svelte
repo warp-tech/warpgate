@@ -112,7 +112,7 @@
             <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="mb-2">Type</label>
             <ButtonGroup class="w-100 mb-3">
-                {#each kinds as kind}
+                {#each kinds as kind (kind.value)}
                     <RadioButton
                         label={kind.name}
                         value={kind.value}

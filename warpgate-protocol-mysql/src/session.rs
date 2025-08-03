@@ -5,11 +5,13 @@ use std::sync::Arc;
 use bytes::{Buf, Bytes, BytesMut};
 use rand::Rng;
 use rustls::ServerConfig;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_core::{
@@ -28,8 +30,8 @@ use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
-pub struct MySqlSession {
-    stream: MySqlStream<tokio_rustls::server::TlsStream<TcpStream>>,
+pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
+    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,
@@ -41,11 +43,11 @@ pub struct MySqlSession {
     remote_address: SocketAddr,
 }
 
-impl MySqlSession {
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
-        stream: TcpStream,
+        stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
@@ -170,7 +172,9 @@ impl MySqlSession {
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
 
-        async fn fail(this: &mut MySqlSession) -> Result<(), MySqlError> {
+        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
+            this: &mut MySqlSession<S>,
+        ) -> Result<(), MySqlError> {
             this.stream.push(
                 &ErrPacket {
                     error_code: 1,
@@ -215,7 +219,7 @@ impl MySqlSession {
                 };
 
                 match user_auth_result {
-                    AuthResult::Accepted { username } => {
+                    AuthResult::Accepted { user_info } => {
                         self.services
                             .auth_state_store
                             .lock()
@@ -227,18 +231,18 @@ impl MySqlSession {
                                 .config_provider
                                 .lock()
                                 .await
-                                .authorize_target(&username, &target_name)
+                                .authorize_target(&user_info.username, &target_name)
                                 .await
                                 .map_err(MySqlError::other)?
                         };
                         if !target_auth_result {
                             warn!(
                                 "Target {} not authorized for user {}",
-                                target_name, username
+                                target_name, user_info.username
                             );
                             return fail(&mut self).await;
                         }
-                        self.run_authorized(handshake, username, target_name).await
+                        self.run_authorized(handshake, user_info, target_name).await
                     }
                     AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
                 }
@@ -248,13 +252,13 @@ impl MySqlSession {
                     .await
                     .map_err(MySqlError::other)?
                 {
-                    Some(ticket) => {
+                    Some((ticket, user_info)) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(MySqlError::other)?;
 
-                        self.run_authorized(handshake, ticket.username, ticket.target)
+                        self.run_authorized(handshake, user_info, ticket.target)
                             .await
                     }
                     _ => fail(&mut self).await,
@@ -266,7 +270,7 @@ impl MySqlSession {
     async fn run_authorized(
         mut self,
         handshake: HandshakeResponse,
-        username: String,
+        user_info: AuthStateUserInfo,
         target_name: String,
     ) -> Result<(), MySqlError> {
         self.stream.push(
@@ -312,7 +316,7 @@ impl MySqlSession {
 
         {
             let handle = self.server_handle.lock().await;
-            handle.set_username(username).await?;
+            handle.set_user_info(user_info).await?;
             handle.set_target(&target).await?;
         }
 

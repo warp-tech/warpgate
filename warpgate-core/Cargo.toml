@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.14.1"
+version = "0.15.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common" }
@@ -42,6 +42,7 @@ warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = fal
 rustls.workspace = true
 rustls-pemfile.workspace = true
 webpki = { version = "0.22", default-features = false }
+governor.workspace = true
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

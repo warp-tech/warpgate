@@ -2,12 +2,7 @@
     import { faFileContract, faFlaskVial, faInfoCircle } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import ApiTokenManager from './ApiTokenManager.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 </script>
-
-<!-- <div class="page-summary-bar">
-    <h1>API tokens</h1>
-</div> -->
 
 <ApiTokenManager />
 

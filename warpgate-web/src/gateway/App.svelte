@@ -113,7 +113,7 @@
             </div>
 
             {#if !doNotShowAuthRequests}
-            {#each webAuthRequests as authRequest}
+            {#each webAuthRequests as authRequest (authRequest.id)}
                 <Button
                     color="success"
                     class="mb-4 d-flex align-items-center w-100 text-start"

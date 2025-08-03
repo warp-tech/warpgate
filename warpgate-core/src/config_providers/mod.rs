@@ -8,9 +8,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, CredentialKind, CredentialPolicy};
+use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
-use warpgate_db_entities::Ticket;
+use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
 #[enum_dispatch]
@@ -69,11 +69,11 @@ pub trait ConfigProvider {
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
-) -> Result<Option<Ticket::Model>, WarpgateError> {
+) -> Result<Option<(e::Ticket::Model, AuthStateUserInfo)>, WarpgateError> {
+    let db = db.lock().await;
     let ticket = {
-        let db = db.lock().await;
-        Ticket::Entity::find()
-            .filter(Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
+        e::Ticket::Entity::find()
+            .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
             .one(&*db)
             .await?
     };
@@ -91,7 +91,17 @@ pub async fn authorize_ticket(
                 }
             }
 
-            Ok(Some(ticket))
+            // TODO maybe Ticket could properly reference the user model and then
+            // AuthStateUserInfo could be constructed from it
+            let Some(ticket_user) = e::User::Entity::find()
+                .filter(e::User::Column::Username.eq(ticket.username.clone()))
+                .one(&*db)
+                .await?
+            else {
+                return Err(WarpgateError::UserNotFound(ticket.username.clone()));
+            };
+
+            Ok(Some((ticket, (&User::try_from(ticket_user)?).into())))
         }
         None => {
             warn!("Ticket not found: {}", &secret.expose_secret());
@@ -105,13 +115,13 @@ pub async fn consume_ticket(
     ticket_id: &Uuid,
 ) -> Result<(), WarpgateError> {
     let db = db.lock().await;
-    let ticket = Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
+    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
     let Some(ticket) = ticket else {
         return Err(WarpgateError::InvalidTicket(*ticket_id));
     };
 
     if let Some(uses_left) = ticket.uses_left {
-        let mut model: Ticket::ActiveModel = ticket.into();
+        let mut model: e::Ticket::ActiveModel = ticket.into();
         model.uses_left = Set(Some(uses_left - 1));
         model.update(&*db).await?;
     }

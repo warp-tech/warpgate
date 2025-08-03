@@ -243,6 +243,9 @@ impl RemoteClient {
             ChannelOperation::OpenDirectTCPIP(params) => {
                 self.open_direct_tcpip(channel_id, params).await?;
             }
+            ChannelOperation::OpenDirectStreamlocal(path) => {
+                self.open_direct_streamlocal(channel_id, path).await?;
+            }
             op => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
                 match channel_pipes.get(&channel_id) {
@@ -486,6 +489,7 @@ impl RemoteClient {
 
         let config = russh::client::Config {
             preferred: algos,
+            nodelay: true,
             ..Default::default()
         };
         let config = Arc::new(config);
@@ -743,6 +747,30 @@ impl RemoteClient {
                     params.originator_port,
                 )
                 .await?;
+
+            let (tx, rx) = unbounded_channel();
+            self.channel_pipes.lock().await.insert(channel_id, tx);
+
+            let channel =
+                DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
+            self.child_tasks.push(
+                tokio::task::Builder::new()
+                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
+                    .spawn(channel.run())
+                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
+            );
+        }
+        Ok(())
+    }
+
+    async fn open_direct_streamlocal(
+        &mut self,
+        channel_id: Uuid,
+        path: String,
+    ) -> Result<(), SshClientError> {
+        if let Some(session) = &self.session {
+            let session = session.lock().await;
+            let channel = session.channel_open_direct_streamlocal(path).await?;
 
             let (tx, rx) = unbounded_channel();
             self.channel_pipes.lock().await.insert(channel_id, tx);

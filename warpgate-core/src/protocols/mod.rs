@@ -1,10 +1,12 @@
-mod handle;
-
+use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
-pub use handle::{SessionHandle, WarpgateServerHandle};
 use warpgate_common::{ListenEndpoint, Target};
+
+mod handle;
+
+pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {
@@ -23,6 +25,7 @@ pub enum TargetTestError {
 }
 
 pub trait ProtocolServer {
+    fn name(&self) -> &'static str;
     fn run(self, address: ListenEndpoint) -> impl Future<Output = Result<()>> + Send;
     fn test_target(
         &self,

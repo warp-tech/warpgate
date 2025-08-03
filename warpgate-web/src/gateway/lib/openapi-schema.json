@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.14.1-8-g2ef3553-modified"
+    "version": "v0.14.1-11-g83f6ef2-modified"
   },
   "servers": [
     {
@@ -11,21 +11,6 @@
   ],
   "tags": [],
   "paths": {
-    "/__stub__": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "AnySecurityScheme": []
-          }
-        ],
-        "operationId": "__stub__"
-      }
-    },
     "/auth/login": {
       "post": {
         "requestBody": {
@@ -113,7 +98,7 @@
             "description": ""
           }
         },
-        "operationId": "getDefaultAuthState"
+        "operationId": "get_default_auth_state"
       },
       "delete": {
         "responses": {
@@ -131,7 +116,7 @@
             "description": ""
           }
         },
-        "operationId": "cancelDefaultAuth"
+        "operationId": "cancel_default_auth"
       }
     },
     "/auth/web-auth-requests": {
@@ -302,6 +287,14 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_targets"
       }
     },
@@ -444,6 +437,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_credentials"
       }
     },
@@ -474,6 +475,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "change_my_password"
       }
     },
@@ -504,6 +513,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "add_my_public_key"
       }
     },
@@ -533,6 +550,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_public_key"
       }
     },
@@ -563,6 +588,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "add_my_otp"
       }
     },
@@ -592,6 +625,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_otp"
       }
     },
@@ -1298,7 +1339,12 @@
       }
     },
     "securitySchemes": {
-      "AnySecurityScheme": {
+      "CookieSecurityScheme": {
+        "type": "apiKey",
+        "name": "warpgate-http-session",
+        "in": "cookie"
+      },
+      "TokenSecurityScheme": {
         "type": "apiKey",
         "name": "X-Warpgate-Token",
         "in": "header"

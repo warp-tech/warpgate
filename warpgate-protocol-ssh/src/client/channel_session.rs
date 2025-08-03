@@ -87,6 +87,7 @@ impl SessionChannel {
                         },
                         Some(ChannelOperation::OpenShell) => unreachable!(),
                         Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
+                        Some(ChannelOperation::OpenDirectStreamlocal { .. }) => unreachable!(),
                         Some(ChannelOperation::OpenX11 { .. }) => unreachable!(),
                         Some(ChannelOperation::RequestX11(request)) => {
                             self.client_channel.request_x11(

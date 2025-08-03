@@ -9,7 +9,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::SessionId;
-use warpgate_core::{Services, SessionStateInit, WarpgateServerHandle};
+use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 
 use crate::common::PROTOCOL_NAME;
 use crate::session_handle::{
@@ -109,18 +109,15 @@ impl SessionStore {
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 
-        let server_handle = services
-            .state
-            .lock()
-            .await
-            .register_session(
-                &PROTOCOL_NAME,
-                SessionStateInit {
-                    remote_address: remote_address.0.as_socket_addr().cloned(),
-                    handle: Box::new(session_handle),
-                },
-            )
-            .await?;
+        let server_handle = State::register_session(
+            &services.state,
+            &PROTOCOL_NAME,
+            SessionStateInit {
+                remote_address: remote_address.0.as_socket_addr().cloned(),
+                handle: Box::new(session_handle),
+            },
+        )
+        .await?;
 
         let id = server_handle.lock().await.id();
         self.session_handles.insert(id, server_handle.clone());

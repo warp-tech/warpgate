@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type Target, type User } from 'admin/lib/api'
+    import { api, type Role, type Target } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -12,6 +12,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
 
     interface Props {
         params: { id: string };
@@ -20,7 +21,7 @@
     let { params }: Props = $props()
 
     let error: string|undefined = $state()
-    let selectedUser: User|undefined = $state()
+    let selectedUsername: string|undefined = $state($serverInfo?.username)
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
@@ -86,9 +87,9 @@
                     <Loadable promise={api.getUsers()}>
                         {#snippet children(users)}
                             <FormGroup floating label="Select a user">
-                                <select bind:value={selectedUser} class="form-control">
-                                    {#each users as user}
-                                        <option value={user}>
+                                <select bind:value={selectedUsername} class="form-control">
+                                    {#each users as user (user.id)}
+                                        <option value={user.username}>
                                             {user.username}
                                         </option>
                                     {/each}
@@ -100,7 +101,7 @@
 
                 <ConnectionInstructions
                     targetName={target.name}
-                    username={selectedUser?.username}
+                    username={selectedUsername}
                     targetKind={{
                         Ssh: TargetKind.Ssh,
                         WebAdmin: TargetKind.WebAdmin,
@@ -247,7 +248,7 @@
         <Loadable promise={loadRoles()}>
             {#snippet children(roles)}
                 <div class="list-group list-group-flush mb-3">
-                    {#each roles as role}
+                    {#each roles as role (role.id)}
                         <label
                             for="role-{role.id}"
                             class="list-group-item list-group-item-action d-flex align-items-center"
@@ -269,6 +270,15 @@
                 </div>
             {/snippet}
         </Loadable>
+
+        <h4 class="mt-4">Traffic</h4>
+        <FormGroup class="mb-5">
+            <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+            <RateLimitInput
+                id="rateLimitBytesPerSecond"
+                bind:value={target.rateLimitBytesPerSecond}
+            />
+        </FormGroup>
     {/if}
     </Loadable>
 

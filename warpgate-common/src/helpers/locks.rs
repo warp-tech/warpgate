@@ -1,0 +1,121 @@
+#[cfg(debug_assertions)]
+mod deadlock_detecting_mutex {
+    use std::any::type_name;
+    use std::collections::HashMap;
+    use std::ops::{Deref, DerefMut};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use once_cell::sync::Lazy;
+    use tokio::task::Id;
+
+    static LOCK_IDENTITIES: Lazy<std::sync::Mutex<HashMap<Option<Id>, Vec<String>>>> =
+        Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+    fn log_state() {
+        eprintln!("Tokio task: {:?}", tokio::task::try_id());
+        #[allow(clippy::unwrap_used)]
+        let ids = LOCK_IDENTITIES.lock().unwrap();
+        let identities = ids.get(&tokio::task::try_id()).cloned().unwrap_or_default();
+        if !identities.is_empty() {
+            eprintln!("* Held locks: {:?}", identities);
+        }
+    }
+
+    pub struct MutexGuard<'a, T> {
+        inner: tokio::sync::MutexGuard<'a, T>,
+        poisoned: &'a AtomicBool,
+    }
+
+    impl<'a, T> MutexGuard<'a, T> {
+        pub fn new(inner: tokio::sync::MutexGuard<'a, T>, poisoned: &'a AtomicBool) -> Self {
+            let this = Self { inner, poisoned };
+            #[allow(clippy::unwrap_used)]
+            let mut ids = LOCK_IDENTITIES.lock().unwrap();
+            let identities = ids.entry(tokio::task::try_id()).or_default();
+            let id = this.identity();
+            identities.push(id);
+            // eprintln!("Locking {} @ {:?}", this.identity(), tokio::task::try_id());
+            this
+        }
+
+        fn identity(&self) -> String {
+            format!(
+                "{:?}@{}",
+                type_name::<T>(),
+                tokio::task::try_id().map_or("unknown".to_string(), |id| id.to_string())
+            )
+        }
+    }
+
+    impl<T> Deref for MutexGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl<T> DerefMut for MutexGuard<'_, T> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.inner
+        }
+    }
+
+    impl<T> Drop for MutexGuard<'_, T> {
+        fn drop(&mut self) {
+            let self_id = self.identity();
+            // eprintln!("Unlocking {} @ {:?}", self.identity(), tokio::task::try_id());
+
+            #[allow(clippy::panic)]
+            if self.poisoned.load(Ordering::Relaxed) {
+                eprintln!("[!!] MutexGuard dropped while poisoned");
+                log_state();
+                panic!();
+            }
+
+            #[allow(clippy::unwrap_used)]
+            let mut ids = LOCK_IDENTITIES.lock().unwrap();
+            if let Some(identities) = ids.get_mut(&tokio::task::try_id()) {
+                identities.retain(|id| id != &self_id);
+            }
+        }
+    }
+
+    pub struct Mutex<T> {
+        inner: tokio::sync::Mutex<T>,
+        poisoned: AtomicBool,
+    }
+
+    impl<T> Mutex<T> {
+        pub fn new(data: T) -> Self {
+            Self {
+                inner: tokio::sync::Mutex::new(data),
+                poisoned: AtomicBool::new(false),
+            }
+        }
+
+        pub async fn lock(&self) -> MutexGuard<'_, T> {
+            self._lock().await
+        }
+
+        #[allow(clippy::panic)]
+        async fn _lock(&self) -> MutexGuard<'_, T> {
+            use std::time::Duration;
+
+            tokio::select! {
+                res = self.inner.lock() => MutexGuard::new(res, &self.poisoned),
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    self.poisoned.store(true, Ordering::Relaxed);
+                    eprintln!("[!!] Mutex lock took too long");
+                    log_state();
+                    panic!();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+pub use deadlock_detecting_mutex::{Mutex, MutexGuard};
+#[cfg(not(debug_assertions))]
+pub use tokio::sync::{Mutex, MutexGuard};
