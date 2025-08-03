@@ -20,6 +20,7 @@ mod m00015_fix_public_key_dates;
 mod m00016_fix_public_key_length;
 mod m00017_descriptions;
 mod m00018_ticket_description;
+mod m00019_rate_limits;
 
 pub struct Migrator;
 
@@ -45,6 +46,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00016_fix_public_key_length::Migration),
             Box::new(m00017_descriptions::Migration),
             Box::new(m00018_ticket_description::Migration),
+            Box::new(m00019_rate_limits::Migration),
         ]
     }
 }

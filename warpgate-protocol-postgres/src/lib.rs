@@ -20,7 +20,7 @@ use warpgate_common::{
     ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
 };
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, TargetTestError};
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -84,23 +84,22 @@ impl ProtocolServer for PostgresProtocolServer {
             tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
-                let server_handle = services
-                    .state
-                    .lock()
-                    .await
-                    .register_session(
-                        &crate::common::PROTOCOL_NAME,
-                        SessionStateInit {
-                            remote_address: Some(remote_address),
-                            handle: Box::new(session_handle),
-                        },
-                    )
-                    .await?;
+                let server_handle = State::register_session(
+                    &services.state,
+                    &crate::common::PROTOCOL_NAME,
+                    SessionStateInit {
+                        remote_address: Some(remote_address),
+                        handle: Box::new(session_handle),
+                    },
+                )
+                .await?;
+
+                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
 
                 let session = PostgresSession::new(
                     server_handle,
                     services,
-                    stream,
+                    wrapped_stream,
                     tls_config,
                     remote_address,
                 )

@@ -157,16 +157,16 @@ impl Api {
 
         let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
         if cp
-            .validate_credential(state.username(), &password_cred)
+            .validate_credential(&state.user_info().username, &password_cred)
             .await?
         {
             state.add_valid_credential(password_cred);
         }
 
         match state.verify() {
-            AuthResult::Accepted { username } => {
+            AuthResult::Accepted { user_info } => {
                 auth_state_store.complete(state.id()).await;
-                authorize_session(req, username).await?;
+                authorize_session(req, user_info).await?;
                 Ok(LoginResponse::Success)
             }
             x => {
@@ -201,14 +201,17 @@ impl Api {
         let mut cp = services.config_provider.lock().await;
 
         let otp_cred = AuthCredential::Otp(body.otp.clone().into());
-        if cp.validate_credential(state.username(), &otp_cred).await? {
+        if cp
+            .validate_credential(&state.user_info().username, &otp_cred)
+            .await?
+        {
             state.add_valid_credential(otp_cred);
         }
 
         match state.verify() {
-            AuthResult::Accepted { username } => {
+            AuthResult::Accepted { user_info } => {
                 auth_state_store.complete(state.id()).await;
-                authorize_session(req, username).await?;
+                authorize_session(req, user_info).await?;
                 Ok(LoginResponse::Success)
             }
             x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
@@ -399,7 +402,7 @@ async fn get_auth_state(
 
     {
         let state = state_arc.lock().await;
-        if state.username() != username {
+        if &state.user_info().username != username {
             return None;
         }
     }
@@ -458,7 +461,7 @@ pub async fn api_get_web_auth_requests_stream(
             let auth_state_store = auth_state_store.lock().await;
             if let Some(state) = auth_state_store.get(&id) {
                 let state = state.lock().await;
-                if Some(state.username()) == username.as_deref() {
+                if Some(state.user_info().username.as_ref()) == username.as_deref() {
                     sink.send(Message::Text(id.to_string())).await?;
                 }
             }

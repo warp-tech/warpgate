@@ -4,7 +4,6 @@ mod service_output;
 mod session;
 mod session_handle;
 use std::borrow::Cow;
-use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +17,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_core::{Services, SessionStateInit};
+use warpgate_core::{Services, SessionStateInit, State};
 
 use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
@@ -68,25 +67,23 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-        let server_handle = services
-            .state
-            .lock()
-            .await
-            .register_session(
-                &crate::PROTOCOL_NAME,
-                SessionStateInit {
-                    remote_address: Some(remote_address),
-                    handle: Box::new(session_handle),
-                },
-            )
-            .await
-            .context("registering session")?;
+        let server_handle = State::register_session(
+            &services.state,
+            &crate::PROTOCOL_NAME,
+            SessionStateInit {
+                remote_address: Some(remote_address),
+                handle: Box::new(session_handle),
+            },
+        )
+        .await
+        .context("registering session")?;
 
         let id = server_handle.lock().await.id();
 
         let (event_tx, event_rx) = unbounded_channel();
 
         let handler = ServerHandler { event_tx };
+        let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
 
         let session = match ServerSession::start(
             remote_address,
@@ -110,7 +107,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
         tokio::task::Builder::new()
             .name(&format!("SSH {id} protocol"))
-            .spawn(_run_stream(russh_config, stream, handler))?;
+            .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
     }
     Ok(())
 }
@@ -121,7 +118,7 @@ async fn _run_stream<R>(
     handler: ServerHandler,
 ) -> Result<()>
 where
-    R: AsyncRead + AsyncWrite + Unpin + Debug + Send + 'static,
+    R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let ret = async move {
         let session = russh::server::run_stream(config, socket, handler).await?;

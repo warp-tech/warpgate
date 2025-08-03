@@ -13,6 +13,7 @@ use uuid::Uuid;
 use warpgate_common::{
     Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_core::Services;
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
@@ -28,6 +29,7 @@ struct UserDataRequest {
     username: String,
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
+    rate_limit_bytes_per_second: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -95,6 +97,7 @@ impl ListApi {
                     .map_err(WarpgateError::from)?,
             ),
             description: Set(body.description.clone().unwrap_or_default()),
+            rate_limit_bytes_per_second: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -151,12 +154,12 @@ impl DetailApi {
     #[oai(path = "/users/:id", method = "put", operation_id = "update_user")]
     async fn api_update_user(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        services: Data<&Services>,
         body: Json<UserDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = services.db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
@@ -168,7 +171,17 @@ impl DetailApi {
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         let user = model.update(&*db).await?;
+
+        drop(db);
+
+        services
+            .rate_limiter_registry
+            .lock()
+            .await
+            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }

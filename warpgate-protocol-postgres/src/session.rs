@@ -4,12 +4,14 @@ use std::sync::Arc;
 use pgwire::error::ErrorInfo;
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use rustls::ServerConfig;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+};
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
@@ -19,8 +21,8 @@ use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericFrontendMessage, PgWireStartupOrSslRequest, PostgresStream};
 
-pub struct PostgresSession {
-    stream: PostgresStream<TlsStream<TcpStream>>,
+pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
+    stream: PostgresStream<S, TlsStream<S>>,
     tls_config: Arc<ServerConfig>,
     username: Option<String>,
     database: Option<String>,
@@ -30,11 +32,11 @@ pub struct PostgresSession {
     remote_address: SocketAddr,
 }
 
-impl PostgresSession {
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
-        stream: TcpStream,
+        stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
@@ -102,7 +104,9 @@ impl PostgresSession {
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
 
-        async fn fail(this: &mut PostgresSession) -> Result<(), PostgresError> {
+        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
+            this: &mut PostgresSession<S>,
+        ) -> Result<(), PostgresError> {
             let error_info = ErrorInfo::new(
                 "FATAL".to_owned(),
                 "28P01".to_owned(),
@@ -140,7 +144,7 @@ impl PostgresSession {
                     let user_auth_result = state_arc.lock().await.verify();
 
                     match user_auth_result {
-                        AuthResult::Accepted { username } => {
+                        AuthResult::Accepted { user_info } => {
                             self.services
                                 .auth_state_store
                                 .lock()
@@ -152,7 +156,7 @@ impl PostgresSession {
                                     .config_provider
                                     .lock()
                                     .await
-                                    .authorize_target(&username, &target_name)
+                                    .authorize_target(&user_info.username, &target_name)
                                     .await
                                     .map_err(PostgresError::other)?
                             };
@@ -165,7 +169,7 @@ impl PostgresSession {
                                 self.stream
                                     .push(pgwire::messages::startup::Authentication::Ok)?;
                             }
-                            return self.run_authorized(startup, username, target_name).await;
+                            return self.run_authorized(startup, user_info, target_name).await;
                         }
                         AuthResult::Need(kinds) => {
                             if kinds.contains(&CredentialKind::Password) {
@@ -271,7 +275,7 @@ impl PostgresSession {
                     .await
                     .map_err(PostgresError::other)?
                 {
-                    Some(ticket) => {
+                    Some((ticket, user_info)) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
@@ -279,8 +283,7 @@ impl PostgresSession {
 
                         self.stream
                             .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, ticket.username, ticket.target)
-                            .await
+                        self.run_authorized(startup, user_info, ticket.target).await
                     }
                     _ => fail(&mut self).await,
                 }
@@ -291,7 +294,7 @@ impl PostgresSession {
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        username: String,
+        user_info: AuthStateUserInfo,
         target_name: String,
     ) -> Result<(), PostgresError> {
         self.stream.flush().await?;
@@ -324,7 +327,7 @@ impl PostgresSession {
 
         {
             let handle = self.server_handle.lock().await;
-            handle.set_username(username).await?;
+            handle.set_user_info(user_info).await?;
             handle.set_target(&target).await?;
         }
 

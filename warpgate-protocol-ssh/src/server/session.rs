@@ -18,7 +18,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+};
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
@@ -68,7 +70,7 @@ enum KeyboardInteractiveState {
 
 struct CachedSuccessfulTicketAuth {
     ticket: Secret<String>,
-    username: String,
+    user_info: AuthStateUserInfo,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -218,7 +220,7 @@ impl ServerSession {
 
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
-            let sender = event_sender.clone();
+            let sender: EventSender<Event> = event_sender.clone();
             async move {
                 while let Some(e) = handler_event_rx.recv().await {
                     if sender.send_once(Event::ServerHandler(e)).await.is_err() {
@@ -244,7 +246,15 @@ impl ServerSession {
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
-            || self.auth_state.as_ref().unwrap().lock().await.username() != username
+            || self
+                .auth_state
+                .as_ref()
+                .unwrap()
+                .lock()
+                .await
+                .user_info()
+                .username
+                != username
         {
             let state = self
                 .services
@@ -1600,16 +1610,16 @@ impl ServerSession {
                 // between auth attempts
                 if &csta.ticket == secret {
                     return Ok(AuthResult::Accepted {
-                        username: csta.username.clone(),
+                        user_info: csta.user_info.clone(),
                     });
                 }
             }
 
             let result = self.try_auth_eager(selector, credential).await?;
-            if let AuthResult::Accepted { ref username } = result {
+            if let AuthResult::Accepted { ref user_info } = result {
                 self.cached_successful_ticket_auth = Some(CachedSuccessfulTicketAuth {
                     ticket: secret.clone(),
-                    username: username.clone(),
+                    user_info: user_info.clone(),
                 });
             }
 
@@ -1647,7 +1657,7 @@ impl ServerSession {
                 let user_auth_result = state.verify();
 
                 match user_auth_result {
-                    AuthResult::Accepted { username } => {
+                    AuthResult::Accepted { user_info } => {
                         self.services
                             .auth_state_store
                             .lock()
@@ -1659,7 +1669,7 @@ impl ServerSession {
                                 .config_provider
                                 .lock()
                                 .await
-                                .authorize_target(&username, target_name)
+                                .authorize_target(&user_info.username, target_name)
                                 .await?
                         };
                         if !target_auth_result {
@@ -1669,21 +1679,20 @@ impl ServerSession {
                             );
                             return Ok(AuthResult::Rejected);
                         }
-                        self._auth_accept(&username, target_name).await?;
-                        Ok(AuthResult::Accepted { username })
+                        self._auth_accept(user_info.clone(), target_name).await?;
+                        Ok(AuthResult::Accepted { user_info })
                     }
                     x => Ok(x),
                 }
             }
             AuthSelector::Ticket { secret } => {
                 match authorize_ticket(&self.services.db, secret).await? {
-                    Some(ticket) => {
+                    Some((ticket, user_info)) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(&ticket.username, &ticket.target).await?;
-                        Ok(AuthResult::Accepted {
-                            username: ticket.username.clone(),
-                        })
+                        self._auth_accept(user_info.clone(), &ticket.target).await?;
+
+                        Ok(AuthResult::Accepted { user_info })
                     }
                     None => Ok(AuthResult::Rejected),
                 }
@@ -1693,16 +1702,16 @@ impl ServerSession {
 
     async fn _auth_accept(
         &mut self,
-        username: &str,
+        user_info: AuthStateUserInfo,
         target_name: &str,
     ) -> Result<(), WarpgateError> {
+        self.username = Some(user_info.username.clone());
         let _ = self
             .server_handle
             .lock()
             .await
-            .set_username(username.to_string())
+            .set_user_info(user_info.clone())
             .await;
-        self.username = Some(username.to_string());
 
         let target = {
             self.services
@@ -1728,7 +1737,7 @@ impl ServerSession {
 
         // Forward username from the authenticated user to the target, if target has no username
         if ssh_options.username.is_empty() {
-            ssh_options.username = username.to_string();
+            ssh_options.username = user_info.username.to_string();
         }
 
         let _ = self.server_handle.lock().await.set_target(&target).await;
