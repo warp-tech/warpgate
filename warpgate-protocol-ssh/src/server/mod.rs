@@ -66,6 +66,8 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         let remote_address = stream.peer_addr().context("getting peer address")?;
         let russh_config = russh_config.clone();
 
+        stream.set_nodelay(true)?;
+
         let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
         let server_handle = services
