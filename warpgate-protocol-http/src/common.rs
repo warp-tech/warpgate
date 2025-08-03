@@ -35,7 +35,6 @@ pub struct SsoLoginState {
 pub trait SessionExt {
     fn get_target_name(&self) -> Option<String>;
     fn set_target_name(&self, target_name: String);
-    fn is_authenticated(&self) -> bool;
     fn get_username(&self) -> Option<String>;
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
@@ -53,10 +52,6 @@ impl SessionExt for Session {
 
     fn set_target_name(&self, target_name: String) {
         self.set(TARGET_SESSION_KEY, target_name);
-    }
-
-    fn is_authenticated(&self) -> bool {
-        self.get_username().is_some()
     }
 
     fn get_username(&self) -> Option<String> {

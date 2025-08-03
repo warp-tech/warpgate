@@ -83,8 +83,8 @@ impl Api {
                 let targets = p.list_targets().await?;
                 (users, targets)
             };
-            let user_is_admin = if let Some(auth) = request_authorization {
-                is_user_admin(req, &auth).await?
+            let user_is_admin = if let Some(auth) = &request_authorization {
+                is_user_admin(req, auth).await?
             } else {
                 false
             };
@@ -104,8 +104,8 @@ impl Api {
         };
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
-            version: session
-                .is_authenticated()
+            version: request_authorization
+                .is_some()
                 .then(|| warpgate_version().to_string()),
             username: session.get_username(),
             selected_target: session.get_target_name(),
@@ -117,8 +117,8 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
-            ports: if session.is_authenticated() {
-                PortsInfo {
+            ports: match request_authorization {
+                Some(_) => PortsInfo {
                     ssh: if config.store.ssh.enable {
                         Some(config.store.ssh.external_port())
                     } else {
@@ -139,14 +139,13 @@ impl Api {
                     } else {
                         None
                     },
-                }
-            } else {
-                PortsInfo {
+                },
+                None => PortsInfo {
                     ssh: None,
                     http: None,
                     mysql: None,
                     postgres: None,
-                }
+                },
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
             setup_state,

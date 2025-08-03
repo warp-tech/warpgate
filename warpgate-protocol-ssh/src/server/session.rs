@@ -736,7 +736,7 @@ impl ServerSession {
             RCEvent::Close(channel) => {
                 // Flush any pending writes before closing the channel
                 let _ = self.channel_writer.flush().await;
-                
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 let _ = self
                     .maybe_with_session(|handle| async move {
@@ -750,7 +750,7 @@ impl ServerSession {
             RCEvent::Eof(channel) => {
                 // Flush any pending writes before sending EOF
                 let _ = self.channel_writer.flush().await;
-                
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 self.maybe_with_session(|handle| async move {
                     handle
@@ -763,7 +763,7 @@ impl ServerSession {
             RCEvent::ExitStatus(channel, code) => {
                 // Flush any pending writes before sending exit status
                 let _ = self.channel_writer.flush().await;
-                
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 self.maybe_with_session(|handle| async move {
                     handle

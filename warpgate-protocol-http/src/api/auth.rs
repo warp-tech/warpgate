@@ -233,7 +233,7 @@ impl Api {
     #[oai(
         path = "/auth/state",
         method = "get",
-        operation_id = "getDefaultAuthState"
+        operation_id = "get_default_auth_state"
     )]
     async fn api_default_auth_state(
         &self,
@@ -256,7 +256,7 @@ impl Api {
     #[oai(
         path = "/auth/state",
         method = "delete",
-        operation_id = "cancelDefaultAuth"
+        operation_id = "cancel_default_auth"
     )]
     async fn api_cancel_default_auth(
         &self,
