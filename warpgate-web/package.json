@@ -21,7 +21,7 @@
     "@cyclonedx/cyclonedx-npm": "^4.0.0",
     "@fontsource/poppins": "^5.2.6",
     "@fontsource/work-sans": "^5.2.6",
-    "@fortawesome/free-brands-svg-icons": "^6.7.2",
+    "@fortawesome/free-brands-svg-icons": "^7.0.0",
     "@fortawesome/free-regular-svg-icons": "^6.7.2",
     "@fortawesome/free-solid-svg-icons": "^6.7.2",
     "@openapitools/openapi-generator-cli": "^2.21.4",
