@@ -1,0 +1,18 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-ca"
+version = "0.15.0"
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+x509-parser.workspace = true
+x509-cert = { version = "0.2", features = ["builder", "signature"] }
+aws-lc-rs = "1"
+der = "0.7"
+pem = "3.0"
+spki = "0.7"
+const-oid = "0.9"

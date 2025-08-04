@@ -9,6 +9,11 @@ pub struct Model {
     pub id: Uuid,
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<i64>,
+
+    #[sea_orm(column_type = "Text")]
+    pub ca_certificate_pem: String,
+    #[sea_orm(column_type = "Text")]
+    pub ca_private_key_pem: String,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -25,6 +30,8 @@ impl Entity {
                     id: Set(Uuid::new_v4()),
                     allow_own_credential_management: Set(true),
                     rate_limit_bytes_per_second: Set(None),
+                    ca_certificate_pem: Set("".into()),
+                    ca_private_key_pem: Set("".into()),
                 }
                 .insert(db)
                 .await

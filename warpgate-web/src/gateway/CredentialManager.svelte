@@ -199,10 +199,10 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Certificates</h4>
         <span class="ms-auto"></span>
-        <a href="#" color="link" onclick={e => {
+        <Button color="link" onclick={e => {
             creatingCertificateCredential = true
             e.preventDefault()
-        }}>Add certificate</a>
+        }}>Add certificate</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">
@@ -215,16 +215,16 @@
             </div>
             <span class="ms-auto"></span>
             <CredentialUsedStateBadge credential={credential} />
-            <a
+            <Button
+            color="link"
                 class="ms-2"
-                href="#"
                 onclick={e => {
                     deleteCertificate(credential)
                     e.preventDefault()
                 }}
             >
                 Delete
-            </a>
+            </Button>
         </div>
         {/each}
     </div>

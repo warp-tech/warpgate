@@ -66,6 +66,8 @@ tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi
 kube = { version = "0.96", features = ["client", "rustls-tls"], default-features = false }
 k8s-openapi = { version = "0.23", features = ["latest"], default-features = false }
 governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
+rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
+x509-parser = { version = "0.17.0", default-features = false }
 
 [profile.release]
 lto = true
