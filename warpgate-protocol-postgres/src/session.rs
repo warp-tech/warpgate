@@ -30,6 +30,7 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     id: Uuid,
     services: Services,
     remote_address: SocketAddr,
+    log_query_results: bool,
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
@@ -39,6 +40,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
+        log_query_results: bool,
     ) -> Self {
         let id = server_handle.lock().await.id();
 
@@ -51,6 +53,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             server_handle,
             id,
             remote_address,
+            log_query_results,
         }
     }
 
@@ -431,6 +434,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         debug!(?msg, "S->C message");
         if let PgWireBackendMessage::ErrorResponse(error) = msg {
             info!(?error, "PostgreSQL error");
+        }
+        if self.log_query_results {
+            match msg {
+                PgWireBackendMessage::DataRow(row) => {
+                    info!(?row, "PostgreSQL query result row");
+                }
+                PgWireBackendMessage::RowDescription(desc) => {
+                    info!(?desc, "PostgreSQL query result description");
+                }
+                _ => {}
+            }
         }
     }
 }
