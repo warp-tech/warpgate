@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.14.1-11-g83f6ef2-modified"
+    "version": "v0.15.0-17-g1d3e7b5-modified"
   },
   "servers": [
     {
@@ -2132,7 +2132,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/NewCertificateCredential"
+                "$ref": "#/components/schemas/IssueCertificateCredentialRequest"
               }
             }
           },
@@ -2144,7 +2144,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExistingCertificateCredential"
+                  "$ref": "#/components/schemas/IssuedCertificateCredential"
                 }
               }
             }
@@ -2158,11 +2158,11 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "create_certificate_credential"
+        "operationId": "issue_certificate_credential"
       }
     },
     "/users/{user_id}/credentials/certificates/{id}": {
-      "put": {
+      "patch": {
         "parameters": [
           {
             "name": "user_id",
@@ -2191,7 +2191,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/NewCertificateCredential"
+                "$ref": "#/components/schemas/UpdateCertificateCredential"
               }
             }
           },
@@ -2740,6 +2740,38 @@
           }
         }
       },
+      "IssueCertificateCredentialRequest": {
+        "type": "object",
+        "title": "IssueCertificateCredentialRequest",
+        "required": [
+          "label",
+          "public_key_pem"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "public_key_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "IssuedCertificateCredential": {
+        "type": "object",
+        "title": "IssuedCertificateCredential",
+        "required": [
+          "credential",
+          "certificate_pem"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ExistingCertificateCredential"
+          },
+          "certificate_pem": {
+            "type": "string"
+          }
+        }
+      },
       "KubernetesTargetAuth": {
         "type": "object",
         "oneOf": [
@@ -2858,22 +2890,6 @@
             "format": "uuid"
           },
           "username": {
-            "type": "string"
-          }
-        }
-      },
-      "NewCertificateCredential": {
-        "type": "object",
-        "title": "NewCertificateCredential",
-        "required": [
-          "label",
-          "certificate"
-        ],
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "certificate": {
             "type": "string"
           }
         }
@@ -3672,6 +3688,18 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UpdateCertificateCredential": {
+        "type": "object",
+        "title": "UpdateCertificateCredential",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        }
       },
       "User": {
         "type": "object",

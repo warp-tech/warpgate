@@ -746,7 +746,7 @@ async fn validate_client_certificate(
     for (cert_credential, users) in cert_credentials {
         if let Some(user) = users.into_iter().next() {
             // Normalize both certificates for comparison
-            let stored_cert = normalize_certificate_pem(&cert_credential.certificate);
+            let stored_cert = normalize_certificate_pem(&cert_credential.certificate_pem);
             let provided_cert = normalize_certificate_pem(&cert_pem);
 
             dbg!(&stored_cert, &provided_cert);

@@ -5895,6 +5895,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "warpgate-admin",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
@@ -5918,6 +5919,7 @@ dependencies = [
  "mime_guess",
  "poem",
  "poem-openapi",
+ "rcgen",
  "regex",
  "russh",
  "rust-embed",
@@ -5929,6 +5931,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
@@ -5937,17 +5940,19 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "aws-lc-rs",
  "bytes",
  "const-oid",
  "der",
  "pem",
+ "rcgen",
  "spki",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
+ "uuid",
  "x509-cert",
  "x509-parser 0.17.0",
 ]

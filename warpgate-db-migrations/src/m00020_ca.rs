@@ -44,6 +44,13 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(""),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ca_private_key_pem"))
                             .text()
@@ -55,7 +62,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         info!("Generating root CA certificate");
-        let cert = warpgate_ca::generate_root_certificate()
+        let (cert_pem, pk_pem) = warpgate_ca::generate_root_certificate_rcgen()
             .map_err(|e| DbErr::Custom(format!("Failed to generate CA certificate: {}", e)))?;
 
         let db = manager.get_connection();
@@ -76,8 +83,8 @@ impl MigrationTrait for Migration {
         }?;
 
         let mut model = parameters.into_active_model();
-        model.ca_certificate_pem = Set(cert.cert.pem());
-        model.ca_private_key_pem = Set(cert.key_pair.serialize_pem());
+        model.ca_certificate_pem = Set(cert_pem);
+        model.ca_private_key_pem = Set(pk_pem);
         model.update(db).await?;
 
         Ok(())
@@ -89,6 +96,14 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(parameters::Entity)
                     .drop_column(Alias::new("ca_certificate_pem"))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("ca_private_key_pem"))
                     .to_owned(),
             )

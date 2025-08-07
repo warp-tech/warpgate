@@ -21,7 +21,7 @@ pub mod certificate_credential {
         pub date_added: Option<DateTime<Utc>>,
         pub last_used: Option<DateTime<Utc>>,
         #[sea_orm(column_type = "Text")]
-        pub certificate: String,
+        pub certificate_pem: String,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter)]

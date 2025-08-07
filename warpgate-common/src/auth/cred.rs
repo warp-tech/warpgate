@@ -30,7 +30,7 @@ pub enum AuthCredential {
         public_key_bytes: Bytes,
     },
     Certificate {
-        certificate: Secret<String>,
+        certificate_pem: Secret<String>,
     },
     Sso {
         provider: String,
@@ -66,7 +66,7 @@ impl AuthCredential {
 impl From<UserCertificateCredential> for AuthCredential {
     fn from(cred: UserCertificateCredential) -> Self {
         AuthCredential::Certificate {
-            certificate: cred.certificate,
+            certificate_pem: cred.certificate_pem,
         }
     }
 }
@@ -74,8 +74,8 @@ impl From<UserCertificateCredential> for AuthCredential {
 impl From<AuthCredential> for Option<UserCertificateCredential> {
     fn from(cred: AuthCredential) -> Self {
         match cred {
-            AuthCredential::Certificate { certificate } => Some(UserCertificateCredential {
-                certificate,
+            AuthCredential::Certificate { certificate_pem } => Some(UserCertificateCredential {
+                certificate_pem,
             }),
             _ => None,
         }

@@ -14,6 +14,8 @@ pub enum CaError {
     Io(#[from] std::io::Error),
     #[error("PEM: {0}")]
     Pem(#[from] x509_parser::asn1_rs::Err<X509Error>),
+    #[error("rcgen: {0}")]
+    RcGen(#[from] rcgen::Error),
     #[error("Invalid key format")]
     InvalidKeyFormat,
     #[error("Invalid certificate format")]

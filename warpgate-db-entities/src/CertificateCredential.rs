@@ -16,7 +16,7 @@ pub struct Model {
     pub date_added: Option<DateTime<Utc>>,
     pub last_used: Option<DateTime<Utc>>,
     #[sea_orm(column_type = "Text")]
-    pub certificate: String,
+    pub certificate_pem: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
@@ -47,7 +47,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<Model> for UserCertificateCredential {
     fn from(credential: Model) -> Self {
         UserCertificateCredential {
-            certificate: credential.certificate.into(),
+            certificate_pem: credential.certificate_pem.into(),
         }
     }
 }
@@ -61,7 +61,7 @@ impl From<Model> for UserAuthCredential {
 impl From<UserCertificateCredential> for ActiveModel {
     fn from(credential: UserCertificateCredential) -> Self {
         Self {
-            certificate: Set(credential.certificate.expose_secret().clone()),
+            certificate_pem: Set(credential.certificate_pem.expose_secret().clone()),
             ..Default::default()
         }
     }

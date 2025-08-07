@@ -6,46 +6,15 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel,
+    ModelTrait, QueryFilter, Set,
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{UserCertificateCredential, WarpgateError, Secret};
-use warpgate_db_entities::CertificateCredential;
+use warpgate_common::WarpgateError;
+use warpgate_db_entities::{CertificateCredential, Parameters, User};
 
 use super::AnySecurityScheme;
-
-fn validate_certificate_pem(cert: &str) -> Result<(), WarpgateError> {
-    // Check if it looks like a PEM certificate
-    let cert = cert.trim();
-    if !cert.starts_with("-----BEGIN CERTIFICATE-----") {
-        return Err(WarpgateError::Other(
-            "Certificate must be in PEM format and start with '-----BEGIN CERTIFICATE-----'".into()
-        ));
-    }
-    if !cert.ends_with("-----END CERTIFICATE-----") {
-        return Err(WarpgateError::Other(
-            "Certificate must be in PEM format and end with '-----END CERTIFICATE-----'".into()
-        ));
-    }
-
-    // Try to parse the certificate using rustls-pemfile
-    use rustls_pemfile::Item;
-    let mut reader = std::io::Cursor::new(cert.as_bytes());
-    match rustls_pemfile::read_one(&mut reader) {
-        Ok(Some(Item::X509Certificate(_))) => Ok(()),
-        Ok(Some(_)) => Err(WarpgateError::Other(
-            "PEM file does not contain a certificate".into()
-        )),
-        Ok(None) => Err(WarpgateError::Other(
-            "No valid PEM items found in certificate".into()
-        )),
-        Err(_) => Err(WarpgateError::Other(
-            "Invalid PEM certificate format".into()
-        )),
-    }
-}
 
 fn abbreviate_certificate(cert: &str) -> String {
     // Extract the subject or first few lines of the certificate for display
@@ -70,9 +39,20 @@ struct ExistingCertificateCredential {
 }
 
 #[derive(Object)]
-struct NewCertificateCredential {
+struct IssuedCertificateCredential {
+    credential: ExistingCertificateCredential,
+    certificate_pem: String,
+}
+
+#[derive(Object)]
+struct IssueCertificateCredentialRequest {
     label: String,
-    certificate: String,
+    public_key_pem: String,
+}
+
+#[derive(Object)]
+struct UpdateCertificateCredential {
+    label: String,
 }
 
 impl From<CertificateCredential::Model> for ExistingCertificateCredential {
@@ -82,15 +62,7 @@ impl From<CertificateCredential::Model> for ExistingCertificateCredential {
             date_added: credential.date_added,
             last_used: credential.last_used,
             label: credential.label,
-            abbreviated: abbreviate_certificate(&credential.certificate),
-        }
-    }
-}
-
-impl From<&NewCertificateCredential> for UserCertificateCredential {
-    fn from(credential: &NewCertificateCredential) -> Self {
-        Self {
-            certificate: Secret::new(credential.certificate.clone()),
+            abbreviated: abbreviate_certificate(&credential.certificate_pem),
         }
     }
 }
@@ -102,9 +74,9 @@ enum GetCertificateCredentialsResponse {
 }
 
 #[derive(ApiResponse)]
-enum CreateCertificateCredentialResponse {
+enum IssueCertificateCredentialResponse {
     #[oai(status = 201)]
-    Created(Json<ExistingCertificateCredential>),
+    Issued(Json<IssuedCertificateCredential>),
 }
 
 #[derive(ApiResponse)]
@@ -145,19 +117,29 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates",
         method = "post",
-        operation_id = "create_certificate_credential"
+        operation_id = "issue_certificate_credential"
     )]
-    async fn api_create(
+    async fn api_issue(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        body: Json<NewCertificateCredential>,
+        body: Json<IssueCertificateCredentialRequest>,
         user_id: Path<Uuid>,
         _auth: AnySecurityScheme,
-    ) -> Result<CreateCertificateCredentialResponse, WarpgateError> {
-        // Validate the certificate PEM format
-        validate_certificate_pem(&body.certificate)?;
-
+    ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let db = db.lock().await;
+        let params = Parameters::Entity::get(&*db).await?;
+        let ca =
+            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
+        let user = User::Entity::find_by_id(*user_id)
+            .one(&*db)
+            .await?
+            .ok_or(WarpgateError::UserNotFound(user_id.to_string()))?;
+
+        let public_key_pem = body.public_key_pem.trim();
+        let client_cert =
+            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, *user_id)?;
+
+        let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -165,14 +147,17 @@ impl ListApi {
             date_added: Set(Some(Utc::now())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            ..CertificateCredential::ActiveModel::from(UserCertificateCredential::from(&*body))
+            certificate_pem: Set(client_cert_pem.clone()),
         }
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
 
-        Ok(CreateCertificateCredentialResponse::Created(Json(
-            object.into(),
+        Ok(IssueCertificateCredentialResponse::Issued(Json(
+            IssuedCertificateCredential {
+                credential: object.into(),
+                certificate_pem: client_cert_pem,
+            },
         )))
     }
 }
@@ -191,36 +176,34 @@ pub struct DetailApi;
 impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
-        method = "put",
+        method = "patch",
         operation_id = "update_certificate_credential"
     )]
     async fn api_update(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        body: Json<NewCertificateCredential>,
+        body: Json<UpdateCertificateCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
         let db = db.lock().await;
+        let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
+            .filter(CertificateCredential::Column::UserId.eq(*user_id))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(UpdateCertificateCredentialResponse::NotFound);
+        };
 
-        let model = CertificateCredential::ActiveModel {
-            id: Set(id.0),
-            user_id: Set(*user_id),
-            date_added: Set(Some(Utc::now())),
-            label: Set(body.label.clone()),
-            ..<_>::from(UserCertificateCredential::from(&*body))
-        }
-        .update(&*db)
-        .await;
+        let mut am = cred.into_active_model();
 
-        match model {
-            Ok(model) => Ok(UpdateCertificateCredentialResponse::Updated(Json(
-                model.into(),
-            ))),
-            Err(DbErr::RecordNotFound(_)) => Ok(UpdateCertificateCredentialResponse::NotFound),
-            Err(e) => Err(e.into()),
-        }
+        am.label = Set(body.label.clone());
+        let model = am.update(&*db).await?;
+
+        Ok(UpdateCertificateCredentialResponse::Updated(Json(
+            model.into(),
+        )))
     }
 
     #[oai(

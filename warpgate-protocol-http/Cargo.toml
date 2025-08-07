@@ -36,6 +36,6 @@ warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", defaul
 warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }
 warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
-uuid = { version = "1.3", features = ["v4"], default-features = false }
+uuid.workspace = true
 regex = { version = "1.6", default-features = false }
 url = { version = "2.4", default-features = false }

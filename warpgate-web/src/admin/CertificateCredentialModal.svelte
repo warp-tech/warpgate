@@ -1,121 +1,190 @@
 <script lang="ts">
+    import { faCheck, faInfoCircle } from '@fortawesome/free-solid-svg-icons'
     import {
         Button,
-        Form,
         FormGroup,
         Input,
         Modal,
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-
-    import type { ExistingCertificateCredential } from './lib/api'
+    import type { IssuedCertificateCredential } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import Fa from 'svelte-fa'
 
     interface Props {
         isOpen: boolean
-        instance?: ExistingCertificateCredential
-        save: (label: string, certificate: string) => void
+        save: (label: string, publicKeyPem: string) => Promise<IssuedCertificateCredential>
+        onClose?: () => void
     }
 
     let {
-        isOpen = $bindable(true),
-        instance,
+        isOpen = $bindable(false),
         save,
+        onClose,
     }: Props = $props()
 
-    let field: HTMLInputElement|undefined = $state()
-    let label: string = $state('')
-    let certificate: string = $state('')
-    let validated = $state(false)
+    let saving = $state(false)
+    let privateKeyPem = $state('')
+    let publicKeyPem = $state('')
+    let label = $state('')
+    let generatedCertificatePem = $state('')
 
-    const CERT_REGEX = /^-----BEGIN CERTIFICATE-----[\s\S]*-----END CERTIFICATE-----$/
+    async function generateKeyPair() {
+        try {
+            const keyPair = await crypto.subtle.generateKey(
+                {
+                    name: 'ECDSA',
+                    namedCurve: 'P-384',
+                },
+                true,
+                ['sign', 'verify']
+            )
 
-    function _save () {
-        if (!certificate || !label) {
+            // Export private key as PKCS#8 PEM
+            const privateKeyArrayBuffer = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
+            const privateKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(privateKeyArrayBuffer)))
+            const privateKeyLines = privateKeyBase64.match(/.{1,64}/g) || []
+            privateKeyPem = `-----BEGIN PRIVATE KEY-----\n${privateKeyLines.join('\n')}\n-----END PRIVATE KEY-----`
+
+            // Export public key as SPKI PEM
+            const publicKeyArrayBuffer = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+            const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyArrayBuffer)))
+            const publicKeyLines = publicKeyBase64.match(/.{1,64}/g) || []
+            publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicKeyLines.join('\n')}\n-----END PUBLIC KEY-----`
+
+        } catch (error) {
+            console.error('Failed to generate key pair:', error)
+            alert('Failed to generate key pair. Please try again.')
+        }
+    }
+
+    async function _generate() {
+        if (!label.trim()) {
+            alert('Please provide a label')
             return
         }
-        // Clean up the certificate (remove extra whitespace, ensure proper formatting)
-        certificate = certificate.trim()
-        if (!certificate.startsWith('-----BEGIN CERTIFICATE-----')) {
-            certificate = '-----BEGIN CERTIFICATE-----\n' + certificate
+
+        saving = true
+        try {
+            await generateKeyPair()
+
+            if (!publicKeyPem) {
+                throw new Error('Failed to generate key pair')
+            }
+
+            // Then submit public key to get certificate issued
+            const result = await save(label.trim(), publicKeyPem)
+            generatedCertificatePem = result.certificatePem
+        } catch (error) {
+            console.error('Failed to generate certificate:', error)
+            alert('Failed to generate certificate. Please try again.')
+        } finally {
+            saving = false
         }
-        if (!certificate.endsWith('-----END CERTIFICATE-----')) {
-            certificate = certificate + '\n-----END CERTIFICATE-----'
-        }
-        isOpen = false
-        save(label, certificate)
     }
 
-    function _cancel () {
-        isOpen = false
+    function downloadBlob(content: string, filename: string) {
+        const blob = new Blob([content], { type: 'text/plain' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
     }
 
-    $effect(() => field?.addEventListener('paste', e => {
-        const clipboardData = e.clipboardData
-        if (clipboardData) {
-            const newValue = clipboardData.getData('text')
-            onCertificatePaste(newValue)
+    function downloadPrivateKey() {
+        if (!privateKeyPem) {
+            return
         }
-    }))
+        const filename = label.trim() ? `${label.trim()}-private-key.pem` : 'private-key.pem'
+        downloadBlob(privateKeyPem, filename)
+    }
 
-    function onCertificatePaste (newValue: string) {
-        // Try to extract a common name or subject from the certificate for auto-labeling
-        // This is just a simple heuristic
-        if (!label && newValue.includes('-----BEGIN CERTIFICATE-----')) {
-            // Could parse the certificate to extract CN, but for now just use a generic label
-            label = 'Certificate'
+    function downloadCertificate() {
+        if (!generatedCertificatePem) {
+            return
         }
+        const certLabel = label.trim() || 'certificate'
+        const filename = `${certLabel}-certificate.pem`
+        downloadBlob(generatedCertificatePem, filename)
+    }
+
+    function close() {
+        isOpen = false
+        privateKeyPem = ''
+        publicKeyPem = ''
+        label = ''
+        generatedCertificatePem = ''
+        saving = false
+        onClose?.()
     }
 </script>
 
-<Modal toggle={_cancel} isOpen={isOpen} on:open={() => {
-    if (instance) {
-        label = instance.label
-        // Note: we can't populate the certificate field as it's not returned by the API for security
-    }
-    field?.focus()
-}}>
-    <Form {validated} on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}>
-        <ModalBody>
-            <FormGroup floating label="Label">
+<Modal {isOpen} toggle={close}>
+    <ModalBody>
+        {#if generatedCertificatePem}
+            <div class="text-center mb-3">
+                <Fa icon={faCheck} size="lg" />
+                <p>Certificate has been issued</p>
+            </div>
+            <Alert color="warning" fade={false} class="mb-3">
+                You must download the private key and the certificate now - you won't be possible to access them later.
+            </Alert>
+        {:else}
+            <FormGroup floating label="Certificate label">
                 <Input
-                    bind:inner={field}
-                    type="text"
-                    required
-                    bind:value={label} />
+                    bind:value={label}
+                    disabled={saving}
+                />
             </FormGroup>
-            <FormGroup floating label="Certificate in PEM format" spacing="0">
-                <Input
-                    style="font-family: monospace; height: 15rem"
-                    bind:inner={field}
-                    type="textarea"
-                    required
-                    placeholder="-----BEGIN CERTIFICATE-----&#10;MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...&#10;-----END CERTIFICATE-----"
-                    bind:value={certificate} />
-            </FormGroup>
-            {#if certificate && !CERT_REGEX.test(certificate.trim())}
-                <div class="text-danger small">
-                    Certificate must be in PEM format (-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----)
-                </div>
-            {/if}
-        </ModalBody>
-        <ModalFooter>
-            <Button
-                type="submit"
+
+            <div class="text-muted d-flex align-items-center">
+                <Fa icon={faInfoCircle} class="me-3" />
+                <small>
+                    A private key will be generated locally in your browser.
+                    <br/>
+                    You'll need to save it after the certificate is issued.
+                </small>
+            </div>
+        {/if}
+    </ModalBody>
+    <ModalFooter>
+        {#if !generatedCertificatePem}
+            <AsyncButton
                 color="primary"
                 class="modal-button"
-                disabled={!certificate || !label || !CERT_REGEX.test(certificate.trim())}
-                on:click={() => validated = true}
-            >Save</Button>
-
+                disabled={saving || !label.trim()}
+                click={_generate}
+            >
+                Issue certificate
+            </AsyncButton>
+        {:else}
             <Button
-                class="modal-button"
-                color="danger"
-                on:click={_cancel}
-            >Cancel</Button>
-        </ModalFooter>
-    </Form>
+                color="primary"
+                class="d-block w-100"
+                on:click={downloadCertificate}
+            >
+                Download certificate
+            </Button>
+        {/if}
+        {#if privateKeyPem}
+            <Button
+                color="secondary"
+                class="d-block w-100"
+                on:click={downloadPrivateKey}
+            >
+                Download private key
+            </Button>
+        {/if}
+        <Button
+            color="danger"
+            on:click={close}
+            class="modal-button"
+        >Close</Button>
+    </ModalFooter>
 </Modal>

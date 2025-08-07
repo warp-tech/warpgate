@@ -63,7 +63,7 @@
         const credential = await api.addMyCertificate({
             newCertificateCredential: {
                 label,
-                certificate,
+                certificatePem: certificate,
             },
         })
         creds!.certificates.push(credential)

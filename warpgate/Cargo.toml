@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = [
 uuid = { version = "1.3", default-features = false }
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-ca = { version = "*", path = "../warpgate-ca" }
 warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }

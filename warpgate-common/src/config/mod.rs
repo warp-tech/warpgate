@@ -58,7 +58,7 @@ pub struct UserPublicKeyCredential {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct UserCertificateCredential {
-    pub certificate: Secret<String>,
+    pub certificate_pem: Secret<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]

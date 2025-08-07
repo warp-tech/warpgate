@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.14.1-11-g83f6ef2-modified"
+    "version": "v0.15.0-17-g1d3e7b5-modified"
   },
   "servers": [
     {
@@ -1097,13 +1097,13 @@
         "title": "NewCertificateCredential",
         "required": [
           "label",
-          "certificate"
+          "certificate_pem"
         ],
         "properties": {
           "label": {
             "type": "string"
           },
-          "certificate": {
+          "certificate_pem": {
             "type": "string"
           }
         }

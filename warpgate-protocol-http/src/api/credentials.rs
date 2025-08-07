@@ -187,7 +187,7 @@ enum CreateOtpCredentialResponse {
 #[derive(Object)]
 struct NewCertificateCredential {
     label: String,
-    certificate: String,
+    certificate_pem: String,
 }
 
 #[derive(Object)]
@@ -219,7 +219,7 @@ impl From<entities::CertificateCredential::Model> for ExistingCertificateCredent
             label: credential.label,
             date_added: credential.date_added,
             last_used: credential.last_used,
-            abbreviated: abbreviate_certificate(&credential.certificate),
+            abbreviated: abbreviate_certificate(&credential.certificate_pem),
         }
     }
 }
@@ -522,7 +522,7 @@ impl Api {
         body: Json<NewCertificateCredential>,
     ) -> Result<CreateCertificateCredentialResponse, WarpgateError> {
         // Validate the certificate PEM format
-        validate_certificate_pem(&body.certificate)?;
+        validate_certificate_pem(&body.certificate_pem)?;
 
         let db = services.db.lock().await;
 
@@ -536,7 +536,7 @@ impl Api {
             date_added: Set(Some(Utc::now())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            certificate: Set(body.certificate.clone()),
+            certificate_pem: Set(body.certificate_pem.clone()),
         }
         .insert(&*db)
         .await

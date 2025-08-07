@@ -39,7 +39,6 @@
     let editingPublicKeyCredential = $state(false)
     let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
     let editingCertificateCredential = $state(false)
-    let editingCertificateCredentialInstance: ExistingCertificateCredential|null = $state(null)
 
     const loadPromise = load()
 
@@ -224,20 +223,21 @@
         editingPublicKeyCredentialInstance = null
     }
 
-    async function saveCertificateCredential (label: string, certificate: string) {
-        const credential = await api.createCertificateCredential({
+    async function saveCertificateCredential (label: string, publicKeyPem: string) {
+        const response = await api.issueCertificateCredential({
             userId,
-            newCertificateCredential: {
+            issueCertificateCredentialRequest: {
                 label,
-                certificate,
+                publicKeyPem,
             },
         })
+
         credentials.push({
             kind: CredentialKind.Certificate,
-            ...credential,
+            ...response.credential,
         })
-        editingCertificateCredential = false
-        editingCertificateCredentialInstance = null
+
+        return response
     }
 
     function assertDefined<T>(value: T|undefined): T {
@@ -259,7 +259,6 @@
         editingPublicKeyCredential = true
     }}>Add public key</Button>
     <Button size="sm" color="link" on:click={() => {
-        editingCertificateCredentialInstance = null
         editingCertificateCredential = true
     }}>Add certificate</Button>
     <Button size="sm" color="link" on:click={() => creatingOtp = true}>Add OTP</Button>
@@ -318,7 +317,7 @@
                 </span>
             {/if}
 
-            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Certificate || credential.kind === CredentialKind.Sso}
+            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
             <Button
                 class="ms-2 px-0"
                 color="link"
@@ -330,10 +329,6 @@
                     if (credential.kind === CredentialKind.PublicKey) {
                         editingPublicKeyCredentialInstance = credential
                         editingPublicKeyCredential = true
-                    }
-                    if (credential.kind === CredentialKind.Certificate) {
-                        editingCertificateCredentialInstance = credential
-                        editingCertificateCredential = true
                     }
                     e.preventDefault()
                 }}>
@@ -408,8 +403,10 @@
 {#if editingCertificateCredential}
 <CertificateCredentialModal
     bind:isOpen={editingCertificateCredential}
-    instance={editingCertificateCredentialInstance ?? undefined}
     save={saveCertificateCredential}
+    onClose={() => {
+        editingCertificateCredential = false
+    }}
 />
 {/if}
 
