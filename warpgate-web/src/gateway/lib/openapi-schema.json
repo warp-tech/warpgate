@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.15.0-18-g8826e09-modified"
+    "version": "v0.15.0-19-gdbc5b86-modified"
   },
   "servers": [
     {
@@ -642,7 +642,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/NewCertificateCredential"
+                "$ref": "#/components/schemas/IssueCertificateCredentialRequest"
               }
             }
           },
@@ -654,7 +654,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExistingCertificateCredential"
+                  "$ref": "#/components/schemas/IssuedCertificateCredential"
                 }
               }
             }
@@ -663,7 +663,7 @@
             "description": ""
           }
         },
-        "operationId": "add_my_certificate"
+        "operationId": "issue_my_certificate"
       }
     },
     "/profile/credentials/certificates/{id}": {
@@ -692,7 +692,7 @@
             "description": ""
           }
         },
-        "operationId": "delete_my_certificate"
+        "operationId": "revoke_my_certificate"
       }
     },
     "/profile/api-tokens": {
@@ -923,7 +923,7 @@
         "required": [
           "id",
           "label",
-          "abbreviated"
+          "fingerprint"
         ],
         "properties": {
           "id": {
@@ -941,7 +941,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "abbreviated": {
+          "fingerprint": {
             "type": "string"
           }
         }
@@ -1047,6 +1047,38 @@
           }
         }
       },
+      "IssueCertificateCredentialRequest": {
+        "type": "object",
+        "title": "IssueCertificateCredentialRequest",
+        "required": [
+          "label",
+          "public_key_pem"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "public_key_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "IssuedCertificateCredential": {
+        "type": "object",
+        "title": "IssuedCertificateCredential",
+        "required": [
+          "credential",
+          "certificate_pem"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ExistingCertificateCredential"
+          },
+          "certificate_pem": {
+            "type": "string"
+          }
+        }
+      },
       "LoginFailureResponse": {
         "type": "object",
         "title": "LoginFailureResponse",
@@ -1089,22 +1121,6 @@
           "expiry": {
             "type": "string",
             "format": "date-time"
-          }
-        }
-      },
-      "NewCertificateCredential": {
-        "type": "object",
-        "title": "NewCertificateCredential",
-        "required": [
-          "label",
-          "certificate_pem"
-        ],
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "certificate_pem": {
-            "type": "string"
           }
         }
       },

@@ -279,7 +279,7 @@
     {/if}
     <div class="list-group list-group-flush mb-3">
         {#each credentials as credential (credential.id)}
-        <div class="list-group-item credential">
+        <div class="list-group-item credential gap-2">
             {#if credential.kind === CredentialKind.Password }
                 <Fa fw icon={faKeyboard} />
                 <span class="label me-auto">Password</span>
@@ -293,18 +293,16 @@
                     <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
                 </div>
                 <CredentialUsedStateBadge credential={credential} />
-                <div class="me-2"></div>
             {/if}
             {#if credential.kind === CredentialKind.Certificate}
                 <Fa fw icon={faCertificate} />
-                <div class="main me-auto">
+                <div class="main me-auto abbreviate">
                     <div class="label d-flex align-items-center">
                         {credential.label}
                     </div>
-                    <small class="d-block text-muted">{credential.fingerprint}</small>
+                    <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
                 </div>
                 <CredentialUsedStateBadge credential={credential} />
-                <div class="me-2"></div>
             {/if}
             {#if credential.kind === 'Totp'}
                 <Fa fw icon={faMobileScreen} />
@@ -313,7 +311,7 @@
             {#if credential.kind === CredentialKind.Sso}
                 <Fa fw icon={faIdBadge} />
                 <span class="label">Single sign-on</span>
-                <span class="text-muted ms-2 me-auto">
+                <span class="text-muted me-auto">
                     {credential.email}
                     {#if credential.provider} ({credential.provider}){/if}
                 </span>
@@ -321,7 +319,7 @@
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
@@ -338,7 +336,7 @@
             </Button>
             {/if}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
                 onclick={e => {
                     deleteCredential(credential)

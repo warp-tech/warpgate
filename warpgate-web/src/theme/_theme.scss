@@ -267,3 +267,11 @@ ul.pagination {
         opacity: var(--bs-backdrop-opacity) !important;
     }
 }
+
+.abbreviate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

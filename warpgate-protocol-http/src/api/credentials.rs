@@ -504,30 +504,40 @@ impl Api {
             return Ok(IssueCertificateCredentialResponse::Unauthorized);
         };
 
+        // Fetch CA params
+        let params = Parameters::Entity::get(&*db).await?;
+        let ca = warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
+        let public_key_pem = body.public_key_pem.trim();
+        let client_cert = warpgate_ca::issue_client_certificate(&ca, &user_model.username, public_key_pem, user_model.id)?;
+        let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
+
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
             date_added: Set(Some(Utc::now())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            certificate_pem: Set(body.certificate_pem.clone()),
+            certificate_pem: Set(client_cert_pem.clone()),
         }
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
 
-        Ok(CreateCertificateCredentialResponse::Created(Json(
-            object.into(),
+        Ok(IssueCertificateCredentialResponse::Issued(Json(
+            IssuedCertificateCredential {
+                credential: object.clone().into(),
+                certificate_pem: client_cert_pem,
+            }
         )))
     }
 
     #[oai(
         path = "/profile/credentials/certificates/:id",
         method = "delete",
-        operation_id = "delete_my_certificate",
+        operation_id = "revoke_my_certificate",
         transform = "parameters_based_auth"
     )]
-    async fn api_delete_certificate(
+    async fn api_revoke_certificate(
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
@@ -547,6 +557,16 @@ impl Api {
         else {
             return Ok(DeleteCertificateCredentialResponse::NotFound);
         };
+
+        // Add to revocation list
+        let cert = warpgate_ca::deserialize_certificate(&model.certificate_pem)?;
+        entities::CertificateRevocation::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            date_added: Set(Utc::now()),
+            serial_number_base64: Set(warpgate_ca::serialize_certificate_serial(&cert)),
+        }
+        .insert(&*db)
+        .await?;
 
         model.delete(&*db).await?;
         Ok(DeleteCertificateCredentialResponse::Ok)

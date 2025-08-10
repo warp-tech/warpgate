@@ -15,7 +15,7 @@
     let creds: CredentialsState | undefined = $state()
 
     let creatingPublicKeyCredential = $state(false)
-    let creatingCertificateCredential = $state(false)
+    let issuingCertificateCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
 
@@ -59,19 +59,22 @@
         await api.deleteMyOtp(credential)
     }
 
-    async function createCertificate (label: string, certificate: string) {
-        const credential = await api.addMyCertificate({
-            newCertificateCredential: {
+    async function issueCertificate (label: string, publicKeyPem: string) {
+        const response = await api.issueMyCertificate({
+            issueCertificateCredentialRequest: {
                 label,
-                certificatePem: certificate,
+                publicKeyPem,
             },
         })
-        creds!.certificates.push(credential)
+        creds!.certificates.push(response.credential)
+        return response
     }
 
     async function deleteCertificate (credential: ExistingCertificateCredential) {
-        creds!.certificates = creds!.certificates.filter(c => c.id !== credential.id)
-        await api.deleteMyCertificate(credential)
+        if (confirm('Permanently revoke certificate?')) {
+            creds!.certificates = creds!.certificates.filter(c => c.id !== credential.id)
+            await api.revokeMyCertificate(credential)
+        }
     }
 </script>
 
@@ -200,7 +203,7 @@
         <h4 class="m-0">Certificates</h4>
         <span class="ms-auto"></span>
         <Button color="link" onclick={e => {
-            creatingCertificateCredential = true
+            issuingCertificateCredential = true
             e.preventDefault()
         }}>Add certificate</Button>
     </div>
@@ -209,9 +212,9 @@
         {#each creds.certificates as credential (credential.id)}
         <div class="list-group-item credential">
             <Fa fw icon={faCertificate} />
-            <div class="main ms-3">
+            <div class="main ms-3 abbreviate">
                 <div class="label">{credential.label}</div>
-                <small class="d-block text-muted">{credential.abbreviated}</small>
+                <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
             </div>
             <span class="ms-auto"></span>
             <CredentialUsedStateBadge credential={credential} />
@@ -277,10 +280,14 @@
 />
 {/if}
 
-{#if creatingCertificateCredential}
+{#if issuingCertificateCredential}
 <CertificateCredentialModal
-    bind:isOpen={creatingCertificateCredential}
-    save={createCertificate}
+    bind:isOpen={issuingCertificateCredential}
+    save={issueCertificate}
+    username={$serverInfo!.username!}
+    onClose={() => {
+        issuingCertificateCredential = false
+    }}
 />
 {/if}
 
