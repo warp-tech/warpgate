@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime};
 use aws_lc_rs::digest;
 use aws_lc_rs::error::KeyRejected;
 use aws_lc_rs::signature::{EcdsaKeyPair, ECDSA_P384_SHA3_384_ASN1_SIGNING};
+use data_encoding::BASE64;
 use der::{Decode, DecodePem, Encode};
 use spki::{AlgorithmIdentifier, SubjectPublicKeyInfo};
 use uuid::Uuid;
@@ -10,6 +11,8 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::time::Validity;
 use x509_cert::{Certificate, TbsCertificate, Version};
 use x509_parser::pem::parse_x509_pem;
+
+use hex;
 
 mod error;
 pub use error::CaError;
@@ -71,28 +74,28 @@ pub fn generate_root_certificate_rcgen() -> Result<(String, String), CaError> {
     Ok((cert.pem(), key_pair.serialize_pem()))
 }
 
+pub fn deserialize_certificate(pem: &str) -> Result<Certificate, CaError> {
+    let (_, pem_cert) = parse_x509_pem(pem.as_bytes())?;
+
+    Ok(Certificate::from_der(&pem_cert.contents)?)
+}
+
+pub fn serialize_certificate_serial(cert: &Certificate) -> String {
+    BASE64.encode(cert.tbs_certificate.serial_number.as_bytes())
+}
+
+pub fn certificate_sha256_hex_fingerprint(cert: &Certificate) -> Result<String, CaError> {
+    let der = cert.to_der()?;
+    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, &der);
+    Ok(hex::encode(digest.as_ref()))
+}
+
 /// Deserialize a CA certificate and private key from PEM format
 pub fn deserialize_ca(
     certificate_pem: &str,
     private_key_pem: &str,
 ) -> Result<CertifiedKey, CaError> {
-    // Parse and validate the certificate PEM
-    let (_, pem_cert) = parse_x509_pem(certificate_pem.as_bytes()).map_err(|e| {
-        CaError::Other(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to parse certificate PEM: {:?}", e),
-        )))
-    })?;
-
-    // // Parse the X.509 certificate to validate it
-    // let (_, _parsed_cert) = parse_x509_certificate(&pem_cert.contents)
-    //     .map_err(|e| CaError::Other(Box::new(std::io::Error::new(
-    //         std::io::ErrorKind::InvalidData,
-    //         format!("Failed to parse certificate: {:?}", e),
-    //     ))))?;
-
-    // Parse the certificate with x509-cert
-    let certificate = Certificate::from_der(&pem_cert.contents)?;
+    let certificate = deserialize_certificate(certificate_pem)?;
 
     // Parse the private key PEM
     let key_pem = pem::parse(private_key_pem).map_err(|e| {

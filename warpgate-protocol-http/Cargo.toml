@@ -31,6 +31,7 @@ tokio-tungstenite = { version = "0.25", features = ["rustls-tls-native-roots"], 
 tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }

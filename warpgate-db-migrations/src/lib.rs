@@ -23,6 +23,7 @@ mod m00018_ticket_description;
 mod m00019_rate_limits;
 mod m00020_ca;
 mod m00021_certificate_credentials;
+mod m00022_certificate_revocation;
 
 pub struct Migrator;
 
@@ -51,6 +52,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00019_rate_limits::Migration),
             Box::new(m00020_ca::Migration),
             Box::new(m00021_certificate_credentials::Migration),
+            Box::new(m00022_certificate_revocation::Migration),
         ]
     }
 }

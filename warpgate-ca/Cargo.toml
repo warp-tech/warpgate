@@ -8,6 +8,7 @@ version = "0.16.0"
 bytes.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+data-encoding.workspace = true
 tracing.workspace = true
 rcgen.workspace = true
 x509-parser.workspace = true
@@ -18,3 +19,5 @@ pem = "3.0"
 spki = "0.7"
 const-oid = "0.9"
 uuid.workspace = true
+
+hex.workspace = true

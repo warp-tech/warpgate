@@ -10,17 +10,20 @@
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import CopyButton from 'common/CopyButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Fa from 'svelte-fa'
 
     interface Props {
         isOpen: boolean
+        username: string
         save: (label: string, publicKeyPem: string) => Promise<IssuedCertificateCredential>
         onClose?: () => void
     }
 
     let {
         isOpen = $bindable(false),
+        username,
         save,
         onClose,
     }: Props = $props()
@@ -30,6 +33,7 @@
     let publicKeyPem = $state('')
     let label = $state('')
     let generatedCertificatePem = $state('')
+    let generatedKubeConfig = $state('')
 
     async function generateKeyPair() {
         try {
@@ -54,6 +58,7 @@
             const publicKeyLines = publicKeyBase64.match(/.{1,64}/g) || []
             publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicKeyLines.join('\n')}\n-----END PUBLIC KEY-----`
 
+            generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(publicKeyPem)}\n    client-key-data: ${btoa(privateKeyPem)}`
         } catch (error) {
             console.error('Failed to generate key pair:', error)
             alert('Failed to generate key pair. Please try again.')
@@ -129,7 +134,7 @@
     <ModalBody>
         {#if generatedCertificatePem}
             <div class="text-center mb-3">
-                <Fa icon={faCheck} size="lg" />
+                <Fa icon={faCheck} class="m-auto" size="lg" />
                 <p>Certificate has been issued</p>
             </div>
             <Alert color="warning" fade={false} class="mb-3">
@@ -169,17 +174,25 @@
                 class="d-block w-100"
                 on:click={downloadCertificate}
             >
-                Download certificate
+                Save certificate
             </Button>
         {/if}
         {#if privateKeyPem}
             <Button
-                color="secondary"
+                color="primary"
                 class="d-block w-100"
                 on:click={downloadPrivateKey}
             >
-                Download private key
+                Save private key
             </Button>
+        {/if}
+        {#if generatedKubeConfig}
+            <CopyButton
+                color="secondary"
+                class="d-flex align-items-center justify-content-center w-100"
+                text={generatedKubeConfig}
+                label="Copy both as kubeconfig"
+                />
         {/if}
         <Button
             color="danger"

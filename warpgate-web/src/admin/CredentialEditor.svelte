@@ -116,10 +116,12 @@
             })
         }
         if (credential.kind === CredentialKind.Certificate) {
-            await api.deleteCertificateCredential({
-                id: credential.id,
-                userId,
-            })
+            if (confirm('Permanently revoke certificate?')) {
+                await api.revokeCertificateCredential({
+                    id: credential.id,
+                    userId,
+                })
+            }
         }
         if (credential.kind === CredentialKind.Totp) {
             await api.deleteOtpCredential({
@@ -299,7 +301,7 @@
                     <div class="label d-flex align-items-center">
                         {credential.label}
                     </div>
-                    <small class="d-block text-muted">{credential.abbreviated}</small>
+                    <small class="d-block text-muted">{credential.fingerprint}</small>
                 </div>
                 <CredentialUsedStateBadge credential={credential} />
                 <div class="me-2"></div>
@@ -404,6 +406,7 @@
 <CertificateCredentialModal
     bind:isOpen={editingCertificateCredential}
     save={saveCertificateCredential}
+    {username}
     onClose={() => {
         editingCertificateCredential = false
     }}

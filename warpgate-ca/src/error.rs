@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use x509_parser::error::X509Error;
+use x509_parser::error::{PEMError, X509Error};
 
 #[derive(thiserror::Error, Debug)]
 pub enum CaError {
@@ -12,8 +12,10 @@ pub enum CaError {
     Der(#[from] der::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("PEM: {0}")]
-    Pem(#[from] x509_parser::asn1_rs::Err<X509Error>),
+    #[error("ASN.1 X509 {0}")]
+    Asn1X509(#[from] x509_parser::asn1_rs::Err<X509Error>),
+    #[error("ASN.1 PEM: {0}")]
+    Asn1Pem(#[from] x509_parser::asn1_rs::Err<PEMError>),
     #[error("rcgen: {0}")]
     RcGen(#[from] rcgen::Error),
     #[error("Invalid key format")]

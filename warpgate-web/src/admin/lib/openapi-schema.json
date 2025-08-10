@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.15.0-17-g1d3e7b5-modified"
+    "version": "v0.15.0-18-g8826e09-modified"
   },
   "servers": [
     {
@@ -2263,7 +2263,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "delete_certificate_credential"
+        "operationId": "revoke_certificate_credential"
       }
     },
     "/users/{user_id}/credentials/otp": {
@@ -2614,7 +2614,7 @@
         "required": [
           "id",
           "label",
-          "abbreviated"
+          "fingerprint"
         ],
         "properties": {
           "id": {
@@ -2632,7 +2632,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "abbreviated": {
+          "fingerprint": {
             "type": "string"
           }
         }

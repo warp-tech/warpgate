@@ -10,7 +10,7 @@ async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true
 chrono = { version = "0.4", default-features = false }
 futures.workspace = true
-hex = { version = "0.4", default-features = false }
+hex.workspace = true
 mime_guess = { version = "2.0", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true

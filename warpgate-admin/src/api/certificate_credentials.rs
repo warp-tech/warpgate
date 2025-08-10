@@ -6,27 +6,21 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel,
-    ModelTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait,
+    QueryFilter, Set,
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::WarpgateError;
-use warpgate_db_entities::{CertificateCredential, Parameters, User};
+use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
 
 use super::AnySecurityScheme;
 
-fn abbreviate_certificate(cert: &str) -> String {
-    // Extract the subject or first few lines of the certificate for display
-    if let Some(first_line) = cert.lines().next() {
-        if first_line.len() > 50 {
-            format!("{}...", &first_line[..47])
-        } else {
-            first_line.to_string()
-        }
-    } else {
-        "Invalid certificate".to_string()
-    }
+fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
+    Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
+        &warpgate_ca::deserialize_certificate(certificate_pem)?,
+    )?)
 }
 
 #[derive(Object)]
@@ -35,7 +29,7 @@ struct ExistingCertificateCredential {
     label: String,
     date_added: Option<DateTime<Utc>>,
     last_used: Option<DateTime<Utc>>,
-    abbreviated: String,
+    fingerprint: String,
 }
 
 #[derive(Object)]
@@ -62,7 +56,8 @@ impl From<CertificateCredential::Model> for ExistingCertificateCredential {
             date_added: credential.date_added,
             last_used: credential.last_used,
             label: credential.label,
-            abbreviated: abbreviate_certificate(&credential.certificate_pem),
+            fingerprint: certificate_fingerprint(&credential.certificate_pem)
+                .unwrap_or_else(|_| "Invalid certificate".into()),
         }
     }
 }
@@ -163,9 +158,9 @@ impl ListApi {
 }
 
 #[derive(ApiResponse)]
-enum DeleteCredentialResponse {
+enum RevokeCertificateCredentialResponse {
     #[oai(status = 204)]
-    Deleted,
+    Revoked,
     #[oai(status = 404)]
     NotFound,
 }
@@ -209,7 +204,7 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
         method = "delete",
-        operation_id = "delete_certificate_credential"
+        operation_id = "revoke_certificate_credential"
     )]
     async fn api_delete(
         &self,
@@ -217,7 +212,7 @@ impl DetailApi {
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: AnySecurityScheme,
-    ) -> Result<DeleteCredentialResponse, WarpgateError> {
+    ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
@@ -225,10 +220,20 @@ impl DetailApi {
             .one(&*db)
             .await?
         else {
-            return Ok(DeleteCredentialResponse::NotFound);
+            return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 
+        let cert = deserialize_certificate(&model.certificate_pem)?;
+
+        CertificateRevocation::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            date_added: Set(Utc::now()),
+            serial_number_base64: Set(serialize_certificate_serial(&cert)),
+        }
+        .insert(&*db)
+        .await?;
+
         model.delete(&*db).await?;
-        Ok(DeleteCredentialResponse::Deleted)
+        Ok(RevokeCertificateCredentialResponse::Revoked)
     }
 }

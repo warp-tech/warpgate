@@ -9,42 +9,13 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
-use warpgate_db_entities::{self as entities, Parameters, PasswordCredential, PublicKeyCredential, CertificateCredential};
+use warpgate_db_entities::{
+    self as entities, CertificateCredential, Parameters, PasswordCredential, PublicKeyCredential,
+};
 
 use super::common::get_user;
 use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization};
-
-fn validate_certificate_pem(cert: &str) -> Result<(), WarpgateError> {
-    // Check if it looks like a PEM certificate
-    let cert = cert.trim();
-    if !cert.starts_with("-----BEGIN CERTIFICATE-----") {
-        return Err(WarpgateError::Other(
-            "Certificate must be in PEM format and start with '-----BEGIN CERTIFICATE-----'".into()
-        ));
-    }
-    if !cert.ends_with("-----END CERTIFICATE-----") {
-        return Err(WarpgateError::Other(
-            "Certificate must be in PEM format and end with '-----END CERTIFICATE-----'".into()
-        ));
-    }
-
-    // Try to parse the certificate using rustls-pemfile
-    use rustls_pemfile::Item;
-    let mut reader = std::io::Cursor::new(cert.as_bytes());
-    match rustls_pemfile::read_one(&mut reader) {
-        Ok(Some(Item::X509Certificate(_))) => Ok(()),
-        Ok(Some(_)) => Err(WarpgateError::Other(
-            "PEM file does not contain a certificate".into()
-        )),
-        Ok(None) => Err(WarpgateError::Other(
-            "No valid PEM items found in certificate".into()
-        )),
-        Err(_) => Err(WarpgateError::Other(
-            "Invalid PEM certificate format".into()
-        )),
-    }
-}
 
 pub struct Api;
 
@@ -196,20 +167,13 @@ struct ExistingCertificateCredential {
     label: String,
     date_added: Option<DateTime<Utc>>,
     last_used: Option<DateTime<Utc>>,
-    abbreviated: String,
+    fingerprint: String,
 }
 
-fn abbreviate_certificate(cert: &str) -> String {
-    // Extract the subject or first few lines of the certificate for display
-    if let Some(first_line) = cert.lines().next() {
-        if first_line.len() > 50 {
-            format!("{}...", &first_line[..47])
-        } else {
-            first_line.to_string()
-        }
-    } else {
-        "Invalid certificate".to_string()
-    }
+fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
+    Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
+        &warpgate_ca::deserialize_certificate(certificate_pem)?,
+    )?)
 }
 
 impl From<entities::CertificateCredential::Model> for ExistingCertificateCredential {
@@ -219,15 +183,28 @@ impl From<entities::CertificateCredential::Model> for ExistingCertificateCredent
             label: credential.label,
             date_added: credential.date_added,
             last_used: credential.last_used,
-            abbreviated: abbreviate_certificate(&credential.certificate_pem),
+            fingerprint: certificate_fingerprint(&credential.certificate_pem)
+                .unwrap_or_else(|_| "Invalid certificate".into()),
         }
     }
 }
 
+#[derive(Object)]
+struct IssuedCertificateCredential {
+    credential: ExistingCertificateCredential,
+    certificate_pem: String,
+}
+
+#[derive(Object)]
+struct IssueCertificateCredentialRequest {
+    label: String,
+    public_key_pem: String,
+}
+
 #[derive(ApiResponse)]
-enum CreateCertificateCredentialResponse {
+enum IssueCertificateCredentialResponse {
     #[oai(status = 201)]
-    Created(Json<ExistingCertificateCredential>),
+    Issued(Json<IssuedCertificateCredential>),
     #[oai(status = 401)]
     Unauthorized,
 }
@@ -512,22 +489,19 @@ impl Api {
     #[oai(
         path = "/profile/credentials/certificates",
         method = "post",
-        operation_id = "add_my_certificate",
+        operation_id = "issue_my_certificate",
         transform = "parameters_based_auth"
     )]
-    async fn api_create_certificate(
+    async fn api_issue_certificate(
         &self,
         auth: Data<&RequestAuthorization>,
         services: Data<&Services>,
-        body: Json<NewCertificateCredential>,
-    ) -> Result<CreateCertificateCredentialResponse, WarpgateError> {
-        // Validate the certificate PEM format
-        validate_certificate_pem(&body.certificate_pem)?;
-
+        body: Json<IssueCertificateCredentialRequest>,
+    ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let db = services.db.lock().await;
 
         let Some(user_model) = get_user(&auth, &db).await? else {
-            return Ok(CreateCertificateCredentialResponse::Unauthorized);
+            return Ok(IssueCertificateCredentialResponse::Unauthorized);
         };
 
         let object = CertificateCredential::ActiveModel {
