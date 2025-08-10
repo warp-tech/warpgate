@@ -14,6 +14,7 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
+#[derive(Clone)]
 pub struct WarpgateServerHandle {
     id: SessionId,
     db: Arc<Mutex<DatabaseConnection>>,

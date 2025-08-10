@@ -1,6 +1,8 @@
 mod client;
 mod recording;
 mod server;
+mod correlator;
+mod session_handle;
 
 use std::fmt::Debug;
 

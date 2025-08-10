@@ -205,7 +205,7 @@
         <Button color="link" onclick={e => {
             issuingCertificateCredential = true
             e.preventDefault()
-        }}>Add certificate</Button>
+        }}>Issue certificate</Button>
     </div>
 
     <div class="list-group list-group-flush mb-3">

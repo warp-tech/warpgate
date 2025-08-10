@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.15.0-19-gdbc5b86-modified"
+    "version": "v0.15.0-20-g4fa0f11-modified"
   },
   "servers": [
     {
@@ -1193,6 +1193,10 @@
             "format": "uint16"
           },
           "postgres": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "kubernetes": {
             "type": "integer",
             "format": "uint16"
           }

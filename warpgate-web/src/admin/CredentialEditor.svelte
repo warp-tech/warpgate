@@ -262,7 +262,7 @@
     }}>Add public key</Button>
     <Button size="sm" color="link" on:click={() => {
         editingCertificateCredential = true
-    }}>Add certificate</Button>
+    }}>Issue certificate</Button>
     <Button size="sm" color="link" on:click={() => creatingOtp = true}>Add OTP</Button>
     <Button size="sm" color="link" on:click={() => {
         editingSsoCredentialInstance = null

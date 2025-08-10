@@ -341,6 +341,10 @@ pub struct KubernetesConfig {
 
     #[serde(default)]
     pub key: String,
+
+    #[serde(default = "_default_session_max_age", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub session_max_age: Duration,
 }
 
 impl Default for KubernetesConfig {
@@ -351,6 +355,7 @@ impl Default for KubernetesConfig {
             external_port: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
+            session_max_age: _default_session_max_age(),
         }
     }
 }

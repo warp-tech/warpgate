@@ -22,9 +22,10 @@ use warpgate_common::{
 };
 use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
-use warpgate_db_entities::{CertificateCredential, Session, User};
+use warpgate_db_entities::{CertificateCredential, User};
 
 use crate::client::create_kube_config;
+use crate::correlator::RequestCorrelator;
 use crate::recording::KubernetesRecorder;
 
 /// Custom client certificate verifier that accepts any client certificate
@@ -173,6 +174,8 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     let auth_state_store = services.auth_state_store.clone();
     let recordings = services.recordings.clone();
 
+    let correlator = RequestCorrelator::new(&services);
+
     let app = Route::new()
         .at("/:target_name/*path", handle_api_request)
         .at("/:target_name/ws", get(handle_websocket))
@@ -182,6 +185,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         .data(auth_state_store)
         .data(recordings)
         .data(services.clone())
+        .data(correlator)
         .before(|req: Request| async move {
             info!("Received Kubernetes API request: {}", req.uri());
             Ok(req)
@@ -242,6 +246,7 @@ async fn handle_api_request(
     state: Data<&Arc<Mutex<State>>>,
     _auth_state_store: Data<&Arc<Mutex<AuthStateStore>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
     services: Data<&Services>,
 ) -> Result<Response, poem::Error> {
     debug!(
@@ -320,6 +325,12 @@ async fn handle_api_request(
         )
     })?;
 
+    let session = correlator
+        .lock()
+        .await
+        .session_for_request(req, &target_name)
+        .await?;
+
     // Record the request if recording is enabled
     let mut recorder_opt = {
         // Check if recording is enabled in the config
@@ -327,21 +338,11 @@ async fn handle_api_request(
         if config.store.recordings.enable {
             drop(config);
 
-            // For Kubernetes protocol, we'll create a temporary session since each request is independent
-            // In the future, this could be improved to group related requests by user/target
-            let session_id = uuid::Uuid::new_v4();
-
-            // First create a minimal session record in the database to satisfy foreign key constraints
-            if let Err(e) = create_temporary_session(&session_id, &target_info, &services).await {
-                warn!("Failed to create temporary session for recording: {}", e);
-                None
-            } else {
-                match start_recording(&session_id, &recordings).await {
-                    Ok(recorder) => Some(recorder),
-                    Err(e) => {
-                        warn!("Failed to start recording: {}", e);
-                        None
-                    }
+            match start_recording(&session.lock().await.id(), &recordings).await {
+                Ok(recorder) => Some(recorder),
+                Err(e) => {
+                    warn!("Failed to start recording: {}", e);
+                    None
                 }
             }
         } else {
@@ -688,29 +689,6 @@ async fn create_authenticated_client(
     })
 }
 
-async fn create_temporary_session(
-    session_id: &SessionId,
-    target_info: &AuthenticatedTarget,
-    services: &Services,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use chrono::Utc;
-
-    let session_model = Session::ActiveModel {
-        id: Set(*session_id),
-        username: Set(target_info.auth_user.clone()),
-        target_snapshot: Set(Some(serde_json::to_string(&target_info.target)?)),
-        remote_address: Set("kubernetes-api".to_string()), // For API requests, we don't have a real remote address
-        started: Set(Utc::now()),
-        protocol: Set("kubernetes".to_string()),
-        ..Default::default()
-    };
-
-    let db = services.db.lock().await;
-    session_model.insert(&*db).await?;
-
-    Ok(())
-}
-
 async fn start_recording(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
@@ -749,7 +727,6 @@ async fn validate_client_certificate(
             let stored_cert = normalize_certificate_pem(&cert_credential.certificate_pem);
             let provided_cert = normalize_certificate_pem(&cert_pem);
 
-            dbg!(&stored_cert, &provided_cert);
             if stored_cert == provided_cert {
                 info!(
                     user = user.username,
@@ -803,7 +780,6 @@ fn normalize_certificate_pem(pem: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct ClientCertificate {
     pub der_bytes: Vec<u8>,
-    pub pem: String,
 }
 
 /// Middleware that extracts client certificates from enhanced remote_addr and stores them in request extensions
@@ -840,25 +816,13 @@ where
                         "Middleware: Successfully extracted client certificate from remote_addr"
                     );
 
-                    // Convert DER to PEM for storage
-                    match der_to_pem(&cert_der) {
-                        Ok(cert_pem) => {
-                            let client_cert = ClientCertificate {
-                                der_bytes: cert_der,
-                                pem: cert_pem,
-                            };
+                    let client_cert = ClientCertificate {
+                        der_bytes: cert_der,
+                    };
 
-                            // Store certificate in request extensions for later access
-                            req.extensions_mut().insert(client_cert);
-                            debug!("Middleware: Client certificate stored in request extensions");
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Middleware: Failed to convert certificate DER to PEM: {}",
-                                e
-                            );
-                        }
-                    }
+                    // Store certificate in request extensions for later access
+                    req.extensions_mut().insert(client_cert);
+                    debug!("Middleware: Client certificate stored in request extensions");
                 }
                 Err(e) => {
                     warn!(

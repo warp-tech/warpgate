@@ -57,8 +57,6 @@
             const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyArrayBuffer)))
             const publicKeyLines = publicKeyBase64.match(/.{1,64}/g) || []
             publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicKeyLines.join('\n')}\n-----END PUBLIC KEY-----`
-
-            generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(publicKeyPem)}\n    client-key-data: ${btoa(privateKeyPem)}`
         } catch (error) {
             console.error('Failed to generate key pair:', error)
             alert('Failed to generate key pair. Please try again.')
@@ -82,6 +80,8 @@
             // Then submit public key to get certificate issued
             const result = await save(label.trim(), publicKeyPem)
             generatedCertificatePem = result.certificatePem
+
+            generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(generatedCertificatePem)}\n    client-key-data: ${btoa(privateKeyPem)}`
         } catch (error) {
             console.error('Failed to generate certificate:', error)
             alert('Failed to generate certificate. Please try again.')

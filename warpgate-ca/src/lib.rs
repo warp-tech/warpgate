@@ -228,7 +228,7 @@ pub fn issue_client_certificate(
     let certificate = Certificate {
         tbs_certificate: tbs_cert,
         signature_algorithm: AlgorithmIdentifier {
-            oid: rfc5912::ECDSA_WITH_SHA_256,
+            oid: rfc5912::ECDSA_WITH_SHA_384,
             parameters: None,
         },
         signature: der::asn1::BitString::from_bytes(signature.as_ref())?,
