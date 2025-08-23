@@ -16,13 +16,14 @@ use secrecy::ExposeSecret;
 use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tracing::*;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{
     ListenEndpoint, SessionId, SingleCertResolver, Target, TargetKubernetesOptions, TargetOptions,
-    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey, User,
 };
 use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
-use warpgate_db_entities::{CertificateCredential, User};
+use warpgate_db_entities::CertificateCredential;
 
 use crate::client::create_kube_config;
 use crate::correlator::RequestCorrelator;
@@ -163,12 +164,6 @@ fn extract_peer_certificates<T>(tls_stream: &TlsStream<T>) -> Option<Vec<u8>> {
     None
 }
 
-#[derive(Debug)]
-struct AuthenticatedTarget {
-    target: Target,
-    auth_user: Option<String>,
-}
-
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
     let state = services.state.clone();
     let auth_state_store = services.auth_state_store.clone();
@@ -256,9 +251,10 @@ async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let target_info = authenticate_and_get_target(req, &target_name, &state, &services).await?;
+    let (user_info, target) =
+        authenticate_and_get_target(req, &target_name, &state, &services).await?;
 
-    let TargetOptions::Kubernetes(k8s_options) = &target_info.target.options else {
+    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
             "Invalid target type",
             poem::http::StatusCode::BAD_REQUEST,
@@ -266,7 +262,8 @@ async fn handle_api_request(
     };
 
     let client =
-        create_authenticated_client(k8s_options, &target_info.auth_user, &services).await?;
+        create_authenticated_client(&k8s_options, &Some(user_info.username.clone()), &services)
+            .await?;
 
     info!(
         "Target Kubernetes options: cluster_url={}, auth={:?}",
@@ -331,6 +328,13 @@ async fn handle_api_request(
         .session_for_request(req, &target_name)
         .await?;
 
+    let session_id = {
+        let session = session.lock().await;
+        session.set_target(&target).await?;
+        session.set_user_info(user_info).await?;
+        session.id()
+    };
+
     // Record the request if recording is enabled
     let mut recorder_opt = {
         // Check if recording is enabled in the config
@@ -338,7 +342,7 @@ async fn handle_api_request(
         if config.store.recordings.enable {
             drop(config);
 
-            match start_recording(&session.lock().await.id(), &recordings).await {
+            match start_recording(&session_id, &recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -512,7 +516,7 @@ async fn authenticate_and_get_target(
     target_name: &str,
     _state: &Arc<Mutex<State>>,
     services: &Services,
-) -> Result<AuthenticatedTarget, poem::Error> {
+) -> Result<(AuthStateUserInfo, Target), poem::Error> {
     use RequestCertificateExt; // Import the trait for certificate extraction
 
     // Check for Bearer token authentication (API tokens)
@@ -539,10 +543,7 @@ async fn authenticate_and_get_target(
                                 .await
                                 .unwrap_or(false)
                             {
-                                return Ok(AuthenticatedTarget {
-                                    target,
-                                    auth_user: Some(user.username),
-                                });
+                                return Ok(((&user).into(), target));
                             } else {
                                 return Err(poem::Error::from_string(
                                     format!("Access denied to target: {}", target_name),
@@ -567,12 +568,7 @@ async fn authenticate_and_get_target(
         debug!("Found client certificate from middleware, validating against database");
 
         match validate_client_certificate(&client_cert.der_bytes, services).await {
-            Ok(Some(username)) => {
-                debug!(
-                    user = username,
-                    "Client certificate authentication successful"
-                );
-
+            Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
                 let mut config_provider = services.config_provider.lock().await;
                 let targets = config_provider.list_targets().await.map_err(|e| {
@@ -588,14 +584,11 @@ async fn authenticate_and_get_target(
                         && matches!(target.options, TargetOptions::Kubernetes(_))
                     {
                         if config_provider
-                            .authorize_target(&username, &target.name)
+                            .authorize_target(&user_info.username, &target.name)
                             .await
                             .unwrap_or(false)
                         {
-                            return Ok(AuthenticatedTarget {
-                                target,
-                                auth_user: Some(username.clone()),
-                            });
+                            return Ok((user_info, target));
                         } else {
                             return Err(poem::Error::from_string(
                                 format!("Access denied to target: {}", target_name),
@@ -709,7 +702,7 @@ async fn start_recording(
 async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> Result<Option<String>, anyhow::Error> {
+) -> Result<Option<AuthStateUserInfo>, anyhow::Error> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der)?;
 
@@ -717,7 +710,7 @@ async fn validate_client_certificate(
 
     // Find all certificate credentials and match against the provided certificate
     let cert_credentials = CertificateCredential::Entity::find()
-        .find_with_related(User::Entity)
+        .find_with_related(warpgate_db_entities::User::Entity)
         .all(&*db)
         .await?;
 
@@ -741,7 +734,7 @@ async fn validate_client_certificate(
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 
-                return Ok(Some(user.username));
+                return Ok(Some((&User::try_from(user)?).into()));
             }
         }
     }

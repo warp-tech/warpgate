@@ -18,7 +18,7 @@ kube.workspace = true
 lazy_static = { version = "1.4", default-features = false }
 md5 = { version = "0.7", default-features = false }
 poem.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
 secrecy = { version = "0.10", default-features = false }
