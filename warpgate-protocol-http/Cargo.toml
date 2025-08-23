@@ -16,12 +16,8 @@ http = { version = "1.0", default-features = false }
 once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
-reqwest = { version = "0.12", features = [
-    "http2",                               # required for connecting to targets behind AWS ELB
-    "rustls-tls-native-roots-no-provider",
-    "stream",
-    "gzip",
-], default-features = false }
+reqwest.workspace = true
+rustls-pemfile.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

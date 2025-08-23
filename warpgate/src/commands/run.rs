@@ -60,21 +60,19 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
 
     let mut protocol_futures = futures::stream::FuturesUnordered::new();
 
+    protocol_futures.push(
+        run_protocol_server(
+            HTTPProtocolServer::new(&services).await?,
+            config.store.http.listen.clone(),
+        )
+        .boxed(),
+    );
+
     if config.store.ssh.enable {
         protocol_futures.push(
             run_protocol_server(
                 SSHProtocolServer::new(&services).await?,
                 config.store.ssh.listen.clone(),
-            )
-            .boxed(),
-        );
-    }
-
-    if config.store.http.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                HTTPProtocolServer::new(&services).await?,
-                config.store.http.listen.clone(),
             )
             .boxed(),
         );

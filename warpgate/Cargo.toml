@@ -18,7 +18,8 @@ dialoguer.workspace = true
 enum_dispatch.workspace = true
 futures.workspace = true
 notify = { version = "8.0", default-features = false, features = ["fsevent-sys"] }
-rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem"], default-features = false }
+rcgen.workspace = true
+reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
 serde_yaml = { version = "0.9", default-features = false }

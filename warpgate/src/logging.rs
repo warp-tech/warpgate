@@ -28,10 +28,10 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) {
 
     let registry = tracing_subscriber::registry();
 
-    #[cfg(all(debug_assertions, feature = "tokio-console"))]
-    let console_layer = console_subscriber::spawn();
-    #[cfg(all(debug_assertions, feature = "tokio-console"))]
-    let registry = registry.with(console_layer);
+    // #[cfg(all(debug_assertions, feature = "tokio-console"))]
+    // let console_layer = console_subscriber::spawn();
+    // #[cfg(all(debug_assertions, feature = "tokio-console"))]
+    // let registry = registry.with(console_layer);
 
     let socket_layer = match config {
         Some(config) => Some(make_socket_logger_layer(config).await),

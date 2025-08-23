@@ -124,11 +124,7 @@ impl Api {
                     } else {
                         None
                     },
-                    http: if config.store.http.enable {
-                        Some(config.store.http.external_port())
-                    } else {
-                        None
-                    },
+                    http: Some(config.store.http.external_port()),
                     mysql: if config.store.mysql.enable {
                         Some(config.store.mysql.external_port())
                     } else {
