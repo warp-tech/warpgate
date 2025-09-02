@@ -41,10 +41,18 @@ impl SsoLoginRequest {
             };
         }
 
+        // If preferred_username is absent, fall back to `email`
+        let preferred_username = get_claim!(preferred_username)
+            .map(|x| x.as_str())
+            .map(ToString::to_string)
+            .or_else(|| {
+                get_claim!(email)
+                    .map(|x| x.as_str())
+                    .map(ToString::to_string)
+            });
+
         Ok(SsoLoginResponse {
-            preferred_username: get_claim!(preferred_username)
-                .map(|x| x.as_str())
-                .map(ToString::to_string),
+            preferred_username,
 
             name: get_claim!(name)
                 .and_then(|x| x.get(None))
@@ -65,3 +73,4 @@ impl SsoLoginRequest {
         })
     }
 }
+
