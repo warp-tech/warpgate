@@ -114,6 +114,16 @@ impl ProtocolServer for HTTPProtocolServer {
             )
         };
 
+        let base_cookie_domain: Option<String> = {
+            let config = self.services.config.lock().await;
+            match config.construct_external_url(None, None) {
+                Ok(url) => url
+                    .host_str()
+                    .map(|host| format!(".{}", host)),
+                Err(_) => None,
+            }
+        };
+
         let app = Route::new()
             .nest(
                 "/@warpgate",
@@ -191,7 +201,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     .name(SESSION_COOKIE_NAME),
                 session_storage.clone(),
             ))
-            .with(CookieHostMiddleware::new())
+            .with(CookieHostMiddleware::new(base_cookie_domain))
             .data(self.services.clone())
             .data(session_store.clone())
             .data(session_storage)
@@ -241,3 +251,4 @@ impl Debug for HTTPProtocolServer {
         write!(f, "HTTPProtocolServer")
     }
 }
+
