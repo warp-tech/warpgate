@@ -329,6 +329,16 @@ impl ServerSession {
         Ok(())
     }
 
+    /// Start connecting to the target if we aren't already.
+    ///
+    /// Timing of this call is important because if the client connection is
+    /// an interactive session *in principle* (e.g a normal interactive OpenSSH
+    /// session but maybe with some port forwards or agent)
+    /// Ideally, it needs to be called by the time we already have the interactive
+    /// channel open if we will ever have one to prevent bugs like
+    /// https://github.com/warp-tech/warpgate/issues/1286
+    /// where a PTY channel is required for the host key prompt, but we've connected
+    /// faster than the client could open one.
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
         match self.target.clone() {
             TargetSelection::None => {
@@ -1330,7 +1340,6 @@ impl ServerSession {
     async fn _agent_forward(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "Requested Agent Forwarding");
-        let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::AgentForward,

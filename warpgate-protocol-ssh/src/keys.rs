@@ -47,7 +47,7 @@ pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn load_host_keys(config: &WarpgateConfig) -> Result<PrivateKey, russh::keys::Error> {
+pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<PrivateKey>, russh::keys::Error> {
     let path = get_keys_path(config);
     let mut keys = Vec::new();
 
@@ -55,8 +55,9 @@ pub fn load_host_keys(config: &WarpgateConfig) -> Result<PrivateKey, russh::keys
     keys.push(load_secret_key(key_path, None)?);
 
     let key_path = path.join("host-rsa");
+    keys.push(load_secret_key(key_path, None)?);
 
-    load_secret_key(key_path, None)
+    Ok(keys)
 }
 
 pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {

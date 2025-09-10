@@ -37,7 +37,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
                     MethodKind::KeyboardInteractive,
                 ][..],
             ),
-            keys: vec![load_host_keys(&config)?],
+            keys: load_host_keys(&config)?,
             event_buffer_size: 100,
             nodelay: true,
             preferred: Preferred {

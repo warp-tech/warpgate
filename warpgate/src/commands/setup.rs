@@ -74,13 +74,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     );
 
     let theme = ColorfulTheme::default();
-    let mut store = WarpgateConfigStore {
-        http: HttpConfig {
-            enable: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let mut store = WarpgateConfigStore::default();
 
     // ---
 
@@ -138,7 +132,6 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     });
 
-    store.http.enable = true;
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
         store.http.listen =
             ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));

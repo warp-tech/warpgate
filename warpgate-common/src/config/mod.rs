@@ -237,9 +237,6 @@ pub struct SniCertificateConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct HttpConfig {
-    #[serde(default = "_default_false")]
-    pub enable: bool,
-
     #[serde(default = "_default_http_listen")]
     pub listen: ListenEndpoint,
 
@@ -270,7 +267,6 @@ pub struct HttpConfig {
 impl Default for HttpConfig {
     fn default() -> Self {
         HttpConfig {
-            enable: false,
             listen: _default_http_listen(),
             external_port: None,
             certificate: "".to_owned(),

@@ -19,7 +19,6 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
-        "enable": false,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
@@ -112,10 +111,6 @@
         "cookie_max_age": {
           "type": "string",
           "default": "1day"
-        },
-        "enable": {
-          "type": "boolean",
-          "default": false
         },
         "external_port": {
           "type": [

@@ -4072,9 +4072,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.54.0"
+version = "0.54.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b6bf7e0751f391a95dfb2feff66a5adafaad2fd98f0e04f10619958253d92fe"
+checksum = "00897b69ab623d39b396af89f1acbb775fb5a730f0db91833da297d5a6cd3f8d"
 dependencies = [
  "aes",
  "aws-lc-rs",
@@ -5867,7 +5867,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -5883,6 +5883,7 @@ dependencies = [
  "futures",
  "notify",
  "rcgen",
+ "reqwest",
  "rustls",
  "schemars",
  "sd-notify",
@@ -5908,7 +5909,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5961,7 +5962,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -6007,7 +6008,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -6050,7 +6051,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -6063,7 +6064,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -6079,7 +6080,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "chrono",
  "data-encoding",
@@ -6096,7 +6097,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6166,7 +6167,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6194,7 +6195,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6216,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -6242,7 +6243,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -6260,7 +6261,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "rust-embed",
  "serde",
@@ -6860,6 +6861,24 @@ dependencies = [
  "signature",
  "spki",
  "tls_codec",
+]
+
+[[package]]
+name = "x509-parser"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcbc162f30700d6f3f82a24bf7cc62ffe7caea42c0b2cba8bf7f3ae50cf51f69"
+dependencies = [
+ "asn1-rs 0.6.2",
+ "data-encoding",
+ "der-parser 9.0.0",
+ "lazy_static",
+ "nom",
+ "oid-registry 0.7.1",
+ "ring",
+ "rusticata-macros",
+ "thiserror 1.0.69",
+ "time",
 ]
 
 [[package]]

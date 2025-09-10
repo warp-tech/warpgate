@@ -16,6 +16,10 @@ use crate::WarpgateError;
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {
+    pub fn address(&self) -> SocketAddr {
+        self.0
+    }
+
     pub fn addresses_to_listen_on(&self) -> Result<Vec<SocketAddr>, WarpgateError> {
         // For [::], explicitly return both addresses so that we are not affected
         // by the state of the ipv6only sysctl.

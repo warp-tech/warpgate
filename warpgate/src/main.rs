@@ -93,6 +93,8 @@ pub(crate) enum Commands {
     },
     /// Show version information
     Version,
+    /// Automatic healthcheck for running Warpgate in a container
+    Healthcheck,
 }
 
 async fn _main() -> Result<()> {
@@ -124,6 +126,7 @@ async fn _main() -> Result<()> {
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&cli, username).await
         }
+        Commands::Healthcheck => crate::commands::healthcheck::command(&cli).await,
     }
 }
 
