@@ -444,7 +444,7 @@ impl RemoteClient {
                     kex::ECDH_SHA2_NISTP521,
                     kex::DH_G16_SHA512,
                     kex::DH_G14_SHA256, // non-default
-                    kex::DH_G14_SHA256,
+                    kex::DH_GEX_SHA256,
                     kex::DH_G1_SHA1, // non-default
                     kex::EXTENSION_SUPPORT_AS_CLIENT,
                     kex::EXTENSION_SUPPORT_AS_SERVER,
