@@ -281,11 +281,19 @@ impl Api {
                 .await?;
         }
 
-        Ok(Ok(context
+        let mut next_url = context
             .next_url
             .as_deref()
             .unwrap_or("/@warpgate#/login")
-            .to_owned()))
+            .to_owned();
+
+        if let Some(ref host) = context.return_host {
+            if next_url.starts_with('/') {
+                next_url = format!("https://{}{}", host, next_url);
+            }
+        }
+
+        Ok(Ok(next_url))
     }
 
     #[oai(
