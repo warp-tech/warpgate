@@ -62,6 +62,9 @@
                     {#if target.options.kind === TargetKind.Ssh}
                         SSH
                     {/if}
+                    {#if target.options.kind === TargetKind.Kubernetes}
+                        Kubernetes
+                    {/if}
                     {#if target.options.kind === TargetKind.WebAdmin}
                         This web admin interface
                     {/if}

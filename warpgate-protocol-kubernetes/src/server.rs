@@ -199,13 +199,13 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             certificate: TlsCertificateBundle::from_file(&certificate_path)
                 .await
                 .with_context(|| {
-                    format!("reading TLS private key from '{}'", key_path.display())
+                    format!(
+                        "reading TLS certificate from '{}'",
+                        certificate_path.display()
+                    )
                 })?,
             private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                format!(
-                    "reading TLS certificate from '{}'",
-                    certificate_path.display()
-                )
+                format!("reading TLS private key from '{}'", key_path.display())
             })?,
         }
     };
