@@ -46,9 +46,11 @@ pub async fn create_kube_config(options: &TargetKubernetesOptions) -> Result<Con
                 auth.token.expose_secret().clone().into(),
             ));
         }
-        KubernetesTargetAuth::Certificate(_) => {
-            // Certificate-based auth will be handled by user credentials
-            // For target testing, we'll try without auth first
+        KubernetesTargetAuth::Certificate(auth) => {
+            config.auth_info.client_key_data = Some(secrecy::SecretBox::new(
+                auth.private_key.expose_secret().clone().into(),
+            ));
+            config.auth_info.client_certificate_data = auth.certificate.expose_secret().clone().into()
         }
     }
 

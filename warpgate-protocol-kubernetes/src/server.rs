@@ -648,30 +648,49 @@ async fn create_authenticated_client(
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
 
-    // TODO: Add certificate authentication support
-    // For certificate auth, we would:
-    // 1. Look up the user's certificate credentials from the database
-    // 2. Configure the HTTP client with the certificate and private key
-
-    if let Some(token) = &config.auth_info.token {
-        info!(
+    match &k8s_options.auth {
+        warpgate_common::KubernetesTargetAuth::Token(auth) => {
+            info!(
             "Setting Kubernetes auth token: {}...",
-            &token.expose_secret()[..std::cmp::min(10, token.expose_secret().len())]
+            &auth.token.expose_secret()[..std::cmp::min(10, auth.token.expose_secret().len())]
         );
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
-                .map_err(|e| {
-                    poem::Error::from_string(
-                        format!("Invalid token: {}", e),
-                        poem::http::StatusCode::BAD_REQUEST,
-                    )
-                })?,
-        );
-        client_builder = client_builder.default_headers(headers);
-    } else {
-        warn!("No Kubernetes auth token configured for target");
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth.token.expose_secret()))
+                    .map_err(|e| {
+                        poem::Error::from_string(
+                            format!("Invalid token: {}", e),
+                            poem::http::StatusCode::BAD_REQUEST,
+                        )
+                    })?,
+            );
+            client_builder = client_builder.default_headers(headers);
+        }
+        warpgate_common::KubernetesTargetAuth::Certificate(auth) => {
+            // Expect PEM certificate and PEM private key in the auth config
+            // Combine into a single PEM bundle for reqwest::Identity
+            let cert_pem = auth.certificate.expose_secret();
+            let key_pem = auth.private_key.expose_secret();
+            let mut pem_bundle = String::new();
+            pem_bundle.push_str(cert_pem);
+            if !pem_bundle.ends_with('\n') {
+                pem_bundle.push('\n');
+            }
+            pem_bundle.push_str(key_pem);
+            if !pem_bundle.ends_with('\n') {
+                pem_bundle.push('\n');
+            }
+
+            info!("Configuring Kubernetes client with mTLS (certificate auth)");
+            let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes()).map_err(|e| {
+                poem::Error::from_string(
+                    format!("Invalid client certificate/key for Kubernetes upstream: {}", e),
+                    poem::http::StatusCode::BAD_REQUEST,
+                )
+            })?;
+            client_builder = client_builder.identity(identity);
+        }
     }
 
     client_builder.build().map_err(|e| {
