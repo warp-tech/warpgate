@@ -22,7 +22,7 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-tokio-tungstenite = { version = "0.25", features = ["rustls-tls-native-roots"], default-features = false }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots"], default-features = false }
 tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }

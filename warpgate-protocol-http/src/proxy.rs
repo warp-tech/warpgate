@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -15,6 +14,7 @@ use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
+use tokio_tungstenite::tungstenite::Utf8Bytes;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
@@ -521,7 +521,7 @@ async fn proxy_ws_inner(
                                     .send(tungstenite::Message::Close(data.map(|data| {
                                         tungstenite::protocol::CloseFrame {
                                             code: u16::from(data.0).into(),
-                                            reason: Cow::Owned(data.1),
+                                            reason: Utf8Bytes::from(data.1),
                                         }
                                     })))
                                     .await?;
@@ -536,27 +536,21 @@ async fn proxy_ws_inner(
                         tracing::debug!("Client: {:?}", msg);
                         match msg? {
                             tungstenite::Message::Binary(data) => {
-                                server_sink
-                                    .send(Message::Binary(data.as_slice().to_vec()))
-                                    .await?;
+                                server_sink.send(Message::Binary(data.to_vec())).await?;
                             }
                             tungstenite::Message::Text(text) => {
                                 server_sink.send(Message::Text(text.to_string())).await?;
                             }
                             tungstenite::Message::Ping(data) => {
-                                server_sink
-                                    .send(Message::Ping(data.as_slice().to_vec()))
-                                    .await?;
+                                server_sink.send(Message::Ping(data.to_vec())).await?;
                             }
                             tungstenite::Message::Pong(data) => {
-                                server_sink
-                                    .send(Message::Pong(data.as_slice().to_vec()))
-                                    .await?;
+                                server_sink.send(Message::Pong(data.to_vec())).await?;
                             }
                             tungstenite::Message::Close(data) => {
                                 server_sink
                                     .send(Message::Close(data.map(|data| {
-                                        (u16::from(data.code).into(), data.reason.into_owned())
+                                        (u16::from(data.code).into(), data.reason.to_string())
                                     })))
                                     .await?;
                             }
