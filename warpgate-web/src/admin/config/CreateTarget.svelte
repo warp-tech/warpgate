@@ -1,15 +1,18 @@
 <script lang="ts">
-    import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
+    import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
     import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import RadioButton from 'common/RadioButton.svelte'
+    import { onMount } from 'svelte'
 
     let error: string|null = $state(null)
     let name = $state('')
     let type: TargetKind = $state(TargetKind.Ssh)
+    let groups: TargetGroup[] = $state([])
+    let selectedGroupId: string | undefined = $state()
 
     async function create () {
         try {
@@ -62,6 +65,7 @@
                 targetDataRequest: {
                     name,
                     options,
+                    groupId: selectedGroupId,
                 },
             })
             replace(`/config/targets/${target.id}`)
@@ -69,6 +73,14 @@
             error = await stringifyError(err)
         }
     }
+
+    onMount(async () => {
+        try {
+            groups = await api.listTargetGroups()
+        } catch (e) {
+            console.error('Failed to load target groups:', e)
+        }
+    })
 
     const kinds: { name: string, value: TargetKind }[] = [
         { name: 'SSH', value: TargetKind.Ssh },
@@ -109,6 +121,15 @@
 
             <FormGroup floating label="Name">
                 <input class="form-control" required bind:value={name} />
+            </FormGroup>
+
+            <FormGroup floating label="Group">
+                <select class="form-control" bind:value={selectedGroupId}>
+                    <option value={undefined}>No group</option>
+                    {#each groups as group}
+                        <option value={group.id}>{group.name}</option>
+                    {/each}
+                </select>
             </FormGroup>
 
             <Button

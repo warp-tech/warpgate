@@ -16,6 +16,7 @@ mod ssh_connection_test;
 mod ssh_keys;
 mod sso_credentials;
 mod targets;
+mod target_groups;
 mod tickets_detail;
 mod tickets_list;
 pub mod users;
@@ -32,6 +33,7 @@ pub fn get() -> impl OpenApi {
         ssh_keys::Api,
         logs::Api,
         (targets::ListApi, targets::DetailApi, targets::RolesApi),
+        (target_groups::ListApi, target_groups::DetailApi),
         (users::ListApi, users::DetailApi, users::RolesApi),
         (
             password_credentials::ListApi,

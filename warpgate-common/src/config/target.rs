@@ -139,6 +139,7 @@ pub struct Target {
     #[serde(flatten)]
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub group_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]

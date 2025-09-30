@@ -1,31 +1,80 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { type Target, api } from 'admin/lib/api'
+    import { Observable, from, map, combineLatest } from 'rxjs'
+    import { type Target, type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
     import EmptyState from 'common/EmptyState.svelte'
+    import { onMount } from 'svelte'
+    import { Button, Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+
+    let groups: TargetGroup[] = $state([])
+    let selectedGroupId: string | undefined = $state()
+    let groupDropdownOpen = $state(false)
+
+    onMount(async () => {
+        try {
+            groups = await api.listTargetGroups()
+        } catch (e) {
+            console.error('Failed to load target groups:', e)
+        }
+    })
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({
             search: options.search,
+            groupId: selectedGroupId,
         })).pipe(map(targets => ({
             items: targets,
             offset: 0,
             total: targets.length,
         })))
     }
+
+    function getGroupName(groupId: string | undefined): string {
+        if (!groupId) return 'All groups'
+        const group = groups.find(g => g.id === groupId)
+        return group ? group.name : 'Unknown group'
+    }
+
+    function selectGroup(groupId: string | undefined) {
+        selectedGroupId = groupId
+        groupDropdownOpen = false
+    }
 </script>
 
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>targets</h1>
-        <a
-            class="btn btn-primary ms-auto"
-            href="/config/targets/create"
-            use:link>
-            Add a target
-        </a>
+        <div class="d-flex gap-2 ms-auto">
+            <Dropdown isOpen={groupDropdownOpen} toggle={() => groupDropdownOpen = !groupDropdownOpen}>
+                <DropdownToggle caret>
+                    {getGroupName(selectedGroupId)}
+                </DropdownToggle>
+                <DropdownMenu>
+                    <DropdownItem onclick={() => selectGroup(undefined)}>
+                        All groups
+                    </DropdownItem>
+                    {#each groups as group}
+                        <DropdownItem onclick={() => selectGroup(group.id)}>
+                            {#if group.color}
+                                <span
+                                    class="me-2 rounded d-inline-block"
+                                    style="width: 12px; height: 12px; background-color: {group.color};"
+                                ></span>
+                            {/if}
+                            {group.name}
+                        </DropdownItem>
+                    {/each}
+                </DropdownMenu>
+            </Dropdown>
+            <a
+                class="btn btn-primary"
+                href="/config/targets/create"
+                use:link>
+                Add a target
+            </a>
+        </div>
     </div>
 
     <ItemList load={getTargets} showSearch={true}>
@@ -42,9 +91,23 @@
                 href="/config/targets/{target.id}"
                 use:link>
                 <div class="me-auto">
-                    <strong>
-                        {target.name}
-                    </strong>
+                    <div class="d-flex align-items-center">
+                        {#if target.groupId}
+                            {@const group = groups.find(g => g.id === target.groupId)}
+                            {#if group}
+                                {#if group.color}
+                                    <div
+                                        class="me-2 rounded"
+                                        style="width: 12px; height: 12px; background-color: {group.color};"
+                                    ></div>
+                                {/if}
+                                <small class="text-muted me-2">{group.name}</small>
+                            {/if}
+                        {/if}
+                        <strong>
+                            {target.name}
+                        </strong>
+                    </div>
                     {#if target.description}
                         <small class="d-block text-muted">{target.description}</small>
                     {/if}

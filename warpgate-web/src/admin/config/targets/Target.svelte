@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type Target } from 'admin/lib/api'
+    import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -25,9 +25,11 @@
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
+    let groups: TargetGroup[] = $state([])
 
     async function init () {
         target = await api.getTarget({ id: params.id })
+        groups = await api.listTargetGroups()
     }
 
     async function loadRoles () {
@@ -155,6 +157,15 @@
 
         <FormGroup floating label="Description">
             <Input bind:value={target.description} />
+        </FormGroup>
+
+        <FormGroup floating label="Group">
+            <select class="form-control" bind:value={target.groupId}>
+                <option value={undefined}>No group</option>
+                {#each groups as group}
+                    <option value={group.id}>{group.name}</option>
+                {/each}
+            </select>
         </FormGroup>
 
         {#if target.options.kind === 'Ssh'}
