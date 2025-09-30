@@ -69,7 +69,6 @@ feature-depth = 1
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2021-0139", # ansi-term is unmaintained
-    "RUSTSEC-2024-0436", # paste is unmaintained
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },

@@ -35,6 +35,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
@@ -95,6 +97,11 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+
+      - name: Attest build
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: target/${{ matrix.target }}/release/warpgate
 
       - name: Generate Rust BOM
         run: |
