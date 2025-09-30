@@ -1,6 +1,6 @@
 name: Build
 permissions:
-  contents: write
+  contents: read
 
 on: [push, pull_request]
 
@@ -33,6 +33,8 @@ jobs:
 
     name: Build (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')

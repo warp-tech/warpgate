@@ -1,9 +1,5 @@
 name: Docker
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-  attestations: write
+permissions: read-all
 on:
   schedule:
     - cron: '25 12 * * *'
@@ -114,6 +110,11 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
