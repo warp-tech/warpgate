@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
