@@ -278,6 +278,11 @@ function filterTargets() {
 
         &:hover {
             background-color: #f8f9fa;
+            color: #212529;
+
+            .text-muted {
+                color: #495057 !important;
+            }
         }
 
         &:first-child {
