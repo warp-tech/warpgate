@@ -51,7 +51,7 @@
                 }
             })
             // Redirect to groups list after successful save
-            location.href = '/@warpgate/admin#/config/target-groups'
+            location.href = '/config/target-groups'
         } catch (e) {
             saveError = 'Failed to save target group'
             console.error(e)
@@ -68,7 +68,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            location.href = '/@warpgate/admin#/config/target-groups'
+            location.href = '/config/target-groups'
         } catch (e) {
             saveError = 'Failed to delete target group'
             console.error(e)
