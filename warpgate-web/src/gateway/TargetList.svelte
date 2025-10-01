@@ -281,7 +281,7 @@ function filterTargets() {
             color: #212529;
 
             .text-muted {
-                color: #495057 !important;
+                color:rgb(29, 30, 31) !important;
             }
         }
 

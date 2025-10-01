@@ -1,6 +1,6 @@
 <script lang="ts">
     import { api, type TargetGroup, type TargetGroupDataRequest } from 'admin/lib/api'
-    import { link } from 'svelte-spa-router'
+    import { link, replace } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
 
@@ -51,7 +51,7 @@
                 }
             })
             // Redirect to groups list after successful save
-            location.href = '/config/target-groups'
+            replace('/config/target-groups')
         } catch (e) {
             saveError = 'Failed to save target group'
             console.error(e)
@@ -68,10 +68,10 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            location.href = '/config/target-groups'
+            replace('/config/target-groups')
         } catch (e) {
             saveError = 'Failed to delete target group'
-            console.error(e)
+            console.error('Delete target group error:', e)
         }
     }
 </script>

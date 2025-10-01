@@ -1,6 +1,6 @@
 <script lang="ts">
     import { api, type TargetGroupDataRequest } from 'admin/lib/api'
-    import { link } from 'svelte-spa-router'
+    import { link, replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
 
     let name = $state('')
@@ -27,7 +27,7 @@
                 }
             })
             // Redirect to groups list
-            location.href = '/config/target-groups'
+            replace('/config/target-groups')
         } catch (e) {
             error = 'Failed to create target group'
             console.error(e)

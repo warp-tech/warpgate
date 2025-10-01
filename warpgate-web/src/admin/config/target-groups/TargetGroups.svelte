@@ -1,16 +1,26 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
+    import { Observable, from, map, catchError, of } from 'rxjs'
     import { type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
 
     function getTargetGroups (options: LoadOptions): Observable<PaginatedResponse<TargetGroup>> {
-        return from(api.listTargetGroups()).pipe(map(groups => ({
-            items: groups,
-            offset: 0,
-            total: groups.length,
-        })))
+        return from(api.listTargetGroups()).pipe(
+            map(groups => ({
+                items: groups,
+                offset: 0,
+                total: groups.length,
+            })),
+            catchError(error => {
+                console.error('Failed to load target groups:', error)
+                return of({
+                    items: [],
+                    offset: 0,
+                    total: 0,
+                })
+            })
+        )
     }
 </script>
 

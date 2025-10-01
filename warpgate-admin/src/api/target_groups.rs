@@ -8,6 +8,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     QueryOrder, Set,
 };
+use sea_orm::prelude::Expr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
@@ -199,6 +200,15 @@ impl DetailApi {
 
         match group {
             Some(group) => {
+                // First, unassign all targets from this group by setting their group_id to NULL
+                use warpgate_db_entities::Target;
+                Target::Entity::update_many()
+                    .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
+                    .filter(Target::Column::GroupId.eq(id.0))
+                    .exec(&*db)
+                    .await?;
+
+                // Then delete the group
                 group.delete(&*db).await.map_err(WarpgateError::from)?;
                 Ok(DeleteTargetGroupResponse::Deleted)
             }
