@@ -11,29 +11,12 @@ import GettingStarted from 'common/GettingStarted.svelte'
 let selectedTarget: TargetSnapshot|undefined = $state()
 let targets: TargetSnapshot[] = $state([])
 let groupedTargets: { [groupName: string]: TargetSnapshot[] } = $state({})
+let searchQuery = $state('')
+let filteredTargets: TargetSnapshot[] = $state([])
+let filteredGroupedTargets: { [groupName: string]: TargetSnapshot[] } = $state({})
 
 // Simple data loading
 api.getTargets({}).then(result => {
-    console.log('=== TARGET DEBUGGING ===')
-    console.log('Raw API response:', result)
-    console.log('Number of targets:', result.length)
-
-    if (result.length > 0) {
-        console.log('Sample target data:', result[0])
-        console.log('All targets group info:')
-        result.forEach((target, index) => {
-            console.log(`Target ${index + 1}:`, {
-                name: target.name,
-                groupId: target.groupId,
-                groupName: target.groupName,
-                groupColor: target.groupColor,
-                hasGroupId: !!target.groupId,
-                hasGroupName: !!target.groupName,
-                hasGroupColor: !!target.groupColor
-            })
-        })
-    }
-
     targets = result.sort(
         firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
             .thenBy(x => x.name.toLowerCase())
@@ -60,9 +43,9 @@ api.getTargets({}).then(result => {
         groupedTargets['Administration'] = [webAdminTarget]
     }
 
-    console.log('Final grouped targets:', groupedTargets)
-    console.log('Group names found:', Object.keys(groupedTargets))
-    console.log('=== END DEBUGGING ===')
+    // Initialize filtered results
+    filteredTargets = targets
+    filteredGroupedTargets = groupedTargets
 }).catch(e => {
     console.error('Failed to load targets:', e)
 })
@@ -81,6 +64,41 @@ function loadURL (url: string) {
     location.href = url
 }
 
+function filterTargets() {
+    if (!searchQuery.trim()) {
+        filteredTargets = targets
+        filteredGroupedTargets = groupedTargets
+        return
+    }
+
+    const query = searchQuery.toLowerCase().trim()
+    filteredTargets = targets.filter(target =>
+        target.name.toLowerCase().includes(query) ||
+        target.description.toLowerCase().includes(query)
+    )
+
+    // Re-group filtered targets
+    filteredGroupedTargets = {}
+    let webAdminTarget: TargetSnapshot | undefined = undefined
+
+    for (const target of filteredTargets) {
+        if (target.kind === TargetKind.WebAdmin) {
+            webAdminTarget = target
+        } else {
+            const groupName = target.groupName || 'Ungrouped'
+            if (!filteredGroupedTargets[groupName]) {
+                filteredGroupedTargets[groupName] = []
+            }
+            filteredGroupedTargets[groupName].push(target)
+        }
+    }
+
+    // Add WebAdmin target to its own special section
+    if (webAdminTarget) {
+        filteredGroupedTargets['Administration'] = [webAdminTarget]
+    }
+}
+
 </script>
 
 {#if $serverInfo?.setupState}
@@ -88,13 +106,51 @@ function loadURL (url: string) {
         setupState={$serverInfo?.setupState} />
 {/if}
 
+<div class="search-container mb-3">
+    <div class="input-group">
+        <input
+            type="text"
+            class="form-control"
+            placeholder="Search targets..."
+            bind:value={searchQuery}
+            oninput={filterTargets}
+        />
+        {#if searchQuery}
+            <button
+                class="btn btn-outline-secondary"
+                type="button"
+                onclick={() => {
+                    searchQuery = ''
+                    filterTargets()
+                }}
+            >
+                Clear
+            </button>
+        {/if}
+    </div>
+</div>
+
 <div class="targets-container">
-    {#each Object.entries(groupedTargets).sort(([a], [b]) => {
-        // Administration section always comes first
-        if (a === 'Administration') return -1
-        if (b === 'Administration') return 1
-        return a.localeCompare(b)
-    }) as [groupName, groupTargets]}
+    {#if Object.keys(filteredGroupedTargets).length === 0 && searchQuery}
+        <div class="text-center text-muted py-4">
+            <p>No targets found matching "{searchQuery}"</p>
+            <button
+                class="btn btn-outline-secondary btn-sm"
+                onclick={() => {
+                    searchQuery = ''
+                    filterTargets()
+                }}
+            >
+                Clear search
+            </button>
+        </div>
+    {:else}
+        {#each Object.entries(filteredGroupedTargets).sort(([a], [b]) => {
+            // Administration section always comes first
+            if (a === 'Administration') return -1
+            if (b === 'Administration') return 1
+            return a.localeCompare(b)
+        }) as [groupName, groupTargets]}
         <div class="target-group">
             <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : (groupTargets[0]?.groupColor || '#6c757d')}>
                 <h6 class="group-title">{groupName}</h6>
@@ -148,7 +204,8 @@ function loadURL (url: string) {
                 {/each}
             </div>
         </div>
-    {/each}
+        {/each}
+    {/if}
 </div>
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
@@ -172,6 +229,12 @@ function loadURL (url: string) {
 </Modal>
 
 <style lang="scss">
+    .search-container {
+        .input-group {
+            max-width: 400px;
+        }
+    }
+
     .targets-container {
         display: flex;
         flex-direction: column;
