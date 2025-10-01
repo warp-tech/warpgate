@@ -3,7 +3,6 @@
     import { link } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
-    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         params: { id: string };
@@ -51,8 +50,8 @@
                     color: color || undefined,
                 }
             })
-            // Reload the group data
-            group = await api.getTargetGroup({ id: groupId })
+            // Redirect to groups list after successful save
+            location.href = '/@warpgate/admin#/config/target-groups'
         } catch (e) {
             saveError = 'Failed to save target group'
             console.error(e)
@@ -69,7 +68,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            location.href = '/config/target-groups'
+            location.href = '/@warpgate/admin#/config/target-groups'
         } catch (e) {
             saveError = 'Failed to delete target group'
             console.error(e)
@@ -77,65 +76,69 @@
     }
 </script>
 
-<Loadable promise={loading ? Promise.resolve() : Promise.resolve()} bind:data={group}>
-    {#if error}
-        <Alert color="danger">{error}</Alert>
-    {:else if group}
-        <div class="container-max-md">
-            <div class="page-summary-bar">
-                <h1>Edit target group</h1>
-                <div class="ms-auto">
-                    <Button color="danger" onclick={deleteGroup}>Delete</Button>
-                </div>
-            </div>
-
-            {#if saveError}
-                <Alert color="danger">{saveError}</Alert>
-            {/if}
-
-            <form on:submit|preventDefault={save}>
-                <FormGroup>
-                    <Label for="name">Name</Label>
-                    <Input
-                        id="name"
-                        bind:value={name}
-                        required
-                        disabled={saving}
-                    />
-                </FormGroup>
-
-                <FormGroup>
-                    <Label for="description">Description</Label>
-                    <Input
-                        id="description"
-                        type="textarea"
-                        bind:value={description}
-                        disabled={saving}
-                    />
-                </FormGroup>
-
-                <FormGroup>
-                    <Label for="color">Color</Label>
-                    <Input
-                        id="color"
-                        type="color"
-                        bind:value={color}
-                        disabled={saving}
-                    />
-                    <small class="form-text text-muted">
-                        Optional color for visual organization
-                    </small>
-                </FormGroup>
-
-                <div class="d-flex gap-2">
-                    <Button type="submit" color="primary" disabled={saving}>
-                        {saving ? 'Saving...' : 'Save'}
-                    </Button>
-                    <a class="btn btn-secondary" href="/config/target-groups" use:link>
-                        Cancel
-                    </a>
-                </div>
-            </form>
+{#if loading}
+    <div class="d-flex justify-content-center p-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
         </div>
-    {/if}
-</Loadable>
+    </div>
+{:else if error}
+    <Alert color="danger">{error}</Alert>
+{:else if group}
+    <div class="container-max-md">
+        <div class="page-summary-bar">
+            <h1>Edit target group</h1>
+            <div class="ms-auto">
+                <Button color="danger" onclick={deleteGroup}>Delete</Button>
+            </div>
+        </div>
+
+        {#if saveError}
+            <Alert color="danger">{saveError}</Alert>
+        {/if}
+
+        <form on:submit|preventDefault={save}>
+            <FormGroup>
+                <Label for="name">Name</Label>
+                <Input
+                    id="name"
+                    bind:value={name}
+                    required
+                    disabled={saving}
+                />
+            </FormGroup>
+
+            <FormGroup>
+                <Label for="description">Description</Label>
+                <Input
+                    id="description"
+                    type="textarea"
+                    bind:value={description}
+                    disabled={saving}
+                />
+            </FormGroup>
+
+            <FormGroup>
+                <Label for="color">Color</Label>
+                <Input
+                    id="color"
+                    type="color"
+                    bind:value={color}
+                    disabled={saving}
+                />
+                <small class="form-text text-muted">
+                    Optional color for visual organization
+                </small>
+            </FormGroup>
+
+            <div class="d-flex gap-2">
+                <Button type="submit" color="primary" disabled={saving}>
+                    {saving ? 'Saving...' : 'Save'}
+                </Button>
+                <a class="btn btn-secondary" href="/config/target-groups" use:link>
+                    Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+{/if}
