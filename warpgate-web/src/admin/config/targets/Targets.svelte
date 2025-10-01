@@ -130,7 +130,7 @@
                     {/if}
                 </small>
             </a>
-                {/snippet}
+        {/snippet}
     </ItemList>
 </div>
 
