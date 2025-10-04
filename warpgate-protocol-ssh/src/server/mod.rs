@@ -14,6 +14,7 @@ use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
@@ -62,55 +63,73 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     let mut listener = address.tcp_accept_stream().await?;
 
     while let Some(stream) = listener.try_next().await.context("accepting connection")? {
-        let remote_address = stream.peer_addr().context("getting peer address")?;
         let russh_config = russh_config.clone();
-
-        stream.set_nodelay(true)?;
-
-        let (session_handle, session_handle_rx) = SSHSessionHandle::new();
-
-        let server_handle = State::register_session(
-            &services.state,
-            &crate::PROTOCOL_NAME,
-            SessionStateInit {
-                remote_address: Some(remote_address),
-                handle: Box::new(session_handle),
-            },
-        )
-        .await
-        .context("registering session")?;
-
-        let id = server_handle.lock().await.id();
-
-        let (event_tx, event_rx) = unbounded_channel();
-
-        let handler = ServerHandler { event_tx };
-        let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
-
-        let session = match ServerSession::start(
-            remote_address,
-            &services,
-            server_handle,
-            session_handle_rx,
-            event_rx,
-        )
-        .await
-        {
-            Ok(session) => session,
-            Err(error) => {
-                error!(%error, "Error setting up session");
-                continue;
-            }
-        };
+        let services = services.clone();
 
         tokio::task::Builder::new()
-            .name(&format!("SSH {id} session"))
-            .spawn(session)?;
-
-        tokio::task::Builder::new()
-            .name(&format!("SSH {id} protocol"))
-            .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
+            .name("SSH new connection setup")
+            .spawn(async move {
+                if let Err(e) = _handle_connection(services, russh_config, stream).await {
+                    error!(%e, "Connection handling failed");
+                }
+            })?;
     }
+    Ok(())
+}
+
+async fn _handle_connection(
+    services: Services,
+    russh_config: Arc<russh::server::Config>,
+    stream: TcpStream,
+) -> Result<()> {
+    stream.set_nodelay(true)?;
+
+    let remote_address = stream.peer_addr().context("getting peer address")?;
+
+    let (session_handle, session_handle_rx) = SSHSessionHandle::new();
+
+    let server_handle = State::register_session(
+        &services.state,
+        &crate::PROTOCOL_NAME,
+        SessionStateInit {
+            remote_address: Some(remote_address),
+            handle: Box::new(session_handle),
+        },
+    )
+    .await
+    .context("registering session")?;
+
+    let id = server_handle.lock().await.id();
+
+    let (event_tx, event_rx) = unbounded_channel();
+
+    let handler = ServerHandler { event_tx };
+    let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+
+    let session = match ServerSession::start(
+        remote_address,
+        &services,
+        server_handle,
+        session_handle_rx,
+        event_rx,
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(error) => {
+            error!(%error, "Error setting up session");
+            return Err(error);
+        }
+    };
+
+    tokio::task::Builder::new()
+        .name(&format!("SSH {id} session"))
+        .spawn(session)?;
+
+    tokio::task::Builder::new()
+        .name(&format!("SSH {id} protocol"))
+        .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
+
     Ok(())
 }
 
