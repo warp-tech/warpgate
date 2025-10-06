@@ -70,6 +70,10 @@ pub(crate) enum Commands {
         /// External host used to construct URLs (without a port or scheme)
         #[clap(long)]
         external_host: Option<String>,
+
+        /// Reuse existing config file if it exists
+        #[clap(long, action=ArgAction::SetTrue)]
+        reuse_existing_config: bool,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,
