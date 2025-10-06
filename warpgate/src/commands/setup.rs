@@ -20,6 +20,7 @@ use warpgate_common::{
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
+use warpgate_common::WarpgateConfig;
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
@@ -51,10 +52,16 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
-    if cli.config.exists() {
-        error!("Config file already exists at {}.", cli.config.display());
-        error!("To generate a new config file, rename or delete the existing one first.");
-        std::process::exit(1);
+    let config_exists = cli.config.exists();
+    if config_exists {
+        warn!("A config file already exists at {}.", cli.config.display());
+        if reuse_existing_config(&cli.command) {
+            warn!("The `reuse_existing_config` flag is set, so the existing config file will be reused.");
+        } else {
+            warn!("The existing config file will be overwritten. If you want to reuse it, use the --reuse-existing-config option.");
+            std::fs::rename(&cli.config, format!("{}.old", cli.config.display()))?;
+            warn!("The old config file has been backed up to {}.old", cli.config.display());
+        }
     }
 
     if let Commands::Setup { .. } = cli.command {
@@ -74,9 +81,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     );
 
     let theme = ColorfulTheme::default();
-    let mut store = WarpgateConfigStore::default();
-
-    // ---
+    let store = WarpgateConfigStore::default();
 
     if !is_docker() {
         info!(
@@ -85,294 +90,32 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         );
     }
 
-    // ---
+    let (data_path, store) = setup_data_path_and_database(config_dir, &cli.command, &theme, store)?;
 
-    let data_path: String = if let Commands::UnattendedSetup { data_path, .. } = &cli.command {
-        data_path.to_owned()
+    let config = if !config_exists || !reuse_existing_config(&cli.command) {
+        let store = configure_protocol_listeners(&cli.command, &theme, store)?;
+
+        let store = setup_certificate_paths(data_path.clone(), store);
+
+        let store = setup_ssh_keys_path(data_path.clone(), store);
+
+        let store = setup_recordings(&cli.command, &theme, data_path.clone(), store)?;
+
+        let store = setup_external_host(&cli.command, store);
+
+        save_config_file(&store, &cli.config)?
     } else {
-        #[cfg(target_os = "linux")]
-        let default_data_path = "/var/lib/warpgate".to_string();
-        #[cfg(target_os = "macos")]
-        let default_data_path = "/usr/local/var/lib/warpgate".to_string();
-
-        if is_docker() {
-            "/data".to_owned()
-        } else {
-            dialoguer::Input::with_theme(&theme)
-                .default(default_data_path)
-                .with_prompt("Directory to store app data (up to a few MB) in")
-                .interact_text()?
-        }
+        load_config(&cli.config, true)?
     };
 
-    let data_path = config_dir.join(PathBuf::from(&data_path)).canonicalize()?;
-    create_dir_all(&data_path)?;
-
-    let db_path = data_path.join("db");
-    create_dir_all(&db_path)?;
-    secure_directory(&db_path)?;
-
-    store.database_url = Secret::new(match &cli.command {
-        Commands::UnattendedSetup {
-            database_url: Some(url),
-            ..
-        }
-        | Commands::Setup {
-            database_url: Some(url),
-            ..
-        } => url.to_owned(),
-        _ => {
-            let mut db_path = db_path.to_string_lossy().to_string();
-
-            if let Some(x) = db_path.strip_suffix("./") {
-                db_path = x.to_string();
-            }
-
-            format!("sqlite:{db_path}")
-        }
-    });
-
-    if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
-        store.http.listen =
-            ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
-    } else {
-        if !is_docker() {
-            store.http.listen = prompt_endpoint(
-                "Endpoint to listen for HTTP connections on",
-                HttpConfig::default().listen,
-            );
-        }
-    }
-
-    if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
-        if let Some(ssh_port) = ssh_port {
-            store.ssh.enable = true;
-            store.ssh.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
-        }
-    } else {
-        if is_docker() {
-            store.ssh.enable = true;
-        } else {
-            info!("You will now choose specific protocol listeners to be enabled.");
-            info!("");
-            info!("NB: Nothing will be exposed by default -");
-            info!("    you'll choose target hosts in the UI later.");
-
-            store.ssh.enable = dialoguer::Confirm::with_theme(&theme)
-                .default(true)
-                .with_prompt("Accept SSH connections?")
-                .interact()?;
-
-            if store.ssh.enable {
-                store.ssh.listen = prompt_endpoint(
-                    "Endpoint to listen for SSH connections on",
-                    SshConfig::default().listen,
-                );
-            }
-        }
-    }
-
-    if let Commands::UnattendedSetup { mysql_port, .. } = &cli.command {
-        if let Some(mysql_port) = mysql_port {
-            store.mysql.enable = true;
-            store.mysql.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
-        }
-    } else {
-        if is_docker() {
-            store.mysql.enable = true;
-        } else {
-            store.mysql.enable = dialoguer::Confirm::with_theme(&theme)
-                .default(true)
-                .with_prompt("Accept MySQL connections?")
-                .interact()?;
-
-            if store.mysql.enable {
-                store.mysql.listen = prompt_endpoint(
-                    "Endpoint to listen for MySQL connections on",
-                    MySqlConfig::default().listen,
-                );
-            }
-        }
-    }
-    if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
-        if let Some(postgres_port) = postgres_port {
-            store.postgres.enable = true;
-            store.postgres.listen = ListenEndpoint::from(SocketAddr::new(
-                Ipv6Addr::UNSPECIFIED.into(),
-                *postgres_port,
-            ));
-        }
-    } else {
-        if is_docker() {
-            store.postgres.enable = true;
-        } else {
-            store.postgres.enable = dialoguer::Confirm::with_theme(&theme)
-                .default(true)
-                .with_prompt("Accept PostgreSQL connections?")
-                .interact()?;
-
-            if store.postgres.enable {
-                store.postgres.listen = prompt_endpoint(
-                    "Endpoint to listen for PostgreSQL connections on",
-                    PostgresConfig::default().listen,
-                );
-            }
-        }
-    }
-
-    store.http.certificate = data_path
-        .join("tls.certificate.pem")
-        .to_string_lossy()
-        .to_string();
-
-    store.http.key = data_path.join("tls.key.pem").to_string_lossy().to_string();
-
-    store.mysql.certificate = store.http.certificate.clone();
-    store.mysql.key = store.http.key.clone();
-
-    store.postgres.certificate = store.http.certificate.clone();
-    store.postgres.key = store.http.key.clone();
-
-    // ---
-
-    store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
-
-    // ---
-
-    if let Commands::UnattendedSetup {
-        record_sessions, ..
-    } = &cli.command
-    {
-        store.recordings.enable = *record_sessions;
-    } else {
-        store.recordings.enable = dialoguer::Confirm::with_theme(&theme)
-            .default(true)
-            .with_prompt("Do you want to record user sessions?")
-            .interact()?;
-    }
-    store.recordings.path = data_path.join("recordings").to_string_lossy().to_string();
-
-    // ---
-
-    let admin_password = Secret::new(
-        if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
-            if let Some(admin_password) = admin_password {
-                admin_password.to_owned()
-            } else {
-                if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
-                    admin_password
-                } else {
-                    error!(
-                    "You must supply the admin password either through the --admin-password option"
-                );
-                    error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
-                    std::process::exit(1);
-                }
-            }
-        } else {
-            dialoguer::Password::with_theme(&theme)
-                .with_prompt("Set a password for the Warpgate admin user")
-                .interact()?
-        },
-    );
-
-    if let Commands::UnattendedSetup { external_host, .. } = &cli.command {
-        store.external_host = external_host.clone();
-    }
-
-    // ---
-
-    info!("Generated configuration:");
-    let yaml = serde_yaml::to_string(&store)?;
-    println!("{yaml}");
-
-    let yaml = format!(
-        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
-        version = warpgate_version()
-    );
-
-    File::create(&cli.config)?.write_all(yaml.as_bytes())?;
-    info!("Saved into {}", cli.config.display());
-
-    let config = load_config(&cli.config, true)?;
     let services = Services::new(config.clone(), None).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
-    {
-        let db = services.db.lock().await;
+    let admin_password = get_admin_password(&cli.command, &theme)?;
+    create_admin_user(&services, &admin_password).await?;
 
-        let admin_role = Role::Entity::find()
-            .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
-            .all(&*db)
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Database inconsistent: no admin role"))?;
-
-        let admin_user = match User::Entity::find()
-            .filter(User::Column::Username.eq(BUILTIN_ADMIN_USERNAME))
-            .all(&*db)
-            .await?
-            .first()
-        {
-            Some(x) => x.to_owned(),
-            None => {
-                let values = User::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
-                    description: Set("".into()),
-                    credential_policy: Set(serde_json::to_value(
-                        None::<UserRequireCredentialsPolicy>,
-                    )?),
-                    rate_limit_bytes_per_second: Set(None),
-                };
-                values.insert(&*db).await.map_err(WarpgateError::from)?
-            }
-        };
-
-        PasswordCredential::ActiveModel {
-            user_id: Set(admin_user.id),
-            id: Set(Uuid::new_v4()),
-            ..UserPasswordCredential::from_password(&admin_password).into()
-        }
-        .insert(&*db)
-        .await?;
-
-        if UserRoleAssignment::Entity::find()
-            .filter(UserRoleAssignment::Column::UserId.eq(admin_user.id))
-            .filter(UserRoleAssignment::Column::RoleId.eq(admin_role.id))
-            .all(&*db)
-            .await?
-            .is_empty()
-        {
-            let values = UserRoleAssignment::ActiveModel {
-                user_id: Set(admin_user.id),
-                role_id: Set(admin_role.id),
-                ..Default::default()
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?;
-        }
-    }
-
-    {
-        info!("Generating a TLS certificate");
-        let cert = generate_simple_self_signed(vec![
-            "warpgate.local".to_string(),
-            "localhost".to_string(),
-        ])?;
-
-        let certificate_path = config
-            .paths_relative_to
-            .join(&config.store.http.certificate);
-        let key_path = config.paths_relative_to.join(&config.store.http.key);
-        std::fs::write(&certificate_path, cert.cert.pem())?;
-        std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
-        secure_file(&certificate_path)?;
-        secure_file(&key_path)?;
-    }
+    generate_tls_cert(config)?;
 
     info!("");
     info!("Admin user credentials:");
@@ -392,5 +135,334 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+fn reuse_existing_config(command: &Commands) -> bool {
+    match command {
+        Commands::UnattendedSetup { reuse_existing_config, .. } => *reuse_existing_config,
+        _ => false,
+    }
+}
+
+fn save_config_file(store: &WarpgateConfigStore, config_path: &Path) -> Result<WarpgateConfig> {
+    info!("Generated configuration:");
+    let yaml = serde_yaml::to_string(store)?;
+    println!("{yaml}");
+
+    let yaml = format!(
+        "# Config generated in version {}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
+        warpgate_version()
+    );
+
+    File::create(config_path)?.write_all(yaml.as_bytes())?;
+    info!("Saved into {}", config_path.display());
+
+    Ok(load_config(config_path, true)?)
+}
+
+fn setup_data_path_and_database(
+    config_dir: &Path,
+    command: &Commands,
+    theme: &ColorfulTheme,
+    mut store: WarpgateConfigStore,
+) -> Result<(PathBuf, WarpgateConfigStore)> {
+    let data_path: String = if let Commands::UnattendedSetup { data_path, .. } = command {
+        data_path.to_owned()
+    } else {
+        #[cfg(target_os = "linux")]
+        let default_data_path = "/var/lib/warpgate".to_string();
+        #[cfg(target_os = "macos")]
+        let default_data_path = "/usr/local/var/lib/warpgate".to_string();
+
+        if is_docker() {
+            "/data".to_owned()
+        } else {
+            dialoguer::Input::with_theme(theme)
+                .default(default_data_path)
+                .with_prompt("Directory to store app data (up to a few MB) in")
+                .interact_text()?
+        }
+    };
+
+    let data_path = config_dir.join(PathBuf::from(&data_path)).canonicalize()?;
+    create_dir_all(&data_path)?;
+
+    let db_path = data_path.join("db");
+    create_dir_all(&db_path)?;
+    secure_directory(&db_path)?;
+
+    store.database_url = Secret::new(match command {
+        Commands::UnattendedSetup {
+            database_url: Some(url),
+            ..
+        }
+        | Commands::Setup {
+            database_url: Some(url),
+            ..
+        } => url.to_owned(),
+        _ => {
+            let mut db_path = db_path.to_string_lossy().to_string();
+
+            if let Some(x) = db_path.strip_suffix("./") {
+                db_path = x.to_string();
+            }
+
+            format!("sqlite:{db_path}")
+        }
+    });
+
+    Ok((data_path, store))
+}
+
+fn configure_protocol_listeners(
+    command: &Commands,
+    theme: &ColorfulTheme,
+    mut store: WarpgateConfigStore,
+) -> Result<WarpgateConfigStore> {
+    if let Commands::UnattendedSetup { http_port, .. } = command {
+        store.http.listen =
+            ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
+    } else {
+        if !is_docker() {
+            store.http.listen = prompt_endpoint(
+                "Endpoint to listen for HTTP connections on",
+                HttpConfig::default().listen,
+            );
+        }
+    }
+
+    if let Commands::UnattendedSetup { ssh_port, .. } = command {
+        if let Some(ssh_port) = ssh_port {
+            store.ssh.enable = true;
+            store.ssh.listen =
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
+        }
+    } else {
+        if is_docker() {
+            store.ssh.enable = true;
+        } else {
+            info!("You will now choose specific protocol listeners to be enabled.");
+            info!("");
+            info!("NB: Nothing will be exposed by default -");
+            info!("    you'll choose target hosts in the UI later.");
+
+            store.ssh.enable = dialoguer::Confirm::with_theme(theme)
+                .default(true)
+                .with_prompt("Accept SSH connections?")
+                .interact()?;
+
+            if store.ssh.enable {
+                store.ssh.listen = prompt_endpoint(
+                    "Endpoint to listen for SSH connections on",
+                    SshConfig::default().listen,
+                );
+            }
+        }
+    }
+
+    if let Commands::UnattendedSetup { mysql_port, .. } = command {
+        if let Some(mysql_port) = mysql_port {
+            store.mysql.enable = true;
+            store.mysql.listen =
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
+        }
+    } else {
+        if is_docker() {
+            store.mysql.enable = true;
+        } else {
+            store.mysql.enable = dialoguer::Confirm::with_theme(theme)
+                .default(true)
+                .with_prompt("Accept MySQL connections?")
+                .interact()?;
+
+            if store.mysql.enable {
+                store.mysql.listen = prompt_endpoint(
+                    "Endpoint to listen for MySQL connections on",
+                    MySqlConfig::default().listen,
+                );
+            }
+        }
+    }
+    
+    if let Commands::UnattendedSetup { postgres_port, .. } = command {
+        if let Some(postgres_port) = postgres_port {
+            store.postgres.enable = true;
+            store.postgres.listen = ListenEndpoint::from(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                *postgres_port,
+            ));
+        }
+    } else {
+        if is_docker() {
+            store.postgres.enable = true;
+        } else {
+            store.postgres.enable = dialoguer::Confirm::with_theme(theme)
+                .default(true)
+                .with_prompt("Accept PostgreSQL connections?")
+                .interact()?;
+
+            if store.postgres.enable {
+                store.postgres.listen = prompt_endpoint(
+                    "Endpoint to listen for PostgreSQL connections on",
+                    PostgresConfig::default().listen,
+                );
+            }
+        }
+    }
+
+    Ok(store)
+}
+
+fn setup_certificate_paths(data_path: PathBuf, mut store: WarpgateConfigStore) -> WarpgateConfigStore {
+    store.http.certificate = data_path
+        .join("tls.certificate.pem")
+        .to_string_lossy()
+        .to_string();
+
+    store.http.key = data_path.join("tls.key.pem").to_string_lossy().to_string();
+
+    store.mysql.certificate = store.http.certificate.clone();
+    store.mysql.key = store.http.key.clone();
+
+    store.postgres.certificate = store.http.certificate.clone();
+    store.postgres.key = store.http.key.clone();
+
+    store
+}
+
+fn setup_ssh_keys_path(data_path: PathBuf, mut store: WarpgateConfigStore) -> WarpgateConfigStore {
+    store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
+    store
+}
+
+fn setup_recordings(
+    command: &Commands,
+    theme: &ColorfulTheme,
+    data_path: PathBuf,
+    mut store: WarpgateConfigStore,
+) -> Result<WarpgateConfigStore> {
+    if let Commands::UnattendedSetup {
+        record_sessions, ..
+    } = command
+    {
+        store.recordings.enable = *record_sessions;
+    } else {
+        store.recordings.enable = dialoguer::Confirm::with_theme(theme)
+            .default(true)
+            .with_prompt("Do you want to record user sessions?")
+            .interact()?;
+    }
+    store.recordings.path = data_path.join("recordings").to_string_lossy().to_string();
+
+    Ok(store)
+}
+
+fn get_admin_password(command: &Commands, theme: &ColorfulTheme) -> Result<Secret<String>> {
+    let admin_password = Secret::new(
+        if let Commands::UnattendedSetup { admin_password, .. } = command {
+            if let Some(admin_password) = admin_password {
+                admin_password.to_owned()
+            } else {
+                if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
+                    admin_password
+                } else {
+                    error!(
+                    "You must supply the admin password either through the --admin-password option"
+                );
+                    error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            dialoguer::Password::with_theme(theme)
+                .with_prompt("Set a password for the Warpgate admin user")
+                .interact()?
+        },
+    );
+
+    Ok(admin_password)
+}
+
+fn setup_external_host(command: &Commands, mut store: WarpgateConfigStore) -> WarpgateConfigStore {
+    if let Commands::UnattendedSetup { external_host, .. } = command {
+        store.external_host = external_host.clone();
+    }
+    store
+}
+
+async fn create_admin_user(services: &Services, admin_password: &Secret<String>) -> Result<()> {
+    let db = services.db.lock().await;
+
+    let admin_role = Role::Entity::find()
+        .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
+        .all(&*db)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Database inconsistent: no admin role"))?;
+
+    let admin_user = match User::Entity::find()
+        .filter(User::Column::Username.eq(BUILTIN_ADMIN_USERNAME))
+        .all(&*db)
+        .await?
+        .first()
+    {
+        Some(x) => x.to_owned(),
+        None => {
+            let values = User::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
+                description: Set("".into()),
+                credential_policy: Set(serde_json::to_value(
+                    None::<UserRequireCredentialsPolicy>,
+                )?),
+                rate_limit_bytes_per_second: Set(None),
+            };
+            values.insert(&*db).await.map_err(WarpgateError::from)?
+        }
+    };
+
+    PasswordCredential::ActiveModel {
+        user_id: Set(admin_user.id),
+        id: Set(Uuid::new_v4()),
+        ..UserPasswordCredential::from_password(admin_password).into()
+    }
+    .insert(&*db)
+    .await?;
+
+    if UserRoleAssignment::Entity::find()
+        .filter(UserRoleAssignment::Column::UserId.eq(admin_user.id))
+        .filter(UserRoleAssignment::Column::RoleId.eq(admin_role.id))
+        .all(&*db)
+        .await?
+        .is_empty()
+    {
+        let values = UserRoleAssignment::ActiveModel {
+            user_id: Set(admin_user.id),
+            role_id: Set(admin_role.id),
+            ..Default::default()
+        };
+        values.insert(&*db).await.map_err(WarpgateError::from)?;
+    }
+
+    Ok(())
+}
+
+fn generate_tls_cert(config: WarpgateConfig) -> Result<()> {
+    info!("Generating a TLS certificate");
+    let cert = generate_simple_self_signed(vec![
+        "warpgate.local".to_string(),
+        "localhost".to_string(),
+    ])?;
+
+    let certificate_path = config
+        .paths_relative_to
+        .join(&config.store.http.certificate);
+    let key_path = config.paths_relative_to.join(&config.store.http.key);
+    std::fs::write(&certificate_path, cert.cert.pem())?;
+    std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
+    secure_file(&certificate_path)?;
+    secure_file(&key_path)?;
     Ok(())
 }
