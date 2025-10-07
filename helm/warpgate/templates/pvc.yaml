@@ -1,0 +1,10 @@
+{{- if and .Values.data.pvc.enabled (not .Values.data.pvc.claimName) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "warpgate.fullname" . }}-data
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+spec:
+  {{- toYaml .Values.data.pvc.template | nindent 2 }}
+{{- end }}
