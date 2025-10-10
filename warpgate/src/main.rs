@@ -100,7 +100,7 @@ pub(crate) enum Commands {
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
 
-    init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await;
+    init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await?;
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()
