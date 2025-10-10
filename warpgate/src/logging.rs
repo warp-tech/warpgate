@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use time::{format_description, UtcOffset};
+use tracing_log::LogTracer;
 use tracing_subscriber::filter::dynamic_filter_fn;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
@@ -11,7 +13,7 @@ use warpgate_core::logging::{make_database_logger_layer, make_socket_logger_laye
 
 use crate::Cli;
 
-pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) {
+pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
         match cli.debug {
             0 => std::env::set_var("RUST_LOG", "warpgate=info"),
@@ -20,6 +22,8 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) {
             _ => std::env::set_var("RUST_LOG", "debug"),
         }
     }
+
+    LogTracer::init().context("Failed to initialize log compatibility layer")?;
 
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
@@ -75,4 +79,5 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) {
         .with(socket_layer);
 
     registry.init();
+    Ok(())
 }

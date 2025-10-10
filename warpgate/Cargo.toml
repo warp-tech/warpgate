@@ -27,6 +27,7 @@ sea-orm.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
+tracing-log = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = [
     "ansi",
     "env-filter",
