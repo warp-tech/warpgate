@@ -437,6 +437,7 @@ impl RemoteClient {
         let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
             Preferred {
                 kex: Cow::Borrowed(&[
+                    kex::MLKEM768X25519_SHA256,
                     kex::CURVE25519,
                     kex::CURVE25519_PRE_RFC_8731,
                     kex::ECDH_SHA2_NISTP256,
