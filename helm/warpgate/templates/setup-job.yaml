@@ -8,6 +8,10 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}-setup
           {{- with .Values.securityContext }}
@@ -48,9 +52,10 @@ spec:
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
                   {{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }} {{- end }}
-                  {{/*{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}*/}}
                   {{- if .Values.setup.databaseUrl }} --database-url "{{ .Values.setup.databaseUrl }}" {{- end }}
                   {{- if .Values.setup.recordSessions }} --record-sessions {{- end }}
+
+                  {{/*{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}*/}}
 
                 {{- if .Values.setup.disableIpV6 }}
                 sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml
@@ -67,6 +72,10 @@ spec:
             - name: tls-cert
               mountPath: /tls-cert
             {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         {{- with .Values.ssh_keys_secret }}
         - name: ssh-keys

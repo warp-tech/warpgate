@@ -100,7 +100,8 @@ setup:
   http: 8888
   mysql: 33306
   pgsql: 55432
-  kubernetes: 6443
+  kubernetes: 0
+  # kubernetes: 6443
 
   # Resources for init container (runs setup)
   resources: {}
@@ -120,7 +121,8 @@ service:
     http: 8888
     mysql: 33306
     pgsql: 55432
-    kubernetes: 6443
+    kubernetes: 0
+    # kubernetes: 6443
 
 # Ingress configuration
 ingress:
