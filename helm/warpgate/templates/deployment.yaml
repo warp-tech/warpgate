@@ -92,7 +92,7 @@ spec:
               if [ -d /override ]; then
                 cp /override/warpgate.yaml /data/warpgate.yaml
                 {{- if .Values.config_env_var_replace }}
-                VARS="{{ .Values.conifg_env_var_replace }}"
+                VARS="{{ .Values.config_env_var_replace }}"
                 for VAR in $VARS; do
                  VAL=$(printenv "$VAR")
                  ESCAPED=$(printf '%s' "$VAL" | sed -e 's/[\/&]/\\&/g')
