@@ -47,7 +47,7 @@ COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
-HEALTHCHECK CMD warpgate healthcheck
+HEALTHCHECK CMD warpgate --config /data/warpgate.yaml healthcheck
 
 ENV DOCKER=1
 
