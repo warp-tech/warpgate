@@ -27,8 +27,8 @@ pub struct SSHProtocolServer {
 impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
-        generate_host_keys(&config)?;
-        generate_client_keys(&config)?;
+        generate_keys(&config, "host")?;
+        generate_keys(&config, "client")?;
         Ok(SSHProtocolServer {
             services: services.clone(),
         })
