@@ -19,7 +19,7 @@ use tracing::*;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{Services, SessionStateInit, State};
 
-use crate::keys::load_host_keys;
+use crate::keys::load_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
@@ -37,7 +37,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
                     MethodKind::KeyboardInteractive,
                 ][..],
             ),
-            keys: load_host_keys(&config)?,
+            keys: load_keys(&config, "host")?,
             event_buffer_size: 100,
             nodelay: true,
             preferred: Preferred {

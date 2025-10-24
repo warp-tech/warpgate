@@ -298,8 +298,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let config = load_config(&cli.config, true)?;
     let services = Services::new(config.clone(), None).await?;
-    warpgate_protocol_ssh::generate_host_keys(&config)?;
-    warpgate_protocol_ssh::generate_client_keys(&config)?;
+    warpgate_protocol_ssh::generate_keys(&config, "host")?;
+    warpgate_protocol_ssh::generate_keys(&config, "client")?;
 
     {
         let db = services.db.lock().await;
