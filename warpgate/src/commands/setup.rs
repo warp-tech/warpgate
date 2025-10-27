@@ -16,12 +16,10 @@ use warpgate_common::{
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
-use warpgate_core::Services;
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
 use crate::Commands;
-use crate::users::{create_user};
 
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     loop {
@@ -295,16 +293,15 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("Saved into {}", cli.config.display());
 
     let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone(), None).await?;
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
     // Create the admin user
-    create_user(
+    crate::commands::create_user::command(
+        cli,
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
         &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
-        &services,
     ).await?;
 
     {
