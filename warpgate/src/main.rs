@@ -10,6 +10,7 @@ use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
+use warpgate_common::Secret;
 use warpgate_common::version::warpgate_version;
 
 use crate::config::load_config;
@@ -88,6 +89,15 @@ pub(crate) enum Commands {
         #[clap(action=ArgAction::Set)]
         target_name: String,
     },
+    /// Create a new user
+    CreateUser {
+        #[clap(action=ArgAction::Set)]
+        username: String,
+        #[clap(action=ArgAction::Set)]
+        password: String,
+        #[clap(action=ArgAction::Set)]
+        role: Option<String>,
+    },
     /// Reset password and auth policy for a user
     RecoverAccess {
         #[clap(action=ArgAction::Set)]
@@ -120,6 +130,13 @@ async fn _main() -> Result<()> {
         Commands::Check => crate::commands::check::command(&cli).await,
         Commands::TestTarget { target_name } => {
             crate::commands::test_target::command(&cli, target_name).await
+        }
+        Commands::CreateUser {
+            username,
+            password,
+            role,
+        } => {
+            crate::commands::create_user::command(&cli, username, &Secret::new(password.clone()), role).await
         }
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli).await

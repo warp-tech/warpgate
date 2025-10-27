@@ -5626,7 +5626,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -5667,7 +5667,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5696,7 +5696,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -5740,7 +5740,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -5783,7 +5783,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -5796,7 +5796,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -5811,7 +5811,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "data-encoding",
@@ -5827,7 +5827,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5862,7 +5862,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5890,7 +5890,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5912,7 +5912,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -5938,7 +5938,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -5956,7 +5956,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "rust-embed",
  "serde",

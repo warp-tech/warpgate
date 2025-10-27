@@ -303,7 +303,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     create_user(
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
-        BUILTIN_ADMIN_ROLE_NAME,
+        &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
         &services,
     ).await?;
 

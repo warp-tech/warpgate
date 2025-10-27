@@ -6,3 +6,4 @@ pub mod recover_access;
 pub mod run;
 pub mod setup;
 pub mod test_target;
+pub mod create_user;
