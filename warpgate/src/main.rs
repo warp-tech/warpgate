@@ -2,6 +2,8 @@ mod commands;
 mod config;
 mod logging;
 mod protocols;
+mod users;
+
 use std::path::PathBuf;
 
 use anyhow::Result;

@@ -8,22 +8,20 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
-use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
-    UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateConfigStore, WarpgateError,
+    WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::Services;
-use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
 use crate::Commands;
+use crate::users::{create_user};
 
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     loop {
@@ -301,61 +299,13 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     warpgate_protocol_ssh::generate_host_keys(&config)?;
     warpgate_protocol_ssh::generate_client_keys(&config)?;
 
-    {
-        let db = services.db.lock().await;
-
-        let admin_role = Role::Entity::find()
-            .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
-            .all(&*db)
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Database inconsistent: no admin role"))?;
-
-        let admin_user = match User::Entity::find()
-            .filter(User::Column::Username.eq(BUILTIN_ADMIN_USERNAME))
-            .all(&*db)
-            .await?
-            .first()
-        {
-            Some(x) => x.to_owned(),
-            None => {
-                let values = User::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    username: Set(BUILTIN_ADMIN_USERNAME.to_owned()),
-                    description: Set("".into()),
-                    credential_policy: Set(serde_json::to_value(
-                        None::<UserRequireCredentialsPolicy>,
-                    )?),
-                    rate_limit_bytes_per_second: Set(None),
-                };
-                values.insert(&*db).await.map_err(WarpgateError::from)?
-            }
-        };
-
-        PasswordCredential::ActiveModel {
-            user_id: Set(admin_user.id),
-            id: Set(Uuid::new_v4()),
-            ..UserPasswordCredential::from_password(&admin_password).into()
-        }
-        .insert(&*db)
-        .await?;
-
-        if UserRoleAssignment::Entity::find()
-            .filter(UserRoleAssignment::Column::UserId.eq(admin_user.id))
-            .filter(UserRoleAssignment::Column::RoleId.eq(admin_role.id))
-            .all(&*db)
-            .await?
-            .is_empty()
-        {
-            let values = UserRoleAssignment::ActiveModel {
-                user_id: Set(admin_user.id),
-                role_id: Set(admin_role.id),
-                ..Default::default()
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?;
-        }
-    }
+    // Create the admin user
+    create_user(
+        BUILTIN_ADMIN_USERNAME,
+        &admin_password,
+        BUILTIN_ADMIN_ROLE_NAME,
+        &services,
+    ).await?;
 
     {
         info!("Generating a TLS certificate");
