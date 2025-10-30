@@ -292,8 +292,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("Saved into {}", cli.config.display());
 
     let config = load_config(&cli.config, true)?;
-    warpgate_protocol_ssh::generate_host_keys(&config)?;
-    warpgate_protocol_ssh::generate_client_keys(&config)?;
+    warpgate_protocol_ssh::generate_keys(&config, "host")?;
+    warpgate_protocol_ssh::generate_keys(&config, "client")?;
 
     // Create the admin user
     crate::commands::create_user::command(

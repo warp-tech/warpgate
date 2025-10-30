@@ -29,7 +29,7 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{load_client_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
+use crate::{load_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -559,7 +559,7 @@ impl RemoteClient {
                         SSHTargetAuth::PublicKey(_) => {
                             let best_hash = session.best_supported_rsa_hash().await?.flatten();
                             #[allow(clippy::explicit_auto_deref)]
-                            let keys = load_client_keys(&*self.services.config.lock().await)?;
+                            let keys = load_keys(&*self.services.config.lock().await, "client")?;
                             let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
                             for key in keys.into_iter() {
                                 let key = Arc::new(key);
