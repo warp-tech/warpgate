@@ -1,11 +1,19 @@
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
+use warpgate_common::{
+    Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
+};
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
-use crate::config::load_config;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-pub(crate) async fn command(cli: &crate::Cli, username: &str, password: &Secret<String>, role: &Option<String>) -> anyhow::Result<()> {
+use crate::config::load_config;
+
+pub(crate) async fn command(
+    cli: &crate::Cli,
+    username: &str,
+    password: &Secret<String>,
+    role: &Option<String>,
+) -> anyhow::Result<()> {
     let config = load_config(&cli.config, true)?;
     let services = Services::new(config.clone(), None).await?;
 
@@ -23,9 +31,7 @@ pub(crate) async fn command(cli: &crate::Cli, username: &str, password: &Secret<
                 id: Set(Uuid::new_v4()),
                 username: Set(username.to_owned()),
                 description: Set("".into()),
-                credential_policy: Set(serde_json::to_value(
-                    None::<UserRequireCredentialsPolicy>,
-                )?),
+                credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
                 rate_limit_bytes_per_second: Set(None),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
@@ -36,7 +42,9 @@ pub(crate) async fn command(cli: &crate::Cli, username: &str, password: &Secret<
         user_id: Set(db_user.id),
         id: Set(Uuid::new_v4()),
         ..UserPasswordCredential::from_password(password).into()
-    }.insert(&*db).await?;
+    }
+    .insert(&*db)
+    .await?;
 
     // Assign a role if a role is specified
     if role.is_some() {

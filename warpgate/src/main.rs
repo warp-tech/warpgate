@@ -9,8 +9,8 @@ use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
-use warpgate_common::Secret;
 use warpgate_common::version::warpgate_version;
+use warpgate_common::Secret;
 
 use crate::config::load_config;
 
@@ -92,9 +92,10 @@ pub(crate) enum Commands {
     CreateUser {
         #[clap(action=ArgAction::Set)]
         username: String,
-        #[clap(action=ArgAction::Set)]
-        password: String,
-        #[clap(action=ArgAction::Set)]
+        /// Password (required if WARPGATE_NEW_USER_PASSWORD env var is not set)
+        #[clap(short, long, action=ArgAction::Set)]
+        password: Option<String>,
+        #[clap(short, long, action=ArgAction::Set)]
         role: Option<String>,
     },
     /// Reset password and auth policy for a user
@@ -132,10 +133,30 @@ async fn _main() -> Result<()> {
         }
         Commands::CreateUser {
             username,
-            password,
+            password: explicit_password,
             role,
         } => {
-            crate::commands::create_user::command(&cli, username, &Secret::new(password.clone()), role).await
+            let password = if let Some(p) = explicit_password {
+                p.to_owned()
+            } else {
+                if let Ok(p) = std::env::var("WARPGATE_NEW_USER_PASSWORD") {
+                    p
+                } else {
+                    error!(
+                        "You must supply the password either through the --password option"
+                    );
+                    error!("or the WARPGATE_NEW_USER_PASSWORD environment variable.");
+                    std::process::exit(1);
+                }
+            };
+
+            crate::commands::create_user::command(
+                &cli,
+                username,
+                &Secret::new(password.clone()),
+                role,
+            )
+            .await
         }
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli).await

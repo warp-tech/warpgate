@@ -12,8 +12,7 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
-    WarpgateConfigStore,
+    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 
@@ -302,7 +301,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
         &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
-    ).await?;
+    )
+    .await?;
 
     {
         info!("Generating a TLS certificate");
