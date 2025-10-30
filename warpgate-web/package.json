@@ -63,7 +63,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "ua-parser-js": "^2.0.4",
-    "vite": "^7.1.7",
+    "vite": "^7.1.11",
     "vite-plugin-checker": "^0.10.1",
     "vite-tsconfig-paths": "^5.1.4"
   },
