@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "warpgate.fullname" . }}
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end}}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- with .Values.service.ports.ssh }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: ssh
+      protocol: TCP
+      name: ssh
+    {{- end }}
+    {{- end }}
+    {{- with .Values.service.ports.http }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- end }}
+    {{- end }}
+    {{- with .Values.service.ports.mysql }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: mysql
+      protocol: TCP
+      name: mysql
+    {{- end }}
+    {{- end }}
+    {{- with .Values.service.ports.pgsql }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: pgsql
+      protocol: TCP
+      name: pgsql
+    {{- end }}
+    {{- end }}
+    {{- with .Values.service.ports.kubernetes }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: kubernetes
+      protocol: TCP
+      name: kubernetes
+    {{- end }}
+    {{- end }}
+  selector:
+    {{- include "warpgate.selectorLabels" . | nindent 4 }}

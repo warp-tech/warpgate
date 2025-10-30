@@ -1,0 +1,11 @@
+{{- if .Values.overrides_config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "warpgate.fullname" . }}-config-overrides
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+data:
+  warpgate.yaml: |
+  {{ .Values.overrides_config | nindent 4 }}
+{{- end }}

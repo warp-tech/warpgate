@@ -1,6 +1,6 @@
 name: Build
 permissions:
-  contents: write
+  contents: read
 
 on: [push, pull_request]
 
@@ -33,6 +33,10 @@ jobs:
 
     name: Build (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
@@ -40,18 +44,18 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@v4.4.1
+      - uses: rlespinasse/github-slug-action@102b1a064a9b145e56556e22b18b19c624538d94
 
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
           target: ${{ matrix.target }}
           override: true
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
         with:
           key: "build"
 
@@ -82,7 +86,7 @@ jobs:
           NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
 
       - name: Build
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
         with:
           command: build
           use-cross: ${{ matrix.cargo-cross }}
@@ -94,6 +98,12 @@ jobs:
           CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
 
+      - name: Attest build
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          subject-path: target/${{ matrix.target }}/release/warpgate
+
       - name: Generate Rust BOM
         run: |
           cargo cyclonedx --all-features
@@ -103,13 +113,13 @@ jobs:
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Upload artifact
-        uses: actions/upload-artifact@master
+        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/warpgate
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@master
+        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
           path: cdx.xml
@@ -121,7 +131,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
@@ -139,7 +149,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           submodules: recursive
 
