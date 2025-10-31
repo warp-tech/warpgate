@@ -37,7 +37,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
         let config = config.lock().await;
-        let keys = warpgate_protocol_ssh::load_client_keys(&config)?;
+        let keys = warpgate_protocol_ssh::load_keys(&config, "client")?;
 
         let keys = keys
             .into_iter()
