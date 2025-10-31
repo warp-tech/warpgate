@@ -68,19 +68,35 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             let mut modified_session_cookie: Option<String> = None;
             for cookie_str in &cookie_values {
                 if cookie_str.starts_with(&format!("{}=", SESSION_COOKIE_NAME)) {
-                    let target_domain = if let Some(ref base) = self.base_domain {
-                        base.clone()
+                    // For localhost/127.0.0.1, always use the request host (or omit Domain)
+                    // since browsers won't send cookies with a different domain
+                    let is_localhost = host == "localhost" || host == "127.0.0.1" || host.starts_with("127.");
+                    let target_domain = if is_localhost {
+                        None // Omit Domain attribute for localhost - browser will scope to exact host
+                    } else if let Some(ref base) = self.base_domain {
+                        Some(base.clone())
                     } else {
-                        host.clone()
+                        Some(host.clone())
                     };
 
-                    let mut modified = if cookie_str.contains("; Domain=") {
-                        DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", target_domain)).to_string()
-                    } else {
-                        if let Some(pos) = cookie_str.find(';') {
-                            format!("{}; Domain={}{}", &cookie_str[..pos], target_domain, &cookie_str[pos..])
+                    let mut modified = if let Some(domain) = target_domain {
+                        if cookie_str.contains("; Domain=") {
+                            DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", domain)).to_string()
                         } else {
-                            format!("{}; Domain={}", cookie_str, target_domain)
+                            if let Some(pos) = cookie_str.find(';') {
+                                format!("{}; Domain={}{}", &cookie_str[..pos], domain, &cookie_str[pos..])
+                            } else {
+                                format!("{}; Domain={}", cookie_str, domain)
+                            }
+                        }
+                    } else {
+                        // Remove Domain attribute for localhost (omit Domain, browser will scope to exact host)
+                        if cookie_str.contains("; Domain=") {
+                            let removed = DOMAIN_REGEX.replace(cookie_str, "");
+                            // Clean up any trailing semicolons and whitespace
+                            removed.trim_end_matches(';').trim_end().to_string()
+                        } else {
+                            cookie_str.clone()
                         }
                     };
 
