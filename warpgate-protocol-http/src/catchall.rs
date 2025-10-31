@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use http::header::HOST;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
@@ -68,8 +69,15 @@ async fn get_target_for_request(
     let selected_target_name;
     let need_role_auth;
 
-    let host_based_target_name = if let Some(host) = req.original_uri().host() {
-        services
+    // Extract host from Host header (more reliable than URI host when behind proxy)
+    // This matches the approach used in cookie_host middleware
+    let request_host = req
+        .header(HOST)
+        .map(|h| h.split(':').next().unwrap_or(h).to_string())
+        .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+
+    let host_based_target_name = if let Some(host) = request_host {
+        let found = services
             .config_provider
             .lock()
             .await
@@ -80,8 +88,13 @@ async fn get_target_for_request(
                 TargetOptions::Http(ref options) => Some((t, options)),
                 _ => None,
             })
-            .find(|(_, o)| o.external_host.as_deref() == Some(host))
-            .map(|(t, _)| t.name.clone())
+            .find(|(_, o)| o.external_host.as_deref() == Some(&host))
+            .map(|(t, _)| t.name.clone());
+        
+        if found.is_some() {
+            info!("Domain rebinding detected: host={} -> target={:?}", host, found);
+        }
+        found
     } else {
         None
     };
@@ -98,12 +111,15 @@ async fn get_target_for_request(
         RequestAuthorization::Session(SessionAuthorization::User(username)) => {
             need_role_auth = true;
 
-            selected_target_name =
-                host_based_target_name.or(if let Some(warpgate_target) = params.warpgate_target {
-                    Some(warpgate_target)
-                } else {
-                    session.get_target_name()
-                });
+            // If domain rebinding is configured (host_based_target_name exists), ALWAYS prioritize it
+            // This ensures users visiting a subdomain always go to the rebound target, not the target selection page
+            selected_target_name = if let Some(ref rebound_target) = host_based_target_name {
+                Some(rebound_target.clone())
+            } else if let Some(warpgate_target) = params.warpgate_target {
+                Some(warpgate_target)
+            } else {
+                session.get_target_name()
+            };
             username
         }
         RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
@@ -111,7 +127,13 @@ async fn get_target_for_request(
         }
     };
 
-    if let Some(target_name) = selected_target_name {
+    // If domain rebinding is configured but no target was selected yet, prioritize the rebound target
+    // This handles edge cases where host_based_target_name exists but wasn't selected
+    // Store a copy for logging before moving it
+    let domain_rebinding_configured = host_based_target_name.is_some();
+    let final_target_name = selected_target_name.or(host_based_target_name);
+
+    if let Some(target_name) = final_target_name {
         let target = {
             services
                 .config_provider
@@ -138,11 +160,21 @@ async fn get_target_for_request(
                     .authorize_target(username, &target.0.name)
                     .await?
             {
+                // If domain rebinding is configured but user is not authorized,
+                // still return None so they get redirected to login/target selection
+                // (they'll see appropriate error message)
                 return Ok(None);
             }
 
             return Ok(Some(target));
         }
+    }
+
+    // If domain rebinding was detected but target wasn't found/selected, log for debugging
+    if domain_rebinding_configured {
+        warn!(
+            "Domain rebinding was configured for this host but target was not selected. This may indicate the target doesn't exist or user is not authorized."
+        );
     }
 
     Ok(None)

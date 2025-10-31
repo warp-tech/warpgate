@@ -60,12 +60,23 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
+        // Always use the base domain (warp.tavahealth.com) for redirect URI to match OAuth provider registration.
+        // This ensures all SSO logins happen through a single registered redirect URI.
+        // The session cookie is set for the parent domain (.tavahealth.com) so it will be
+        // accessible across all subdomains (warp.tavahealth.com, prometheus.warp.tavahealth.com,
+        // reporting.tavahealth.com, etc.) after authentication.
         let mut return_url = config.construct_external_url(
             None,
             provider_config.return_domain_whitelist.as_deref(),
         )?;
         return_url.set_path("@warpgate/api/sso/return");
-        debug!("Return URL: {}", &return_url);
+        let request_host = req.header("host").map(|h| h.to_string());
+        info!("SSO redirect URL constructed: {} (scheme={}, host={}, port={:?}, request_host={:?})", 
+            &return_url, 
+            return_url.scheme(),
+            return_url.host_str().unwrap_or("unknown"),
+            return_url.port(),
+            request_host);
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 
