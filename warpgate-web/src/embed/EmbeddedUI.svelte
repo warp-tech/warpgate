@@ -9,14 +9,21 @@ let dragging = false
 let savedPosition = { x: 0.1, y: 0.8 }
 let position = { x: 0.1, y: 0.8 }
 let dragStartCoords = { x: 0, y: 0 }
+let externalHost: string | undefined = undefined
 
 if (localStorage.warpgateMenuLocation) {
     position = JSON.parse(localStorage.warpgateMenuLocation)
     savedPosition = position
 }
 
-onMount(() => {
+onMount(async () => {
     ready = true
+    try {
+        const info = await api.getInfo()
+        externalHost = info.externalHost
+    } catch {
+        // Ignore errors, fall back to relative URL
+    }
 })
 
 function drag (e: MouseEvent) {
@@ -45,7 +52,14 @@ function stopDragging () {
 }
 
 function goHome () {
-    location.href = '/@warpgate'
+    if (externalHost) {
+        // Use the configured external host to ensure we go to the actual warpgate home
+        // and not the bound domain home
+        location.href = `https://${externalHost}/@warpgate`
+    } else {
+        // Fallback to relative URL if external host is not available
+        location.href = '/@warpgate'
+    }
 }
 
 async function logout () {

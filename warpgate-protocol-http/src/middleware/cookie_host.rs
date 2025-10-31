@@ -54,10 +54,6 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         let scheme_https = req.original_uri().scheme().map(|s| s.as_str() == "https").unwrap_or(false);
         let header_https = req.header("x-forwarded-proto").map(|h| h == "https").unwrap_or(false);
         let is_https = scheme_https || header_https;
-        tracing::debug!("CookieHostMiddleware: HTTPS detection - scheme={:?}, x-forwarded-proto={:?}, is_https={}", 
-            req.original_uri().scheme().map(|s| s.as_str()),
-            req.header("x-forwarded-proto").map(|h| h.to_string()),
-            is_https);
 
         let mut resp = self.inner.call(req).await?.into_response();
 
@@ -74,8 +70,6 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     .collect()
             };
 
-            tracing::debug!("CookieHostMiddleware: Found {} cookie(s), base_domain={:?}, request_host={}", 
-                cookie_values.len(), self.base_domain, host);
 
             // Find and modify the session cookie if present
             // We manually modify the cookie string to preserve all attributes (Secure, HttpOnly, SameSite, Path, etc.)
@@ -83,12 +77,6 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             for cookie_str in &cookie_values {
                 // Check if this is the session cookie by looking for the cookie name
                 if cookie_str.starts_with(&format!("{}=", SESSION_COOKIE_NAME)) {
-                    let original_domain = if let Ok(cookie) = Cookie::parse(cookie_str) {
-                        cookie.domain().map(|d| d.to_string())
-                    } else {
-                        None
-                    };
-
                     let target_domain = if let Some(ref base) = self.base_domain {
                         base.clone()
                     } else {
@@ -138,18 +126,10 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                             } else {
                                 modified = format!("{}; SameSite=None", modified);
                             }
-                            tracing::info!("CookieHostMiddleware: Added SameSite=None for cross-subdomain cookie sharing");
                         }
                     }
 
-                    if let Some(ref base) = self.base_domain {
-                        tracing::info!(
-                            "CookieHostMiddleware: Setting session cookie domain to {} (was: {:?}, request host: {})",
-                            base,
-                            original_domain,
-                            host
-                        );
-                    } else {
+                    if self.base_domain.is_none() {
                         tracing::warn!(
                             "CookieHostMiddleware: Setting session cookie domain to request host: {} (no base domain configured). This may prevent SSO from working across subdomains. Consider setting 'external_host' in config.",
                             host
@@ -157,13 +137,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     }
 
                     modified_session_cookie = Some(modified.clone());
-                    tracing::info!(
-                        "CookieHostMiddleware: Modified cookie - domain={}, is_https={}, cookie_preview={}...",
-                        target_domain,
-                        is_https,
-                        if modified.len() > 100 { &modified[..100] } else { &modified }
-                    );
-                    tracing::debug!("CookieHostMiddleware: Full modified cookie string: {}", modified);
+                    tracing::debug!("CookieHostMiddleware: Modified cookie - domain={}, is_https={}", target_domain, is_https);
                     break;
                 }
             }

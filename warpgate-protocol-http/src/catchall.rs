@@ -92,7 +92,7 @@ async fn get_target_for_request(
             .map(|(t, _)| t.name.clone());
         
         if found.is_some() {
-            info!("Domain rebinding detected: host={} -> target={:?}", host, found);
+            debug!("Domain rebinding detected: host={} -> target={:?}", host, found);
         }
         found
     } else {
@@ -172,7 +172,7 @@ async fn get_target_for_request(
 
     // If domain rebinding was detected but target wasn't found/selected, log for debugging
     if domain_rebinding_configured {
-        warn!(
+        debug!(
             "Domain rebinding was configured for this host but target was not selected. This may indicate the target doesn't exist or user is not authorized."
         );
     }

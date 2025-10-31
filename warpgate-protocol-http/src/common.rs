@@ -204,12 +204,6 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                         session.clear();
                         // Mark session as invalid so it won't be used
                         session_auth = None;
-                    } else {
-                        tracing::debug!(
-                            "Session cookie accepted: request host '{}' is authorized (base host: '{}')",
-                            host,
-                            base_host
-                        );
                     }
                 }
             }

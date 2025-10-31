@@ -70,13 +70,7 @@ impl Api {
             provider_config.return_domain_whitelist.as_deref(),
         )?;
         return_url.set_path("@warpgate/api/sso/return");
-        let request_host = req.header("host").map(|h| h.to_string());
-        info!("SSO redirect URL constructed: {} (scheme={}, host={}, port={:?}, request_host={:?})", 
-            &return_url, 
-            return_url.scheme(),
-            return_url.host_str().unwrap_or("unknown"),
-            return_url.port(),
-            request_host);
+        debug!("Return URL: {}", &return_url);
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 
