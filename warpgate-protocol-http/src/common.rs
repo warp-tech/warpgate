@@ -2,7 +2,7 @@ use core::str;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{HeaderName, StatusCode};
+use http::{header::HOST, HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
@@ -178,7 +178,45 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
     let session = <&Session>::from_request_without_body(&req).await?;
     let services = Data::<&Services>::from_request_without_body(&req).await?;
 
-    let auth = match session.get_auth() {
+    // Validate that the request host is authorized (base host or subdomain of base host)
+    // This ensures session cookies only work for the base host and its subdomains
+    let mut session_auth = session.get_auth();
+    if session_auth.is_some() {
+        let config = services.config.lock().await;
+        if let Ok(base_url) = config.construct_external_url(None, None) {
+            if let Some(base_host) = base_url.host_str() {
+                // Extract request host from Host header (more reliable when behind proxy)
+                let request_host = req
+                    .header(HOST)
+                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
+                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+
+                if let Some(host) = request_host {
+                    // Check if request host is the base host or a subdomain of it
+                    let is_authorized = host == base_host || host.ends_with(&format!(".{}", base_host));
+                    
+                    if !is_authorized {
+                        tracing::warn!(
+                            "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
+                            host,
+                            base_host
+                        );
+                        session.clear();
+                        // Mark session as invalid so it won't be used
+                        session_auth = None;
+                    } else {
+                        tracing::debug!(
+                            "Session cookie accepted: request host '{}' is authorized (base host: '{}')",
+                            host,
+                            base_host
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let auth = match session_auth {
         Some(auth) => Some(RequestAuthorization::Session(auth)),
         None => match req.headers().get(&X_WARPGATE_TOKEN) {
             Some(token_from_header) => {

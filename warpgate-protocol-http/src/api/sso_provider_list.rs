@@ -180,13 +180,26 @@ impl Api {
             ));
         };
 
+        // Log redirect URI details for debugging Google OAuth redirect URI mismatches
+        let redirect_uri_string = context.request.redirect_url().to_string();
+        let current_request_host = req.header(http::header::HOST).map(|h| h.to_string());
+        info!(
+            "Token exchange - stored_redirect_uri_string={}, using_redirect_url={}, current_request_host={:?}",
+            redirect_uri_string,
+            redirect_uri_string,
+            current_request_host
+        );
+
         let response = context
             .request
             .verify_code((*code).clone())
             .await
             .inspect_err(|e| {
                 // More error details visible via Debug
-                warn!("Failed to verify SSO code: {e:?}");
+                error!(
+                    "SSO token exchange FAILED: error={:?}, redirect_uri_used={}, stored_string={}, request_host={:?}",
+                    e, redirect_uri_string, redirect_uri_string, current_request_host
+                );
             })?;
 
         if !response.email_verified.unwrap_or(true) {
