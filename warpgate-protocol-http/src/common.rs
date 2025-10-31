@@ -189,7 +189,11 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                     .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
                 if let Some(host) = request_host {
-                    let is_authorized = host == base_host || host.ends_with(&format!(".{}", base_host));
+                    // Allow localhost/127.0.0.1 for development/testing scenarios
+                    let is_localhost = host == "localhost" || host == "127.0.0.1" || host.starts_with("127.");
+                    let is_authorized = host == base_host 
+                        || host.ends_with(&format!(".{}", base_host))
+                        || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
                     
                     if !is_authorized {
                         tracing::warn!(
