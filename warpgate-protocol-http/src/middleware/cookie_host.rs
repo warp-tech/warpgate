@@ -79,7 +79,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                         Some(host.clone())
                     };
 
-                    let mut modified = if let Some(domain) = target_domain {
+                    let mut modified = if let Some(ref domain) = target_domain {
                         if cookie_str.contains("; Domain=") {
                             DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", domain)).to_string()
                         } else {
@@ -132,7 +132,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     }
 
                     modified_session_cookie = Some(modified.clone());
-                    tracing::debug!("CookieHostMiddleware: Modified cookie - domain={}, is_https={}", target_domain, is_https);
+                    tracing::debug!("CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}", target_domain, is_https);
                     break;
                 }
             }
