@@ -69,8 +69,6 @@ async fn get_target_for_request(
     let selected_target_name;
     let need_role_auth;
 
-    // Extract host from Host header (more reliable than URI host when behind proxy)
-    // This matches the approach used in cookie_host middleware
     let request_host = req
         .header(HOST)
         .map(|h| h.split(':').next().unwrap_or(h).to_string())
@@ -111,8 +109,6 @@ async fn get_target_for_request(
         RequestAuthorization::Session(SessionAuthorization::User(username)) => {
             need_role_auth = true;
 
-            // If domain rebinding is configured (host_based_target_name exists), ALWAYS prioritize it
-            // This ensures users visiting a subdomain always go to the rebound target, not the target selection page
             selected_target_name = if let Some(ref rebound_target) = host_based_target_name {
                 Some(rebound_target.clone())
             } else if let Some(warpgate_target) = params.warpgate_target {
@@ -127,9 +123,6 @@ async fn get_target_for_request(
         }
     };
 
-    // If domain rebinding is configured but no target was selected yet, prioritize the rebound target
-    // This handles edge cases where host_based_target_name exists but wasn't selected
-    // Store a copy for logging before moving it
     let domain_rebinding_configured = host_based_target_name.is_some();
     let final_target_name = selected_target_name.or(host_based_target_name);
 
@@ -160,9 +153,6 @@ async fn get_target_for_request(
                     .authorize_target(username, &target.0.name)
                     .await?
             {
-                // If domain rebinding is configured but user is not authorized,
-                // still return None so they get redirected to login/target selection
-                // (they'll see appropriate error message)
                 return Ok(None);
             }
 
@@ -170,7 +160,6 @@ async fn get_target_for_request(
         }
     }
 
-    // If domain rebinding was detected but target wasn't found/selected, log for debugging
     if domain_rebinding_configured {
         debug!(
             "Domain rebinding was configured for this host but target was not selected. This may indicate the target doesn't exist or user is not authorized."

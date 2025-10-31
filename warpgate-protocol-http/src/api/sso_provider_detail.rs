@@ -60,11 +60,6 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
-        // Always use the base domain (warp.tavahealth.com) for redirect URI to match OAuth provider registration.
-        // This ensures all SSO logins happen through a single registered redirect URI.
-        // The session cookie is set for the parent domain (.tavahealth.com) so it will be
-        // accessible across all subdomains (warp.tavahealth.com, prometheus.warp.tavahealth.com,
-        // reporting.tavahealth.com, etc.) after authentication.
         let mut return_url = config.construct_external_url(
             None,
             provider_config.return_domain_whitelist.as_deref(),
