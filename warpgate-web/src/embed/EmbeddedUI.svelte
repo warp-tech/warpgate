@@ -22,7 +22,6 @@ onMount(async () => {
         const info = await api.getInfo()
         externalHost = info.externalHost
     } catch {
-        // Ignore errors, fall back to relative URL
     }
 })
 
@@ -53,11 +52,8 @@ function stopDragging () {
 
 function goHome () {
     if (externalHost) {
-        // Use the configured external host to ensure we go to the actual warpgate home
-        // and not the bound domain home
         location.href = `https://${externalHost}/@warpgate`
     } else {
-        // Fallback to relative URL if external host is not available
         location.href = '/@warpgate'
     }
 }

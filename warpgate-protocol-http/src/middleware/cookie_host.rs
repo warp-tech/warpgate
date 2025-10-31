@@ -43,14 +43,11 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
-        // Capture the request host from Host header (more reliable than URI host when behind proxy)
         let host = req
             .header(http::header::HOST)
             .map(|h| h.split(':').next().unwrap_or(h).to_string())
             .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
-        // Capture HTTPS status before req is moved
-        // Check both URI scheme and x-forwarded-proto header (for behind proxy scenarios)
         let scheme_https = req.original_uri().scheme().map(|s| s.as_str() == "https").unwrap_or(false);
         let header_https = req.header("x-forwarded-proto").map(|h| h == "https").unwrap_or(false);
         let is_https = scheme_https || header_https;
@@ -58,8 +55,6 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         let mut resp = self.inner.call(req).await?.into_response();
 
         if let Some(host) = host {
-            // Handle all SET-COOKIE headers (there may be multiple)
-            // Collect cookie values first to release the immutable borrow
             let cookie_values: Vec<String> = {
                 let headers = resp.headers();
                 headers
@@ -70,12 +65,8 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     .collect()
             };
 
-
-            // Find and modify the session cookie if present
-            // We manually modify the cookie string to preserve all attributes (Secure, HttpOnly, SameSite, Path, etc.)
             let mut modified_session_cookie: Option<String> = None;
             for cookie_str in &cookie_values {
-                // Check if this is the session cookie by looking for the cookie name
                 if cookie_str.starts_with(&format!("{}=", SESSION_COOKIE_NAME)) {
                     let target_domain = if let Some(ref base) = self.base_domain {
                         base.clone()
@@ -83,28 +74,18 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                         host.clone()
                     };
 
-                    // Manually modify the domain attribute in the cookie string
-                    // This preserves all other attributes (Secure, HttpOnly, SameSite, Path, Expires, etc.)
-                    // For cross-subdomain cookies to work, we need SameSite=None and Secure=true
                     let mut modified = if cookie_str.contains("; Domain=") {
-                        // Replace existing Domain attribute
                         DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", target_domain)).to_string()
                     } else {
-                        // Add Domain attribute after the value (before other attributes like Path, Secure, etc.)
-                        // Find the first semicolon (after the value) and insert Domain there
                         if let Some(pos) = cookie_str.find(';') {
                             format!("{}; Domain={}{}", &cookie_str[..pos], target_domain, &cookie_str[pos..])
                         } else {
-                            // No attributes, just add Domain
                             format!("{}; Domain={}", cookie_str, target_domain)
                         }
                     };
 
-                    // Ensure Secure flag is set for HTTPS requests (required for cross-subdomain cookies)
                     if is_https {
-                        // Ensure Secure flag is present
                         if !modified.contains("; Secure") && !modified.contains(";Secure") {
-                            // Add Secure before the final attributes
                             if modified.contains("; HttpOnly") {
                                 modified = modified.replace("; HttpOnly", "; Secure; HttpOnly");
                             } else if modified.contains("; SameSite") {
@@ -114,8 +95,6 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                             }
                         }
                         
-                        // Ensure SameSite=None for cross-subdomain cookie sharing (required when using Domain)
-                        // Check both "SameSite=" and "samesite=" (case-insensitive)
                         let has_samesite = modified.contains("SameSite=") || 
                                            modified.to_lowercase().contains("samesite=");
                         if !has_samesite {
@@ -146,15 +125,12 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                 tracing::debug!("CookieHostMiddleware: No session cookie found in {} cookie(s)", cookie_values.len());
             }
 
-            // If we modified the session cookie, replace all SET-COOKIE headers
             if let Some(modified_cookie) = modified_session_cookie {
                 let headers = resp.headers_mut();
                 headers.remove(http::header::SET_COOKIE);
-                // Add the modified session cookie
                 if let Ok(header_value) = modified_cookie.parse::<http::HeaderValue>() {
                     headers.append(http::header::SET_COOKIE, header_value);
                 }
-                // Re-add other cookies (non-session cookies)
                 for cookie_str in &cookie_values {
                     if let Ok(cookie) = Cookie::parse(cookie_str) {
                         if cookie.name() != SESSION_COOKIE_NAME {

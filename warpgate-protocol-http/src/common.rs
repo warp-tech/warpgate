@@ -178,21 +178,17 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
     let session = <&Session>::from_request_without_body(&req).await?;
     let services = Data::<&Services>::from_request_without_body(&req).await?;
 
-    // Validate that the request host is authorized (base host or subdomain of base host)
-    // This ensures session cookies only work for the base host and its subdomains
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
         let config = services.config.lock().await;
         if let Ok(base_url) = config.construct_external_url(None, None) {
             if let Some(base_host) = base_url.host_str() {
-                // Extract request host from Host header (more reliable when behind proxy)
                 let request_host = req
                     .header(HOST)
                     .map(|h| h.split(':').next().unwrap_or(h).to_string())
                     .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
                 if let Some(host) = request_host {
-                    // Check if request host is the base host or a subdomain of it
                     let is_authorized = host == base_host || host.ends_with(&format!(".{}", base_host));
                     
                     if !is_authorized {
@@ -202,7 +198,6 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                             base_host
                         );
                         session.clear();
-                        // Mark session as invalid so it won't be used
                         session_auth = None;
                     }
                 }
