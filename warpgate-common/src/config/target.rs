@@ -123,6 +123,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub tls: Tls,
+
+    #[serde(default = "_default_postgres_idle_timeout_str")]
+    pub idle_timeout: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]

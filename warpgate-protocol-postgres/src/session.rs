@@ -1,11 +1,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pgwire::error::ErrorInfo;
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
+use tokio::time;
 use tokio_rustls::server::TlsStream;
 use tracing::*;
 use uuid::Uuid;
@@ -372,26 +374,87 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             x => x,
         }?;
 
+        // Parse idle timeout from config
+        let idle_timeout = options
+            .idle_timeout
+            .as_ref()
+            .and_then(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    humantime::parse_duration(trimmed)
+                        .map_err(|e| {
+                            warn!(
+                                timeout_string = %trimmed,
+                                error = %e,
+                                "Invalid idle_timeout value, falling back to default"
+                            );
+                            e
+                        })
+                        .ok()
+                }
+            })
+            .unwrap_or(Duration::from_secs(60 * 10)); // Default 10 minutes
+
+        if idle_timeout.as_secs() > 0 {
+            info!(
+                idle_timeout_seconds = idle_timeout.as_secs(),
+                "Using configured idle timeout for session"
+            );
+        }
+
+        let mut last_activity = std::time::Instant::now();
+        let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
+
         loop {
+            let elapsed = last_activity.elapsed();
+            if elapsed > idle_timeout {
+                info!(
+                    idle_seconds = elapsed.as_secs(),
+                    timeout_seconds = idle_timeout.as_secs(),
+                    "Session idle timeout exceeded, closing connection"
+                );
+                self.send_error_response(
+                    "57P01".into(),
+                    format!(
+                        "Session idle for {} exceeded configured timeout of {}. Please reconnect.",
+                        humantime::format_duration(elapsed),
+                        humantime::format_duration(idle_timeout)
+                    ),
+                )
+                .await?;
+                break;
+            }
+
+            let remaining_timeout = idle_timeout - elapsed;
+            let select_timeout = remaining_timeout.min(check_interval);
+
             tokio::select! {
-                c_to_s = self.stream.recv::<PgWireGenericFrontendMessage>() => {
+                c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>()) => {
                     match c_to_s {
-                        Ok(Some(msg)) => {
+                        Ok(Ok(Some(msg))) => {
+                            last_activity = std::time::Instant::now(); // Update activity on client message
                             self.maybe_log_client_msg(&msg.0);
                             client.send(msg).await?;
                         }
-                        Ok(None) => {
+                        Ok(Ok(None)) => {
                             break
                         }
-                        Err(err) => {
+                        Ok(Err(err)) => {
                             error!(error=%err, "Error receiving message");
                             break
+                        }
+                        Err(_) => {
+                            // Timeout - check if we've exceeded idle timeout
+                            continue;
                         }
                     };
                 },
                 s_to_c = client.recv() => {
                     match s_to_c {
                         Ok(Some(msg)) => {
+                            last_activity = std::time::Instant::now(); // Update activity on server message
                             self.maybe_log_server_msg(&msg.0);
                             self.stream.push(msg)?;
                             self.stream.flush().await?;

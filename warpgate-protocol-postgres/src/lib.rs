@@ -7,8 +7,10 @@ mod stream;
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use socket2::{Socket, TcpKeepalive};
 use client::{ConnectionOptions, PostgresClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
@@ -77,7 +79,18 @@ impl ProtocolServer for PostgresProtocolServer {
             };
 
             let remote_address = stream.peer_addr().context("getting peer address")?;
-            stream.set_nodelay(true)?;
+            
+            // Enable TCP keepalive to prevent idle connections from timing out
+            // This is especially important during web auth approval wait
+            // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
+            let socket = Socket::from(stream.into_std()?);
+            let keepalive = TcpKeepalive::new()
+                .with_time(Duration::from_secs(60))  // Start keepalive after 60s of inactivity
+                .with_interval(Duration::from_secs(10))  // Send probes every 10s
+                .with_retries(3);  // 3 retries before considering dead
+            socket.set_tcp_keepalive(&keepalive)?;
+            socket.set_nodelay(true)?;
+            let stream = tokio::net::TcpStream::from_std(socket.into())?;
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();

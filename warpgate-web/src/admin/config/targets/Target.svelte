@@ -203,6 +203,21 @@
             </div>
 
             <TlsConfiguration bind:value={target.options.tls} />
+
+            {#if target.options.kind === 'Postgres'}
+                <FormGroup floating label="Idle timeout">
+                    <input 
+                        class="form-control" 
+                        type="text" 
+                        placeholder="10m" 
+                        bind:value={target.options.idleTimeout}
+                        title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                    />
+                    <small class="form-text text-muted">
+                        How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
+                    </small>
+                </FormGroup>
+            {/if}
         {/if}
 
         <h4 class="mt-4">Allow access for roles</h4>
