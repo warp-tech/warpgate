@@ -25,6 +25,7 @@
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
+    let connectionInstructionsKey = $state(0)
 
     async function init () {
         target = await api.getTarget({ id: params.id })
@@ -42,10 +43,23 @@
             if (target!.options.kind === 'Http') {
                 target!.options.externalHost = target!.options.externalHost || undefined
             }
+            // Only send fields that TargetDataRequest expects
+            const dbName = target!.defaultDatabaseName?.trim()
+            const updateData = {
+                name: target!.name,
+                description: target!.description,
+                options: target!.options,
+                rateLimitBytesPerSecond: target!.rateLimitBytesPerSecond,
+                defaultDatabaseName: dbName && dbName.length > 0 ? dbName : null,
+            }
             target = await api.updateTarget({
                 id: params.id,
-                targetDataRequest: target!,
+                targetDataRequest: updateData,
             })
+            // Force re-render of connection instructions if modal is open
+            if (connectionsInstructionsModalOpen) {
+                connectionInstructionsKey++
+            }
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -99,18 +113,21 @@
                     </Loadable>
                 {/if}
 
-                <ConnectionInstructions
-                    targetName={target.name}
-                    username={selectedUsername}
-                    targetKind={{
-                        Ssh: TargetKind.Ssh,
-                        WebAdmin: TargetKind.WebAdmin,
-                        Http: TargetKind.Http,
-                        MySql: TargetKind.MySql,
-                        Postgres: TargetKind.Postgres,
-                    }[target.options.kind ?? '']}
-                    targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
-                />
+                {#key `${target.id}-${target.defaultDatabaseName ?? 'null'}-${connectionInstructionsKey}`}
+                    <ConnectionInstructions
+                        targetName={target.name}
+                        username={selectedUsername}
+                        targetKind={{
+                            Ssh: TargetKind.Ssh,
+                            WebAdmin: TargetKind.WebAdmin,
+                            Http: TargetKind.Http,
+                            MySql: TargetKind.MySql,
+                            Postgres: TargetKind.Postgres,
+                        }[target.options.kind ?? '']}
+                        targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
+                        targetDefaultDatabaseName={target.defaultDatabaseName}
+                    />
+                {/key}
             </ModalBody>
             <ModalFooter>
                 <Button
@@ -218,6 +235,20 @@
                     </small>
                 </FormGroup>
             {/if}
+
+            {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                <FormGroup floating label="Default database name for connection examples">
+                    <input 
+                        class="form-control" 
+                        type="text" 
+                        placeholder="database-name" 
+                        bind:value={target.defaultDatabaseName}
+                    />
+                    <small class="form-text text-muted">
+                        Default database name used in connection examples. This is only for display purposes and does not restrict which databases users can access. Leave empty to use the global default.
+                    </small>
+                </FormGroup>
+            {/if}
         {/if}
 
         <h4 class="mt-4">Allow access for roles</h4>
@@ -266,7 +297,13 @@
         <Button
             color="secondary"
             class="me-3"
-            on:click={() => connectionsInstructionsModalOpen = true}
+            on:click={async () => {
+                // Reload target to get latest values before opening modal
+                const freshTarget = await api.getTarget({ id: params.id })
+                target = freshTarget
+                connectionInstructionsKey++
+                connectionsInstructionsModalOpen = true
+            }}
         >Access instructions</Button>
 
         <AsyncButton
