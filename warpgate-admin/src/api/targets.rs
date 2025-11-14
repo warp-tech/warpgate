@@ -26,6 +26,7 @@ struct TargetDataRequest {
     description: Option<String>,
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
+    default_database_name: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -108,6 +109,7 @@ impl ListApi {
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
+            default_database_name: Set(body.default_database_name.clone()),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -204,6 +206,7 @@ impl DetailApi {
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.default_database_name = Set(body.default_database_name.clone());
         let target = model.update(&*db).await?;
 
         drop(db);

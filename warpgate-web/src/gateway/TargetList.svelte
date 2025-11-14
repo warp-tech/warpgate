@@ -115,6 +115,7 @@ function loadURL (url: string) {
             targetName={selectedTarget?.name}
             username={$serverInfo?.username}
             targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
+            targetDefaultDatabaseName={(selectedTarget as any)?.defaultDatabaseName}
         />
     </ModalBody>
     <ModalFooter>

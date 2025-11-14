@@ -142,6 +142,8 @@ pub struct Target {
     #[serde(flatten)]
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
