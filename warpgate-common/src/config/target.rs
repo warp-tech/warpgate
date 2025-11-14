@@ -133,6 +133,8 @@ pub struct Target {
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub group_id: Option<Uuid>,
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]

@@ -30,6 +30,7 @@ pub struct TargetSnapshot {
     pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
+    pub default_database_name: Option<String>,
     pub group: Option<GroupInfo>,
 }
 
@@ -125,11 +126,14 @@ impl Api {
                         TargetOptions::Http(ref opt) => opt.external_host.clone(),
                         _ => None,
                     },
+                    default_database_name: t.default_database_name.clone(),
                     group,
                 }
             })
             .collect();
 
         Ok(GetTargetsResponse::Ok(Json(result)))
+        )))
+>>>>>>> 7a7abe5 (Allow Targets to Customize default connection string)
     }
 }
