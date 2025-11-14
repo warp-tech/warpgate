@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::*;
 
+/// Migration to add default_database_name column to targets table
 pub struct Migration;
 
 impl MigrationName for Migration {
