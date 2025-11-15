@@ -26,5 +26,6 @@ uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
+warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
 regex = { version = "1.6", default-features = false }

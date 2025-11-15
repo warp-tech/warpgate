@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.17.0-11-g38cbf76-modified"
+    "version": "v0.17.0-12-g2d88273-modified"
   },
   "servers": [
     {
@@ -1956,6 +1956,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2018,6 +2028,16 @@
           },
           "404": {
             "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2061,6 +2081,16 @@
           },
           "404": {
             "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2204,6 +2234,330 @@
           }
         ],
         "operationId": "delete_otp_credential"
+      }
+    },
+    "/ldap-servers": {
+      "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LdapServerResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ldap_servers"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLdapServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapServerResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_ldap_server"
+      }
+    },
+    "/ldap-servers/test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TestLdapServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestLdapServerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_ldap_server_connection"
+      }
+    },
+    "/ldap-servers/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapServerResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ldap_server"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLdapServerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapServerResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_ldap_server"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ldap_server"
+      }
+    },
+    "/ldap-servers/{id}/users": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LdapUserResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ldap_users"
       }
     },
     "/parameters": {
@@ -2363,6 +2717,65 @@
           }
         }
       },
+      "CreateLdapServerRequest": {
+        "type": "object",
+        "title": "CreateLdapServerRequest",
+        "required": [
+          "name",
+          "host",
+          "bind_dn",
+          "bind_password"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "default": 389
+          },
+          "bind_dn": {
+            "type": "string"
+          },
+          "bind_password": {
+            "type": "string"
+          },
+          "user_filter": {
+            "type": "string",
+            "default": "(objectClass=person)"
+          },
+          "tls_mode": {
+            "default": "Preferred",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TlsMode"
+              },
+              {
+                "default": "Preferred"
+              }
+            ]
+          },
+          "tls_verify": {
+            "type": "boolean",
+            "default": true
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "auto_link_sso_users": {
+            "type": "boolean",
+            "default": false
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTicketRequest": {
         "type": "object",
         "title": "CreateTicketRequest",
@@ -2514,6 +2927,89 @@
             "type": "string"
           },
           "search": {
+            "type": "string"
+          }
+        }
+      },
+      "LdapServerResponse": {
+        "type": "object",
+        "title": "LdapServerResponse",
+        "required": [
+          "id",
+          "name",
+          "host",
+          "port",
+          "bind_dn",
+          "user_filter",
+          "base_dns",
+          "tls_mode",
+          "tls_verify",
+          "enabled",
+          "auto_link_sso_users",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bind_dn": {
+            "type": "string"
+          },
+          "user_filter": {
+            "type": "string"
+          },
+          "base_dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tls_mode": {
+            "$ref": "#/components/schemas/TlsMode"
+          },
+          "tls_verify": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "auto_link_sso_users": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "LdapUserResponse": {
+        "type": "object",
+        "title": "LdapUserResponse",
+        "required": [
+          "username",
+          "dn"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "dn": {
             "type": "string"
           }
         }
@@ -3219,6 +3715,61 @@
         "type": "object",
         "title": "TargetWebAdminOptions"
       },
+      "TestLdapServerRequest": {
+        "type": "object",
+        "title": "TestLdapServerRequest",
+        "required": [
+          "host",
+          "port",
+          "bind_dn",
+          "bind_password",
+          "tls_mode",
+          "tls_verify"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bind_dn": {
+            "type": "string"
+          },
+          "bind_password": {
+            "type": "string"
+          },
+          "tls_mode": {
+            "$ref": "#/components/schemas/TlsMode"
+          },
+          "tls_verify": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TestLdapServerResponse": {
+        "type": "object",
+        "title": "TestLdapServerResponse",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "base_dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Ticket": {
         "type": "object",
         "title": "Ticket",
@@ -3296,6 +3847,57 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UpdateLdapServerRequest": {
+        "type": "object",
+        "title": "UpdateLdapServerRequest",
+        "required": [
+          "name",
+          "host",
+          "port",
+          "bind_dn",
+          "user_filter",
+          "tls_mode",
+          "tls_verify",
+          "enabled",
+          "auto_link_sso_users"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bind_dn": {
+            "type": "string"
+          },
+          "bind_password": {
+            "type": "string"
+          },
+          "user_filter": {
+            "type": "string"
+          },
+          "tls_mode": {
+            "$ref": "#/components/schemas/TlsMode"
+          },
+          "tls_verify": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "auto_link_sso_users": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
       },
       "User": {
         "type": "object",

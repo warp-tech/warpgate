@@ -9,6 +9,7 @@ members = [
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",
+    "warpgate-ldap",
     "warpgate-protocol-http",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
@@ -55,6 +56,7 @@ password-hash = { version = "0.5", features = ["std"], default-features = false 
 delegate = { version = "0.13", default-features = false }
 tracing = { version = "0.1", default-features = false }
 schemars = { version = "0.9.0", default-features = false, features = ["derive", "std"] }
+ldap3 = { version = "0.11", default-features = false, features = ["tls"] }
 rustls-pemfile = { version = "2.2", default-features = false }
 thiserror = { version = "2", default-features = false }
 rand = { version = "0.8", default-features = false }

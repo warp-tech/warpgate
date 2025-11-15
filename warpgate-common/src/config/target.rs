@@ -70,6 +70,27 @@ pub enum TlsMode {
     Required,
 }
 
+impl From<&str> for TlsMode {
+    fn from(s: &str) -> Self {
+        match s {
+            "disabled" => TlsMode::Disabled,
+            "preferred" => TlsMode::Preferred,
+            "required" => TlsMode::Required,
+            _ => TlsMode::Preferred,
+        }
+    }
+}
+
+impl From<TlsMode> for String {
+    fn from(mode: TlsMode) -> Self {
+        match mode {
+            TlsMode::Disabled => "disabled".to_string(),
+            TlsMode::Preferred => "preferred".to_string(),
+            TlsMode::Required => "required".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Tls {
     #[serde(default)]

@@ -2,6 +2,7 @@
 
 pub mod ApiToken;
 pub mod KnownHost;
+pub mod LdapServer;
 pub mod LogEntry;
 pub mod OtpCredential;
 pub mod Parameters;

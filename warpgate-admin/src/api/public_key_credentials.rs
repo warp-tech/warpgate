@@ -16,6 +16,33 @@ use warpgate_db_entities::PublicKeyCredential;
 
 use super::AnySecurityScheme;
 
+async fn check_user_ldap_linked(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+) -> Result<bool, WarpgateError> {
+    use warpgate_db_entities::User;
+
+    let user = User::Entity::find_by_id(user_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| WarpgateError::UserNotFound(user_id.to_string()))?;
+
+    Ok(user.ldap_server_id.is_some())
+}
+
+/// Checks if a user is LDAP-linked and returns an error message if they are.
+/// Returns Ok(()) if the user is not LDAP-linked, or a formatted error string if they are.
+async fn verify_user_not_ldap_linked(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+) -> Result<(), String> {
+    if check_user_ldap_linked(db, user_id).await.unwrap_or(false) {
+        Err("Cannot manage SSH keys for LDAP-linked users. Keys are synced from LDAP.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Object)]
 struct ExistingPublicKeyCredential {
     id: Uuid,
@@ -68,6 +95,8 @@ enum GetPublicKeyCredentialsResponse {
 enum CreatePublicKeyCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingPublicKeyCredential>),
+    #[oai(status = 403)]
+    Forbidden(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -76,6 +105,8 @@ enum UpdatePublicKeyCredentialResponse {
     Updated(Json<ExistingPublicKeyCredential>),
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 403)]
+    Forbidden(Json<String>),
 }
 
 pub struct ListApi;
@@ -119,6 +150,11 @@ impl ListApi {
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
 
+        // Check if user is LDAP-linked
+        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+            return Ok(CreatePublicKeyCredentialResponse::Forbidden(Json(msg)));
+        }
+
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
@@ -143,6 +179,8 @@ enum DeleteCredentialResponse {
     Deleted,
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 403)]
+    Forbidden(Json<String>),
 }
 
 pub struct DetailApi;
@@ -163,6 +201,11 @@ impl DetailApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         let db = db.lock().await;
+
+        // Check if user is LDAP-linked
+        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+            return Ok(UpdatePublicKeyCredentialResponse::Forbidden(Json(msg)));
+        }
 
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
@@ -196,6 +239,11 @@ impl DetailApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let db = db.lock().await;
+
+        // Check if user is LDAP-linked
+        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+            return Ok(DeleteCredentialResponse::Forbidden(Json(msg)));
+        }
 
         let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))

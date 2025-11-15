@@ -43,6 +43,18 @@
         '/tickets/create': wrap({
             asyncComponent: () => import('./CreateTicket.svelte') as any,
         }),
+        '/ldap-servers': wrap({
+            asyncComponent: () => import('./ldap/LdapServers.svelte') as any,
+        }),
+        '/ldap-servers/create': wrap({
+            asyncComponent: () => import('./ldap/CreateLdapServer.svelte') as any,
+        }),
+        '/ldap-servers/:id': wrap({
+            asyncComponent: () => import('./ldap/LdapServer.svelte') as any,
+        }),
+        '/ldap-servers/:id/users': wrap({
+            asyncComponent: () => import('./ldap/LdapUserBrowser.svelte') as any,
+        }),
     }
 
     let sidebarMode = $state(false)
@@ -86,6 +98,14 @@
         title="SSH keys"
         description="Own keys and known hosts"
         href="/config/ssh"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="LDAP Servers"
+        description="Connect to directory services"
+        href="/config/ldap-servers"
         small={sidebarMode}
     />
 

@@ -98,6 +98,8 @@ impl ListApi {
             ),
             description: Set(body.description.clone().unwrap_or_default()),
             rate_limit_bytes_per_second: Set(None),
+            ldap_server_id: Set(None),
+            ldap_object_uuid: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;

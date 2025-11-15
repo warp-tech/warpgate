@@ -2,6 +2,7 @@ use poem_openapi::OpenApi;
 
 mod known_hosts_detail;
 mod known_hosts_list;
+mod ldap_servers;
 mod logs;
 mod otp_credentials;
 mod pagination;
@@ -43,6 +44,11 @@ pub fn get() -> impl OpenApi {
             public_key_credentials::DetailApi,
         ),
         (otp_credentials::ListApi, otp_credentials::DetailApi),
+        (
+            ldap_servers::ListApi,
+            ldap_servers::DetailApi,
+            ldap_servers::QueryApi,
+        ),
         parameters::Api,
         ssh_connection_test::Api,
     )
