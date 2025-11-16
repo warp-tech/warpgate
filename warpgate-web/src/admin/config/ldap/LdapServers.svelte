@@ -3,6 +3,7 @@
     import { api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
+    import EmptyState from 'common/EmptyState.svelte'
 
     interface LdapServer {
         id: string
@@ -36,31 +37,23 @@
     </div>
 
     <ItemList load={getLdapServers} showSearch={true}>
+        {#snippet empty()}
+            <EmptyState
+                title="No LDAP servers configured"
+                hint="Connecting to LDAP lets you synchronize users' SSH keys from it"
+            />
+        {/snippet}
         {#snippet item(server)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/ldap-servers/{server.id}"
                 use:link>
-                <div class="d-flex align-items-center">
-                    <div class="flex-grow-1">
-                        <strong class="me-auto">
-                            {server.name}
-                        </strong>
-                        <small class="d-block text-muted">
-                            {server.host}:{server.port}
-                        </small>
-                        {#if server.description}
-                            <small class="d-block text-muted">{server.description}</small>
-                        {/if}
-                    </div>
-                    <div class="ms-3">
-                        {#if server.enabled}
-                            <span class="badge bg-success">Enabled</span>
-                        {:else}
-                            <span class="badge bg-secondary">Disabled</span>
-                        {/if}
-                    </div>
-                </div>
+                <strong class="me-auto">
+                    {server.name}
+                </strong>
+                {#if server.description}
+                    <small class="d-block text-muted">{server.description}</small>
+                {/if}
             </a>
         {/snippet}
     </ItemList>

@@ -16,6 +16,7 @@ use uri::Scheme;
 use url::Url;
 use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
+use warpgate_tls::IntoTlsCertificateRelativePaths;
 
 use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
@@ -271,6 +272,26 @@ impl Default for HttpConfig {
 impl HttpConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+}
+
+impl IntoTlsCertificateRelativePaths for HttpConfig {
+    fn certificate_path(&self) -> PathBuf {
+        self.certificate.as_str().into()
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.key.as_str().into()
+    }
+}
+
+impl IntoTlsCertificateRelativePaths for SniCertificateConfig {
+    fn certificate_path(&self) -> PathBuf {
+        self.certificate.as_str().into()
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.key.as_str().into()
     }
 }
 

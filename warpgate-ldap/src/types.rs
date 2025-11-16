@@ -1,22 +1,5 @@
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TlsMode {
-    Disabled,
-    Preferred,
-    Required,
-}
-
-impl From<&str> for TlsMode {
-    fn from(s: &str) -> Self {
-        match s {
-            "disabled" => TlsMode::Disabled,
-            "preferred" => TlsMode::Preferred,
-            "required" => TlsMode::Required,
-            _ => TlsMode::Preferred,
-        }
-    }
-}
+use warpgate_tls::TlsMode;
 
 #[derive(Debug, Clone)]
 pub struct LdapConfig {

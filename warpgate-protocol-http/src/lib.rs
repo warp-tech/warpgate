@@ -28,10 +28,11 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{
-    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
-};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions, WarpgateConfig};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_tls::{
+    IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey
+};
 use warpgate_web::Assets;
 
 use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKIE_NAME};
@@ -53,6 +54,20 @@ impl HTTPProtocolServer {
 
 fn make_session_storage() -> SharedSessionStorage {
     SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
+}
+
+async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
+    from: &R,
+    config: &WarpgateConfig,
+) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
+    Ok(TlsCertificateAndPrivateKey {
+        certificate: TlsCertificateBundle::from_file(
+            config.paths_relative_to.join(from.certificate_path()),
+        )
+        .await?,
+        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
+            .await?,
+    })
 }
 
 async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
@@ -117,9 +132,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let base_cookie_domain: Option<String> = {
             let config = self.services.config.lock().await;
             match config.construct_external_url(None, None) {
-                Ok(url) => url
-                    .host_str()
-                    .map(|host| format!(".{}", host)),
+                Ok(url) => url.host_str().map(|host| format!(".{}", host)),
                 Err(_) => None,
             }
         };
@@ -251,4 +264,3 @@ impl Debug for HTTPProtocolServer {
         write!(f, "HTTPProtocolServer")
     }
 }
-

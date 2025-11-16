@@ -10,19 +10,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use socket2::{Socket, TcpKeepalive};
 use client::{ConnectionOptions, PostgresClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
+use socket2::{Socket, TcpKeepalive};
 use tracing::*;
-use warpgate_common::{
-    ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
-    TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions};
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use warpgate_tls::{
+    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -79,15 +79,15 @@ impl ProtocolServer for PostgresProtocolServer {
             };
 
             let remote_address = stream.peer_addr().context("getting peer address")?;
-            
+
             // Enable TCP keepalive to prevent idle connections from timing out
             // This is especially important during web auth approval wait
             // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
             let socket = Socket::from(stream.into_std()?);
             let keepalive = TcpKeepalive::new()
-                .with_time(Duration::from_secs(60))  // Start keepalive after 60s of inactivity
-                .with_interval(Duration::from_secs(10))  // Send probes every 10s
-                .with_retries(3);  // 3 retries before considering dead
+                .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
+                .with_interval(Duration::from_secs(10)) // Send probes every 10s
+                .with_retries(3); // 3 retries before considering dead
             socket.set_tcp_keepalive(&keepalive)?;
             socket.set_nodelay(true)?;
             let stream = tokio::net::TcpStream::from_std(socket.into())?;

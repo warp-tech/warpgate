@@ -1,29 +1,37 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
 use tracing::{debug, info, warn};
+use warpgate_tls::{configure_tls_connector, TlsMode};
 
 use crate::error::{LdapError, Result};
-use crate::types::{LdapConfig, TlsMode};
+use crate::types::LdapConfig;
 
 pub async fn connect(config: &LdapConfig) -> Result<Ldap> {
     let url = build_ldap_url(config);
     debug!("Connecting to LDAP server: {}", url);
 
+    let connector = Arc::new(configure_tls_connector(!config.tls_verify, false, None).await?);
+
     // Configure connection settings based on TLS mode
     let settings = LdapConnSettings::new()
-        .set_starttls(matches!(config.tls_mode, TlsMode::Preferred | TlsMode::Required))
-        .set_no_tls_verify(!config.tls_verify);
+        .set_starttls(
+            matches!(config.tls_mode, TlsMode::Preferred | TlsMode::Required) && config.port != 636,
+        )
+        .set_conn_timeout(Duration::from_secs(10))
+        .set_no_tls_verify(!config.tls_verify)
+        .set_config(connector);
 
-    let (conn, mut ldap) = if matches!(config.tls_mode, TlsMode::Disabled) {
-        // No TLS
-        LdapConnAsync::new(&url)
-            .await
-            .map_err(|e| LdapError::ConnectionFailed(e.to_string()))?
-    } else {
-        // TLS or STARTTLS
-        LdapConnAsync::with_settings(settings, &url)
-            .await
-            .map_err(|e| LdapError::ConnectionFailed(e.to_string()))?
-    };
+    let (conn, mut ldap) = LdapConnAsync::with_settings(settings, &url)
+        .await
+        .map_err(|e| LdapError::ConnectionFailed(e.to_string()))?;
+
+    tokio::spawn(async move {
+        if let Err(e) = conn.drive().await {
+            warn!("LDAP connection driver error: {}", e);
+        }
+    });
 
     // Bind with credentials
     ldap.simple_bind(&config.bind_dn, &config.bind_password)
@@ -31,15 +39,6 @@ pub async fn connect(config: &LdapConfig) -> Result<Ldap> {
         .map_err(|e| LdapError::AuthenticationFailed(e.to_string()))?
         .success()
         .map_err(|e| LdapError::AuthenticationFailed(e.to_string()))?;
-
-    info!("Successfully connected and authenticated to LDAP server");
-
-    // Spawn the connection driver
-    tokio::spawn(async move {
-        if let Err(e) = conn.drive().await {
-            warn!("LDAP connection driver error: {}", e);
-        }
-    });
 
     Ok(ldap)
 }
@@ -65,12 +64,7 @@ pub async fn discover_base_dns(config: &LdapConfig) -> Result<Vec<String>> {
 
     // Query rootDSE for namingContexts
     let (rs, _res) = ldap
-        .search(
-            "",
-            Scope::Base,
-            "(objectClass=*)",
-            vec!["namingContexts"],
-        )
+        .search("", Scope::Base, "(objectClass=*)", vec!["namingContexts"])
         .await
         .map_err(|e| LdapError::QueryFailed(e.to_string()))?
         .success()

@@ -9,7 +9,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Certificate};
 
-use crate::{HttpConfig, RustlsSetupError, SniCertificateConfig, WarpgateConfig};
+use crate::RustlsSetupError;
 
 #[derive(Clone)]
 pub struct TlsCertificateBundle {
@@ -180,38 +180,4 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
 pub trait IntoTlsCertificateRelativePaths {
     fn certificate_path(&self) -> PathBuf;
     fn key_path(&self) -> PathBuf;
-}
-
-impl IntoTlsCertificateRelativePaths for HttpConfig {
-    fn certificate_path(&self) -> PathBuf {
-        self.certificate.as_str().into()
-    }
-
-    fn key_path(&self) -> PathBuf {
-        self.key.as_str().into()
-    }
-}
-
-impl IntoTlsCertificateRelativePaths for SniCertificateConfig {
-    fn certificate_path(&self) -> PathBuf {
-        self.certificate.as_str().into()
-    }
-
-    fn key_path(&self) -> PathBuf {
-        self.key.as_str().into()
-    }
-}
-
-pub async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
-    from: &R,
-    config: &WarpgateConfig,
-) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
-    Ok(TlsCertificateAndPrivateKey {
-        certificate: TlsCertificateBundle::from_file(
-            config.paths_relative_to.join(from.certificate_path()),
-        )
-        .await?,
-        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
-            .await?,
-    })
 }

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use poem_openapi::{Enum, Object, Union};
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use warpgate_tls::TlsMode;
 
 use super::defaults::*;
 use crate::Secret;
@@ -57,38 +58,6 @@ pub struct TargetHTTPOptions {
 
     #[serde(default)]
     pub external_host: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq, Default)]
-pub enum TlsMode {
-    #[serde(rename = "disabled")]
-    Disabled,
-    #[serde(rename = "preferred")]
-    #[default]
-    Preferred,
-    #[serde(rename = "required")]
-    Required,
-}
-
-impl From<&str> for TlsMode {
-    fn from(s: &str) -> Self {
-        match s {
-            "disabled" => TlsMode::Disabled,
-            "preferred" => TlsMode::Preferred,
-            "required" => TlsMode::Required,
-            _ => TlsMode::Preferred,
-        }
-    }
-}
-
-impl From<TlsMode> for String {
-    fn from(mode: TlsMode) -> Self {
-        match mode {
-            TlsMode::Disabled => "disabled".to_string(),
-            TlsMode::Preferred => "preferred".to_string(),
-            TlsMode::Required => "required".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]

@@ -1,8 +1,10 @@
 <script lang="ts">
     import { link, push } from 'svelte-spa-router'
-    import { api, stringifyError } from 'admin/lib/api'
+    import { api, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import LdapConnectionFields from './LdapConnectionFields.svelte'
 
     interface Props {
         params: { id: string }
@@ -18,12 +20,27 @@
     let bindPassword = $state('')
     let userFilter = $state('')
     let baseDns = $state<string[]>([])
-    let tlsMode = $state('preferred')
-    let tlsVerify = $state(true)
+    let tls: Tls = $state({
+        mode: TlsMode.Preferred,
+        verify: true,
+    })
     let enabled = $state(true)
+    let autoLinkSsoUsers = $state(false)
     let description = $state('')
     let error = $state<string | null>(null)
     let testResult = $state<{ success: boolean; message: string } | null>(null)
+    let isLoaded = $state(false)
+
+    // Auto-update port based on TLS mode (only after initial load)
+    $effect(() => {
+        if (isLoaded) {
+            if (tls.mode === TlsMode.Disabled) {
+                port = 389
+            } else {
+                port = 636
+            }
+        }
+    })
 
     async function load() {
         const result = await api.getLdapServer({ id: params.id })
@@ -34,10 +51,11 @@
         bindDn = result.bindDn
         userFilter = result.userFilter
         baseDns = result.baseDns || []
-        tlsMode = result.tlsMode
-        tlsVerify = result.tlsVerify
+        tls = { mode: result.tlsMode, verify: result.tlsVerify }
         enabled = result.enabled
+        autoLinkSsoUsers = result.autoLinkSsoUsers
         description = result.description || ''
+        isLoaded = true
     }
 
     async function testConnection() {
@@ -45,16 +63,22 @@
         testResult = null
 
         try {
-            const result = await api.testLdapServerConnection({
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Connection test timed out after 10 seconds')), 10000)
+            })
+
+            const testPromise = api.testLdapServerConnection({
                 testLdapServerRequest: {
                     host,
                     port,
                     bindDn,
                     bindPassword: bindPassword || server.bindPassword,
-                    tlsMode: tlsMode as any,
-                    tlsVerify,
+                    tlsMode: tls.mode,
+                    tlsVerify: tls.verify,
                 },
             })
+
+            const result = await Promise.race([testPromise, timeoutPromise]) as any
             testResult = result
         } catch (e: any) {
             error = await stringifyError(e)
@@ -74,9 +98,10 @@
                     bindDn,
                     bindPassword: bindPassword || undefined,
                     userFilter,
-                    tlsMode: tlsMode as any,
-                    tlsVerify,
+                    tlsMode: tls.mode,
+                    tlsVerify: tls.verify,
                     enabled,
+                    autoLinkSsoUsers,
                     description: description || undefined,
                 },
             })
@@ -103,77 +128,35 @@
 
 <Loadable promise={load()}>
     <div class="container-max-md">
-        <h1>LDAP Server</h1>
+        <div class="page-summary-bar">
+            <div>
+                <h1>{name}</h1>
+                <div class="text-muted">LDAP server</div>
+            </div>
+        </div>
 
         <form onsubmit={(e) => { e.preventDefault(); save() }}>
-            <div class="mb-3">
-                <label for="name" class="form-label">Name *</label>
-                <input
-                    type="text"
-                    class="form-control"
-                    id="name"
-                    bind:value={name}
-                    required
-                />
-            </div>
+            <FormGroup floating label="Name">
+                <Input bind:value={name} required />
+            </FormGroup>
 
-            <div class="row mb-3">
-                <div class="col-md-8">
-                    <label for="host" class="form-label">Host *</label>
-                    <input
-                        type="text"
-                        class="form-control"
-                        id="host"
-                        bind:value={host}
-                        required
-                    />
-                </div>
-                <div class="col-md-4">
-                    <label for="port" class="form-label">Port *</label>
-                    <input
-                        type="number"
-                        class="form-control"
-                        id="port"
-                        bind:value={port}
-                        required
-                    />
-                </div>
-            </div>
+            <FormGroup floating label="Description">
+                <Input bind:value={description} />
+            </FormGroup>
 
-            <div class="mb-3">
-                <label for="bindDn" class="form-label">Bind DN *</label>
-                <input
-                    type="text"
-                    class="form-control"
-                    id="bindDn"
-                    bind:value={bindDn}
-                    required
-                />
-            </div>
-
-            <div class="mb-3">
-                <label for="bindPassword" class="form-label">Bind Password</label>
-                <input
-                    type="password"
-                    class="form-control"
-                    id="bindPassword"
-                    bind:value={bindPassword}
-                    placeholder="Leave empty to keep current password"
-                />
-            </div>
-
-            <div class="mb-3">
-                <label for="userFilter" class="form-label">User Filter</label>
-                <input
-                    type="text"
-                    class="form-control"
-                    id="userFilter"
-                    bind:value={userFilter}
-                />
-            </div>
+            <LdapConnectionFields
+                bind:host
+                bind:port
+                bind:bindDn
+                bind:bindPassword
+                bind:tls
+                bind:userFilter
+                passwordPlaceholder="Keep current password"
+                passwordRequired={false}
+            />
 
             {#if baseDns.length > 0}
-                <div class="mb-3">
+                <div class="mt-4">
                     <label class="form-label">Base DNs (discovered)</label>
                     <ul class="list-group">
                         {#each baseDns as dn (dn)}
@@ -185,31 +168,7 @@
                 </div>
             {/if}
 
-            <div class="row mb-3">
-                <div class="col-md-6">
-                    <label for="tlsMode" class="form-label">TLS Mode</label>
-                    <select class="form-select" id="tlsMode" bind:value={tlsMode}>
-                        <option value="disabled">Disabled</option>
-                        <option value="preferred">Preferred</option>
-                        <option value="required">Required</option>
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <div class="form-check form-switch mt-4">
-                        <input
-                            class="form-check-input"
-                            type="checkbox"
-                            id="tlsVerify"
-                            bind:checked={tlsVerify}
-                        />
-                        <label class="form-check-label" for="tlsVerify">
-                            Verify TLS certificates
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <div class="mb-3">
+            <!-- <div class="mt-4">
                 <div class="form-check form-switch">
                     <input
                         class="form-check-input"
@@ -221,16 +180,23 @@
                         Enabled
                     </label>
                 </div>
-            </div>
+            </div> -->
 
-            <div class="mb-3">
-                <label for="description" class="form-label">Description</label>
-                <textarea
-                    class="form-control"
-                    id="description"
-                    rows="3"
-                    bind:value={description}
-                ></textarea>
+            <div class="mt-4">
+                <div class="form-check form-switch">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="autoLinkSsoUsers"
+                        bind:checked={autoLinkSsoUsers}
+                    />
+                    <label class="form-check-label" for="autoLinkSsoUsers">
+                        Auto-link SSO users
+                    </label>
+                </div>
+                <div class="form-text">
+                    Automatically link SSO users to their LDAP accounts when they log in
+                </div>
             </div>
 
             {#if testResult}
@@ -245,7 +211,7 @@
                 </div>
             {/if}
 
-            <div class="d-flex gap-2 mb-3">
+            <div class="d-flex gap-2 mt-5">
                 <AsyncButton type="button" class="btn btn-secondary" click={testConnection}>
                     Test Connection
                 </AsyncButton>
@@ -255,11 +221,12 @@
                     use:link>
                     View Users
                 </a>
+                <div class="me-auto"></div>
                 <AsyncButton type="submit" class="btn btn-primary" click={save}>
                     Save
                 </AsyncButton>
-                <AsyncButton type="button" class="btn btn-danger ms-auto" click={remove}>
-                    Delete
+                <AsyncButton type="button" class="btn btn-danger" click={remove}>
+                    Remove
                 </AsyncButton>
             </div>
         </form>

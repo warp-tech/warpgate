@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::TlsMode;
+use warpgate_tls::TlsMode;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "ldap_servers")]
@@ -37,18 +37,12 @@ impl TryFrom<&Model> for warpgate_ldap::LdapConfig {
     fn try_from(server: &Model) -> Result<Self, Self::Error> {
         let base_dns: Vec<String> = serde_json::from_value(server.base_dns.clone())?;
 
-        let tls_mode = match TlsMode::from(server.tls_mode.as_str()) {
-            TlsMode::Disabled => warpgate_ldap::TlsMode::Disabled,
-            TlsMode::Preferred => warpgate_ldap::TlsMode::Preferred,
-            TlsMode::Required => warpgate_ldap::TlsMode::Required,
-        };
-
         Ok(Self {
             host: server.host.clone(),
             port: server.port as u16,
             bind_dn: server.bind_dn.clone(),
             bind_password: server.bind_password.clone(),
-            tls_mode,
+            tls_mode: TlsMode::from(server.tls_mode.as_str()),
             tls_verify: server.tls_verify,
             base_dns,
             user_filter: server.user_filter.clone(),

@@ -10,7 +10,8 @@ use sea_orm::{
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{Secret, TlsMode, WarpgateError};
+use warpgate_common::{Secret, WarpgateError};
+use warpgate_tls::TlsMode;
 use warpgate_db_entities::LdapServer;
 
 use super::AnySecurityScheme;
@@ -235,11 +236,7 @@ impl ListApi {
             port: body.port as u16,
             bind_dn: body.bind_dn.clone(),
             bind_password: body.bind_password.expose_secret().clone(),
-            tls_mode: match body.tls_mode {
-                TlsMode::Disabled => warpgate_ldap::TlsMode::Disabled,
-                TlsMode::Preferred => warpgate_ldap::TlsMode::Preferred,
-                TlsMode::Required => warpgate_ldap::TlsMode::Required,
-            },
+            tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: body.user_filter.clone(),
@@ -259,7 +256,7 @@ impl ListApi {
             bind_password: Set(body.bind_password.expose_secret().clone()),
             user_filter: Set(body.user_filter.clone()),
             base_dns: Set(base_dns_json),
-            tls_mode: Set(String::from(body.tls_mode.clone())),
+            tls_mode: Set(String::from(body.tls_mode)),
             tls_verify: Set(body.tls_verify),
             enabled: Set(body.enabled),
             auto_link_sso_users: Set(body.auto_link_sso_users),
@@ -286,11 +283,7 @@ impl ListApi {
             port: body.port as u16,
             bind_dn: body.bind_dn.clone(),
             bind_password: body.bind_password.expose_secret().clone(),
-            tls_mode: match body.tls_mode {
-                TlsMode::Disabled => warpgate_ldap::TlsMode::Disabled,
-                TlsMode::Preferred => warpgate_ldap::TlsMode::Preferred,
-                TlsMode::Required => warpgate_ldap::TlsMode::Required,
-            },
+            tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: String::new(),
@@ -417,11 +410,7 @@ impl DetailApi {
             bind_dn: body.bind_dn.clone(),
             bind_password: body.bind_password.as_ref().map(|p| p.expose_secret().clone())
                 .unwrap_or_else(|| model.bind_password.clone().unwrap()),
-            tls_mode: match body.tls_mode {
-                TlsMode::Disabled => warpgate_ldap::TlsMode::Disabled,
-                TlsMode::Preferred => warpgate_ldap::TlsMode::Preferred,
-                TlsMode::Required => warpgate_ldap::TlsMode::Required,
-            },
+            tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: body.user_filter.clone(),

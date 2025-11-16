@@ -1,4 +1,5 @@
 use thiserror::Error;
+use warpgate_tls::RustlsSetupError;
 
 pub type Result<T> = std::result::Result<T, LdapError>;
 
@@ -24,6 +25,9 @@ pub enum LdapError {
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    #[error("rustls setup: {0}")]
+    RustlSetup(#[from] RustlsSetupError),
 
     #[error("Other error: {0}")]
     Other(String),
