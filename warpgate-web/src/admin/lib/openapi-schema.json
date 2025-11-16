@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.13.2-49-ge91a4cf-modified"
+    "version": "v0.16.0-65-ga801e0e-modified"
   },
   "servers": [
     {
@@ -830,6 +830,17 @@
             "required": false,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "group_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -1219,6 +1230,212 @@
           }
         ],
         "operationId": "delete_target_role"
+      }
+    },
+    "/target-groups": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_target_groups"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetGroupDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetGroup"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_target_group"
+      }
+    },
+    "/target-groups/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_target_group"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetGroupDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_target_group"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_target_group"
       }
     },
     "/users": {
@@ -2230,7 +2447,7 @@
         ],
         "operationId": "get_parameters"
       },
-      "patch": {
+      "put": {
         "requestBody": {
           "content": {
             "application/json; charset=utf-8": {
@@ -2307,6 +2524,7 @@
     "schemas": {
       "AddSshKnownHostRequest": {
         "type": "object",
+        "title": "AddSshKnownHostRequest",
         "required": [
           "host",
           "port",
@@ -2329,8 +2547,22 @@
           }
         }
       },
+      "BootstrapThemeColor": {
+        "type": "string",
+        "enum": [
+          "Primary",
+          "Secondary",
+          "Success",
+          "Danger",
+          "Warning",
+          "Info",
+          "Light",
+          "Dark"
+        ]
+      },
       "CheckSshHostKeyRequest": {
         "type": "object",
+        "title": "CheckSshHostKeyRequest",
         "required": [
           "host",
           "port"
@@ -2347,6 +2579,7 @@
       },
       "CheckSshHostKeyResponseBody": {
         "type": "object",
+        "title": "CheckSshHostKeyResponseBody",
         "required": [
           "remote_key_type",
           "remote_key_base64"
@@ -2362,6 +2595,7 @@
       },
       "CreateTicketRequest": {
         "type": "object",
+        "title": "CreateTicketRequest",
         "required": [
           "username",
           "target_name"
@@ -2388,6 +2622,7 @@
       },
       "CreateUserRequest": {
         "type": "object",
+        "title": "CreateUserRequest",
         "required": [
           "username"
         ],
@@ -2412,6 +2647,7 @@
       },
       "ExistingOtpCredential": {
         "type": "object",
+        "title": "ExistingOtpCredential",
         "required": [
           "id"
         ],
@@ -2424,6 +2660,7 @@
       },
       "ExistingPasswordCredential": {
         "type": "object",
+        "title": "ExistingPasswordCredential",
         "required": [
           "id"
         ],
@@ -2436,6 +2673,7 @@
       },
       "ExistingPublicKeyCredential": {
         "type": "object",
+        "title": "ExistingPublicKeyCredential",
         "required": [
           "id",
           "label",
@@ -2464,6 +2702,7 @@
       },
       "ExistingSsoCredential": {
         "type": "object",
+        "title": "ExistingSsoCredential",
         "required": [
           "id",
           "email"
@@ -2483,6 +2722,7 @@
       },
       "GetLogsRequest": {
         "type": "object",
+        "title": "GetLogsRequest",
         "properties": {
           "before": {
             "type": "string",
@@ -2510,6 +2750,7 @@
       },
       "LogEntry": {
         "type": "object",
+        "title": "LogEntry",
         "required": [
           "id",
           "text",
@@ -2541,6 +2782,7 @@
       },
       "NewOtpCredential": {
         "type": "object",
+        "title": "NewOtpCredential",
         "required": [
           "secret_key"
         ],
@@ -2556,6 +2798,7 @@
       },
       "NewPasswordCredential": {
         "type": "object",
+        "title": "NewPasswordCredential",
         "required": [
           "password"
         ],
@@ -2567,6 +2810,7 @@
       },
       "NewPublicKeyCredential": {
         "type": "object",
+        "title": "NewPublicKeyCredential",
         "required": [
           "label",
           "openssh_public_key"
@@ -2582,6 +2826,7 @@
       },
       "NewSsoCredential": {
         "type": "object",
+        "title": "NewSsoCredential",
         "required": [
           "email"
         ],
@@ -2596,6 +2841,7 @@
       },
       "PaginatedResponse_SessionSnapshot": {
         "type": "object",
+        "title": "PaginatedResponse_SessionSnapshot",
         "required": [
           "items",
           "offset",
@@ -2620,25 +2866,39 @@
       },
       "ParameterUpdate": {
         "type": "object",
-        "properties": {
-          "allow_own_credential_management": {
-            "type": "boolean"
-          }
-        }
-      },
-      "ParameterValues": {
-        "type": "object",
+        "title": "ParameterUpdate",
         "required": [
           "allow_own_credential_management"
         ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
+      "ParameterValues": {
+        "type": "object",
+        "title": "ParameterValues",
+        "required": [
+          "allow_own_credential_management"
+        ],
+        "properties": {
+          "allow_own_credential_management": {
+            "type": "boolean"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
           }
         }
       },
       "Recording": {
         "type": "object",
+        "title": "Recording",
         "required": [
           "id",
           "name",
@@ -2680,6 +2940,7 @@
       },
       "Role": {
         "type": "object",
+        "title": "Role",
         "required": [
           "id",
           "name",
@@ -2700,6 +2961,7 @@
       },
       "RoleDataRequest": {
         "type": "object",
+        "title": "RoleDataRequest",
         "required": [
           "name"
         ],
@@ -2714,6 +2976,7 @@
       },
       "SSHKey": {
         "type": "object",
+        "title": "SSHKey",
         "required": [
           "kind",
           "public_key_base64"
@@ -2729,6 +2992,7 @@
       },
       "SSHKnownHost": {
         "type": "object",
+        "title": "SSHKnownHost",
         "required": [
           "id",
           "host",
@@ -2820,6 +3084,7 @@
       },
       "SessionSnapshot": {
         "type": "object",
+        "title": "SessionSnapshot",
         "required": [
           "id",
           "started",
@@ -2855,6 +3120,7 @@
       },
       "SshTargetPasswordAuth": {
         "type": "object",
+        "title": "SshTargetPasswordAuth",
         "required": [
           "password"
         ],
@@ -2865,10 +3131,12 @@
         }
       },
       "SshTargetPublicKeyAuth": {
-        "type": "object"
+        "type": "object",
+        "title": "SshTargetPublicKeyAuth"
       },
       "Target": {
         "type": "object",
+        "title": "Target",
         "required": [
           "id",
           "name",
@@ -2895,11 +3163,20 @@
           },
           "options": {
             "$ref": "#/components/schemas/TargetOptions"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
       "TargetDataRequest": {
         "type": "object",
+        "title": "TargetDataRequest",
         "required": [
           "name",
           "options"
@@ -2913,11 +3190,62 @@
           },
           "options": {
             "$ref": "#/components/schemas/TargetOptions"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TargetGroup": {
+        "type": "object",
+        "title": "TargetGroup",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
+          }
+        }
+      },
+      "TargetGroupDataRequest": {
+        "type": "object",
+        "title": "TargetGroupDataRequest",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
           }
         }
       },
       "TargetHTTPOptions": {
         "type": "object",
+        "title": "TargetHTTPOptions",
         "required": [
           "url",
           "tls"
@@ -2942,6 +3270,7 @@
       },
       "TargetMySqlOptions": {
         "type": "object",
+        "title": "TargetMySqlOptions",
         "required": [
           "host",
           "port",
@@ -3109,6 +3438,7 @@
       },
       "TargetPostgresOptions": {
         "type": "object",
+        "title": "TargetPostgresOptions",
         "required": [
           "host",
           "port",
@@ -3131,11 +3461,15 @@
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
+          },
+          "idle_timeout": {
+            "type": "string"
           }
         }
       },
       "TargetSSHOptions": {
         "type": "object",
+        "title": "TargetSSHOptions",
         "required": [
           "host",
           "port",
@@ -3162,10 +3496,12 @@
         }
       },
       "TargetWebAdminOptions": {
-        "type": "object"
+        "type": "object",
+        "title": "TargetWebAdminOptions"
       },
       "Ticket": {
         "type": "object",
+        "title": "Ticket",
         "required": [
           "id",
           "username",
@@ -3203,6 +3539,7 @@
       },
       "TicketAndSecret": {
         "type": "object",
+        "title": "TicketAndSecret",
         "required": [
           "ticket",
           "secret"
@@ -3218,6 +3555,7 @@
       },
       "Tls": {
         "type": "object",
+        "title": "Tls",
         "required": [
           "mode",
           "verify"
@@ -3241,6 +3579,7 @@
       },
       "User": {
         "type": "object",
+        "title": "User",
         "required": [
           "id",
           "username",
@@ -3259,11 +3598,16 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
       "UserDataRequest": {
         "type": "object",
+        "title": "UserDataRequest",
         "required": [
           "username"
         ],
@@ -3276,11 +3620,16 @@
           },
           "description": {
             "type": "string"
+          },
+          "rate_limit_bytes_per_second": {
+            "type": "integer",
+            "format": "uint32"
           }
         }
       },
       "UserRequireCredentialsPolicy": {
         "type": "object",
+        "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
             "type": "array",
