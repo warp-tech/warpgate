@@ -2,12 +2,28 @@
     import { api, type TargetGroupDataRequest } from 'admin/lib/api'
     import { link, replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
+    import { stringifyError } from 'common/errors'
 
     let name = $state('')
     let description = $state('')
     let color = $state('')
     let saving = $state(false)
     let error: string | undefined = $state()
+
+    const VALID_COLORS = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
+
+    function capitalizeFirst(str: string): string {
+        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+    }
+
+    function getValidColor(colorValue: string): string | undefined {
+        const trimmed = colorValue.trim().toLowerCase()
+        if (!trimmed) return undefined
+        if (VALID_COLORS.includes(trimmed)) {
+            return capitalizeFirst(trimmed) as any
+        }
+        return undefined
+    }
 
     async function save () {
         if (!name.trim()) {
@@ -23,17 +39,22 @@
                 targetGroupDataRequest: {
                     name: name.trim(),
                     description: description.trim() || undefined,
-                    color: color.trim() || undefined,
+                    color: getValidColor(color),
                 }
             })
             // Redirect to groups list
             replace('/config/target-groups')
         } catch (e) {
-            error = 'Failed to create target group'
+            error = await stringifyError(e)
             console.error(e)
         } finally {
             saving = false
         }
+    }
+
+    function handleSubmit (e: SubmitEvent) {
+        e.preventDefault()
+        save()
     }
 </script>
 
@@ -46,7 +67,7 @@
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    <form on:submit|preventDefault={save}>
+    <form onsubmit={handleSubmit}>
         <FormGroup>
             <Label for="name">Name</Label>
             <Input

@@ -3,6 +3,7 @@
     import { link, replace } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
+    import { stringifyError } from 'common/errors'
 
     interface Props {
         params: { id: string };
@@ -21,14 +22,32 @@
     let description = $state('')
     let color = $state('')
 
+    const VALID_COLORS = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
+
+    function capitalizeFirst(str: string): string {
+        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+    }
+
+    function getValidColor(colorValue: string): string | undefined {
+        const trimmed = colorValue.trim().toLowerCase()
+        if (!trimmed) return undefined
+        if (VALID_COLORS.includes(trimmed)) {
+            return capitalizeFirst(trimmed) as any
+        }
+        return undefined
+    }
+
     onMount(async () => {
         try {
             group = await api.getTargetGroup({ id: groupId })
             name = group.name
             description = group.description
-            color = group.color || ''
+            // Convert capitalized API value to lowercase for form
+            // Only use valid colors, ignore any invalid values
+            const apiColor = group.color ? group.color.toLowerCase() : ''
+            color = VALID_COLORS.includes(apiColor) ? apiColor : ''
         } catch (e) {
-            error = 'Failed to load target group'
+            error = await stringifyError(e)
             console.error(e)
         } finally {
             loading = false
@@ -47,17 +66,22 @@
                 targetGroupDataRequest: {
                     name,
                     description: description || undefined,
-                    color: color || undefined,
+                    color: getValidColor(color),
                 }
             })
             // Redirect to groups list after successful save
             replace('/config/target-groups')
         } catch (e) {
-            saveError = 'Failed to save target group'
+            saveError = await stringifyError(e)
             console.error(e)
         } finally {
             saving = false
         }
+    }
+
+    function handleSubmit (e: SubmitEvent) {
+        e.preventDefault()
+        save()
     }
 
     async function deleteGroup () {
@@ -70,7 +94,7 @@
             // Redirect to groups list
             replace('/config/target-groups')
         } catch (e) {
-            saveError = 'Failed to delete target group'
+            saveError = await stringifyError(e)
             console.error('Delete target group error:', e)
         }
     }
@@ -97,7 +121,7 @@
             <Alert color="danger">{saveError}</Alert>
         {/if}
 
-        <form on:submit|preventDefault={save}>
+        <form onsubmit={handleSubmit}>
             <FormGroup>
                 <Label for="name">Name</Label>
                 <Input

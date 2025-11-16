@@ -7,7 +7,7 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use warpgate_common::TargetOptions;
 use warpgate_core::{ConfigProvider, Services};
-use warpgate_db_entities::{Target, TargetGroup};
+use warpgate_db_entities::{Target, TargetGroup, TargetGroup::BootstrapThemeColor};
 
 use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
@@ -18,7 +18,7 @@ pub struct Api;
 pub struct GroupInfo {
     pub id: uuid::Uuid,
     pub name: String,
-    pub color: Option<String>,
+    pub color: Option<BootstrapThemeColor>,
 }
 
 #[derive(Debug, Serialize, Clone, Object)]
