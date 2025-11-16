@@ -12,7 +12,7 @@ use sea_orm::prelude::Expr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_db_entities::TargetGroup;
+use warpgate_db_entities::{TargetGroup, TargetGroup::BootstrapThemeColor};
 
 use super::AnySecurityScheme;
 
@@ -20,7 +20,7 @@ use super::AnySecurityScheme;
 struct TargetGroupDataRequest {
     name: String,
     description: Option<String>,
-    color: Option<String>,
+    color: Option<BootstrapThemeColor>,
 }
 
 #[derive(ApiResponse)]

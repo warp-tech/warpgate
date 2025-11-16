@@ -8,6 +8,21 @@ import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 
+function getBootstrapColorValue(color: string | undefined): string {
+    if (!color) return '#6c757d' // Bootstrap secondary/default gray
+    const colorMap: Record<string, string> = {
+        primary: '#0d6efd',
+        secondary: '#6c757d',
+        success: '#198754',
+        danger: '#dc3545',
+        warning: '#ffc107',
+        info: '#0dcaf0',
+        light: '#f8f9fa',
+        dark: '#212529',
+    }
+    return colorMap[color] || '#6c757d'
+}
+
 let selectedTarget: TargetSnapshot|undefined = $state()
 let targets: TargetSnapshot[] = $state([])
 let groupedTargets: { [groupName: string]: TargetSnapshot[] } = $state({})
@@ -152,7 +167,7 @@ function filterTargets() {
             return a.localeCompare(b)
         }) as [groupName, groupTargets]}
         <div class="target-group">
-            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : (groupTargets[0]?.group?.color || '#6c757d')}>
+            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : getBootstrapColorValue(groupTargets[0]?.group?.color)}>
                 <h6 class="group-title">{groupName}</h6>
             </div>
             <div class="list-group">

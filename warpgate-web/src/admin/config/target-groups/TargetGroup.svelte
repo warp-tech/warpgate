@@ -122,12 +122,22 @@
                 <Label for="color">Color</Label>
                 <Input
                     id="color"
-                    type="color"
+                    type="select"
                     bind:value={color}
                     disabled={saving}
-                />
+                >
+                    <option value="">None</option>
+                    <option value="primary">Primary</option>
+                    <option value="secondary">Secondary</option>
+                    <option value="success">Success</option>
+                    <option value="danger">Danger</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </Input>
                 <small class="form-text text-muted">
-                    Optional color for visual organization
+                    Optional Bootstrap theme color for visual organization
                 </small>
             </FormGroup>
 

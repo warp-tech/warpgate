@@ -58,10 +58,7 @@
                     {#each groups as group}
                         <DropdownItem onclick={() => selectGroup(group.id)}>
                             {#if group.color}
-                                <span
-                                    class="me-2 rounded d-inline-block"
-                                    style="width: 12px; height: 12px; background-color: {group.color};"
-                                ></span>
+                                <span class="badge me-2" class:bg-primary={group.color === 'primary'} class:bg-secondary={group.color === 'secondary'} class:bg-success={group.color === 'success'} class:bg-danger={group.color === 'danger'} class:bg-warning={group.color === 'warning'} class:bg-info={group.color === 'info'} class:bg-light={group.color === 'light'} class:bg-dark={group.color === 'dark'}></span>
                             {/if}
                             {group.name}
                         </DropdownItem>
@@ -96,10 +93,7 @@
                             {@const group = groups.find(g => g.id === target.groupId)}
                             {#if group}
                                 {#if group.color}
-                                    <div
-                                        class="me-2 rounded"
-                                        style="width: 12px; height: 12px; background-color: {group.color};"
-                                    ></div>
+                                    <span class="badge me-2" class:bg-primary={group.color === 'primary'} class:bg-secondary={group.color === 'secondary'} class:bg-success={group.color === 'success'} class:bg-danger={group.color === 'danger'} class:bg-warning={group.color === 'warning'} class:bg-info={group.color === 'info'} class:bg-light={group.color === 'light'} class:bg-dark={group.color === 'dark'}></span>
                                 {/if}
                                 <small class="text-muted me-2">{group.name}</small>
                             {/if}

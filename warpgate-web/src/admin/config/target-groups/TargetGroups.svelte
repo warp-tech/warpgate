@@ -50,10 +50,7 @@
                 <div class="me-auto">
                     <div class="d-flex align-items-center">
                         {#if group.color}
-                            <div
-                                class="me-2 rounded"
-                                style="width: 12px; height: 12px; background-color: {group.color};"
-                            ></div>
+                            <span class="badge me-2" class:bg-primary={group.color === 'primary'} class:bg-secondary={group.color === 'secondary'} class:bg-success={group.color === 'success'} class:bg-danger={group.color === 'danger'} class:bg-warning={group.color === 'warning'} class:bg-info={group.color === 'info'} class:bg-light={group.color === 'light'} class:bg-dark={group.color === 'dark'}></span>
                         {/if}
                         <strong>{group.name}</strong>
                     </div>
