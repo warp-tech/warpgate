@@ -1,0 +1,217 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "warpgate.fullname" . }}
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+    {{- with .Values.deploymentLabels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "warpgate.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "warpgate.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: {{ .Chart.Name }}-setup
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- if .Values.setup.envFromSecret }}
+          env:
+          {{- range $key, $val := .Values.setup.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+          {{- end }}
+          {{- end }}
+          command: 
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              if [ -d /ssh-keys ]; then
+                mkdir -p /data/ssh-keys
+                cp /ssh-keys/client-ed25519 /ssh-keys/client-rsa /ssh-keys/host-ed25519 /ssh-keys/host-rsa /data/ssh-keys/
+                chmod -R 600 /data/ssh-keys/*
+              fi
+
+              if [ -d /tls-cert ]; then
+                cp /tls-cert/tls.crt /data/tls.certificate.pem
+                cp /tls-cert/tls.key /data/tls.key.pem
+                chmod 600 /data/tls.certificate.pem
+                chmod 600 /data/tls.key.pem
+              fi
+
+              {{- if .Values.setup.enabled }}
+              {{- if eq .Values.setup.type "podinit" }}
+              if [ ! -f /data/warpgate.yaml ]; then
+                warpgate -c /data/warpgate.yaml  unattended-setup --data-path /data
+                  {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
+                  {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
+                  {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
+                  {{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }} {{- end }}
+                  {{- if .Values.setup.databaseUrl }} --database-url "{{ .Values.setup.databaseUrl }}" {{- end }}
+                  {{- if .Values.setup.recordSessions }} --record-sessions {{- end }}
+
+                  {{/*{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}*/}}
+
+                {{- if .Values.setup.disableIpV6 }}
+                sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml
+                {{- end }}
+              fi
+              {{- end }}
+              {{- end }}
+
+              if [ -d /override ]; then
+                cp /override/warpgate.yaml /data/warpgate.yaml
+                {{- if .Values.config_env_var_replace }}
+                VARS="{{ .Values.config_env_var_replace }}"
+                for VAR in $VARS; do
+                 VAL=$(printenv "$VAR")
+                 ESCAPED=$(printf '%s' "$VAL" | sed -e 's/[\/&]/\\&/g')
+                 FVAR=$(printf '$%s' "$VAR")
+                 sed -i "s/$FVAR/$ESCAPED/g" /data/warpgate.yaml
+                done
+                {{- end }}
+                chmod 600 /data/warpgate.yaml
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.ssh_keys_secret  }}
+            - name: ssh-keys
+              mountPath: /ssh-keys
+            {{- end }}
+            {{- if .Values.tls_cert_secret }}
+            - name: tls-cert
+              mountPath: /tls-cert
+            {{- end }}
+            {{- if .Values.overrides_config }}
+            - name: override-config
+              mountPath: /override
+            {{- end }}
+          {{- if .Values.volume_mounts }}
+            {{- toYaml .Values.volume_mounts | nindent 12 }}
+          {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: 
+            - warpgate
+            - -c 
+            - /data/warpgate.yaml
+            - run
+          ports:
+            {{- if .Values.setup.ssh }}
+            - name: ssh
+              containerPort: {{ .Values.setup.ssh }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.setup.http }}
+            - name: http
+              containerPort: {{ .Values.setup.http }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.setup.mysql }}
+            - name: mysql
+              containerPort: {{ .Values.setup.mysql }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.setup.pgsql }}
+            - name: pgsql
+              containerPort: {{ .Values.setup.pgsql }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.setup.kubernetes }}
+            - name: kubernetes
+              containerPort: {{ .Values.setup.kubernetes }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- with .Values.volume_mounts }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+            - name: data
+              mountPath: /data
+      volumes:
+        {{- with .Values.volumes }}
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.ssh_keys_secret }}
+        - name: ssh-keys
+          secret:
+            secretName: {{ . }}
+        {{- end }}
+        {{- with .Values.tls_cert_secret }}
+        - name: tls-cert
+          secret:
+            secretName: {{ . }}
+        {{- end }}
+        {{- if .Values.overrides_config }}
+        - name: override-config
+          configMap:
+            name: {{ include "warpgate.fullname" . }}-config-overrides
+        {{- end }}
+        {{- if .Values.data.pvc.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            {{- if .Values.data.pvc.claimName }}
+            claimName: {{ .Values.data.pvc.claimName }}
+            {{- else }}
+            claimName: {{ include "warpgate.fullname" . }}-data
+            {{- end }}
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

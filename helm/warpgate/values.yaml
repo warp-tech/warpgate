@@ -1,0 +1,136 @@
+# Number of replicas for Warpgate deployment
+# Do NOT increase above 1 when using SQLite as the database!
+replicaCount: 1
+
+image:
+  repository: ghcr.io/warp-tech/warpgate
+  pullPolicy: IfNotPresent
+  tag: "0.16.0"
+
+# References to Kubernetes secrets for pulling images (if using a private registry)
+imagePullSecrets: []
+
+# Extra annotations/labels for deployment or pods
+deploymentAnnotations: {}
+deploymentLabels: {}
+podAnnotations: {}
+podLabels: {}
+
+# Override chart name if desired
+nameOverride: ""
+fullnameOverride: ""
+
+# Pod-level security context (applies to all containers)
+podSecurityContext: {}
+  # fsGroup: 2000
+
+# Container-level security context
+securityContext: {}
+  # capabilities:
+  #   drop: [ "ALL" ]
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# Resource requests/limits for the Warpgate container
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Node scheduling options
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Secret with SSH host/client private keys:
+# expected keys: client-ed25519, client-rsa, host-ed25519, host-rsa
+# If not provided, Warpgate will generate them inside the PVC
+ssh_keys_secret: ""
+
+# Secret containing TLS certs (tls.key, tls.crt)
+tls_cert_secret: ""
+
+# Provide a full Warpgate config to override the auto-generated one
+# ⚠️ If set, ensure ports match the setup/service config below
+overrides_config: ""
+
+# Space-separated list of environment variable names to substitute in the config
+# Example: "FOO BAR" → replaces $FOO and $BAR from pod environment
+config_env_var_replace: ""
+
+# Additional custom volumes & mounts (advanced use-cases)
+volumes: []
+volume_mounts: []
+
+# Persistence configuration
+#  If disabled and no external DB is used, all data will be lost on pod restart!
+#  If you are using config_overrides, ca, ssh keyds form secrets and external databse you can use emptyDir
+data:
+  pvc:
+    enabled: false          # true = use PersistentVolumeClaim, false = use emptyDir
+    claimName: ""           # if set, uses existing PVC instead of template
+    template: {}            # PVC template spec for dynamic provisioning
+
+# Automatic Warpgate setup
+# Ref: https://warpgate.null.page/getting-started/#setup
+setup:
+  enabled: true
+
+  # Setup mode:
+  # - job: (recommended) one-time Kubernetes Job runs setup
+  # - podinit: initContainer mode (use only if you don't persist data via PVC)
+  type: "job"
+
+  # Secret containing initial admin password
+  # Format: <secret-name>/<key>
+  envFromSecret:
+    WARPGATE_ADMIN_PASSWORD: "warpgate-secret/adminPassword"
+
+  # Config options (overridden if overrides_config is used)
+  disableIpV6: false
+  recordSessions: true
+  databaseUrl: ""   # Optional: PostgreSQL connection string
+
+  # Ports to expose. Set to 0 or false to disable protocol.
+  ssh: 2222
+  http: 8888
+  mysql: 33306
+  pgsql: 55432
+  kubernetes: 0
+  # kubernetes: 6443
+
+  # Resources for init container (runs setup)
+  resources: {}
+    # limits:
+    #   cpu: 100m
+    #   memory: 128Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+
+# Kubernetes Service definition
+service:
+  annotations: {}
+  type: ClusterIP
+  ports:
+    ssh: 2222
+    http: 8888
+    mysql: 33306
+    pgsql: 55432
+    kubernetes: 0
+    # kubernetes: 6443
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: default-issuer
+    kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts: []
+  tls: []
