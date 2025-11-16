@@ -41,6 +41,24 @@
         selectedGroupId = groupId
         groupDropdownOpen = false
     }
+
+    function getColorStyle(color: string | null | undefined): string {
+        if (!color) return ''
+        // Handle capitalized color names from API (e.g., "Primary" -> "primary")
+        const colorLower = color.toLowerCase()
+        const colorMap: Record<string, string> = {
+            primary: '#0d6efd',
+            secondary: '#6c757d',
+            success: '#198754',
+            danger: '#dc3545',
+            warning: '#ffc107',
+            info: '#0dcaf0',
+            light: '#f8f9fa',
+            dark: '#212529',
+        }
+        const hexColor = colorMap[colorLower] || '#6c757d'
+        return `background-color: ${hexColor};`
+    }
 </script>
 
 <div class="container-max-md">
@@ -93,7 +111,7 @@
                             {@const group = groups.find(g => g.id === target.groupId)}
                             {#if group}
                                 {#if group.color}
-                                    <span class="badge me-2" class:bg-primary={group.color === 'primary'} class:bg-secondary={group.color === 'secondary'} class:bg-success={group.color === 'success'} class:bg-danger={group.color === 'danger'} class:bg-warning={group.color === 'warning'} class:bg-info={group.color === 'info'} class:bg-light={group.color === 'light'} class:bg-dark={group.color === 'dark'}></span>
+                                    <span class="color-circle me-2" style={getColorStyle(group.color)}></span>
                                 {/if}
                                 <small class="text-muted me-2">{group.name}</small>
                             {/if}
@@ -132,5 +150,13 @@
     .list-group-item {
         display: flex;
         align-items: center;
+    }
+
+    .color-circle {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
     }
 </style>
