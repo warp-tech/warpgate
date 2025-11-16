@@ -89,12 +89,6 @@ impl Api {
             .await;
         targets.sort_by(|a, b| a.name.cmp(&b.name));
 
-        // Debug: Log target group information
-        tracing::info!("Processing {} targets", targets.len());
-        for target in &targets {
-            tracing::info!("Target: {} (group_id: {:?})", target.name, target.group_id);
-        }
-
         // Fetch target groups for group information
         let groups = {
             let db = services.db.lock().await;
@@ -102,13 +96,7 @@ impl Api {
                 .all(&*db)
                 .await;
             match result {
-                Ok(groups) => {
-                    tracing::info!("Found {} target groups", groups.len());
-                    for group in &groups {
-                        tracing::info!("Group: {} (id: {})", group.name, group.id);
-                    }
-                    groups
-                }
+                Ok(groups) => groups,
                 Err(e) => {
                     tracing::error!("Failed to fetch target groups: {}", e);
                     Vec::new()
@@ -129,7 +117,7 @@ impl Api {
                     })
                 });
 
-                let snapshot = TargetSnapshot {
+                TargetSnapshot {
                     name: t.name.clone(),
                     description: t.description.clone(),
                     kind: (&t.options).into(),
@@ -138,12 +126,7 @@ impl Api {
                         _ => None,
                     },
                     group,
-                };
-
-                tracing::info!("Final snapshot for {}: group={:?}",
-                    snapshot.name, snapshot.group);
-
-                snapshot
+                }
             })
             .collect();
 
