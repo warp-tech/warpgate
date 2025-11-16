@@ -30,7 +30,7 @@ api.getTargets({}).then(result => {
         if (target.kind === TargetKind.WebAdmin) {
             webAdminTarget = target
         } else {
-            const groupName = target.groupName || 'Ungrouped'
+            const groupName = target.group?.name || 'Ungrouped'
             if (!groupedTargets[groupName]) {
                 groupedTargets[groupName] = []
             }
@@ -85,7 +85,7 @@ function filterTargets() {
         if (target.kind === TargetKind.WebAdmin) {
             webAdminTarget = target
         } else {
-            const groupName = target.groupName || 'Ungrouped'
+            const groupName = target.group?.name || 'Ungrouped'
             if (!filteredGroupedTargets[groupName]) {
                 filteredGroupedTargets[groupName] = []
             }
@@ -152,7 +152,7 @@ function filterTargets() {
             return a.localeCompare(b)
         }) as [groupName, groupTargets]}
         <div class="target-group">
-            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : (groupTargets[0]?.groupColor || '#6c757d')}>
+            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : (groupTargets[0]?.group?.color || '#6c757d')}>
                 <h6 class="group-title">{groupName}</h6>
             </div>
             <div class="list-group">

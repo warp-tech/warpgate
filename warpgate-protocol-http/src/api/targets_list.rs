@@ -15,14 +15,19 @@ use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
 pub struct Api;
 
 #[derive(Debug, Serialize, Clone, Object)]
+pub struct GroupInfo {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
     pub name: String,
     pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
-    pub group_id: Option<uuid::Uuid>,
-    pub group_name: Option<String>,
-    pub group_color: Option<String>,
+    pub group: Option<GroupInfo>,
 }
 
 #[derive(ApiResponse)]
@@ -116,8 +121,12 @@ impl Api {
         let result: Vec<TargetSnapshot> = targets
             .into_iter()
             .map(|t| {
-                let group_info = t.group_id.and_then(|group_id| {
-                    group_map.get(&group_id).map(|group| (group.name.clone(), group.color.clone()))
+                let group = t.group_id.and_then(|group_id| {
+                    group_map.get(&group_id).map(|group| GroupInfo {
+                        id: group.id,
+                        name: group.name.clone(),
+                        color: group.color.clone(),
+                    })
                 });
 
                 let snapshot = TargetSnapshot {
@@ -128,13 +137,11 @@ impl Api {
                         TargetOptions::Http(ref opt) => opt.external_host.clone(),
                         _ => None,
                     },
-                    group_id: t.group_id,
-                    group_name: group_info.as_ref().map(|(name, _): &(String, Option<String>)| name.clone()),
-                    group_color: group_info.as_ref().and_then(|(_, color): &(String, Option<String>)| color.clone()),
+                    group,
                 };
 
-                tracing::info!("Final snapshot for {}: group_id={:?}, group_name={:?}, group_color={:?}",
-                    snapshot.name, snapshot.group_id, snapshot.group_name, snapshot.group_color);
+                tracing::info!("Final snapshot for {}: group={:?}",
+                    snapshot.name, snapshot.group);
 
                 snapshot
             })
