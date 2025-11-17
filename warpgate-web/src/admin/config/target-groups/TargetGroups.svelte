@@ -27,18 +27,11 @@
         if (!color) return ''
         // Handle capitalized color names from API (e.g., "Primary" -> "primary")
         const colorLower = color.toLowerCase()
-        const colorMap: Record<string, string> = {
-            primary: '#0d6efd',
-            secondary: '#6c757d',
-            success: '#198754',
-            danger: '#dc3545',
-            warning: '#ffc107',
-            info: '#0dcaf0',
-            light: '#f8f9fa',
-            dark: '#212529',
+        const validColors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
+        if (validColors.includes(colorLower)) {
+            return `background-color: var(--bs-${colorLower});`
         }
-        const hexColor = colorMap[colorLower] || '#6c757d'
-        return `background-color: ${hexColor};`
+        return ''
     }
 </script>
 

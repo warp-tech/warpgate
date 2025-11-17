@@ -163,7 +163,7 @@ function filterTargets() {
             return a.localeCompare(b)
         }) as [groupName, groupTargets]}
         <div class="target-group">
-            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? '#dc3545' : getBootstrapColorValue(groupTargets[0]?.group?.color)}>
+            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? 'var(--bs-danger)' : getBootstrapColorValue(groupTargets[0]?.group?.color)}>
                 <h6 class="group-title">{groupName}</h6>
             </div>
             <div class="list-group">
@@ -258,7 +258,7 @@ function filterTargets() {
     }
 
     .group-header {
-        background-color: #6c757d;
+        background-color: var(--bs-secondary);
         color: white;
         padding: 0.75rem 1rem;
         border-radius: 0.375rem 0.375rem 0 0;
@@ -266,7 +266,7 @@ function filterTargets() {
     }
 
     .group-header.administration {
-        background-color: #dc3545 !important;
+        background-color: var(--bs-danger) !important;
         font-weight: 700;
     }
 
