@@ -9,18 +9,14 @@ import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 
 function getBootstrapColorValue(color: string | undefined): string {
-    if (!color) return '#6c757d' // Bootstrap secondary/default gray
-    const colorMap: Record<string, string> = {
-        primary: '#0d6efd',
-        secondary: '#6c757d',
-        success: '#198754',
-        danger: '#dc3545',
-        warning: '#ffc107',
-        info: '#0dcaf0',
-        light: '#f8f9fa',
-        dark: '#212529',
+    if (!color) return 'var(--bs-secondary)'
+    // Handle capitalized color names from API (e.g., "Primary" -> "primary")
+    const colorLower = color.toLowerCase()
+    const validColors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
+    if (validColors.includes(colorLower)) {
+        return `var(--bs-${colorLower})`
     }
-    return colorMap[color] || '#6c757d'
+    return 'var(--bs-secondary)'
 }
 
 let selectedTarget: TargetSnapshot|undefined = $state()
