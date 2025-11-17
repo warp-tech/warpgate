@@ -88,28 +88,44 @@
             />
         </FormGroup>
 
-        <FormGroup>
-            <Label for="color">Color</Label>
-            <Input
-                id="color"
-                type="select"
-                bind:value={color}
-                disabled={saving}
-            >
-                <option value="">None</option>
-                <option value="primary">Primary</option>
-                <option value="secondary">Secondary</option>
-                <option value="success">Success</option>
-                <option value="danger">Danger</option>
-                <option value="warning">Warning</option>
-                <option value="info">Info</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-            </Input>
-            <small class="form-text text-muted">
-                Optional Bootstrap theme color for visual organization
-            </small>
-        </FormGroup>
+            <FormGroup>
+                <Label for="color">Color</Label>
+                <div class="color-picker">
+                    <button
+                        type="button"
+                        class="color-option"
+                        class:selected={color === ''}
+                        disabled={saving}
+                        onclick={(e) => {
+                            e.preventDefault()
+                            color = ''
+                        }}
+                        title="None"
+                    >
+                        <span class="color-circle" style="background-color: transparent; border: 1px solid var(--bs-border-color);"></span>
+                        <span>None</span>
+                    </button>
+                    {#each VALID_COLORS as colorName}
+                        <button
+                            type="button"
+                            class="color-option"
+                            class:selected={color === colorName}
+                            disabled={saving}
+                            onclick={(e) => {
+                                e.preventDefault()
+                                color = colorName
+                            }}
+                            title={capitalizeFirst(colorName)}
+                        >
+                            <span class="color-circle" style={`background-color: var(--bs-${colorName});`}></span>
+                            <span>{capitalizeFirst(colorName)}</span>
+                        </button>
+                    {/each}
+                </div>
+                <small class="form-text text-muted">
+                    Optional Bootstrap theme color for visual organization
+                </small>
+            </FormGroup>
 
         <div class="d-flex gap-2">
             <Button type="submit" color="primary" disabled={saving}>
@@ -121,3 +137,47 @@
         </div>
     </form>
 </div>
+
+<style lang="scss">
+    .color-picker {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .color-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--bs-border-color);
+        background-color: var(--bs-body-bg);
+        color: var(--bs-body-color);
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: all 0.15s ease-in-out;
+
+        &:hover:not(:disabled) {
+            background-color: var(--bs-secondary-bg);
+            border-color: var(--bs-primary);
+        }
+
+        &:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        &.selected {
+            border-color: var(--bs-primary);
+            background-color: var(--bs-primary-bg-subtle);
+        }
+
+        .color-circle {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+    }
+</style>
