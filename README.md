@@ -43,6 +43,19 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
 
+## How is Warpgate different from a jump host / VPN / Teleport?
+
+| Warpgate | SSH jump host | VPN | Teleport |
+|-|-|-|-|
+| ✅ **Precise 1:1 assignment between users and services** | (Usually) full access to the network behind the jump host | (Usually) full access to the network | ✅ **Precise 1:1 assignment between users and services** |
+| ✅ **No custom client needed** | Jump host config needed | ✅ **No custom client needed** | Custom client required |
+| ✅ **2FA out of the box** | 🟡 2FA possible with additional PAM plugins | 🟡 Depends on the provider | ✅ **2FA out of the box** |
+| ✅ **SSO out of the box** | 🟡 SSO possible with additional PAM plugins | 🟡 Depends on the provider | Paid |
+| ✅ **Command-level audit** | 🟡 Connection-level audit on the jump host, no secure audit on the target if root access is given | No secure audit on the target if root access is given | ✅ **Command-level audit** |
+| ✅ **Full session recording** | No secure recording possible on the target if root access is given | No secure recording possible on the target if root access is given | ✅ **Full session recording** |
+| ✅ **Non-interactive connections** | 🟡 Non-interactive connections are possible if the clients supports jump hosts natively | ✅ **Non-interactive connections** | Non-interactive connections require using an SSH client wrapper or running a tunnel |
+| ✅ **Self-hosted, you own the data** | ✅ **Self-hosted, you own the data** | 🟡 Depends on the provider | SaaS |
+
 <center>
       <img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
 </center>
