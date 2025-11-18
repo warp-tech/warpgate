@@ -39,7 +39,7 @@ impl DatabaseConfigProvider {
         db: &DatabaseConnection,
         user_id: Uuid,
         ldap_server_id: Uuid,
-        ldap_object_uuid: &str,
+        ldap_object_uuid: &Uuid,
     ) -> Result<(), WarpgateError> {
         // Fetch LDAP server config
         let ldap_server = entities::LdapServer::Entity::find_by_id(ldap_server_id)
@@ -59,39 +59,16 @@ impl DatabaseConfigProvider {
 
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server)?;
 
-        // Connect to LDAP and search for user by object UUID
-        let mut ldap = warpgate_ldap::connect(&ldap_config).await?;
+        // Find user in LDAP by object UUID
+        let ldap_user = warpgate_ldap::find_user_by_uuid(&ldap_config, ldap_object_uuid).await?;
 
-        // Search for user with matching objectGUID/entryUUID
-        let filter = format!(
-            "(&{}(|(objectGUID={})(entryUUID={})))",
-            ldap_config.user_filter, ldap_object_uuid, ldap_object_uuid
-        );
-
-        let mut ssh_keys = Vec::new();
-        for base_dn in &ldap_config.base_dns {
-            let (rs, _res) = ldap
-                .search(
-                    base_dn,
-                    ldap3::Scope::Subtree,
-                    &filter,
-                    vec!["sshPublicKey"],
-                )
-                .await
-                .map_err(warpgate_ldap::LdapError::from)?
-                .success()
-                .map_err(warpgate_ldap::LdapError::from)?;
-
-            if !rs.is_empty() {
-                let entry = ldap3::SearchEntry::construct(rs.into_iter().next().unwrap());
-                if let Some(keys) = entry.attrs.get("sshPublicKey") {
-                    ssh_keys.extend(keys.clone());
-                }
-                break;
-            }
-        }
-
-        let _ = ldap.unbind().await;
+        let Some(ldap_user) = ldap_user else {
+            warn!(
+                "LDAP user with UUID {} not found in server {}",
+                ldap_object_uuid, ldap_server.name
+            );
+            return Ok(());
+        };
 
         // Delete existing public key credentials for this user
         entities::PublicKeyCredential::Entity::delete_many()
@@ -100,8 +77,7 @@ impl DatabaseConfigProvider {
             .await?;
 
         // Insert SSH keys from LDAP
-        let key_count = ssh_keys.len();
-        for ssh_key in &ssh_keys {
+        for ssh_key in &ldap_user.ssh_public_keys {
             let ssh_key = ssh_key.trim();
             if ssh_key.is_empty() {
                 continue;
@@ -118,7 +94,7 @@ impl DatabaseConfigProvider {
                     user_id: Set(user_id),
                     date_added: Set(Some(Utc::now())),
                     last_used: Set(None),
-                    label: Set("LDAP Synced Key".to_string()),
+                    label: Set("Public key synchronized from LDAP".to_string()),
                     ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
                         key: openssh_key.into(),
                     })
@@ -131,8 +107,9 @@ impl DatabaseConfigProvider {
         }
 
         info!(
-            "Synced {} SSH key(s) from LDAP for user ID {}",
-            key_count, user_id
+            "Synced {} SSH key(s) from LDAP for {}",
+            ldap_user.ssh_public_keys.len(),
+            ldap_user.username
         );
 
         Ok(())
@@ -145,26 +122,24 @@ impl DatabaseConfigProvider {
         preferred_username: String,
     ) -> Result<Option<String>, WarpgateError> {
         // Check for LDAP servers with auto-linking enabled
-        let ldap_servers: Vec<entities::LdapServer::Model> =
-            entities::LdapServer::Entity::find()
-                .filter(entities::LdapServer::Column::Enabled.eq(true))
-                .filter(entities::LdapServer::Column::AutoLinkSsoUsers.eq(true))
-                .all(db)
-                .await?;
+        let ldap_servers: Vec<entities::LdapServer::Model> = entities::LdapServer::Entity::find()
+            .filter(entities::LdapServer::Column::Enabled.eq(true))
+            .filter(entities::LdapServer::Column::AutoLinkSsoUsers.eq(true))
+            .all(db)
+            .await?;
 
         let mut ldap_server_id = None;
         let mut ldap_object_uuid = None;
 
         // Try to find user in LDAP servers
         for ldap_server in ldap_servers {
-            let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server)
-                .map_err(|e| {
-                    warn!(
-                        "Failed to parse LDAP config for server {}: {}",
-                        ldap_server.name, e
-                    );
-                    e
-                })?;
+            let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server).map_err(|e| {
+                warn!(
+                    "Failed to parse LDAP config for server {}: {}",
+                    ldap_server.name, e
+                );
+                e
+            })?;
 
             match warpgate_ldap::find_user_by_email(&ldap_config, &credential.email).await {
                 Ok(Some(ldap_user)) => {
@@ -219,7 +194,10 @@ impl DatabaseConfigProvider {
                 preferred_username
             );
         } else {
-            info!("Auto-created SSO user {} (no LDAP link)", preferred_username);
+            info!(
+                "Auto-created SSO user {} (no LDAP link)",
+                preferred_username
+            );
         }
 
         Ok(Some(preferred_username))
@@ -425,14 +403,19 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         // Sync SSH keys from LDAP if user is linked
-        if let (Some(ldap_server_id), Some(ldap_object_uuid)) =
-            (user_model.ldap_server_id, &user_model.ldap_object_uuid)
-        {
-            if let Err(e) = self
-                .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
-                .await
+        if matches!(client_credential, AuthCredential::PublicKey { .. }) {
+            if let (Some(ldap_server_id), Some(ldap_object_uuid)) =
+                (user_model.ldap_server_id, &user_model.ldap_object_uuid)
             {
-                warn!("Failed to sync SSH keys from LDAP for user {}: {}", username, e);
+                if let Err(e) = self
+                    .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
+                    .await
+                {
+                    warn!(
+                        "Failed to sync SSH keys from LDAP for user {}: {}",
+                        username, e
+                    );
+                }
             }
         }
 

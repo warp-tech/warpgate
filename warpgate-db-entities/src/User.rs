@@ -20,7 +20,7 @@ pub struct Model {
     pub rate_limit_bytes_per_second: Option<i64>,
     pub ldap_server_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
-    pub ldap_object_uuid: Option<String>,
+    pub ldap_object_uuid: Option<Uuid>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -112,6 +112,7 @@ impl TryFrom<Model> for User {
             credential_policy: serde_json::from_value(model.credential_policy)?,
             description: model.description,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
+            ldap_server_id: model.ldap_server_id,
         })
     }
 }

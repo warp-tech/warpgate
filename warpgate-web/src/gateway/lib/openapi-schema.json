@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.17.0-13-g4545eb5-modified"
+    "version": "v0.17.0-14-gb16bafc-modified"
   },
   "servers": [
     {
@@ -794,7 +794,8 @@
           "otp",
           "public_keys",
           "sso",
-          "credential_policy"
+          "credential_policy",
+          "ldap_linked"
         ],
         "properties": {
           "password": {
@@ -820,6 +821,9 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "ldap_linked": {
+            "type": "boolean"
           }
         }
       },

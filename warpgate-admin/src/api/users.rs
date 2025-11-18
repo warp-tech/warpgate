@@ -133,6 +133,30 @@ enum DeleteUserResponse {
     NotFound,
 }
 
+#[derive(ApiResponse)]
+enum UnlinkUserFromLdapResponse {
+    #[oai(status = 200)]
+    Ok(Json<UserConfig>),
+
+    #[oai(status = 404)]
+    NotFound,
+
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
+}
+
+#[derive(ApiResponse)]
+enum AutoLinkUserToLdapResponse {
+    #[oai(status = 200)]
+    Ok(Json<UserConfig>),
+
+    #[oai(status = 404)]
+    NotFound,
+
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
+}
+
 pub struct DetailApi;
 
 #[OpenApi]
@@ -208,6 +232,115 @@ impl DetailApi {
 
         user.delete(&*db).await?;
         Ok(DeleteUserResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/users/:id/ldap-link/unlink",
+        method = "post",
+        operation_id = "unlink_user_from_ldap"
+    )]
+    async fn api_unlink_user_from_ldap(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UnlinkUserFromLdapResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(UnlinkUserFromLdapResponse::NotFound);
+        };
+
+        if user.ldap_server_id.is_none() {
+            return Ok(UnlinkUserFromLdapResponse::BadRequest(Json(
+                "User is not linked to LDAP".to_string(),
+            )));
+        }
+
+        let mut model: User::ActiveModel = user.into();
+        model.ldap_server_id = Set(None);
+        model.ldap_object_uuid = Set(None);
+        let user = model.update(&*db).await?;
+
+        Ok(UnlinkUserFromLdapResponse::Ok(Json(user.try_into()?)))
+    }
+
+    #[oai(
+        path = "/users/:id/ldap-link/auto-link",
+        method = "post",
+        operation_id = "auto_link_user_to_ldap"
+    )]
+    async fn api_auto_link_user_to_ldap(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<AutoLinkUserToLdapResponse, WarpgateError> {
+        use warpgate_db_entities::LdapServer;
+
+        let db = db.lock().await;
+
+        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(AutoLinkUserToLdapResponse::NotFound);
+        };
+
+        if user.ldap_server_id.is_some() {
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
+                "User is already linked to LDAP".to_string(),
+            )));
+        }
+
+        // Get all enabled LDAP servers
+        let ldap_servers: Vec<LdapServer::Model> = LdapServer::Entity::find()
+            .filter(LdapServer::Column::Enabled.eq(true))
+            .all(&*db)
+            .await?;
+
+        if ldap_servers.is_empty() {
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
+                "No enabled LDAP servers configured".to_string(),
+            )));
+        }
+
+        // Try to find user in LDAP servers using username as email
+        let email = &user.username;
+        let mut ldap_server_id = None;
+        let mut ldap_object_uuid = None;
+
+        for ldap_server in ldap_servers {
+            let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server)?;
+
+            match warpgate_ldap::find_user_by_email(&ldap_config, email).await {
+                Ok(Some(ldap_user)) => {
+                    ldap_server_id = Some(ldap_server.id);
+                    ldap_object_uuid = ldap_user.object_uuid;
+                    break;
+                }
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "Error searching for LDAP user in {}: {}",
+                        ldap_server.name,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+
+        if ldap_server_id.is_none() {
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(format!(
+                "No LDAP user found with email: {}",
+                email
+            ))));
+        }
+
+        let mut model: User::ActiveModel = user.into();
+        model.ldap_server_id = Set(ldap_server_id);
+        model.ldap_object_uuid = Set(ldap_object_uuid);
+        let user = model.update(&*db).await?;
+
+        Ok(AutoLinkUserToLdapResponse::Ok(Json(user.try_into()?)))
     }
 }
 

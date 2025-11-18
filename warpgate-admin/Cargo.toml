@@ -29,4 +29,4 @@ warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
-regex = { version = "1.6", default-features = false }
+regex.workspace = true

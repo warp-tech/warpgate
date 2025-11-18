@@ -12,4 +12,5 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }

@@ -75,6 +75,7 @@ reqwest = { version = "0.12", features = [
     "stream",
     "gzip",
 ], default-features = false }
+regex = { version = "1.6", default-features = false, features = ["std"] }
 
 [profile.release]
 lto = true

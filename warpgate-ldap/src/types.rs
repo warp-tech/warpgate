@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,6 @@ pub struct LdapUser {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub dn: String,
-    pub object_uuid: Option<String>,
+    pub object_uuid: Option<Uuid>,
     pub ssh_public_keys: Vec<String>,
 }

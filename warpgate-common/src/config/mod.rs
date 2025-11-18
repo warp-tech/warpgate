@@ -138,6 +138,8 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub rate_limit_bytes_per_second: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ldap_server_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
