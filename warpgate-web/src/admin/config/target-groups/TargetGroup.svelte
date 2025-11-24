@@ -56,8 +56,6 @@
                     color: color || undefined,
                 },
             })
-            // Redirect to groups list after successful save
-            replace('/config/target-groups')
         } catch (e) {
             saveError = await stringifyError(e)
             console.error(e)
@@ -155,7 +153,7 @@
             </FormGroup>
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton click={handleSubmit}>Save</AsyncButton>
+                <AsyncButton click={save}>Save</AsyncButton>
                 <a class="btn btn-secondary" href="/config/target-groups" use:link>
                     Cancel
                 </a>

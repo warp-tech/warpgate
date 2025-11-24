@@ -100,7 +100,7 @@
                 class:disabled={target.options.kind === TargetKind.WebAdmin}
                 href="/config/targets/{target.id}"
                 use:link>
-                <div class="me-auto d-flex align-items-center">
+                <div class="me-auto">
                     <div class="d-flex align-items-center gap-2">
                         {#if target.groupId}
                             {@const group = groups.find(g => g.id === target.groupId)}

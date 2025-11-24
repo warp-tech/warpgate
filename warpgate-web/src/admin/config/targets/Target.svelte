@@ -151,21 +151,27 @@
 
         <h4 class="mt-4">Configuration</h4>
 
-        <FormGroup floating label="Name">
-            <Input class="form-control" bind:value={target.name} />
-        </FormGroup>
+        <div class="row">
+            <div class="col-md-8">
+                <FormGroup floating label="Name">
+                    <Input class="form-control" bind:value={target.name} />
+                </FormGroup>
+            </div>
+
+            <div class="col-md-4">
+                <FormGroup floating label="Group">
+                    <select class="form-control" bind:value={target.groupId}>
+                        <option value={undefined}>No group</option>
+                        {#each groups as group (group.id)}
+                            <option value={group.id}>{group.name}</option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            </div>
+        </div>
 
         <FormGroup floating label="Description">
             <Input bind:value={target.description} />
-        </FormGroup>
-
-        <FormGroup floating label="Group">
-            <select class="form-control" bind:value={target.groupId}>
-                <option value={undefined}>No group</option>
-                {#each groups as group}
-                    <option value={group.id}>{group.name}</option>
-                {/each}
-            </select>
         </FormGroup>
 
         {#if target.options.kind === 'Ssh'}
@@ -217,10 +223,10 @@
 
             {#if target.options.kind === 'Postgres'}
                 <FormGroup floating label="Idle timeout">
-                    <input 
-                        class="form-control" 
-                        type="text" 
-                        placeholder="10m" 
+                    <input
+                        class="form-control"
+                        type="text"
+                        placeholder="10m"
                         bind:value={target.options.idleTimeout}
                         title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
                     />
