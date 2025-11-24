@@ -1,9 +1,12 @@
 <script lang="ts">
-    import { api, type TargetGroup, type TargetGroupDataRequest } from 'admin/lib/api'
+    import { api, BootstrapThemeColor, type TargetGroup } from 'admin/lib/api'
     import { link, replace } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { VALID_CHOICES } from './common'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
 
     interface Props {
         params: { id: string };
@@ -20,32 +23,14 @@
 
     let name = $state('')
     let description = $state('')
-    let color = $state('')
-
-    const VALID_COLORS = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
-
-    function capitalizeFirst(str: string): string {
-        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-    }
-
-    function getValidColor(colorValue: string): string | undefined {
-        const trimmed = colorValue.trim().toLowerCase()
-        if (!trimmed) return undefined
-        if (VALID_COLORS.includes(trimmed)) {
-            return capitalizeFirst(trimmed) as any
-        }
-        return undefined
-    }
+    let color = $state<BootstrapThemeColor | ''>('')
 
     onMount(async () => {
         try {
             group = await api.getTargetGroup({ id: groupId })
             name = group.name
             description = group.description
-            // Convert capitalized API value to lowercase for form
-            // Only use valid colors, ignore any invalid values
-            const apiColor = group.color ? group.color.toLowerCase() : ''
-            color = VALID_COLORS.includes(apiColor) ? apiColor : ''
+            color = group.color ?? ''
         } catch (e) {
             error = await stringifyError(e)
             console.error(e)
@@ -55,7 +40,9 @@
     })
 
     async function save () {
-        if (!group) return
+        if (!group) {
+            return
+        }
 
         saving = true
         saveError = undefined
@@ -66,8 +53,8 @@
                 targetGroupDataRequest: {
                     name,
                     description: description || undefined,
-                    color: getValidColor(color),
-                }
+                    color: color || undefined,
+                },
             })
             // Redirect to groups list after successful save
             replace('/config/target-groups')
@@ -144,47 +131,31 @@
 
             <FormGroup>
                 <Label for="color">Color</Label>
-                <div class="color-picker">
-                    <button
-                        type="button"
-                        class="color-option"
-                        class:selected={color === ''}
-                        disabled={saving}
-                        onclick={(e) => {
-                            e.preventDefault()
-                            color = ''
-                        }}
-                        title="None"
-                    >
-                        <span class="color-circle" style="background-color: transparent; border: 1px solid var(--bs-border-color);"></span>
-                        <span>None</span>
-                    </button>
-                    {#each VALID_COLORS as colorName}
-                        <button
-                            type="button"
-                            class="color-option"
-                            class:selected={color === colorName}
-                            disabled={saving}
-                            onclick={(e) => {
-                                e.preventDefault()
-                                color = colorName
-                            }}
-                            title={capitalizeFirst(colorName)}
-                        >
-                            <span class="color-circle" style={`background-color: var(--bs-${colorName});`}></span>
-                            <span>{capitalizeFirst(colorName)}</span>
-                        </button>
-                    {/each}
-                </div>
                 <small class="form-text text-muted">
                     Optional Bootstrap theme color for visual organization
                 </small>
+                <div class="color-picker">
+                    {#each VALID_CHOICES as value (value)}
+                        <button
+                            type="button"
+                            class="btn btn-secondary gap-2 d-flex align-items-center"
+                            class:active={color === value}
+                            disabled={saving}
+                            onclick={(e) => {
+                                e.preventDefault()
+                                color = value
+                            }}
+                            title={value || 'None'}
+                        >
+                            <GroupColorCircle color={value} />
+                            <span>{value || 'None'}</span>
+                        </button>
+                    {/each}
+                </div>
             </FormGroup>
 
-            <div class="d-flex gap-2">
-                <Button type="submit" color="primary" disabled={saving}>
-                    {saving ? 'Saving...' : 'Save'}
-                </Button>
+            <div class="d-flex gap-2 mt-5">
+                <AsyncButton click={handleSubmit}>Save</AsyncButton>
                 <a class="btn btn-secondary" href="/config/target-groups" use:link>
                     Cancel
                 </a>
@@ -198,41 +169,5 @@
         display: flex;
         flex-wrap: wrap;
         gap: 0.5rem;
-    }
-
-    .color-option {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 0.75rem;
-        border: 1px solid var(--bs-border-color);
-        background-color: var(--bs-body-bg);
-        color: var(--bs-body-color);
-        border-radius: 0.375rem;
-        cursor: pointer;
-        transition: all 0.15s ease-in-out;
-
-        &:hover:not(:disabled) {
-            background-color: var(--bs-secondary-bg);
-            border-color: var(--bs-primary);
-        }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        &.selected {
-            border-color: var(--bs-primary);
-            background-color: var(--bs-primary-bg-subtle);
-        }
-
-        .color-circle {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
     }
 </style>

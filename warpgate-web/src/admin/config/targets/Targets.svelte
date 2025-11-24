@@ -1,12 +1,13 @@
 <script lang="ts">
-    import { Observable, from, map, combineLatest } from 'rxjs'
+    import { Observable, from, map } from 'rxjs'
     import { type Target, type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
     import EmptyState from 'common/EmptyState.svelte'
     import { onMount } from 'svelte'
-    import { Button, Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
     let groups: TargetGroup[] = $state([])
     let selectedGroupId: string | undefined = $state()
@@ -66,10 +67,10 @@
                     <DropdownItem onclick={() => selectGroup(undefined)}>
                         All groups
                     </DropdownItem>
-                    {#each groups as group}
-                        <DropdownItem onclick={() => selectGroup(group.id)}>
+                    {#each groups as group (group.id)}
+                        <DropdownItem onclick={() => selectGroup(group.id)} class="d-flex align-items-center gap-2">
                             {#if group.color}
-                                <span class="badge me-2" class:bg-primary={group.color === 'primary'} class:bg-secondary={group.color === 'secondary'} class:bg-success={group.color === 'success'} class:bg-danger={group.color === 'danger'} class:bg-warning={group.color === 'warning'} class:bg-info={group.color === 'info'} class:bg-light={group.color === 'light'} class:bg-dark={group.color === 'dark'}></span>
+                                <GroupColorCircle color={group.color} />
                             {/if}
                             {group.name}
                         </DropdownItem>
@@ -85,6 +86,7 @@
         </div>
     </div>
 
+    {#key selectedGroupId}
     <ItemList load={getTargets} showSearch={true}>
         {#snippet empty()}
             <EmptyState
@@ -98,15 +100,15 @@
                 class:disabled={target.options.kind === TargetKind.WebAdmin}
                 href="/config/targets/{target.id}"
                 use:link>
-                <div class="me-auto">
-                    <div class="d-flex align-items-center">
+                <div class="me-auto d-flex align-items-center">
+                    <div class="d-flex align-items-center gap-2">
                         {#if target.groupId}
                             {@const group = groups.find(g => g.id === target.groupId)}
                             {#if group}
                                 {#if group.color}
-                                    <span class="color-circle me-2" style={getColorStyle(group.color)}></span>
+                                    <GroupColorCircle color={group.color} />
                                 {/if}
-                                <small class="text-muted me-2">{group.name}</small>
+                                <small class="text-muted">{group.name}</small>
                             {/if}
                         {/if}
                         <strong>
@@ -137,19 +139,12 @@
             </a>
         {/snippet}
     </ItemList>
+    {/key}
 </div>
 
 <style lang="scss">
     .list-group-item {
         display: flex;
         align-items: center;
-    }
-
-    .color-circle {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        flex-shrink: 0;
     }
 </style>

@@ -1,37 +1,20 @@
 <script lang="ts">
-    import { Observable, from, map, catchError, of } from 'rxjs'
+    import { Observable, from, map } from 'rxjs'
     import { type TargetGroup, api } from 'admin/lib/api'
-    import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
+    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
+    import { getCSSColorFromThemeColor } from 'common/helpers'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte';
 
-    function getTargetGroups (options: LoadOptions): Observable<PaginatedResponse<TargetGroup>> {
+    function getTargetGroups (): Observable<PaginatedResponse<TargetGroup>> {
         return from(api.listTargetGroups()).pipe(
             map(groups => ({
                 items: groups,
                 offset: 0,
                 total: groups.length,
             })),
-            catchError(error => {
-                console.error('Failed to load target groups:', error)
-                return of({
-                    items: [],
-                    offset: 0,
-                    total: 0,
-                })
-            })
         )
-    }
-
-    function getColorStyle(color: string | null | undefined): string {
-        if (!color) return ''
-        // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-        const colorLower = color.toLowerCase()
-        const validColors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
-        if (validColors.includes(colorLower)) {
-            return `background-color: var(--bs-${colorLower});`
-        }
-        return ''
     }
 </script>
 
@@ -59,9 +42,9 @@
                 href="/config/target-groups/{group.id}"
                 use:link>
                 <div class="me-auto">
-                    <div class="d-flex align-items-center">
+                    <div class="d-flex align-items-center gap-2">
                         {#if group.color}
-                            <span class="color-circle me-2" style={getColorStyle(group.color)}></span>
+                            <GroupColorCircle color={group.color} />
                         {/if}
                         <strong>{group.name}</strong>
                     </div>
@@ -78,13 +61,5 @@
     .list-group-item {
         display: flex;
         align-items: center;
-    }
-
-    .color-circle {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        flex-shrink: 0;
     }
 </style>

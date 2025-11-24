@@ -1,29 +1,16 @@
 <script lang="ts">
-    import { api, type TargetGroupDataRequest } from 'admin/lib/api'
+    import { api, type BootstrapThemeColor } from 'admin/lib/api'
     import { link, replace } from 'svelte-spa-router'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { VALID_CHOICES } from './common';
 
     let name = $state('')
     let description = $state('')
-    let color = $state('')
+    let color = $state<BootstrapThemeColor | ''>('')
     let saving = $state(false)
     let error: string | undefined = $state()
-
-    const VALID_COLORS = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
-
-    function capitalizeFirst(str: string): string {
-        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-    }
-
-    function getValidColor(colorValue: string): string | undefined {
-        const trimmed = colorValue.trim().toLowerCase()
-        if (!trimmed) return undefined
-        if (VALID_COLORS.includes(trimmed)) {
-            return capitalizeFirst(trimmed) as any
-        }
-        return undefined
-    }
 
     async function save () {
         if (!name.trim()) {
@@ -39,8 +26,8 @@
                 targetGroupDataRequest: {
                     name: name.trim(),
                     description: description.trim() || undefined,
-                    color: getValidColor(color),
-                }
+                    color: color || undefined,
+                },
             })
             // Redirect to groups list
             replace('/config/target-groups')
@@ -88,46 +75,32 @@
             />
         </FormGroup>
 
-            <FormGroup>
-                <Label for="color">Color</Label>
-                <div class="color-picker">
+        <FormGroup>
+            <Label for="color">Color</Label>
+            <small class="form-text text-muted">
+                Optional theme color for visual organization
+            </small>
+            <div class="color-picker">
+                {#each VALID_CHOICES as value (value)}
                     <button
                         type="button"
-                        class="color-option"
-                        class:selected={color === ''}
+                        class="btn btn-secondary"
+                        class:active={color === value}
                         disabled={saving}
-                        onclick={(e) => {
+                        onclick={e => {
                             e.preventDefault()
-                            color = ''
+                            color = value
                         }}
-                        title="None"
+                        title={value || 'None'}
                     >
-                        <span class="color-circle" style="background-color: transparent; border: 1px solid var(--bs-border-color);"></span>
-                        <span>None</span>
+                        <GroupColorCircle color={value} />
+                        <span>{value || 'None'}</span>
                     </button>
-                    {#each VALID_COLORS as colorName}
-                        <button
-                            type="button"
-                            class="color-option"
-                            class:selected={color === colorName}
-                            disabled={saving}
-                            onclick={(e) => {
-                                e.preventDefault()
-                                color = colorName
-                            }}
-                            title={capitalizeFirst(colorName)}
-                        >
-                            <span class="color-circle" style={`background-color: var(--bs-${colorName});`}></span>
-                            <span>{capitalizeFirst(colorName)}</span>
-                        </button>
-                    {/each}
-                </div>
-                <small class="form-text text-muted">
-                    Optional Bootstrap theme color for visual organization
-                </small>
-            </FormGroup>
+                {/each}
+            </div>
+        </FormGroup>
 
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 mt-5">
             <Button type="submit" color="primary" disabled={saving}>
                 {saving ? 'Creating...' : 'Create'}
             </Button>
@@ -143,41 +116,11 @@
         display: flex;
         flex-wrap: wrap;
         gap: 0.5rem;
-    }
 
-    .color-option {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 0.75rem;
-        border: 1px solid var(--bs-border-color);
-        background-color: var(--bs-body-bg);
-        color: var(--bs-body-color);
-        border-radius: 0.375rem;
-        cursor: pointer;
-        transition: all 0.15s ease-in-out;
-
-        &:hover:not(:disabled) {
-            background-color: var(--bs-secondary-bg);
-            border-color: var(--bs-primary);
-        }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        &.selected {
-            border-color: var(--bs-primary);
-            background-color: var(--bs-primary-bg-subtle);
-        }
-
-        .color-circle {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            flex-shrink: 0;
+        > button {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
     }
 </style>

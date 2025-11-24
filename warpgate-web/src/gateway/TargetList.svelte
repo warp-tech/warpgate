@@ -7,17 +7,7 @@ import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
-
-function getBootstrapColorValue(color: string | undefined): string {
-    if (!color) return 'var(--bs-secondary)'
-    // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-    const colorLower = color.toLowerCase()
-    const validColors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
-    if (validColors.includes(colorLower)) {
-        return `var(--bs-${colorLower})`
-    }
-    return 'var(--bs-secondary)'
-}
+    import { getCSSColorFromThemeColor } from 'common/helpers';
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 let targets: TargetSnapshot[] = $state([])
@@ -156,18 +146,27 @@ function filterTargets() {
             </button>
         </div>
     {:else}
+        <!-- eslint-disable-next-line svelte/require-each-key -->
         {#each Object.entries(filteredGroupedTargets).sort(([a], [b]) => {
             // Administration section always comes first
-            if (a === 'Administration') return -1
-            if (b === 'Administration') return 1
+            if (a === 'Administration') {
+                return -1
+            }
+            if (b === 'Administration') {
+                return 1
+            }
             return a.localeCompare(b)
         }) as [groupName, groupTargets]}
         <div class="target-group">
-            <div class="group-header" class:administration={groupName === 'Administration'} style:background-color={groupName === 'Administration' ? 'var(--bs-danger)' : getBootstrapColorValue(groupTargets[0]?.group?.color)}>
+            <div
+                class="group-header"
+                class:administration={groupName === 'Administration'}
+                style:background-color={groupName === 'Administration' ? 'var(--bs-danger)' : getCSSColorFromThemeColor(groupTargets[0]?.group?.color)}
+            >
                 <h6 class="group-title">{groupName}</h6>
             </div>
             <div class="list-group">
-                {#each groupTargets as target}
+                {#each groupTargets as target (target)}
                     <a
                         class="list-group-item list-group-item-action target-item"
                         href={

@@ -126,7 +126,7 @@
             <FormGroup floating label="Group">
                 <select class="form-control" bind:value={selectedGroupId}>
                     <option value={undefined}>No group</option>
-                    {#each groups as group}
+                    {#each groups as group (group.id)}
                         <option value={group.id}>{group.name}</option>
                     {/each}
                 </select>
