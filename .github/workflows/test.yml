@@ -13,7 +13,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           key: "test"
 
