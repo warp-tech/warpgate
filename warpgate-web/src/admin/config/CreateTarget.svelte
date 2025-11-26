@@ -77,8 +77,8 @@
     onMount(async () => {
         try {
             groups = await api.listTargetGroups()
-        } catch (e) {
-            console.error('Failed to load target groups:', e)
+        } catch (err) {
+            error = await stringifyError(err)
         }
     })
 
@@ -123,6 +123,7 @@
                 <input class="form-control" required bind:value={name} />
             </FormGroup>
 
+            {#if groups.length > 0}
             <FormGroup floating label="Group">
                 <select class="form-control" bind:value={selectedGroupId}>
                     <option value={undefined}>No group</option>
@@ -131,6 +132,7 @@
                     {/each}
                 </select>
             </FormGroup>
+            {/if}
 
             <Button
                 color="primary"

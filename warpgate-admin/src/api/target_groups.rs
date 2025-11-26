@@ -4,15 +4,16 @@ use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::prelude::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     QueryOrder, Set,
 };
-use sea_orm::prelude::Expr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_db_entities::{TargetGroup, TargetGroup::BootstrapThemeColor};
+use warpgate_db_entities::TargetGroup;
+use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 use super::AnySecurityScheme;
 
@@ -45,7 +46,11 @@ pub struct ListApi;
 
 #[OpenApi]
 impl ListApi {
-    #[oai(path = "/target-groups", method = "get", operation_id = "list_target_groups")]
+    #[oai(
+        path = "/target-groups",
+        method = "get",
+        operation_id = "list_target_groups"
+    )]
     async fn api_list_target_groups(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -60,7 +65,11 @@ impl ListApi {
         Ok(GetTargetGroupsResponse::Ok(Json(groups)))
     }
 
-    #[oai(path = "/target-groups", method = "post", operation_id = "create_target_group")]
+    #[oai(
+        path = "/target-groups",
+        method = "post",
+        operation_id = "create_target_group"
+    )]
     async fn api_create_target_group(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -89,7 +98,7 @@ impl ListApi {
             color: Set(body.color.clone()),
         };
 
-        let group = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let group = values.insert(&*db).await?;
 
         Ok(CreateTargetGroupResponse::Created(Json(group)))
     }
@@ -118,7 +127,6 @@ enum DeleteTargetGroupResponse {
     #[oai(status = 204)]
     Deleted,
 
-
     #[oai(status = 404)]
     NotFound,
 }
@@ -127,7 +135,11 @@ pub struct DetailApi;
 
 #[OpenApi]
 impl DetailApi {
-    #[oai(path = "/target-groups/:id", method = "get", operation_id = "get_target_group")]
+    #[oai(
+        path = "/target-groups/:id",
+        method = "get",
+        operation_id = "get_target_group"
+    )]
     async fn api_get_target_group(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -135,9 +147,7 @@ impl DetailApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
         let db = db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0)
-            .one(&*db)
-            .await?;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         match group {
             Some(group) => Ok(GetTargetGroupResponse::Ok(Json(group))),
@@ -145,7 +155,11 @@ impl DetailApi {
         }
     }
 
-    #[oai(path = "/target-groups/:id", method = "put", operation_id = "update_target_group")]
+    #[oai(
+        path = "/target-groups/:id",
+        method = "put",
+        operation_id = "update_target_group"
+    )]
     async fn api_update_target_group(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -158,35 +172,36 @@ impl DetailApi {
         }
 
         let db = db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0)
+        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+
+        let Some(group) = group else {
+            return Ok(UpdateTargetGroupResponse::NotFound);
+        };
+
+        // Check if name is already taken by another group
+        let existing = TargetGroup::Entity::find()
+            .filter(TargetGroup::Column::Name.eq(body.name.clone()))
+            .filter(TargetGroup::Column::Id.ne(id.0))
             .one(&*db)
             .await?;
-
-        match group {
-            Some(group) => {
-                // Check if name is already taken by another group
-                let existing = TargetGroup::Entity::find()
-                    .filter(TargetGroup::Column::Name.eq(body.name.clone()))
-                    .filter(TargetGroup::Column::Id.ne(id.0))
-                    .one(&*db)
-                    .await?;
-                if existing.is_some() {
-                    return Ok(UpdateTargetGroupResponse::BadRequest);
-                }
-
-                let mut group: TargetGroup::ActiveModel = group.into();
-                group.name = Set(body.name.clone());
-                group.description = Set(body.description.clone().unwrap_or_default());
-                group.color = Set(body.color.clone());
-
-                let group = group.update(&*db).await.map_err(WarpgateError::from)?;
-                Ok(UpdateTargetGroupResponse::Ok(Json(group)))
-            }
-            None => Ok(UpdateTargetGroupResponse::NotFound),
+        if existing.is_some() {
+            return Ok(UpdateTargetGroupResponse::BadRequest);
         }
+
+        let mut group: TargetGroup::ActiveModel = group.into();
+        group.name = Set(body.name.clone());
+        group.description = Set(body.description.clone().unwrap_or_default());
+        group.color = Set(body.color.clone());
+
+        let group = group.update(&*db).await?;
+        Ok(UpdateTargetGroupResponse::Ok(Json(group)))
     }
 
-    #[oai(path = "/target-groups/:id", method = "delete", operation_id = "delete_target_group")]
+    #[oai(
+        path = "/target-groups/:id",
+        method = "delete",
+        operation_id = "delete_target_group"
+    )]
     async fn api_delete_target_group(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -194,25 +209,22 @@ impl DetailApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
         let db = db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0)
-            .one(&*db)
+        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+
+        let Some(group) = group else {
+            return Ok(DeleteTargetGroupResponse::NotFound);
+        };
+
+        // First, unassign all targets from this group by setting their group_id to NULL
+        use warpgate_db_entities::Target;
+        Target::Entity::update_many()
+            .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
+            .filter(Target::Column::GroupId.eq(id.0))
+            .exec(&*db)
             .await?;
 
-        match group {
-            Some(group) => {
-                // First, unassign all targets from this group by setting their group_id to NULL
-                use warpgate_db_entities::Target;
-                Target::Entity::update_many()
-                    .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
-                    .filter(Target::Column::GroupId.eq(id.0))
-                    .exec(&*db)
-                    .await?;
-
-                // Then delete the group
-                group.delete(&*db).await.map_err(WarpgateError::from)?;
-                Ok(DeleteTargetGroupResponse::Deleted)
-            }
-            None => Ok(DeleteTargetGroupResponse::NotFound),
-        }
+        // Then delete the group
+        group.delete(&*db).await?;
+        Ok(DeleteTargetGroupResponse::Deleted)
     }
 }

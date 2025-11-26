@@ -28,8 +28,10 @@
     let groups: TargetGroup[] = $state([])
 
     async function init () {
-        target = await api.getTarget({ id: params.id })
-        groups = await api.listTargetGroups()
+        [target, groups] = await Promise.all([
+            api.getTarget({ id: params.id }),
+            api.listTargetGroups(),
+        ])
     }
 
     async function loadRoles () {
@@ -152,12 +154,13 @@
         <h4 class="mt-4">Configuration</h4>
 
         <div class="row">
-            <div class="col-md-8">
+            <div class:col-md-8={groups.length > 0} class:col-md-12={!groups.length}>
                 <FormGroup floating label="Name">
                     <Input class="form-control" bind:value={target.name} />
                 </FormGroup>
             </div>
 
+            {#if groups.length > 0}
             <div class="col-md-4">
                 <FormGroup floating label="Group">
                     <select class="form-control" bind:value={target.groupId}>
@@ -168,6 +171,7 @@
                     </select>
                 </FormGroup>
             </div>
+            {/if}
         </div>
 
         <FormGroup floating label="Description">

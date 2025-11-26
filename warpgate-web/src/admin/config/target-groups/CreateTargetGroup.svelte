@@ -4,7 +4,7 @@
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
-    import { VALID_CHOICES } from './common';
+    import { VALID_CHOICES } from './common'
 
     let name = $state('')
     let description = $state('')

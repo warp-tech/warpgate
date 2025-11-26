@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use futures::{stream, StreamExt};
 use poem::web::Data;
 use poem_openapi::param::Query;
@@ -5,9 +7,10 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
-use warpgate_common::TargetOptions;
+use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::{ConfigProvider, Services};
-use warpgate_db_entities::{Target, TargetGroup, TargetGroup::BootstrapThemeColor};
+use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
+use warpgate_db_entities::{Target, TargetGroup};
 
 use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
@@ -50,7 +53,16 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<GetTargetsResponse> {
+    ) -> Result<GetTargetsResponse, WarpgateError> {
+        // Fetch target groups for group information
+        let groups: Vec<TargetGroup::Model> = {
+            let db = services.db.lock().await;
+            TargetGroup::Entity::find().all(&*db).await
+        }?;
+
+        let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
+            groups.iter().map(|g| (g.id, g)).collect();
+
         let mut targets = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?
@@ -58,7 +70,13 @@ impl Api {
 
         if let Some(ref search) = *search {
             let search = search.to_lowercase();
-            targets.retain(|t| t.name.to_lowercase().contains(&search))
+            targets.retain(|t| {
+                let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
+                return t.name.to_lowercase().contains(&search)
+                    || group
+                        .map(|g| g.name.to_lowercase().contains(&search))
+                        .unwrap_or(false);
+            })
         }
 
         let mut targets = stream::iter(targets)
@@ -87,24 +105,6 @@ impl Api {
             })
             .collect::<Vec<_>>()
             .await;
-        targets.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // Fetch target groups for group information
-        let groups = {
-            let db = services.db.lock().await;
-            let result = TargetGroup::Entity::find()
-                .all(&*db)
-                .await;
-            match result {
-                Ok(groups) => groups,
-                Err(e) => {
-                    tracing::error!("Failed to fetch target groups: {}", e);
-                    Vec::new()
-                }
-            }
-        };
-        let group_map: std::collections::HashMap<uuid::Uuid, &TargetGroup::Model> =
-            groups.iter().map(|g| (g.id, g)).collect();
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()

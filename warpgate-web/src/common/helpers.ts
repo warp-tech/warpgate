@@ -1,4 +1,4 @@
-import type { BootstrapThemeColor } from 'gateway/lib/api'
+import { TargetKind, type BootstrapThemeColor, type TargetSnapshot } from 'gateway/lib/api'
 
 export function getCSSColorFromThemeColor(color?: BootstrapThemeColor): string {
     // Handle capitalized color names from API (e.g., "Primary" -> "primary")

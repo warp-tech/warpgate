@@ -8,7 +8,10 @@
     import { onMount } from 'svelte'
     import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { stringifyError } from 'common/errors'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
+    let error: string|undefined = $state()
     let groups: TargetGroup[] = $state([])
     let selectedGroupId: string | undefined = $state()
     let groupDropdownOpen = $state(false)
@@ -16,8 +19,8 @@
     onMount(async () => {
         try {
             groups = await api.listTargetGroups()
-        } catch (e) {
-            console.error('Failed to load target groups:', e)
+        } catch (err) {
+            error = await stringifyError(err)
         }
     })
 
@@ -33,7 +36,9 @@
     }
 
     function getGroupName(groupId: string | undefined): string {
-        if (!groupId) return 'All groups'
+        if (!groupId) {
+            return 'All groups'
+        }
         const group = groups.find(g => g.id === groupId)
         return group ? group.name : 'Unknown group'
     }
@@ -42,23 +47,13 @@
         selectedGroupId = groupId
         groupDropdownOpen = false
     }
-
-    function getColorStyle(color: string | null | undefined): string {
-        if (!color) return ''
-        // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-        const colorLower = color.toLowerCase()
-        const validColors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']
-        if (validColors.includes(colorLower)) {
-            return `background-color: var(--bs-${colorLower});`
-        }
-        return ''
-    }
 </script>
 
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">
+            {#if groups.length > 0}
             <Dropdown isOpen={groupDropdownOpen} toggle={() => groupDropdownOpen = !groupDropdownOpen}>
                 <DropdownToggle caret>
                     {getGroupName(selectedGroupId)}
@@ -77,6 +72,7 @@
                     {/each}
                 </DropdownMenu>
             </Dropdown>
+            {/if}
             <a
                 class="btn btn-primary"
                 href="/config/targets/create"
@@ -85,6 +81,10 @@
             </a>
         </div>
     </div>
+
+    {#if error}
+        <Alert color="danger">{error}</Alert>
+    {/if}
 
     {#key selectedGroupId}
     <ItemList load={getTargets} showSearch={true}>
