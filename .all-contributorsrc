@@ -1,6 +1,6 @@
 {
   "projectName": "warpgate",
-  "projectOwner": "Eugeny",
+  "projectOwner": "warp-tech",
   "repoType": "github",
   "repoHost": "https://github.com",
   "files": [
@@ -72,7 +72,17 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "alairock",
+      "name": "Skyler Lewis",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1480236?v=4",
+      "profile": "http://sixteenink.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
-  "contributorsPerLine": 7
+  "contributorsPerLine": 7,
+  "commitType": "docs"
 }
