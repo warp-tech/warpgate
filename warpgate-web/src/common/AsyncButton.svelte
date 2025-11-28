@@ -52,8 +52,9 @@ async function _click () {
     try {
         await click()
         st = State.Done
-    } catch {
+    } catch (e) {
         st = State.Failed
+        throw e
     } finally {
         setTimeout(() => {
             if (st === State.Done || st === State.Failed) {

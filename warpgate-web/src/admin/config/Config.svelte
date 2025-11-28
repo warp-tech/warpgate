@@ -43,6 +43,15 @@
         '/tickets/create': wrap({
             asyncComponent: () => import('./CreateTicket.svelte') as any,
         }),
+        '/target-groups/create': wrap({
+            asyncComponent: () => import('./target-groups/CreateTargetGroup.svelte') as any,
+        }),
+        '/target-groups/:id': wrap({
+            asyncComponent: () => import('./target-groups/TargetGroup.svelte') as any,
+        }),
+        '/target-groups': wrap({
+            asyncComponent: () => import('./target-groups/TargetGroups.svelte') as any,
+        }),
     }
 
     let sidebarMode = $state(false)
@@ -54,6 +63,14 @@
         title="Targets"
         description="Destinations for users to connect to"
         href="/config/targets"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="Target Groups"
+        description="Organize targets into groups"
+        href="/config/target-groups"
         small={sidebarMode}
     />
 
