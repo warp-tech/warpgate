@@ -1,12 +1,11 @@
 <script lang="ts">
     import { api, BootstrapThemeColor, type TargetGroup } from 'admin/lib/api'
-    import { link, replace } from 'svelte-spa-router'
-    import { onMount } from 'svelte'
     import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import { VALID_CHOICES } from './common'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         params: { id: string };
@@ -16,16 +15,16 @@
     let groupId = params.id
 
     let group: TargetGroup | undefined = $state()
-    let loading = $state(true)
     let error: string | undefined = $state()
     let saving = $state(false)
-    let saveError: string | undefined = $state()
 
     let name = $state('')
     let description = $state('')
     let color = $state<BootstrapThemeColor | ''>('')
 
-    onMount(async () => {
+    const initPromise = init()
+
+    async function init () {
         try {
             group = await api.getTargetGroup({ id: groupId })
             name = group.name
@@ -33,19 +32,17 @@
             color = group.color ?? ''
         } catch (e) {
             error = await stringifyError(e)
-            console.error(e)
-        } finally {
-            loading = false
+            throw e
         }
-    })
+    }
 
-    async function save () {
+    async function update () {
         if (!group) {
             return
         }
 
         saving = true
-        saveError = undefined
+        error = undefined
 
         try {
             await api.updateTargetGroup({
@@ -57,20 +54,15 @@
                 },
             })
         } catch (e) {
-            saveError = await stringifyError(e)
-            console.error(e)
+            error = await stringifyError(e)
+            throw e
         } finally {
             saving = false
         }
     }
 
-    function handleSubmit (e: SubmitEvent) {
-        e.preventDefault()
-        save()
-    }
-
-    async function deleteGroup () {
-        if (!group || !confirm(`Are you sure you want to delete the group "${group.name}"?`)) {
+    async function remove () {
+        if (!group || !confirm(`Delete target group "${group.name}"?`)) {
             return
         }
 
@@ -79,34 +71,30 @@
             // Redirect to groups list
             replace('/config/target-groups')
         } catch (e) {
-            saveError = await stringifyError(e)
-            console.error('Delete target group error:', e)
+            error = await stringifyError(e)
+            throw e
         }
     }
 </script>
 
-{#if loading}
-    <div class="d-flex justify-content-center p-4">
-        <div class="spinner-border" role="status">
-            <span class="visually-hidden">Loading...</span>
-        </div>
-    </div>
-{:else if error}
+
+{#if error}
     <Alert color="danger">{error}</Alert>
-{:else if group}
+{/if}
+<Loadable promise={initPromise}>
+{#if group}
     <div class="container-max-md">
         <div class="page-summary-bar">
-            <h1>Edit target group</h1>
-            <div class="ms-auto">
-                <Button color="danger" onclick={deleteGroup}>Delete</Button>
+            <div>
+                <h1>{group.name}</h1>
+                <div class="text-muted">Target group</div>
             </div>
         </div>
 
-        {#if saveError}
-            <Alert color="danger">{saveError}</Alert>
-        {/if}
-
-        <form onsubmit={handleSubmit}>
+        <form onsubmit={e => {
+            e.preventDefault()
+            update()
+        }}>
             <FormGroup>
                 <Label for="name">Name</Label>
                 <Input
@@ -153,14 +141,13 @@
             </FormGroup>
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton click={save}>Save</AsyncButton>
-                <a class="btn btn-secondary" href="/config/target-groups" use:link>
-                    Cancel
-                </a>
+                <AsyncButton click={update} color="primary">Update</AsyncButton>
+                <Button color="danger" onclick={remove}>Remove</Button>
             </div>
         </form>
     </div>
 {/if}
+</Loadable>
 
 <style lang="scss">
     .color-picker {

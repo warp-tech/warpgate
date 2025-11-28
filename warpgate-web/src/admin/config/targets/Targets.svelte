@@ -10,11 +10,11 @@
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { firstBy } from 'thenby'
 
     let error: string|undefined = $state()
     let groups: TargetGroup[] = $state([])
-    let selectedGroupId: string | undefined = $state()
-    let groupDropdownOpen = $state(false)
+    let selectedGroup: TargetGroup|undefined = $state()
 
     onMount(async () => {
         try {
@@ -27,25 +27,20 @@
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({
             search: options.search,
-            groupId: selectedGroupId,
-        })).pipe(map(targets => ({
-            items: targets,
-            offset: 0,
-            total: targets.length,
-        })))
-    }
-
-    function getGroupName(groupId: string | undefined): string {
-        if (!groupId) {
-            return 'All groups'
-        }
-        const group = groups.find(g => g.id === groupId)
-        return group ? group.name : 'Unknown group'
-    }
-
-    function selectGroup(groupId: string | undefined) {
-        selectedGroupId = groupId
-        groupDropdownOpen = false
+            groupId: selectedGroup?.id,
+        })).pipe(
+            map(targets =>  targets.sort(
+                firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
+                    .thenBy<Target, boolean>(x => !x.groupId)
+                    .thenBy<Target, string | undefined>(
+                        target => groups.find(g => g.id === target.groupId)?.name.toLowerCase())
+                    .thenBy(x => x.name.toLowerCase())
+            )),
+            map(targets => ({
+                items: targets,
+                offset: 0,
+                total: targets.length,
+            })))
     }
 </script>
 
@@ -54,16 +49,20 @@
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">
             {#if groups.length > 0}
-            <Dropdown isOpen={groupDropdownOpen} toggle={() => groupDropdownOpen = !groupDropdownOpen}>
+            <Dropdown>
                 <DropdownToggle caret>
-                    {getGroupName(selectedGroupId)}
+                    {selectedGroup?.name ?? 'All groups'}
                 </DropdownToggle>
                 <DropdownMenu>
-                    <DropdownItem onclick={() => selectGroup(undefined)}>
+                    <DropdownItem onclick={() => {
+                        selectedGroup = undefined
+                    }}>
                         All groups
                     </DropdownItem>
                     {#each groups as group (group.id)}
-                        <DropdownItem onclick={() => selectGroup(group.id)} class="d-flex align-items-center gap-2">
+                        <DropdownItem onclick={() => {
+                            selectedGroup = group
+                        }} class="d-flex align-items-center gap-2">
                             {#if group.color}
                                 <GroupColorCircle color={group.color} />
                             {/if}
@@ -86,7 +85,7 @@
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    {#key selectedGroupId}
+    {#key selectedGroup}
     <ItemList load={getTargets} showSearch={true}>
         {#snippet empty()}
             <EmptyState

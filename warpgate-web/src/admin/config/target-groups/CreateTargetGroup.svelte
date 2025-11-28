@@ -1,15 +1,15 @@
 <script lang="ts">
     import { api, type BootstrapThemeColor } from 'admin/lib/api'
     import { link, replace } from 'svelte-spa-router'
-    import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { VALID_CHOICES } from './common'
+    import AsyncButton from 'common/AsyncButton.svelte'
 
     let name = $state('')
     let description = $state('')
     let color = $state<BootstrapThemeColor | ''>('')
-    let saving = $state(false)
     let error: string | undefined = $state()
 
     async function save () {
@@ -18,7 +18,6 @@
             return
         }
 
-        saving = true
         error = undefined
 
         try {
@@ -33,35 +32,30 @@
             replace('/config/target-groups')
         } catch (e) {
             error = await stringifyError(e)
-            console.error(e)
-        } finally {
-            saving = false
+            throw e
         }
-    }
-
-    function handleSubmit (e: SubmitEvent) {
-        e.preventDefault()
-        save()
     }
 </script>
 
 <div class="container-max-md">
     <div class="page-summary-bar">
-        <h1>Create target group</h1>
+        <h1>add a target group</h1>
     </div>
 
     {#if error}
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    <form onsubmit={handleSubmit}>
+    <form onsubmit={e => {
+        e.preventDefault()
+        save()
+    }}>
         <FormGroup>
             <Label for="name">Name</Label>
             <Input
                 id="name"
                 bind:value={name}
                 required
-                disabled={saving}
             />
         </FormGroup>
 
@@ -71,7 +65,6 @@
                 id="description"
                 type="textarea"
                 bind:value={description}
-                disabled={saving}
             />
         </FormGroup>
 
@@ -86,7 +79,6 @@
                         type="button"
                         class="btn btn-secondary"
                         class:active={color === value}
-                        disabled={saving}
                         onclick={e => {
                             e.preventDefault()
                             color = value
@@ -101,9 +93,7 @@
         </FormGroup>
 
         <div class="d-flex gap-2 mt-5">
-            <Button type="submit" color="primary" disabled={saving}>
-                {saving ? 'Creating...' : 'Create'}
-            </Button>
+            <AsyncButton click={save} color="primary">Create</AsyncButton>
             <a class="btn btn-secondary" href="/config/target-groups" use:link>
                 Cancel
             </a>

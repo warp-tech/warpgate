@@ -4,8 +4,7 @@
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
-    import { getCSSColorFromThemeColor } from 'common/helpers'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte';
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
     function getTargetGroups (): Observable<PaginatedResponse<TargetGroup>> {
         return from(api.listTargetGroups()).pipe(

@@ -79,7 +79,7 @@ impl Api {
             })
         }
 
-        let mut targets = stream::iter(targets)
+        let targets = stream::iter(targets)
             .filter(|t| {
                 let services = services.clone();
                 let auth = auth.clone();
