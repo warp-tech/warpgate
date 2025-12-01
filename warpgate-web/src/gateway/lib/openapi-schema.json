@@ -764,6 +764,19 @@
           }
         }
       },
+      "BootstrapThemeColor": {
+        "type": "string",
+        "enum": [
+          "Primary",
+          "Secondary",
+          "Success",
+          "Danger",
+          "Warning",
+          "Info",
+          "Light",
+          "Dark"
+        ]
+      },
       "ChangePasswordRequest": {
         "type": "object",
         "title": "ChangePasswordRequest",
@@ -909,6 +922,26 @@
           },
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "GroupInfo": {
+        "type": "object",
+        "title": "GroupInfo",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
           }
         }
       },
@@ -1172,6 +1205,9 @@
           },
           "default_database_name": {
             "type": "string"
+          }
+          "group": {
+            "$ref": "#/components/schemas/GroupInfo"
           }
         }
       },

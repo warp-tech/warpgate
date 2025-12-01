@@ -120,6 +120,7 @@ pub async fn populate_db(
                 .map_err(WarpgateError::from)?),
                 rate_limit_bytes_per_second: Set(None),
                 default_database_name: Set(None),
+                group_id: Set(None),
             };
 
             values.insert(&*db).await.map_err(WarpgateError::from)?

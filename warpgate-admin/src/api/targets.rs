@@ -27,6 +27,7 @@ struct TargetDataRequest {
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
     default_database_name: Option<String>,
+    group_id: Option<Uuid>,
 }
 
 #[derive(ApiResponse)]
@@ -56,6 +57,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
+        group_id: Query<Option<Uuid>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = db.lock().await;
@@ -65,6 +67,10 @@ impl ListApi {
         if let Some(ref search) = *search {
             let search = format!("%{search}%");
             targets = targets.filter(Target::Column::Name.like(search));
+        }
+
+        if let Some(group_id) = *group_id {
+            targets = targets.filter(Target::Column::GroupId.eq(group_id));
         }
 
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
@@ -110,6 +116,8 @@ impl ListApi {
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             default_database_name: Set(body.default_database_name.clone()),
+            group_id: Set(body.group_id),
+
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -207,6 +215,7 @@ impl DetailApi {
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         model.default_database_name = Set(body.default_database_name.clone());
+        model.group_id = Set(body.group_id);
         let target = model.update(&*db).await?;
 
         drop(db);

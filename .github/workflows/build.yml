@@ -44,18 +44,18 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@102b1a064a9b145e56556e22b18b19c624538d94
+      - uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596
 
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
           target: ${{ matrix.target }}
           override: true
 
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           key: "build"
 
@@ -131,7 +131,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
@@ -149,7 +149,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
 

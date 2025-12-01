@@ -1,17 +1,28 @@
+use std::collections::HashMap;
+
 use futures::{stream, StreamExt};
 use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::EntityTrait;
 use serde::Serialize;
-use warpgate_common::TargetOptions;
+use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::{ConfigProvider, Services};
-use warpgate_db_entities::Target;
+use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
+use warpgate_db_entities::{Target, TargetGroup};
 
 use crate::api::AnySecurityScheme;
 use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
 
 pub struct Api;
+
+#[derive(Debug, Serialize, Clone, Object)]
+pub struct GroupInfo {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub color: Option<BootstrapThemeColor>,
+}
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
@@ -20,6 +31,7 @@ pub struct TargetSnapshot {
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
     pub default_database_name: Option<String>,
+    pub group: Option<GroupInfo>,
 }
 
 #[derive(ApiResponse)]
@@ -42,7 +54,16 @@ impl Api {
         auth: Data<&RequestAuthorization>,
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<GetTargetsResponse> {
+    ) -> Result<GetTargetsResponse, WarpgateError> {
+        // Fetch target groups for group information
+        let groups: Vec<TargetGroup::Model> = {
+            let db = services.db.lock().await;
+            TargetGroup::Entity::find().all(&*db).await
+        }?;
+
+        let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
+            groups.iter().map(|g| (g.id, g)).collect();
+
         let mut targets = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?
@@ -50,10 +71,16 @@ impl Api {
 
         if let Some(ref search) = *search {
             let search = search.to_lowercase();
-            targets.retain(|t| t.name.to_lowercase().contains(&search))
+            targets.retain(|t| {
+                let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
+                return t.name.to_lowercase().contains(&search)
+                    || group
+                        .map(|g| g.name.to_lowercase().contains(&search))
+                        .unwrap_or(false);
+            })
         }
 
-        let mut targets = stream::iter(targets)
+        let targets = stream::iter(targets)
             .filter(|t| {
                 let services = services.clone();
                 let auth = auth.clone();
@@ -79,12 +106,19 @@ impl Api {
             })
             .collect::<Vec<_>>()
             .await;
-        targets.sort_by(|a, b| a.name.cmp(&b.name));
 
-        Ok(GetTargetsResponse::Ok(Json(
-            targets
-                .into_iter()
-                .map(|t| TargetSnapshot {
+        let result: Vec<TargetSnapshot> = targets
+            .into_iter()
+            .map(|t| {
+                let group = t.group_id.and_then(|group_id| {
+                    group_map.get(&group_id).map(|group| GroupInfo {
+                        id: group.id,
+                        name: group.name.clone(),
+                        color: group.color.clone(),
+                    })
+                });
+
+                TargetSnapshot {
                     name: t.name.clone(),
                     description: t.description.clone(),
                     kind: (&t.options).into(),
@@ -93,8 +127,11 @@ impl Api {
                         _ => None,
                     },
                     default_database_name: t.default_database_name.clone(),
-                })
-                .collect(),
-        )))
+                    group,
+                }
+            })
+            .collect();
+
+        Ok(GetTargetsResponse::Ok(Json(result)))
     }
 }
