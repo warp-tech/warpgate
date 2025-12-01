@@ -25,6 +25,11 @@ static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
+/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+pub fn is_localhost_host(host: &str) -> bool {
+    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
     pub token: CoreIdToken,
@@ -189,8 +194,8 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                     .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
                 if let Some(host) = request_host {
-                    // Allow localhost/127.0.0.1 for development/testing scenarios
-                    let is_localhost = host == "localhost" || host == "127.0.0.1" || host.starts_with("127.");
+                    // Validate request host matches base host or is a subdomain/localhost
+                    let is_localhost = is_localhost_host(&host);
                     let is_authorized = host == base_host 
                         || host.ends_with(&format!(".{}", base_host))
                         || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");

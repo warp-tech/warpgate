@@ -2,8 +2,9 @@ use once_cell::sync::Lazy;
 use poem::web::cookie::Cookie;
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
 use regex::Regex;
+use http::uri::Scheme;
 
-use crate::common::SESSION_COOKIE_NAME;
+use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
 
 static DOMAIN_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r";\s*Domain=[^;]*").unwrap()
@@ -48,13 +49,14 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             .map(|h| h.split(':').next().unwrap_or(h).to_string())
             .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
-        let scheme_https = req.original_uri().scheme().map(|s| s.as_str() == "https").unwrap_or(false);
+        let scheme_https = req.original_uri().scheme() == Some(&Scheme::HTTPS);
         let header_https = req.header("x-forwarded-proto").map(|h| h == "https").unwrap_or(false);
         let is_https = scheme_https || header_https;
 
         let mut resp = self.inner.call(req).await?.into_response();
 
         if let Some(host) = host {
+            // Extract all Set-Cookie headers for modification
             let cookie_values: Vec<String> = {
                 let headers = resp.headers();
                 headers
@@ -65,12 +67,13 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     .collect()
             };
 
+            // Parse cookies manually to modify Domain/Secure/SameSite attributes.
+            // The Cookie crate doesn't easily allow modifying these and converting back to header format.
             let mut modified_session_cookie: Option<String> = None;
             for cookie_str in &cookie_values {
                 if cookie_str.starts_with(&format!("{}=", SESSION_COOKIE_NAME)) {
-                    // For localhost/127.0.0.1, always use the request host (or omit Domain)
-                    // since browsers won't send cookies with a different domain
-                    let is_localhost = host == "localhost" || host == "127.0.0.1" || host.starts_with("127.");
+                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
+                    let is_localhost = is_localhost_host(&host);
                     let target_domain = if is_localhost {
                         None // Omit Domain attribute for localhost - browser will scope to exact host
                     } else if let Some(ref base) = self.base_domain {
@@ -79,6 +82,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                         Some(host.clone())
                     };
 
+                    // Modify Domain attribute: set to base domain (for subdomain sharing) or remove for localhost
                     let mut modified = if let Some(ref domain) = target_domain {
                         if cookie_str.contains("; Domain=") {
                             DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", domain)).to_string()
@@ -100,6 +104,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                         }
                     };
 
+                    // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
                     if is_https {
                         if !modified.contains("; Secure") && !modified.contains(";Secure") {
                             if modified.contains("; HttpOnly") {
@@ -141,6 +146,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                 tracing::debug!("CookieHostMiddleware: No session cookie found in {} cookie(s)", cookie_values.len());
             }
 
+            // Replace Set-Cookie headers: modified session cookie + other cookies unchanged
             if let Some(modified_cookie) = modified_session_cookie {
                 let headers = resp.headers_mut();
                 headers.remove(http::header::SET_COOKIE);
