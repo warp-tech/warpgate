@@ -3,14 +3,15 @@
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 
     interface Props {
-        value: Tls;
+        value: Tls
+        class?: string
     }
 
-    let { value = $bindable() }: Props = $props()
+    let { value = $bindable(), 'class': klass }: Props = $props()
 
 </script>
 
-<div class="row align-items-center">
+<div class="row align-items-center {klass}">
     <div class="col">
         <FormGroup floating label="TLS mode">
             <select bind:value={value.mode} class="form-control">

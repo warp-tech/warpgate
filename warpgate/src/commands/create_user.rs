@@ -33,6 +33,8 @@ pub(crate) async fn command(
                 description: Set("".into()),
                 credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
                 rate_limit_bytes_per_second: Set(None),
+                ldap_server_id: Set(None),
+                ldap_object_uuid: Set(None),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
         }

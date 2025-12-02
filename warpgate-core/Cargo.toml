@@ -8,6 +8,7 @@ version = "0.18.0"
 warpgate-common = { version = "*", path = "../warpgate-common" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
+warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 
 anyhow = { version = "1.0", features = ["std"] }
 argon2 = "0.5"
@@ -19,6 +20,7 @@ dialoguer.workspace = true
 enum_dispatch.workspace = true
 humantime-serde = "1.1"
 futures.workspace = true
+ldap3.workspace = true
 once_cell = "1.17"
 packet = "0.1"
 password-hash.workspace = true
@@ -27,6 +29,7 @@ poem-openapi.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+russh.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

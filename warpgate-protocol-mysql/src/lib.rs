@@ -13,11 +13,11 @@ use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tracing::*;
-use warpgate_common::{
-    ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
-    TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions};
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use warpgate_tls::{
+    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
 
 use crate::session::MySqlSession;
 use crate::session_handle::MySqlSessionHandle;

@@ -267,3 +267,9 @@ ul.pagination {
         opacity: var(--bs-backdrop-opacity) !important;
     }
 }
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}

@@ -5,7 +5,7 @@ use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::*;
-use warpgate_common::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
+use warpgate_tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum PostgresStreamError {

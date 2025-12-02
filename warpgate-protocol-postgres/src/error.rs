@@ -4,7 +4,8 @@ use std::string::FromUtf8Error;
 use pgwire::error::PgWireError;
 use pgwire::messages::response::ErrorResponse;
 use rsasl::prelude::{SASLError, SessionError};
-use warpgate_common::{MaybeTlsStreamError, RustlsSetupError, WarpgateError};
+use warpgate_common::WarpgateError;
+use warpgate_tls::{MaybeTlsStreamError, RustlsSetupError};
 
 use crate::stream::PostgresStreamError;
 

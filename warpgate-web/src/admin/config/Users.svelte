@@ -3,6 +3,8 @@
     import { type User, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
+    import Fa from 'svelte-fa'
+    import { faLink } from '@fortawesome/free-solid-svg-icons'
 
     function getUsers (options: LoadOptions): Observable<PaginatedResponse<User>> {
         return from(api.getUsers({
@@ -37,9 +39,14 @@
                         {user.username}
                     </strong>
                     {#if user.description}
-                        <small class="d-block text-muted">{user.description}</small>
+                    <small class="d-block text-muted">{user.description}</small>
                     {/if}
                 </div>
+                {#if user.ldapServerId}
+                    <span class="badge bg-info ms-auto">
+                        LDAP
+                    </span>
+                {/if}
             </a>
         {/snippet}
     </ItemList>
