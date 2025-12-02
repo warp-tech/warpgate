@@ -52,6 +52,7 @@ pub struct Model {
     pub kind: TargetKind,
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
+    pub default_database_name: Option<String>,
     pub group_id: Option<Uuid>,
 }
 
@@ -92,6 +93,7 @@ impl TryFrom<Model> for Target {
             allow_roles: vec![],
             options,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
+            default_database_name: model.default_database_name,
             group_id: model.group_id,
         })
     }
