@@ -21,8 +21,9 @@ mod m00016_fix_public_key_length;
 mod m00017_descriptions;
 mod m00018_ticket_description;
 mod m00019_rate_limits;
-mod m00020_ldap_server;
-mod m00021_user_ldap_link;
+mod m00020_target_groups;
+mod m00021_ldap_server;
+mod m00022_user_ldap_link;
 
 pub struct Migrator;
 
@@ -49,8 +50,9 @@ impl MigratorTrait for Migrator {
             Box::new(m00017_descriptions::Migration),
             Box::new(m00018_ticket_description::Migration),
             Box::new(m00019_rate_limits::Migration),
-            Box::new(m00020_ldap_server::Migration),
-            Box::new(m00021_user_ldap_link::Migration),
+            Box::new(m00020_target_groups::Migration),
+            Box::new(m00021_ldap_server::Migration),
+            Box::new(m00022_user_ldap_link::Migration),
         ]
     }
 }

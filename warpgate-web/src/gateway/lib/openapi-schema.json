@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.17.0-14-gb16bafc-modified"
+    "version": "v0.17.0-15-g30bc38df-modified"
   },
   "servers": [
     {
@@ -764,6 +764,19 @@
           }
         }
       },
+      "BootstrapThemeColor": {
+        "type": "string",
+        "enum": [
+          "Primary",
+          "Secondary",
+          "Success",
+          "Danger",
+          "Warning",
+          "Info",
+          "Light",
+          "Dark"
+        ]
+      },
       "ChangePasswordRequest": {
         "type": "object",
         "title": "ChangePasswordRequest",
@@ -913,6 +926,26 @@
           },
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "GroupInfo": {
+        "type": "object",
+        "title": "GroupInfo",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
           }
         }
       },
@@ -1173,6 +1206,9 @@
           },
           "external_host": {
             "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupInfo"
           }
         }
       },

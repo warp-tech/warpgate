@@ -13,6 +13,7 @@ pub mod Role;
 pub mod Session;
 pub mod SsoCredential;
 pub mod Target;
+pub mod TargetGroup;
 pub mod TargetRoleAssignment;
 pub mod Ticket;
 pub mod User;
