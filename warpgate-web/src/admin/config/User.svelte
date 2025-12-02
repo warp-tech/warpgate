@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role, type User } from 'admin/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
     import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input } from '@sveltestrap/sveltestrap'
@@ -101,6 +102,7 @@
             <Input bind:value={user.username} disabled={!user.ldapServerId} />
         </FormGroup>
 
+        {#if $serverInfo?.hasLdap}
         <Dropdown class="mb-3">
             <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
                 {#if user.ldapServerId}
@@ -123,6 +125,7 @@
                 {/if}
             </DropdownMenu>
         </Dropdown>
+        {/if}
     </div>
 
     <FormGroup floating label="Description">

@@ -1,13 +1,16 @@
 <script lang="ts">
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { push } from 'svelte-spa-router'
-    import { api, stringifyError, type TestLdapServerResponse, TlsMode, type Tls } from 'admin/lib/api'
+    import { reloadServerInfo } from 'gateway/lib/store'
+    import { api, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap';
+    import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
 
     let name = $state('')
     let host = $state('')
+    // eslint-disable-next-line svelte/prefer-writable-derived
     let port = $state(389)
     let bindDn = $state('')
     let bindPassword = $state('')
@@ -24,11 +27,7 @@
 
     // Auto-update port based on TLS mode
     $effect(() => {
-        if (tls.mode === TlsMode.Disabled) {
-            port = 389
-        } else {
-            port = 636
-        }
+        port = defaultLdapPortForTlsMode(tls.mode)
     })
 
     async function testConnection() {
@@ -36,23 +35,14 @@
         testResult = null
 
         try {
-            const timeoutPromise = new Promise<TestLdapServerResponse>((_, reject) => {
-                setTimeout(() => reject(new Error('Connection test timed out')), 10000)
+            testResult = await testLdapConnection({
+                host,
+                port,
+                bindDn,
+                bindPassword,
+                tlsMode: tls.mode,
+                tlsVerify: tls.verify,
             })
-
-            const testPromise = api.testLdapServerConnection({
-                testLdapServerRequest: {
-                    host,
-                    port,
-                    bindDn,
-                    bindPassword,
-                    tlsMode: tls.mode,
-                    tlsVerify: tls.verify,
-                },
-            })
-
-            const result = await Promise.race([testPromise, timeoutPromise])
-            testResult = result
         } catch (e: any) {
             error = await stringifyError(e)
         }
@@ -60,11 +50,6 @@
 
     async function create() {
         error = null
-
-        if (!name || !host || !bindDn || !bindPassword) {
-            error = 'Please fill in all required fields'
-            return
-        }
 
         try {
             const result = await api.createLdapServer({
@@ -82,6 +67,8 @@
                     description: description || undefined,
                 },
             })
+
+            reloadServerInfo() // update hasLdap flag
             push(`/config/ldap-servers/${result.id}`)
         } catch (e: any) {
             error = await stringifyError(e)

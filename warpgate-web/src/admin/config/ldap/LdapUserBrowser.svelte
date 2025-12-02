@@ -31,10 +31,10 @@
     let filteredUsers = $derived(
         searchTerm
             ? users.filter(
-                  (u) =>
-                      u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()),
+                (u) =>
+                    u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()),
               )
             : users,
     )

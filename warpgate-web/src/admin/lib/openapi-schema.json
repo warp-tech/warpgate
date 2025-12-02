@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.17.0-15-g30bc38df-modified"
+    "version": "v0.18.0-5-g350b5917-modified"
   },
   "servers": [
     {

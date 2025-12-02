@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { link, push } from 'svelte-spa-router'
-    import { api, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
+    import { push } from 'svelte-spa-router'
+    import { api, stringifyError, TlsMode, type LdapServerResponse, type Tls } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
+    import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
 
     interface Props {
         params: { id: string }
@@ -12,7 +13,8 @@
 
     let { params }: Props = $props()
 
-    let server = $state<any>(null)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    let server = $state<LdapServerResponse | null>(null)
     let name = $state('')
     let host = $state('')
     let port = $state(389)
@@ -34,11 +36,7 @@
     // Auto-update port based on TLS mode (only after initial load)
     $effect(() => {
         if (isLoaded) {
-            if (tls.mode === TlsMode.Disabled) {
-                port = 389
-            } else {
-                port = 636
-            }
+            port = defaultLdapPortForTlsMode(tls.mode)
         }
     })
 
@@ -62,24 +60,20 @@
         error = null
         testResult = null
 
+        if (!bindPassword) {
+            error = 'Password is required to test the connection'
+            return
+        }
+
         try {
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Connection test timed out after 10 seconds')), 10000)
+            testResult = await testLdapConnection({
+                host,
+                port,
+                bindDn,
+                bindPassword,
+                tlsMode: tls.mode,
+                tlsVerify: tls.verify,
             })
-
-            const testPromise = api.testLdapServerConnection({
-                testLdapServerRequest: {
-                    host,
-                    port,
-                    bindDn,
-                    bindPassword: bindPassword || server.bindPassword,
-                    tlsMode: tls.mode,
-                    tlsVerify: tls.verify,
-                },
-            })
-
-            const result = await Promise.race([testPromise, timeoutPromise]) as any
-            testResult = result
         } catch (e: any) {
             error = await stringifyError(e)
         }
@@ -157,6 +151,7 @@
 
             {#if baseDns.length > 0}
                 <div class="mt-4">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
                     <label class="form-label">Base DNs (discovered)</label>
                     <ul class="list-group">
                         {#each baseDns as dn (dn)}
@@ -206,7 +201,7 @@
             {/if}
 
             {#if error}
-                <div class="alert alert-danger" role="alert">
+                <div class="alert alert-danger mt-3" role="alert">
                     {error}
                 </div>
             {/if}
@@ -215,12 +210,12 @@
                 <AsyncButton type="button" class="btn btn-secondary" click={testConnection}>
                     Test Connection
                 </AsyncButton>
-                <a
+                <!-- <a
                     class="btn btn-info"
                     href="/config/ldap-servers/{params.id}/users"
                     use:link>
                     View Users
-                </a>
+                </a> -->
                 <div class="me-auto"></div>
                 <AsyncButton type="submit" class="btn btn-primary" click={save}>
                     Save
