@@ -21,9 +21,9 @@ jobs:
         run: |
           sudo apt-get install openssh-client expect
           cargo install just
-          # Pin cargo-llvm-cov to 0.6.20 because 0.6.21 depends on ruzstd 0.8.2 which uses
+          # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
           # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
-          cargo install cargo-llvm-cov --version 0.6.20
+          cargo install cargo-llvm-cov --version 0.6.15
           cargo clean
           rustup component add llvm-tools-preview
 
