@@ -3,6 +3,7 @@
     import { api, stringifyError } from 'admin/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte';
 
     interface Props {
         params: { id: string }
@@ -17,6 +18,7 @@
 
     async function load() {
         server = await api.getLdapServer({ id: params.id })
+        await loadUsers()
     }
 
     async function loadUsers() {
@@ -34,31 +36,17 @@
                 (u) =>
                     u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()),
-              )
+                    u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()))
             : users,
     )
 </script>
 
 <Loadable promise={load()}>
+    {#if server}
     <div class="container-max-md">
         <div class="page-summary-bar">
-            <h1>LDAP Users</h1>
-            <a class="btn btn-secondary ms-auto" href="/config/ldap-servers/{params.id}" use:link>
-                Back to Server
-            </a>
+            <h1>{server.name}</h1>
         </div>
-
-        {#if server}
-            <div class="card mb-3">
-                <div class="card-body">
-                    <h5 class="card-title">{server.name}</h5>
-                    <p class="card-text text-muted">
-                        {server.host}:{server.port}
-                    </p>
-                </div>
-            </div>
-        {/if}
 
         {#if users.length === 0}
             <div class="text-center my-5">
@@ -106,9 +94,8 @@
         {/if}
 
         {#if error}
-            <div class="alert alert-danger mt-3" role="alert">
-                {error}
-            </div>
+            <Alert color="danger">{error}</Alert>
         {/if}
     </div>
+    {/if}
 </Loadable>

@@ -118,6 +118,11 @@
             error = await stringifyError(e)
         }
     }
+
+    async function importUsers () {
+        await save()
+        push(`/config/ldap-servers/${params.id}/users`)
+    }
 </script>
 
 <Loadable promise={load()}>
@@ -210,12 +215,13 @@
                 <AsyncButton type="button" class="btn btn-secondary" click={testConnection}>
                     Test Connection
                 </AsyncButton>
-                <!-- <a
+                <AsyncButton
+                    type="button"
                     class="btn btn-info"
-                    href="/config/ldap-servers/{params.id}/users"
-                    use:link>
-                    View Users
-                </a> -->
+                    click={importUsers}
+                >
+                    Import users
+                </AsyncButton>
                 <div class="me-auto"></div>
                 <AsyncButton type="submit" class="btn btn-primary" click={save}>
                     Save
