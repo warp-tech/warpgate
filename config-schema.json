@@ -30,6 +30,7 @@
     "log": {
       "$ref": "#/$defs/LogConfig",
       "default": {
+        "format": "text",
         "retention": "7days",
         "send_to": null
       }
@@ -153,6 +154,10 @@
     "LogConfig": {
       "type": "object",
       "properties": {
+        "format": {
+          "$ref": "#/$defs/LogFormat",
+          "default": "text"
+        },
         "retention": {
           "type": "string",
           "default": "7days"
@@ -165,6 +170,13 @@
           "default": null
         }
       }
+    },
+    "LogFormat": {
+      "type": "string",
+      "enum": [
+        "text",
+        "json"
+      ]
     },
     "MySqlConfig": {
       "type": "object",
