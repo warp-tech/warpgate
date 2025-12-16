@@ -1,14 +1,8 @@
-use once_cell::sync::Lazy;
-use poem::web::cookie::Cookie;
+use cookie::Cookie;
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
-use regex::Regex;
 use http::uri::Scheme;
 
 use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
-
-static DOMAIN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r";\s*Domain=[^;]*").unwrap()
-});
 
 #[derive(Clone)]
 pub struct CookieHostMiddleware {
@@ -67,78 +61,77 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     .collect()
             };
 
-            // Parse cookies manually to modify Domain/Secure/SameSite attributes.
-            // The Cookie crate doesn't easily allow modifying these and converting back to header format.
+            // Use the cookie crate to parse and modify cookies properly
             let mut modified_session_cookie: Option<String> = None;
             for cookie_str in &cookie_values {
-                if cookie_str.starts_with(&format!("{}=", SESSION_COOKIE_NAME)) {
-                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
-                    let is_localhost = is_localhost_host(&host);
-                    let target_domain = if is_localhost {
-                        None // Omit Domain attribute for localhost - browser will scope to exact host
-                    } else if let Some(ref base) = self.base_domain {
-                        Some(base.clone())
-                    } else {
-                        Some(host.clone())
-                    };
-
-                    // Modify Domain attribute: set to base domain (for subdomain sharing) or remove for localhost
-                    let mut modified = if let Some(ref domain) = target_domain {
-                        if cookie_str.contains("; Domain=") {
-                            DOMAIN_REGEX.replace(cookie_str, &format!("; Domain={}", domain)).to_string()
+                if let Ok(mut cookie) = Cookie::parse(cookie_str) {
+                    if cookie.name() == SESSION_COOKIE_NAME {
+                        // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
+                        let is_localhost = is_localhost_host(&host);
+                        let target_domain = if is_localhost {
+                            None // Omit Domain attribute for localhost - browser will scope to exact host
+                        } else if let Some(ref base) = self.base_domain {
+                            Some(base.clone())
                         } else {
-                            if let Some(pos) = cookie_str.find(';') {
-                                format!("{}; Domain={}{}", &cookie_str[..pos], domain, &cookie_str[pos..])
-                            } else {
-                                format!("{}; Domain={}", cookie_str, domain)
-                            }
-                        }
-                    } else {
-                        // Remove Domain attribute for localhost (omit Domain, browser will scope to exact host)
-                        if cookie_str.contains("; Domain=") {
-                            let removed = DOMAIN_REGEX.replace(cookie_str, "");
-                            // Clean up any trailing semicolons and whitespace
-                            removed.trim_end_matches(';').trim_end().to_string()
+                            Some(host.clone())
+                        };
+
+                        // Set or remove Domain attribute using cookie crate methods
+                        if let Some(ref domain) = target_domain {
+                            cookie.set_domain(domain.clone());
                         } else {
-                            cookie_str.clone()
-                        }
-                    };
-
-                    // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
-                    if is_https {
-                        if !modified.contains("; Secure") && !modified.contains(";Secure") {
-                            if modified.contains("; HttpOnly") {
-                                modified = modified.replace("; HttpOnly", "; Secure; HttpOnly");
-                            } else if modified.contains("; SameSite") {
-                                modified = modified.replace("; SameSite", "; Secure; SameSite");
-                            } else {
-                                modified = format!("{}; Secure", modified);
+                            // For localhost, we need to remove the domain attribute
+                            // Rebuild the cookie without domain, copying all other attributes
+                            let name = cookie.name().to_string();
+                            let value = cookie.value().to_string();
+                            let path_str = cookie.path().map(|p| p.to_string());
+                            let http_only = cookie.http_only().unwrap_or(false);
+                            let secure = cookie.secure().unwrap_or(false);
+                            let same_site = cookie.same_site();
+                            let max_age = cookie.max_age();
+                            let expires = cookie.expires();
+                            
+                            let mut builder = Cookie::build((name, value));
+                            
+                            if let Some(p) = path_str {
+                                builder = builder.path(p);
                             }
-                        }
-                        
-                        let has_samesite = modified.contains("SameSite=") || 
-                                           modified.to_lowercase().contains("samesite=");
-                        if !has_samesite {
-                            if modified.contains("; HttpOnly") {
-                                modified = modified.replace("; HttpOnly", "; SameSite=None; HttpOnly");
-                            } else if modified.ends_with("; Secure") {
-                                modified = format!("{}; SameSite=None", modified);
-                            } else {
-                                modified = format!("{}; SameSite=None", modified);
+                            if http_only {
+                                builder = builder.http_only(true);
                             }
+                            if secure {
+                                builder = builder.secure(true);
+                            }
+                            if let Some(same_site) = same_site {
+                                builder = builder.same_site(same_site);
+                            }
+                            if let Some(max_age) = max_age {
+                                builder = builder.max_age(max_age);
+                            }
+                            if let Some(expires) = expires {
+                                builder = builder.expires(expires);
+                            }
+                            
+                            cookie = builder.build();
                         }
-                    }
 
-                    if self.base_domain.is_none() {
-                        tracing::warn!(
-                            "CookieHostMiddleware: Setting session cookie domain to request host: {} (no base domain configured). This may prevent SSO from working across subdomains. Consider setting 'external_host' in config.",
-                            host
-                        );
-                    }
+                        // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
+                        if is_https {
+                            cookie.set_secure(true);
+                            cookie.set_same_site(cookie::SameSite::None);
+                        }
 
-                    modified_session_cookie = Some(modified.clone());
-                    tracing::debug!("CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}", target_domain, is_https);
-                    break;
+                        if self.base_domain.is_none() {
+                            tracing::warn!(
+                                "CookieHostMiddleware: Setting session cookie domain to request host: {} (no base domain configured). This may prevent SSO from working across subdomains. Consider setting 'external_host' in config.",
+                                host
+                            );
+                        }
+
+                        modified_session_cookie = Some(cookie.to_string());
+                        tracing::debug!("CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}", target_domain, is_https);
+                        break;
+                    }
                 }
             }
 
@@ -167,4 +160,5 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         Ok(resp)
     }
 }
+
 
