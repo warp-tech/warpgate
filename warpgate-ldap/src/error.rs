@@ -21,7 +21,7 @@ pub enum LdapError {
     InvalidConfiguration(String),
 
     #[error("LDAP error: {0}")]
-    LdapError(#[from] ldap3::LdapError),
+    LdapClientError(#[from] ldap3::LdapError),
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),

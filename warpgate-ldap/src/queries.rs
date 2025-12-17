@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use ldap3::{Scope, SearchEntry};
 use tracing::{debug, info};
@@ -139,8 +140,8 @@ pub async fn find_user_by_username(
             .success()
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?;
 
-        if !rs.is_empty() {
-            let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
+        if let Some(first_result) = rs.into_iter().next() {
+            let search_entry = SearchEntry::construct(first_result);
 
             if let Some(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
@@ -173,10 +174,10 @@ pub async fn find_user_by_uuid(
     // Active Directory stores objectGUID as binary and requires hex encoding in filters
     // Convert UUID bytes to escaped hex string for LDAP filter (e.g., \01\02\03...)
     let uuid_bytes = object_uuid.as_bytes();
-    let ad_guid_hex = uuid_bytes
-        .iter()
-        .map(|b| format!("\\{:02x}", b))
-        .collect::<String>();
+    let ad_guid_hex = uuid_bytes.iter().fold(String::new(), |mut s, b| {
+        let _ = write!(&mut s, "\\{:02x}", b);
+        s
+    });
 
     let filter = format!(
         "(&{}(|(objectGUID={})(objectGUID={})(entryUUID={})))",
@@ -197,6 +198,7 @@ pub async fn find_user_by_uuid(
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?;
 
         if !rs.is_empty() {
+            #[allow(clippy::unwrap_used, reason = "length checked")]
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
             if let Some(user) = extract_ldap_user(search_entry, config) {
