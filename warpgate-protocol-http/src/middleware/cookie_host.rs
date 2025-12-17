@@ -66,4 +66,3 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         Ok(resp)
     }
 }
-

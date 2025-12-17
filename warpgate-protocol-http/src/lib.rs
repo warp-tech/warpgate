@@ -117,9 +117,7 @@ impl ProtocolServer for HTTPProtocolServer {
         let base_cookie_domain: Option<String> = {
             let config = self.services.config.lock().await;
             match config.construct_external_url(None, None) {
-                Ok(url) => url
-                    .host_str()
-                    .map(|host| format!(".{}", host)),
+                Ok(url) => url.host_str().map(|host| format!(".{}", host)),
                 Err(_) => None,
             }
         };
@@ -251,4 +249,3 @@ impl Debug for HTTPProtocolServer {
         write!(f, "HTTPProtocolServer")
     }
 }
-

@@ -142,9 +142,7 @@ async fn _main() -> Result<()> {
                 if let Ok(p) = std::env::var("WARPGATE_NEW_USER_PASSWORD") {
                     p
                 } else {
-                    error!(
-                        "You must supply the password either through the --password option"
-                    );
+                    error!("You must supply the password either through the --password option");
                     error!("or the WARPGATE_NEW_USER_PASSWORD environment variable.");
                     std::process::exit(1);
                 }
