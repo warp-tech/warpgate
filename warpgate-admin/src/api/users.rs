@@ -318,10 +318,7 @@ impl DetailApi {
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    tracing::warn!(
-                        "Error searching for LDAP user in {}: {e}",
-                        ldap_server.name,
-                    );
+                    tracing::warn!("Error searching for LDAP user in {}: {e}", ldap_server.name,);
                     continue;
                 }
             }

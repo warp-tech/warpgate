@@ -175,7 +175,6 @@ fn default_username_attribute() -> LdapUsernameAttribute {
     LdapUsernameAttribute::Cn
 }
 
-
 #[derive(Object)]
 struct UpdateLdapServerRequest {
     name: String,
