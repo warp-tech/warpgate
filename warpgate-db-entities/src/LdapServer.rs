@@ -24,6 +24,7 @@ pub struct Model {
     pub auto_link_sso_users: bool,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    pub username_attribute: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -46,6 +47,11 @@ impl TryFrom<&Model> for warpgate_ldap::LdapConfig {
             tls_verify: server.tls_verify,
             base_dns,
             user_filter: server.user_filter.clone(),
+            username_attribute: server
+                .username_attribute
+                .as_str()
+                .try_into()
+                .unwrap_or(warpgate_ldap::LdapUsernameAttribute::Cn),
         })
     }
 }

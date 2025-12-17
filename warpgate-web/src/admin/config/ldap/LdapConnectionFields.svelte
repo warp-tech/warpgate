@@ -1,7 +1,7 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import TlsConfiguration from 'admin/TlsConfiguration.svelte'
-    import type { Tls } from 'admin/lib/api'
+    import { type Tls, LdapUsernameAttribute } from 'admin/lib/api'
 
     interface Props {
         host: string
@@ -12,6 +12,7 @@
         userFilter: string
         passwordPlaceholder?: string
         passwordRequired?: boolean
+        usernameAttribute: LdapUsernameAttribute,
     }
 
     let {
@@ -19,11 +20,20 @@
         port = $bindable(),
         bindDn = $bindable(),
         bindPassword = $bindable(),
+        usernameAttribute = $bindable(),
         tls = $bindable(),
         userFilter = $bindable(),
         passwordPlaceholder = undefined,
         passwordRequired = true,
     }: Props = $props()
+
+    const usernameAttributeOptions = [
+        { value: LdapUsernameAttribute.Cn, name: 'CN' },
+        { value: LdapUsernameAttribute.Email, name: 'E-mail' },
+        { value: LdapUsernameAttribute.UserPrincipalName, name: 'User principal name' },
+        { value: LdapUsernameAttribute.SamAccountName, name: 'SAM account name' },
+        { value: LdapUsernameAttribute.Uid, name: 'UID' },
+    ]
 </script>
 
 <div class="mt-4">
@@ -63,10 +73,24 @@
     </div>
 </div>
 
-<div class="mt-4">
-    <FormGroup floating label="User query filter">
-        <Input
-            bind:value={userFilter}
-        />
-    </FormGroup>
+<div class="mt-4 row">
+    <div class="col-md-6">
+        <FormGroup floating label="User query filter">
+            <Input
+                bind:value={userFilter}
+            />
+        </FormGroup>
+    </div>
+    <div class="col-md-6">
+        <FormGroup floating label="LDAP attribute to read usernames from">
+            <select
+                class="form-control"
+                bind:value={usernameAttribute}
+            >
+                {#each usernameAttributeOptions as item (item.value)}
+                    <option value={item.value}>{item.name}</option>
+                {/each}
+            </select>
+        </FormGroup>
+    </div>
 </div>

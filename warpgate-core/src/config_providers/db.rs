@@ -141,11 +141,11 @@ impl DatabaseConfigProvider {
                 e
             })?;
 
-            match warpgate_ldap::find_user_by_email(&ldap_config, &credential.email).await {
+            match warpgate_ldap::find_user_by_username(&ldap_config, &preferred_username).await {
                 Ok(Some(ldap_user)) => {
                     info!(
-                        "Found LDAP user for email {}: {:?}",
-                        credential.email, ldap_user.username
+                        "Found LDAP user for username {}: {:?}",
+                        preferred_username, ldap_user.username
                     );
                     ldap_server_id = Some(ldap_server.id);
                     ldap_object_uuid = ldap_user.object_uuid;
@@ -153,8 +153,8 @@ impl DatabaseConfigProvider {
                 }
                 Ok(None) => {
                     debug!(
-                        "No LDAP user found with email {} in server {}",
-                        credential.email, ldap_server.name
+                        "No LDAP user found with username {} in server {}",
+                        preferred_username, ldap_server.name
                     );
                 }
                 Err(e) => {
@@ -183,7 +183,7 @@ impl DatabaseConfigProvider {
         entities::SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
-            ..entities::SsoCredential::ActiveModel::from(credential)
+            ..credential.into()
         }
         .insert(db)
         .await?;

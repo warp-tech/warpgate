@@ -1,6 +1,6 @@
 <script lang="ts">
     import { push } from 'svelte-spa-router'
-    import { api, stringifyError, TlsMode, type LdapServerResponse, type Tls } from 'admin/lib/api'
+    import { api, LdapUsernameAttribute, stringifyError, TlsMode, type LdapServerResponse, type Tls } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
@@ -29,6 +29,7 @@
     let enabled = $state(true)
     let autoLinkSsoUsers = $state(false)
     let description = $state('')
+    let usernameAttribute = $state(LdapUsernameAttribute.Cn)
     let error = $state<string | null>(null)
     let testResult = $state<{ success: boolean; message: string } | null>(null)
     let isLoaded = $state(false)
@@ -97,6 +98,7 @@
                     enabled,
                     autoLinkSsoUsers,
                     description: description || undefined,
+                    usernameAttribute,
                 },
             })
             await load()
@@ -150,6 +152,7 @@
                 bind:bindPassword
                 bind:tls
                 bind:userFilter
+                bind:usernameAttribute
                 passwordPlaceholder="Keep current password"
                 passwordRequired={false}
             />

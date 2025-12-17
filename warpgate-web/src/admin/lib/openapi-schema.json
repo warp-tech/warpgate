@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.18.0-5-g350b5917-modified"
+    "version": "v0.18.0-7-g747fc5e3-modified"
   },
   "servers": [
     {
@@ -3105,6 +3105,17 @@
           },
           "description": {
             "type": "string"
+          },
+          "username_attribute": {
+            "default": "Uid",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LdapUsernameAttribute"
+              },
+              {
+                "default": "Uid"
+              }
+            ]
           }
         }
       },
@@ -3278,7 +3289,8 @@
           "tls_verify",
           "enabled",
           "auto_link_sso_users",
-          "description"
+          "description",
+          "username_attribute"
         ],
         "properties": {
           "id": {
@@ -3321,6 +3333,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "username_attribute": {
+            "$ref": "#/components/schemas/LdapUsernameAttribute"
           }
         }
       },
@@ -3345,6 +3360,16 @@
             "type": "string"
           }
         }
+      },
+      "LdapUsernameAttribute": {
+        "type": "string",
+        "enum": [
+          "Cn",
+          "Uid",
+          "Email",
+          "UserPrincipalName",
+          "SamAccountName"
+        ]
       },
       "LogEntry": {
         "type": "object",
@@ -4242,7 +4267,8 @@
           "tls_mode",
           "tls_verify",
           "enabled",
-          "auto_link_sso_users"
+          "auto_link_sso_users",
+          "username_attribute"
         ],
         "properties": {
           "name": {
@@ -4278,6 +4304,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "username_attribute": {
+            "$ref": "#/components/schemas/LdapUsernameAttribute"
           }
         }
       },

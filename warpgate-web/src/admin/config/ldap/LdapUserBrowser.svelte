@@ -1,9 +1,8 @@
 <script lang="ts">
-    import { link } from 'svelte-spa-router'
     import { api, stringifyError } from 'admin/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte';
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
     interface Props {
         params: { id: string }
@@ -15,6 +14,8 @@
     let users = $state<any[]>([])
     let error = $state<string | null>(null)
     let searchTerm = $state('')
+
+    let selectedUserDns = $state<string[]>([])
 
     async function load() {
         server = await api.getLdapServer({ id: params.id })
@@ -39,6 +40,10 @@
                     u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()))
             : users,
     )
+
+    async function batchImport () {
+        // TODO
+    }
 </script>
 
 <Loadable promise={load()}>
@@ -68,29 +73,58 @@
                 <span class="text-muted">
                     {filteredUsers.length} user(s) {searchTerm ? `(filtered from ${users.length})` : ''}
                 </span>
-                <AsyncButton class="btn btn-sm btn-secondary" click={loadUsers}>
-                    Refresh
-                </AsyncButton>
+                <div class="d-flex gap-2">
+                    <AsyncButton class="btn btn-sm btn-secondary" click={loadUsers}>
+                        Refresh
+                    </AsyncButton>
+                    <AsyncButton
+                        class="btn btn-sm btn-primary"
+                        click={batchImport}
+                        disabled={selectedUserDns.length === 0}
+                    >
+                        Import selected ({selectedUserDns.length})
+                    </AsyncButton>
+                </div>
             </div>
+<script lang="ts">
+    // ...existing code...
+    async function batchImport() {
+        // TODO: Implement batch import logic
+        alert(`Importing users: ${selectedUserDns.join(', ')}`)
+    }
+</script>
 
             <div class="list-group">
                 {#each filteredUsers as user (user.dn)}
-                    <div class="list-group-item">
-                        <div class="d-flex w-100 justify-content-between">
-                            <h6 class="mb-1">{user.username}</h6>
-                            {#if user.displayName}
-                                <small class="text-muted">{user.displayName}</small>
+                    <div class="list-group-item d-flex align-items-center">
+                        <input
+                            type="checkbox"
+                            class="form-check-input me-2"
+                            bind:group={selectedUserDns}
+                            value={user.dn}
+                            aria-label="Select user"
+                        />
+                        <div class="flex-grow-1">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">{user.username}</h6>
+                                {#if user.displayName}
+                                    <small class="text-muted">{user.displayName}</small>
+                                {/if}
+                            </div>
+                            {#if user.email}
+                                <p class="mb-1">
+                                    <small>{user.email}</small>
+                                </p>
                             {/if}
+                            <small class="text-muted">DN: {user.dn}</small>
                         </div>
-                        {#if user.email}
-                            <p class="mb-1">
-                                <small>{user.email}</small>
-                            </p>
-                        {/if}
-                        <small class="text-muted">DN: {user.dn}</small>
                     </div>
                 {/each}
             </div>
+        <script lang="ts">
+            // ...existing code...
+            let selectedUserDns = $state<string[]>([])
+        </script>
         {/if}
 
         {#if error}

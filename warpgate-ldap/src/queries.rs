@@ -8,30 +8,27 @@ use crate::connection::connect;
 use crate::error::{LdapError, Result};
 use crate::types::{LdapConfig, LdapUser};
 
-// Attributes we request from LDAP for user discovery and SSH key sync.
-// Kept as a single constant so all searches use the same set.
 const LDAP_USER_ATTRIBUTES: &[&str] = &[
     "uid",
     "cn",
     "mail",
     "displayName",
     "sAMAccountName",
+    "userPrincipalName",
     "objectGUID",
     "entryUUID",
     "sshPublicKey",
 ];
 
-/// Extract user details from an LDAP SearchEntry.
+/// Extract user details from an LDAP [SearchEntry].
 /// Returns None if no valid username can be determined.
-fn extract_ldap_user(search_entry: SearchEntry) -> Option<LdapUser> {
+fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<LdapUser> {
     let dn = search_entry.dn.clone();
 
     // Extract username - try different attributes
     let username = search_entry
         .attrs
-        .get("uid")
-        .or_else(|| search_entry.attrs.get("sAMAccountName"))
-        .or_else(|| search_entry.attrs.get("cn"))
+        .get(config.username_attribute.attribute_name())
         .and_then(|v| v.first())
         .cloned()?;
 
@@ -105,7 +102,7 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
             }
             seen_dns.insert(dn.clone());
 
-            if let Some(user) = extract_ldap_user(search_entry) {
+            if let Some(user) = extract_ldap_user(search_entry, config) {
                 all_users.push(user);
             }
         }
@@ -116,11 +113,19 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
     Ok(all_users)
 }
 
-pub async fn find_user_by_email(config: &LdapConfig, email: &str) -> Result<Option<LdapUser>> {
+pub async fn find_user_by_username(
+    config: &LdapConfig,
+    username: &str,
+) -> Result<Option<LdapUser>> {
     let mut ldap = connect(config).await?;
 
     for base_dn in &config.base_dns {
-        let filter = format!("(&{}(mail={}))", config.user_filter, email);
+        let filter = format!(
+            "(&{}({}={}))",
+            config.user_filter,
+            config.username_attribute.attribute_name(),
+            username
+        );
 
         let (rs, _res) = ldap
             .search(
@@ -137,10 +142,13 @@ pub async fn find_user_by_email(config: &LdapConfig, email: &str) -> Result<Opti
         if !rs.is_empty() {
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
-            if let Some(user) = extract_ldap_user(search_entry) {
+            if let Some(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
-                info!("Found LDAP user with email {}: {}", email, user.username);
+                info!(
+                    "Found LDAP user with username {}: {}",
+                    username, user.username
+                );
 
                 return Ok(Some(user));
             }
@@ -148,7 +156,7 @@ pub async fn find_user_by_email(config: &LdapConfig, email: &str) -> Result<Opti
     }
 
     let _ = ldap.unbind().await;
-    debug!("No user found with email: {}", email);
+    debug!("No user found with username: {}", username);
     Ok(None)
 }
 
@@ -191,7 +199,7 @@ pub async fn find_user_by_uuid(
         if !rs.is_empty() {
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
-            if let Some(user) = extract_ldap_user(search_entry) {
+            if let Some(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
                 debug!(

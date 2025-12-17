@@ -303,14 +303,14 @@ impl DetailApi {
         }
 
         // Try to find user in LDAP servers using username as email
-        let email = &user.username;
+        let username = &user.username;
         let mut ldap_server_id = None;
         let mut ldap_object_uuid = None;
 
         for ldap_server in ldap_servers {
             let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server)?;
 
-            match warpgate_ldap::find_user_by_email(&ldap_config, email).await {
+            match warpgate_ldap::find_user_by_username(&ldap_config, username).await {
                 Ok(Some(ldap_user)) => {
                     ldap_server_id = Some(ldap_server.id);
                     ldap_object_uuid = ldap_user.object_uuid;
@@ -319,9 +319,8 @@ impl DetailApi {
                 Ok(None) => continue,
                 Err(e) => {
                     tracing::warn!(
-                        "Error searching for LDAP user in {}: {}",
+                        "Error searching for LDAP user in {}: {e}",
                         ldap_server.name,
-                        e
                     );
                     continue;
                 }
@@ -330,8 +329,7 @@ impl DetailApi {
 
         if ldap_server_id.is_none() {
             return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(format!(
-                "No LDAP user found with email: {}",
-                email
+                "No LDAP user found with username: {username}",
             ))));
         }
 

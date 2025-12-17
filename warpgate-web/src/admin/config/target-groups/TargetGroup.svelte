@@ -6,6 +6,7 @@
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { replace } from 'svelte-spa-router'
 
     interface Props {
         params: { id: string };

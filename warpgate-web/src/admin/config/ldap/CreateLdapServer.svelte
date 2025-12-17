@@ -2,7 +2,7 @@
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { push } from 'svelte-spa-router'
     import { reloadServerInfo } from 'gateway/lib/store'
-    import { api, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
+    import { api, LdapUsernameAttribute, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
@@ -18,6 +18,7 @@
     let enabled = $state(true)
     let autoLinkSsoUsers = $state(false)
     let description = $state('')
+    let usernameAttribute = $state(LdapUsernameAttribute.Cn)
     let error = $state<string | null>(null)
     let tls: Tls = $state({
         mode: TlsMode.Preferred,
@@ -100,6 +101,7 @@
             bind:bindPassword
             bind:tls
             bind:userFilter
+            bind:usernameAttribute
         />
 
         {#if testResult}

@@ -1,3 +1,68 @@
+#[derive(Object)]
+struct ImportLdapUsersRequest {
+    dns: Vec<String>,
+}
+
+#[derive(ApiResponse)]
+enum ImportLdapUsersResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<String>>), // List of imported usernames
+    #[oai(status = 404)]
+    NotFound,
+}
+
+pub struct ImportApi;
+
+#[OpenApi]
+impl ImportApi {
+    #[oai(
+        path = "/ldap-servers/:id/import-users",
+        method = "post",
+        operation_id = "import_ldap_users"
+    )]
+    async fn api_import_ldap_users(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        body: Json<ImportLdapUsersRequest>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ImportLdapUsersResponse, WarpgateError> {
+        let db = db.lock().await;
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(ImportLdapUsersResponse::NotFound);
+        };
+        let ldap_config = warpgate_ldap::LdapConfig::try_from(&server)?;
+        let all_users = warpgate_ldap::list_users(&ldap_config)
+            .await
+            .map_err(|e| WarpgateError::from(e))?;
+        let mut imported = Vec::new();
+        for dn in &body.dns {
+            if let Some(user) = all_users.iter().find(|u| &u.dn == dn) {
+                // Create user in DB if not exists
+                let exists = warpgate_db_entities::User::Entity::find()
+                    .filter(warpgate_db_entities::User::Column::Username.eq(&user.username))
+                    .one(&*db)
+                    .await?;
+                if exists.is_none() {
+                    let values = warpgate_db_entities::User::ActiveModel {
+                        id: Set(Uuid::new_v4()),
+                        username: Set(user.username.clone()),
+                        credential_policy: Set(serde_json::to_value(
+                            warpgate_common::UserRequireCredentialsPolicy::default(),
+                        )?),
+                        description: Set(user.display_name.clone().unwrap_or_default()),
+                        rate_limit_bytes_per_second: Set(None),
+                        ldap_object_uuid: Set(user.object_uuid),
+                        ldap_server_id: Set(Some(server.id)),
+                    };
+                    values.insert(&*db).await?;
+                    imported.push(user.username.clone());
+                }
+            }
+        }
+        Ok(ImportLdapUsersResponse::Ok(Json(imported)))
+    }
+}
 use std::sync::Arc;
 
 use poem::web::Data;
@@ -11,8 +76,9 @@ use sea_orm::{
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_tls::TlsMode;
 use warpgate_db_entities::LdapServer;
+use warpgate_ldap::LdapUsernameAttribute;
+use warpgate_tls::TlsMode;
 
 use super::AnySecurityScheme;
 
@@ -30,6 +96,7 @@ struct LdapServerResponse {
     enabled: bool,
     auto_link_sso_users: bool,
     description: String,
+    username_attribute: LdapUsernameAttribute,
 }
 
 impl From<LdapServer::Model> for LdapServerResponse {
@@ -48,6 +115,11 @@ impl From<LdapServer::Model> for LdapServerResponse {
             enabled: model.enabled,
             auto_link_sso_users: model.auto_link_sso_users,
             description: model.description,
+            username_attribute: model
+                .username_attribute
+                .as_str()
+                .try_into()
+                .unwrap_or(LdapUsernameAttribute::Cn),
         }
     }
 }
@@ -71,6 +143,8 @@ struct CreateLdapServerRequest {
     #[oai(default = "default_auto_link_sso_users")]
     auto_link_sso_users: bool,
     description: Option<String>,
+    #[oai(default = "default_username_attribute")]
+    username_attribute: LdapUsernameAttribute,
 }
 
 fn default_port() -> i32 {
@@ -97,6 +171,11 @@ fn default_auto_link_sso_users() -> bool {
     false
 }
 
+fn default_username_attribute() -> LdapUsernameAttribute {
+    LdapUsernameAttribute::Cn
+}
+
+
 #[derive(Object)]
 struct UpdateLdapServerRequest {
     name: String,
@@ -110,6 +189,7 @@ struct UpdateLdapServerRequest {
     enabled: bool,
     auto_link_sso_users: bool,
     description: Option<String>,
+    username_attribute: LdapUsernameAttribute,
 }
 
 #[derive(Object)]
@@ -180,7 +260,11 @@ pub struct ListApi;
 
 #[OpenApi]
 impl ListApi {
-    #[oai(path = "/ldap-servers", method = "get", operation_id = "get_ldap_servers")]
+    #[oai(
+        path = "/ldap-servers",
+        method = "get",
+        operation_id = "get_ldap_servers"
+    )]
     async fn api_get_all_ldap_servers(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -203,7 +287,11 @@ impl ListApi {
         )))
     }
 
-    #[oai(path = "/ldap-servers", method = "post", operation_id = "create_ldap_server")]
+    #[oai(
+        path = "/ldap-servers",
+        method = "post",
+        operation_id = "create_ldap_server"
+    )]
     async fn api_create_ldap_server(
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
@@ -240,6 +328,7 @@ impl ListApi {
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: body.user_filter.clone(),
+            username_attribute: body.username_attribute,
         };
 
         // Discover base DNs
@@ -261,6 +350,7 @@ impl ListApi {
             enabled: Set(body.enabled),
             auto_link_sso_users: Set(body.auto_link_sso_users),
             description: Set(body.description.clone().unwrap_or_default()),
+            username_attribute: Set(body.username_attribute.attribute_name().into()),
         };
 
         let server = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -287,6 +377,7 @@ impl ListApi {
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: String::new(),
+            username_attribute: LdapUsernameAttribute::Cn,
         };
 
         match warpgate_ldap::test_connection(&ldap_config).await {
@@ -402,18 +493,23 @@ impl DetailApi {
         model.enabled = Set(body.enabled);
         model.auto_link_sso_users = Set(body.auto_link_sso_users);
         model.description = Set(body.description.clone().unwrap_or_default());
+        model.username_attribute = Set(body.username_attribute.attribute_name().into());
 
         // Re-discover base DNs if connection details changed
         let ldap_config = warpgate_ldap::LdapConfig {
             host: body.host.clone(),
             port: body.port as u16,
             bind_dn: body.bind_dn.clone(),
-            bind_password: body.bind_password.as_ref().map(|p| p.expose_secret().clone())
+            bind_password: body
+                .bind_password
+                .as_ref()
+                .map(|p| p.expose_secret().clone())
                 .unwrap_or_else(|| model.bind_password.clone().unwrap()),
             tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
             user_filter: body.user_filter.clone(),
+            username_attribute: body.username_attribute,
         };
 
         if let Ok(base_dns) = warpgate_ldap::discover_base_dns(&ldap_config).await {
@@ -442,10 +538,7 @@ impl DetailApi {
             return Ok(DeleteLdapServerResponse::NotFound);
         };
 
-        server
-            .delete(&*db)
-            .await
-            .map_err(WarpgateError::from)?;
+        server.delete(&*db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteLdapServerResponse::Deleted)
     }

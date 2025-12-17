@@ -5910,6 +5910,7 @@ version = "0.17.0"
 dependencies = [
  "anyhow",
  "ldap3",
+ "poem-openapi",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
