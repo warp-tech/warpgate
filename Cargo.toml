@@ -55,7 +55,7 @@ password-hash = { version = "0.5", features = ["std"], default-features = false 
 delegate = { version = "0.13", default-features = false }
 tracing = { version = "0.1", default-features = false }
 schemars = { version = "0.9.0", default-features = false, features = ["derive", "std"] }
-rustls-pemfile = { version = "2.2", default-features = false }
+rustls-pki-types = { version = "1.13", default-features = false, features = ["alloc", "std"] }
 thiserror = { version = "2", default-features = false }
 rand = { version = "0.8", default-features = false }
 rand_chacha = { version = "0.3", default-features = false }
