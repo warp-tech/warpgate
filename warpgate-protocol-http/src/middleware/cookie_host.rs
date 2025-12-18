@@ -1,6 +1,6 @@
 use cookie::Cookie;
-use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
 use http::uri::Scheme;
+use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
 
 use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
 
@@ -44,7 +44,10 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             .or_else(|| req.original_uri().host().map(|x| x.to_string()));
 
         let scheme_https = req.original_uri().scheme() == Some(&Scheme::HTTPS);
-        let header_https = req.header("x-forwarded-proto").map(|h| h == "https").unwrap_or(false);
+        let header_https = req
+            .header("x-forwarded-proto")
+            .map(|h| h == "https")
+            .unwrap_or(false);
         let is_https = scheme_https || header_https;
 
         let mut resp = self.inner.call(req).await?.into_response();
@@ -129,14 +132,21 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                         }
 
                         modified_session_cookie = Some(cookie.to_string());
-                        tracing::debug!("CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}", target_domain, is_https);
+                        tracing::debug!(
+                            "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
+                            target_domain,
+                            is_https
+                        );
                         break;
                     }
                 }
             }
 
             if modified_session_cookie.is_none() {
-                tracing::debug!("CookieHostMiddleware: No session cookie found in {} cookie(s)", cookie_values.len());
+                tracing::debug!(
+                    "CookieHostMiddleware: No session cookie found in {} cookie(s)",
+                    cookie_values.len()
+                );
             }
 
             // Replace Set-Cookie headers: modified session cookie + other cookies unchanged

@@ -88,9 +88,12 @@ async fn get_target_for_request(
             })
             .find(|(_, o)| o.external_host.as_deref() == Some(&host))
             .map(|(t, _)| t.name.clone());
-        
+
         if found.is_some() {
-            debug!("Domain rebinding detected: host={} -> target={:?}", host, found);
+            debug!(
+                "Domain rebinding detected: host={} -> target={:?}",
+                host, found
+            );
         }
         found
     } else {

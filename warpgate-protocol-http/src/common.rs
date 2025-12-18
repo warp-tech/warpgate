@@ -2,7 +2,8 @@ use core::str;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{header::HOST, HeaderName, StatusCode};
+use http::header::HOST;
+use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
 use poem::web::{Data, Redirect};
@@ -196,10 +197,10 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost
                     let is_localhost = is_localhost_host(&host);
-                    let is_authorized = host == base_host 
+                    let is_authorized = host == base_host
                         || host.ends_with(&format!(".{}", base_host))
                         || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
-                    
+
                     if !is_authorized {
                         tracing::warn!(
                             "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
