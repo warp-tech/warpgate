@@ -2,6 +2,7 @@ use core::str;
 use std::sync::Arc;
 
 use anyhow::Context;
+use http::header::HOST;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::session::Session;
@@ -24,6 +25,11 @@ static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
+
+/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+pub fn is_localhost_host(host: &str) -> bool {
+    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
@@ -178,7 +184,38 @@ pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
     let session = <&Session>::from_request_without_body(&req).await?;
     let services = Data::<&Services>::from_request_without_body(&req).await?;
 
-    let auth = match session.get_auth() {
+    let mut session_auth = session.get_auth();
+    if session_auth.is_some() {
+        let config = services.config.lock().await;
+        if let Ok(base_url) = config.construct_external_url(None, None) {
+            if let Some(base_host) = base_url.host_str() {
+                let request_host = req
+                    .header(HOST)
+                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
+                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+
+                if let Some(host) = request_host {
+                    // Validate request host matches base host or is a subdomain/localhost
+                    let is_localhost = is_localhost_host(&host);
+                    let is_authorized = host == base_host
+                        || host.ends_with(&format!(".{}", base_host))
+                        || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
+
+                    if !is_authorized {
+                        tracing::warn!(
+                            "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
+                            host,
+                            base_host
+                        );
+                        session.clear();
+                        session_auth = None;
+                    }
+                }
+            }
+        }
+    }
+
+    let auth = match session_auth {
         Some(auth) => Some(RequestAuthorization::Session(auth)),
         None => match req.headers().get(&X_WARPGATE_TOKEN) {
             Some(token_from_header) => {

@@ -5,6 +5,8 @@ use x509_parser::error::X509Error;
 pub enum RustlsSetupError {
     #[error("rustls: {0}")]
     Rustls(#[from] rustls::Error),
+    #[error("rustls: {0}")]
+    RustlsPem(#[from] rustls_pki_types::pem::Error),
     #[error("verifier setup: {0}")]
     VerifierBuilder(#[from] VerifierBuilderError),
     #[error("no certificates found in certificate file")]

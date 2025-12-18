@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-mysql"
-version = "0.17.0"
+version = "0.18.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
@@ -22,7 +22,6 @@ rand.workspace = true
 sha1 = { version = "0.10", default-features = false }
 password-hash.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 webpki = { version = "0.22", default-features = false }

@@ -64,6 +64,7 @@ impl RateLimiterRegistry {
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.user_rate_limiters.insert(*user_id, rate_limiter);
         }
+        #[allow(clippy::unwrap_used, reason = "just inserted")]
         Ok(self.user_rate_limiters.get(user_id).unwrap().clone())
     }
 
@@ -84,6 +85,7 @@ impl RateLimiterRegistry {
             let rate_limiter = WarpgateRateLimiter::new(quota)?;
             self.target_rate_limiters.insert(*target_id, rate_limiter);
         }
+        #[allow(clippy::unwrap_used, reason = "just inserted")]
         Ok(self.target_rate_limiters.get(target_id).unwrap().clone())
     }
 

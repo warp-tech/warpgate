@@ -68,11 +68,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(target::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("group_id"))
-                            .uuid()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(Alias::new("group_id")).uuid().null())
                     .to_owned(),
             )
             .await?;

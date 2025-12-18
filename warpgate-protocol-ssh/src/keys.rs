@@ -42,7 +42,10 @@ pub fn generate_keys(config: &WarpgateConfig, prefix: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn load_keys(config: &WarpgateConfig, prefix: &str) -> Result<Vec<PrivateKey>, russh::keys::Error> {
+pub fn load_keys(
+    config: &WarpgateConfig,
+    prefix: &str,
+) -> Result<Vec<PrivateKey>, russh::keys::Error> {
     let path = get_keys_path(config);
     Ok(vec![
         load_secret_key(path.join(format!("{prefix}-ed25519")), None)?,

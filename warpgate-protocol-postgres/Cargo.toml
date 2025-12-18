@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-postgres"
-version = "0.17.0"
+version = "0.18.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
@@ -14,7 +14,6 @@ tracing.workspace = true
 uuid = { version = "1.2", default-features = false }
 bytes.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }

@@ -1,14 +1,13 @@
 <script lang="ts">
     import { get } from 'svelte/store'
     import { querystring, replace } from 'svelte-spa-router'
-    import { FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
     import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
     import { reloadServerInfo } from 'gateway/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -118,13 +117,6 @@
         location.reload()
     }
 
-    function onInputKey (event: KeyboardEvent) {
-        if (event.key === 'Enter') {
-            login()
-            event.preventDefault()
-        }
-    }
-
     async function startSSO (provider: SsoProviderDescription) {
         busy = true
         try {
@@ -138,7 +130,7 @@
 </script>
 
 <Loadable promise={initPromise}>
-    <form class="mt-5" autocomplete="on">
+    <div class="mt-5">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
                 <h1>Welcome</h1>
@@ -147,53 +139,72 @@
             {/if}
         </div>
         {#if authState === ApiAuthState.OtpNeeded}
-            <FormGroup floating label="One-time password">
-                <!-- svelte-ignore a11y_autofocus -->
-                <input
-                    bind:value={otp}
-                    bind:this={otpInput}
-                    onkeypress={onInputKey}
-                    name="otp"
-                    autofocus
-                    inputmode="numeric"
+            <form class="d-flex align-items-stretch gap-2" onsubmit={e => {
+                login()
+                e.preventDefault()
+            }}>
+                <FormGroup floating label="One-time password" class="w-100">
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input
+                        bind:value={otp}
+                        bind:this={otpInput}
+                        name="otp"
+                        required
+                        pattern="\d&lbrace;6,8&rbrace;"
+                        autofocus
+                        inputmode="numeric"
+                        disabled={busy}
+                        class="form-control" />
+                </FormGroup>
+
+                <Button
+                class="mb-3"
+                    color="primary"
+                    type="submit"
                     disabled={busy}
-                    class="form-control" />
-            </FormGroup>
+                >
+                    <Fa icon={faArrowRight} />
+                </Button>
+            </form>
         {/if}
         {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed}
+        <form autocomplete="on" onsubmit={e => {
+            login()
+            e.preventDefault()
+        }}>
             <FormGroup floating label="Username">
                 <!-- svelte-ignore a11y_autofocus -->
                 <input
                     bind:value={username}
-                    onkeypress={onInputKey}
                     name="username"
                     autocomplete="username"
                     disabled={busy}
                     class="form-control"
+                    required
                     autofocus />
             </FormGroup>
 
             <FormGroup floating label="Password">
                 <input
                     bind:value={password}
-                    onkeypress={onInputKey}
                     name="password"
                     type="password"
                     autocomplete="current-password"
                     disabled={busy}
+                    required
                     class="form-control" />
             </FormGroup>
 
-            <AsyncButton
+            <Button
                 class="d-flex align-items-center"
                 color="primary"
                 type="submit"
                 disabled={busy}
-                click={login}
             >
                 Login
                 <Fa class="ms-2" fw icon={faArrowRight} />
-            </AsyncButton>
+            </Button>
+        </form>
         {/if}
 
         <div class="mt-3"></div>
@@ -207,7 +218,7 @@
         {#if error}
             <Alert color="danger">{error}</Alert>
         {/if}
-    </form>
+    </div>
 
     {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
         <Loadable promise={ssoProvidersPromise}>
