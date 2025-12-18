@@ -90,9 +90,9 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                             let same_site = cookie.same_site();
                             let max_age = cookie.max_age();
                             let expires = cookie.expires();
-                            
+
                             let mut builder = Cookie::build((name, value));
-                            
+
                             if let Some(p) = path_str {
                                 builder = builder.path(p);
                             }
@@ -111,7 +111,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                             if let Some(expires) = expires {
                                 builder = builder.expires(expires);
                             }
-                            
+
                             cookie = builder.build();
                         }
 
@@ -160,5 +160,3 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         Ok(resp)
     }
 }
-
-

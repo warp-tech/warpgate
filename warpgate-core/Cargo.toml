@@ -40,7 +40,6 @@ url = { version = "2.2", default-features = false }
 uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
 warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
 rustls.workspace = true
-rustls-pemfile.workspace = true
 webpki = { version = "0.22", default-features = false }
 governor.workspace = true
 

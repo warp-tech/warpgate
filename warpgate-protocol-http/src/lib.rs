@@ -143,11 +143,11 @@ impl ProtocolServer for HTTPProtocolServer {
                         tracing::warn!("Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication.");
                         None
                     }
-                },
+                }
                 Err(e) => {
                     tracing::warn!("Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.", e);
                     None
-                },
+                }
             }
         };
 
@@ -278,4 +278,3 @@ impl Debug for HTTPProtocolServer {
         write!(f, "HTTPProtocolServer")
     }
 }
-
