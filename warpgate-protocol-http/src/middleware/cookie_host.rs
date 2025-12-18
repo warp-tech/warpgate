@@ -84,38 +84,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                             cookie.set_domain(domain.clone());
                         } else {
                             // For localhost, we need to remove the domain attribute
-                            // Rebuild the cookie without domain, copying all other attributes
-                            let name = cookie.name().to_string();
-                            let value = cookie.value().to_string();
-                            let path_str = cookie.path().map(|p| p.to_string());
-                            let http_only = cookie.http_only().unwrap_or(false);
-                            let secure = cookie.secure().unwrap_or(false);
-                            let same_site = cookie.same_site();
-                            let max_age = cookie.max_age();
-                            let expires = cookie.expires();
-
-                            let mut builder = Cookie::build((name, value));
-
-                            if let Some(p) = path_str {
-                                builder = builder.path(p);
-                            }
-                            if http_only {
-                                builder = builder.http_only(true);
-                            }
-                            if secure {
-                                builder = builder.secure(true);
-                            }
-                            if let Some(same_site) = same_site {
-                                builder = builder.same_site(same_site);
-                            }
-                            if let Some(max_age) = max_age {
-                                builder = builder.max_age(max_age);
-                            }
-                            if let Some(expires) = expires {
-                                builder = builder.expires(expires);
-                            }
-
-                            cookie = builder.build();
+                            cookie.unset_domain();
                         }
 
                         // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
