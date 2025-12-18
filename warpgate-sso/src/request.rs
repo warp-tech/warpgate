@@ -24,6 +24,10 @@ impl SsoLoginRequest {
         &self.csrf_token
     }
 
+    pub fn redirect_url(&self) -> &RedirectUrl {
+        &self.redirect_url
+    }
+
     pub async fn verify_code(self, code: String) -> Result<SsoLoginResponse, SsoError> {
         let result = SsoClient::new(self.config)?
             .finish_login(self.pkce_verifier, self.redirect_url, &self.nonce, code)
