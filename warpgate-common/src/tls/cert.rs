@@ -39,7 +39,7 @@ impl TlsCertificateBundle {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let certificates = CertificateDer::pem_slice_iter(&mut &bytes[..])
+        let certificates = CertificateDer::pem_slice_iter(&bytes[..])
             .collect::<Result<Vec<CertificateDer<'static>>, _>>()?;
 
         if certificates.is_empty() {
@@ -123,7 +123,7 @@ impl TlsPrivateKey {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let key = PrivateKeyDer::from_pem_slice(&mut bytes.as_slice())?;
+        let key = PrivateKeyDer::from_pem_slice(bytes.as_slice())?;
         let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
 
         Ok(Self { bytes, key })

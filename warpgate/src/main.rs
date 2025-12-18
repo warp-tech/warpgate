@@ -136,6 +136,7 @@ async fn _main() -> Result<()> {
             password: explicit_password,
             role,
         } => {
+            #[allow(clippy::collapsible_else_if)]
             let password = if let Some(p) = explicit_password {
                 p.to_owned()
             } else {
