@@ -31,7 +31,8 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, WarpgateConfig};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_tls::{
-    IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey
+    IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
+    TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_web::Assets;
 

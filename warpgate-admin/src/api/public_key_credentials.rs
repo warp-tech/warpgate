@@ -32,10 +32,7 @@ async fn check_user_ldap_linked(
 
 /// Checks if a user is LDAP-linked and returns an error message if they are.
 /// Returns Ok(()) if the user is not LDAP-linked, or a formatted error string if they are.
-async fn verify_user_not_ldap_linked(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-) -> Result<(), String> {
+async fn verify_user_not_ldap_linked(db: &DatabaseConnection, user_id: Uuid) -> Result<(), String> {
     if check_user_ldap_linked(db, user_id).await.unwrap_or(false) {
         Err("Cannot manage SSH keys for LDAP-linked users. Keys are synced from LDAP.".to_string())
     } else {
