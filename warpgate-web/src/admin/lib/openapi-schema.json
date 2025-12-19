@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.18.0-7-g747fc5e3-modified"
+    "version": "v0.18.0-10-g4ae52393-modified"
   },
   "servers": [
     {
@@ -3107,13 +3107,13 @@
             "type": "string"
           },
           "username_attribute": {
-            "default": "Uid",
+            "default": "Cn",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LdapUsernameAttribute"
               },
               {
-                "default": "Uid"
+                "default": "Cn"
               }
             ]
           }

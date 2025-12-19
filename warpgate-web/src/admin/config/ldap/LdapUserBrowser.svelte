@@ -13,6 +13,7 @@
     let server = $state<any>(null)
     let users = $state<any[]>([])
     let error = $state<string | null>(null)
+    let success = $state<string | null>(null)
     let searchTerm = $state('')
 
     let selectedUserDns = $state<string[]>([])
@@ -42,7 +43,20 @@
     )
 
     async function batchImport () {
-        // TODO
+        error = null
+        success = null
+        try {
+            await api.request({
+                method: 'POST',
+                url: `/ldap-servers/${params.id}/import-users`,
+                body: { dns: selectedUserDns },
+            })
+            await loadUsers()
+            success = `Successfully imported ${selectedUserDns.length} user(s).`
+            selectedUserDns = []
+        } catch (e: any) {
+            error = await stringifyError(e)
+        }
     }
 </script>
 
@@ -129,6 +143,9 @@
 
         {#if error}
             <Alert color="danger">{error}</Alert>
+        {/if}
+        {#if success}
+            <Alert color="success">{success}</Alert>
         {/if}
     </div>
     {/if}
