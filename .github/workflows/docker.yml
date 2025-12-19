@@ -4,10 +4,10 @@ on:
   schedule:
     - cron: '25 12 * * *'
   push:
-    branches: [ main, docker-build-fix ]
+    branches: [ '**' ]
     tags: [ 'v*.*.*' ] # Publish semver tags as releases.
   pull_request:
-    branches: [ main, docker-build-fix ]
+    branches: [ '**' ]
 
 env:
   REGISTRY: ghcr.io
@@ -58,9 +58,15 @@ jobs:
         uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch,prefix=dev-,enable=${{ github.ref != 'refs/heads/main' && github.event_name == 'push' && github.event.pull_request == null }}
+            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && github.event.pull_request == null }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=schedule
 
       - name: Build Docker image without pushing
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         id: build-no-push
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
@@ -72,7 +78,7 @@ jobs:
           cache-from: type=gha,scope=build-${{ matrix.docker-platform }}
 
       - name: Build and push Docker image
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
