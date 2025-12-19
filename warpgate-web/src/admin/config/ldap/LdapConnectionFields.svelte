@@ -13,6 +13,7 @@
         passwordPlaceholder?: string
         passwordRequired?: boolean
         usernameAttribute: LdapUsernameAttribute,
+        sshKeyAttribute: string,
     }
 
     let {
@@ -21,6 +22,7 @@
         bindDn = $bindable(),
         bindPassword = $bindable(),
         usernameAttribute = $bindable(),
+        sshKeyAttribute = $bindable(),
         tls = $bindable(),
         userFilter = $bindable(),
         passwordPlaceholder = undefined,
@@ -91,6 +93,9 @@
                     <option value={item.value}>{item.name}</option>
                 {/each}
             </select>
+        </FormGroup>
+        <FormGroup floating label="LDAP attribute to read SSH keys from">
+            <Input bind:value={sshKeyAttribute} placeholder="sshPublicKey" />
         </FormGroup>
     </div>
 </div>

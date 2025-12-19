@@ -42,7 +42,6 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
     let display_name = search_entry
         .attrs
         .get("displayName")
-        .or_else(|| search_entry.attrs.get("cn"))
         .and_then(|v| v.first())
         .cloned();
 
@@ -57,7 +56,7 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
     // Extract SSH public keys
     let ssh_public_keys = search_entry
         .attrs
-        .get("sshPublicKey")
+        .get(&config.ssh_key_attribute)
         .cloned()
         .unwrap_or_default();
 

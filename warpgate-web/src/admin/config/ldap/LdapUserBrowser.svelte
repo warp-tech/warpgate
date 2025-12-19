@@ -3,6 +3,8 @@
     import Loadable from 'common/Loadable.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import Fa from 'svelte-fa'
+    import { faRefresh } from '@fortawesome/free-solid-svg-icons'
 
     interface Props {
         params: { id: string }
@@ -46,19 +48,28 @@
         error = null
         success = null
         try {
-            await api.request({
-                method: 'POST',
-                url: `/ldap-servers/${params.id}/import-users`,
-                body: { dns: selectedUserDns },
+            await api.importLdapUsers({
+                id: params.id,
+                importLdapUsersRequest: {
+                    dns: selectedUserDns,
+                },
             })
             await loadUsers()
-            success = `Successfully imported ${selectedUserDns.length} user(s).`
+            success = `Successfully imported ${selectedUserDns.length} users.`
             selectedUserDns = []
         } catch (e: any) {
             error = await stringifyError(e)
         }
     }
 </script>
+
+
+{#if error}
+    <Alert color="danger">{error}</Alert>
+{/if}
+{#if success}
+    <Alert color="success">{success}</Alert>
+{/if}
 
 <Loadable promise={load()}>
     {#if server}
@@ -85,67 +96,46 @@
 
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <span class="text-muted">
-                    {filteredUsers.length} user(s) {searchTerm ? `(filtered from ${users.length})` : ''}
+                    {filteredUsers.length} users {searchTerm ? `(filtered from ${users.length})` : ''}
                 </span>
                 <div class="d-flex gap-2">
-                    <AsyncButton class="btn btn-sm btn-secondary" click={loadUsers}>
-                        Refresh
-                    </AsyncButton>
                     <AsyncButton
                         class="btn btn-sm btn-primary"
                         click={batchImport}
                         disabled={selectedUserDns.length === 0}
                     >
-                        Import selected ({selectedUserDns.length})
+                        Import {selectedUserDns.length} selected
+                    </AsyncButton>
+                    <AsyncButton class="btn btn-sm btn-secondary" click={loadUsers}>
+                        <Fa icon={faRefresh} />
                     </AsyncButton>
                 </div>
             </div>
-<script lang="ts">
-    // ...existing code...
-    async function batchImport() {
-        // TODO: Implement batch import logic
-        alert(`Importing users: ${selectedUserDns.join(', ')}`)
-    }
-</script>
 
             <div class="list-group">
                 {#each filteredUsers as user (user.dn)}
-                    <div class="list-group-item d-flex align-items-center">
+                    <div class="list-group-item d-flex align-items-center gap-3">
                         <input
                             type="checkbox"
-                            class="form-check-input me-2"
+                            class="form-check-input"
                             bind:group={selectedUserDns}
                             value={user.dn}
                             aria-label="Select user"
                         />
                         <div class="flex-grow-1">
-                            <div class="d-flex w-100 justify-content-between">
-                                <h6 class="mb-1">{user.username}</h6>
-                                {#if user.displayName}
-                                    <small class="text-muted">{user.displayName}</small>
-                                {/if}
+                            <div>
+                                <h6 class="mb-1">
+                                    {user.username}
+                                    {#if user.displayName && user.displayName !== user.username}
+                                        <small class="text-muted ms-1">({user.displayName})</small>
+                                    {/if}
+                                </h6>
                             </div>
-                            {#if user.email}
-                                <p class="mb-1">
-                                    <small>{user.email}</small>
-                                </p>
-                            {/if}
                             <small class="text-muted">DN: {user.dn}</small>
                         </div>
                     </div>
                 {/each}
             </div>
-        <script lang="ts">
-            // ...existing code...
-            let selectedUserDns = $state<string[]>([])
-        </script>
-        {/if}
-
-        {#if error}
-            <Alert color="danger">{error}</Alert>
-        {/if}
-        {#if success}
-            <Alert color="success">{success}</Alert>
         {/if}
     </div>
     {/if}

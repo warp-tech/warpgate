@@ -25,6 +25,8 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub username_attribute: String,
+    #[sea_orm(column_type = "Text")]
+    pub ssh_key_attribute: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -52,6 +54,7 @@ impl TryFrom<&Model> for warpgate_ldap::LdapConfig {
                 .as_str()
                 .try_into()
                 .unwrap_or(warpgate_ldap::LdapUsernameAttribute::Cn),
+            ssh_key_attribute: server.ssh_key_attribute.clone(),
         })
     }
 }

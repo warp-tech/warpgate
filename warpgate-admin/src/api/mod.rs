@@ -56,6 +56,7 @@ pub fn get() -> impl OpenApi {
                 ldap_servers::ListApi,
                 ldap_servers::DetailApi,
                 ldap_servers::QueryApi,
+                ldap_servers::ImportApi,
             ),
             parameters::Api,
             ssh_connection_test::Api,

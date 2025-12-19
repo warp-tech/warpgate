@@ -38,12 +38,11 @@ impl ImportApi {
         let mut imported = Vec::new();
         for dn in &body.dns {
             if let Some(user) = all_users.iter().find(|u| &u.dn == dn) {
-                // Create user in DB if not exists
-                let exists = warpgate_db_entities::User::Entity::find()
+                let existing = warpgate_db_entities::User::Entity::find()
                     .filter(warpgate_db_entities::User::Column::Username.eq(&user.username))
                     .one(&*db)
                     .await?;
-                if exists.is_none() {
+                if existing.is_none() {
                     let values = warpgate_db_entities::User::ActiveModel {
                         id: Set(Uuid::new_v4()),
                         username: Set(user.username.clone()),
@@ -97,6 +96,7 @@ struct LdapServerResponse {
     auto_link_sso_users: bool,
     description: String,
     username_attribute: LdapUsernameAttribute,
+    ssh_key_attribute: String,
 }
 
 impl From<LdapServer::Model> for LdapServerResponse {
@@ -120,6 +120,7 @@ impl From<LdapServer::Model> for LdapServerResponse {
                 .as_str()
                 .try_into()
                 .unwrap_or(LdapUsernameAttribute::Cn),
+            ssh_key_attribute: model.ssh_key_attribute,
         }
     }
 }
@@ -145,6 +146,8 @@ struct CreateLdapServerRequest {
     description: Option<String>,
     #[oai(default = "default_username_attribute")]
     username_attribute: LdapUsernameAttribute,
+    #[oai(default = "default_ssh_key_attribute")]
+    ssh_key_attribute: String,
 }
 
 fn default_port() -> i32 {
@@ -175,6 +178,10 @@ fn default_username_attribute() -> LdapUsernameAttribute {
     LdapUsernameAttribute::Cn
 }
 
+fn default_ssh_key_attribute() -> String {
+    "sshPublicKey".to_string()
+}
+
 #[derive(Object)]
 struct UpdateLdapServerRequest {
     name: String,
@@ -189,6 +196,7 @@ struct UpdateLdapServerRequest {
     auto_link_sso_users: bool,
     description: Option<String>,
     username_attribute: LdapUsernameAttribute,
+    ssh_key_attribute: String,
 }
 
 #[derive(Object)]
@@ -328,6 +336,7 @@ impl ListApi {
             base_dns: vec![],
             user_filter: body.user_filter.clone(),
             username_attribute: body.username_attribute,
+            ssh_key_attribute: body.ssh_key_attribute.clone(),
         };
 
         // Discover base DNs
@@ -350,6 +359,7 @@ impl ListApi {
             auto_link_sso_users: Set(body.auto_link_sso_users),
             description: Set(body.description.clone().unwrap_or_default()),
             username_attribute: Set(body.username_attribute.attribute_name().into()),
+            ssh_key_attribute: Set(body.ssh_key_attribute.clone()),
         };
 
         let server = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -377,6 +387,7 @@ impl ListApi {
             base_dns: vec![],
             user_filter: String::new(),
             username_attribute: LdapUsernameAttribute::Cn,
+            ssh_key_attribute: "sshPublicKey".to_string(),
         };
 
         match warpgate_ldap::test_connection(&ldap_config).await {
@@ -509,6 +520,7 @@ impl DetailApi {
             base_dns: vec![],
             user_filter: body.user_filter.clone(),
             username_attribute: body.username_attribute,
+            ssh_key_attribute: body.ssh_key_attribute.clone(),
         };
 
         if let Ok(base_dns) = warpgate_ldap::discover_base_dns(&ldap_config).await {
@@ -577,15 +589,17 @@ impl QueryApi {
         };
 
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&server)?;
-
-        match warpgate_ldap::list_users(&ldap_config).await {
-            Ok(users) => Ok(GetLdapUsersResponse::Ok(Json(
-                users.into_iter().map(Into::into).collect(),
-            ))),
-            Err(e) => Ok(GetLdapUsersResponse::BadRequest(Json(format!(
-                "Failed to query users: {}",
-                e
-            )))),
-        }
+        let users = match warpgate_ldap::list_users(&ldap_config).await {
+            Ok(users) => users,
+            Err(e) => {
+                return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
+                    "Failed to query users: {}",
+                    e
+                ))))
+            }
+        };
+        let mut users = users.into_iter().map(Into::into).collect::<Vec<_>>();
+        users.sort_by_key(|u: &LdapUserResponse| u.username.clone());
+        Ok(GetLdapUsersResponse::Ok(Json(users)))
     }
 }

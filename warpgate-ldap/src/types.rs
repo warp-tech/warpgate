@@ -50,6 +50,7 @@ pub struct LdapConfig {
     pub base_dns: Vec<String>,
     pub user_filter: String,
     pub username_attribute: LdapUsernameAttribute,
+    pub ssh_key_attribute: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -19,6 +19,7 @@
     let autoLinkSsoUsers = $state(false)
     let description = $state('')
     let usernameAttribute = $state(LdapUsernameAttribute.Cn)
+    let sshKeyAttribute = $state('sshPublicKey')
     let error = $state<string | null>(null)
     let tls: Tls = $state({
         mode: TlsMode.Preferred,
@@ -66,6 +67,8 @@
                     enabled,
                     autoLinkSsoUsers,
                     description: description || undefined,
+                    usernameAttribute,
+                    sshKeyAttribute,
                 },
             })
 
@@ -102,6 +105,7 @@
             bind:tls
             bind:userFilter
             bind:usernameAttribute
+            bind:sshKeyAttribute
         />
 
         {#if testResult}

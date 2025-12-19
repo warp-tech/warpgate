@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.18.0-10-g4ae52393-modified"
+    "version": "v0.18.0-11-g422b4f76-modified"
   },
   "servers": [
     {
@@ -2879,6 +2879,60 @@
         "operationId": "get_ldap_users"
       }
     },
+    "/ldap-servers/{id}/import-users": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportLdapUsersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ldap_users"
+      }
+    },
     "/parameters": {
       "get": {
         "responses": {
@@ -3116,6 +3170,10 @@
                 "default": "Cn"
               }
             ]
+          },
+          "ssh_key_attribute": {
+            "type": "string",
+            "default": "sshPublicKey"
           }
         }
       },
@@ -3274,6 +3332,21 @@
           }
         }
       },
+      "ImportLdapUsersRequest": {
+        "type": "object",
+        "title": "ImportLdapUsersRequest",
+        "required": [
+          "dns"
+        ],
+        "properties": {
+          "dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "LdapServerResponse": {
         "type": "object",
         "title": "LdapServerResponse",
@@ -3290,7 +3363,8 @@
           "enabled",
           "auto_link_sso_users",
           "description",
-          "username_attribute"
+          "username_attribute",
+          "ssh_key_attribute"
         ],
         "properties": {
           "id": {
@@ -3336,6 +3410,9 @@
           },
           "username_attribute": {
             "$ref": "#/components/schemas/LdapUsernameAttribute"
+          },
+          "ssh_key_attribute": {
+            "type": "string"
           }
         }
       },
@@ -4268,7 +4345,8 @@
           "tls_verify",
           "enabled",
           "auto_link_sso_users",
-          "username_attribute"
+          "username_attribute",
+          "ssh_key_attribute"
         ],
         "properties": {
           "name": {
@@ -4307,6 +4385,9 @@
           },
           "username_attribute": {
             "$ref": "#/components/schemas/LdapUsernameAttribute"
+          },
+          "ssh_key_attribute": {
+            "type": "string"
           }
         }
       },
