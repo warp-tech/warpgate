@@ -9,7 +9,7 @@ once_cell = { version = "1.17", default-features = false }
 poem = { version = "3.1", features = ["rustls"], default-features = false }
 poem-openapi.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
-rustls-tls-types.workspace = true
+rustls-pki-types.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
 serde_json.workspace = true

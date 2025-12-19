@@ -6059,6 +6059,7 @@ dependencies = [
  "poem-openapi",
  "rustls",
  "rustls-native-certs",
+ "rustls-pki-types",
  "sea-orm",
  "serde",
  "serde_json",
