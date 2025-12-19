@@ -42,7 +42,7 @@ warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 rustls.workspace = true
-rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
 webpki = { version = "0.22", default-features = false }
 tokio-stream.workspace = true
 git-version = { version = "0.3.9", default-features = false }

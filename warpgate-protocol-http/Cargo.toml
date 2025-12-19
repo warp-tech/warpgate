@@ -17,7 +17,6 @@ once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 reqwest.workspace = true
-rustls-pemfile.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

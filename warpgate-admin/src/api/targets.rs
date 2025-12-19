@@ -35,6 +35,7 @@ enum GetTargetsResponse {
     Ok(Json<Vec<TargetConfig>>),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum CreateTargetResponse {
     #[oai(status = 201)]
@@ -125,6 +126,7 @@ impl ListApi {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum GetTargetResponse {
     #[oai(status = 200)]
@@ -133,6 +135,7 @@ enum GetTargetResponse {
     NotFound,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum UpdateTargetResponse {
     #[oai(status = 200)]

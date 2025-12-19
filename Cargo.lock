@@ -4164,9 +4164,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.12.0"
+version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "229a4a4c221013e7e1f1a043678c5cc39fe5171437c88fb47151a21e6f5b5c79"
+checksum = "21e6f2ab2928ca4291b86736a8bd920a277a399bba1589409d72154ff87c1282"
 dependencies = [
  "zeroize",
 ]
@@ -5790,7 +5790,7 @@ dependencies = [
  "russh",
  "rustls",
  "rustls-native-certs",
- "rustls-pemfile",
+ "rustls-pki-types",
  "schemars",
  "sea-orm",
  "serde",
@@ -5837,7 +5837,6 @@ dependencies = [
  "rand_core 0.6.4",
  "russh",
  "rustls",
- "rustls-pemfile",
  "sea-orm",
  "serde",
  "serde_json",
@@ -5938,7 +5937,6 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest",
- "rustls-pemfile",
  "sea-orm",
  "serde",
  "serde_json",
@@ -5970,7 +5968,6 @@ dependencies = [
  "password-hash",
  "rand 0.8.5",
  "rustls",
- "rustls-pemfile",
  "sha1",
  "thiserror 2.0.17",
  "tokio",
@@ -5998,9 +5995,8 @@ dependencies = [
  "rsasl",
  "rustls",
  "rustls-native-certs",
- "rustls-pemfile",
- "socket2 0.5.10",
- "thiserror 2.0.17",
+ "socket2",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-rustls",
  "tracing",

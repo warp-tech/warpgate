@@ -318,6 +318,7 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 
+    #[allow(clippy::panic, reason = "dev only")]
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         panic!("This migration is irreversible");
     }

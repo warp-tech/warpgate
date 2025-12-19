@@ -15,7 +15,6 @@ tracing.workspace = true
 uuid = { version = "1.2", default-features = false }
 bytes.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }

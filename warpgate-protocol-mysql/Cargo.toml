@@ -23,7 +23,6 @@ rand.workspace = true
 sha1 = { version = "0.10", default-features = false }
 password-hash.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 webpki = { version = "0.22", default-features = false }
