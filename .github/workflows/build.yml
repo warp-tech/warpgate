@@ -11,12 +11,12 @@ jobs:
         include:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             cyclonedx-build: cyclonedx-linux-x64
             cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
           - arch: x86_64-macos
@@ -44,6 +44,16 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
+
+      - name: Install tools
+        run: |
+          rustup toolchain install 1.92.0
+          rustup default 1.92.0
+          cargo install just
+          cargo install cargo-deny@0.18.9
+          cargo install cargo-cyclonedx@^0.5
+          rm -rf ~/.cargo/registry
+
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
@@ -59,15 +69,11 @@ jobs:
         with:
           key: "build"
 
-      - name: Install tools
+      - name: Install CycloneDX
         run: |
-          cargo install just
-          cargo install cargo-deny@0.18.9
-          cargo install cargo-cyclonedx@^0.5
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
-          rm -rf ~/.cargo/registry
 
       - name: cargo-deny
         run: |
