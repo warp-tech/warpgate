@@ -44,16 +44,6 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-
-      - name: Install tools
-        run: |
-          rustup toolchain install 1.92.0
-          rustup default 1.92.0
-          cargo install just
-          cargo install cargo-deny@0.18.9
-          cargo install cargo-cyclonedx@^0.5
-          rm -rf ~/.cargo/registry
-
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
@@ -68,6 +58,13 @@ jobs:
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           key: "build"
+
+      - name: Install tools
+        run: |
+          cargo install just
+          cargo install cargo-deny@0.18.9
+          cargo install cargo-cyclonedx@^0.5
+          rm -rf ~/.cargo/registry
 
       - name: Install CycloneDX
         run: |
