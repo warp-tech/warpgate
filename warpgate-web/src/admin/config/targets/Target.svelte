@@ -55,6 +55,7 @@
                 options: target!.options,
                 rateLimitBytesPerSecond: target!.rateLimitBytesPerSecond,
                 defaultDatabaseName: dbName && dbName.length > 0 ? dbName : null,
+                groupId: target!.groupId,
             }
             target = await api.updateTarget({
                 id: params.id,
