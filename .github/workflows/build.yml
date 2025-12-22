@@ -44,11 +44,11 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596
+      - uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b
 
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
@@ -149,7 +149,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with:
           submodules: recursive
 
