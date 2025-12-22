@@ -5,7 +5,6 @@ use std::sync::Arc;
 use poem::listener::RustlsCertificate;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::sign::{CertifiedKey, SigningKey};
-use rustls_pki_types::pem::PemObject;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Certificate};
@@ -39,13 +38,12 @@ impl TlsCertificateBundle {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let certificates = CertificateDer::pem_slice_iter(&bytes[..])
+        let certificates = rustls_pemfile::certs(&mut &bytes[..])
             .collect::<Result<Vec<CertificateDer<'static>>, _>>()?;
 
         if certificates.is_empty() {
             return Err(RustlsSetupError::NoCertificates);
         }
-
         Ok(Self {
             bytes,
             certificates,
@@ -123,7 +121,24 @@ impl TlsPrivateKey {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let key = PrivateKeyDer::from_pem_slice(bytes.as_slice())?;
+        let key = match rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice()).next() {
+            Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
+            _ => None,
+        }
+        .or_else(
+            || match rustls_pemfile::ec_private_keys(&mut bytes.as_slice()).next() {
+                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
+                _ => None,
+            },
+        )
+        .or_else(
+            || match rustls_pemfile::rsa_private_keys(&mut bytes.as_slice()).next() {
+                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
+                _ => None,
+            },
+        );
+
+        let key = key.ok_or(RustlsSetupError::NoKeys)?;
         let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
 
         Ok(Self { bytes, key })

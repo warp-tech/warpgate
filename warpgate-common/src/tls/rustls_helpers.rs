@@ -7,7 +7,6 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
-use rustls_pki_types::pem::PemObject;
 
 use super::{RustlsSetupError, ROOT_CERT_STORE};
 
@@ -41,7 +40,7 @@ pub async fn configure_tls_connector(
         if let Some(data) = root_cert {
             let mut cursor = Cursor::new(data);
 
-            for cert in CertificateDer::pem_reader_iter(&mut cursor) {
+            for cert in rustls_pemfile::certs(&mut cursor) {
                 cert_store.add(cert?)?;
             }
         }
