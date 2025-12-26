@@ -55,6 +55,11 @@ pub(crate) fn _default_postgres_listen() -> ListenEndpoint {
 }
 
 #[inline]
+pub(crate) fn _default_kubernetes_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 8443))
+}
+
+#[inline]
 pub(crate) fn _default_retention() -> Duration {
     Duration::from_secs(60 * 60 * 24 * 7)
 }

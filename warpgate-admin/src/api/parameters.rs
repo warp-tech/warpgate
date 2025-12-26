@@ -1,7 +1,7 @@
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{EntityTrait, Set};
+use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
@@ -65,11 +65,9 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
 
-        let am = Parameters::ActiveModel {
-            id: Set(Parameters::Entity::get(&db).await?.id),
-            allow_own_credential_management: Set(body.allow_own_credential_management),
-            rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
-        };
+        let mut am = Parameters::Entity::get(&db).await?.into_active_model();
+        am.allow_own_credential_management = Set(body.allow_own_credential_management);
+        am.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
 
         Parameters::Entity::update(am).exec(&*db).await?;
         drop(db);

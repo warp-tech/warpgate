@@ -269,6 +269,14 @@ ul.pagination {
     }
 }
 
+.abbreviate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .dropdown-item {
     display: flex;
     align-items: center;

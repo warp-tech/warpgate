@@ -1,5 +1,6 @@
 use poem_openapi::OpenApi;
 
+mod certificate_credentials;
 mod known_hosts_detail;
 mod known_hosts_list;
 mod ldap_servers;
@@ -60,6 +61,10 @@ pub fn get() -> impl OpenApi {
             ),
             parameters::Api,
             ssh_connection_test::Api,
+        ),
+        (
+            certificate_credentials::ListApi,
+            certificate_credentials::DetailApi,
         ),
     )
 }

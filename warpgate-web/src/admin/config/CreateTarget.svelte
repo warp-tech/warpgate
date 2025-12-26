@@ -4,9 +4,9 @@
     import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { TargetKind } from 'gateway/lib/api'
     import RadioButton from 'common/RadioButton.svelte'
     import { onMount } from 'svelte'
+    import type { TargetKind } from 'gateway/lib/api'
 
     let error: string|null = $state(null)
     let name = $state('')
@@ -17,8 +17,8 @@
     async function create () {
         try {
             const options: TargetOptions|undefined = {
-                [TargetKind.Ssh]: {
-                    kind: TargetKind.Ssh,
+                Ssh: {
+                    kind: 'Ssh' as const,
                     host: '192.168.0.1',
                     port: 22,
                     username: 'root',
@@ -26,16 +26,16 @@
                         kind: 'PublicKey' as const,
                     },
                 },
-                [TargetKind.Http]: {
-                    kind: TargetKind.Http,
+                Http: {
+                    kind: 'Http' as const,
                     url: 'http://192.168.0.1',
                     tls: {
                         mode: TlsMode.Preferred,
                         verify: true,
                     },
                 },
-                [TargetKind.MySql]: {
-                    kind: TargetKind.MySql,
+                MySql: {
+                    kind: 'MySql' as const,
                     host: '192.168.0.1',
                     port: 3306,
                     tls: {
@@ -45,8 +45,8 @@
                     username: 'root',
                     password: '',
                 },
-                [TargetKind.Postgres]: {
-                    kind: TargetKind.Postgres,
+                Postgres: {
+                    kind: 'Postgres' as const,
                     host: '192.168.0.1',
                     port: 5432,
                     tls: {
@@ -56,7 +56,21 @@
                     username: 'postgres',
                     password: '',
                 },
-                [TargetKind.WebAdmin]: null as any,
+                Kubernetes: {
+                    kind: 'Kubernetes' as const,
+                    clusterUrl: 'https://kubernetes.example.com:6443',
+                    namespace: 'default',
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    auth: {
+                        kind: 'Certificate' as const,
+                        certificate: '',
+                        privateKey: '',
+                    },
+                },
+                WebAdmin: null as any,
             }[type]
             if (!options) {
                 return
@@ -87,6 +101,7 @@
         { name: 'HTTP', value: TargetKind.Http },
         { name: 'MySQL', value: TargetKind.MySql },
         { name: 'PostgreSQL', value: TargetKind.Postgres },
+        { name: 'Kubernetes', value: TargetKind.Kubernetes },
     ]
 </script>
 

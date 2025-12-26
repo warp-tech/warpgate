@@ -4,7 +4,7 @@ import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
 import type { ExistingCredential } from './CredentialEditor.svelte'
 import InfoBox from 'common/InfoBox.svelte'
 
-type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres'
+type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes'
 
 interface Props {
     value: UserRequireCredentialsPolicy
@@ -23,6 +23,7 @@ let {
 const labels = {
     Password: 'Password',
     PublicKey: 'Key',
+    Certificate: 'Certificate',
     Totp: 'OTP',
     Sso: 'SSO',
     WebUserApproval: 'In-browser auth',
@@ -38,6 +39,12 @@ const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     http: new Map(),
     mysql: new Map(),
     ssh: new Map(),
+    kubernetes: new Map([
+        [
+            [CredentialKind.WebUserApproval, true],
+            'Users will need to log in to the Warpgate UI to see the 2FA auth prompt for Kubernetes access.',
+        ],
+    ]),
 }
 
 let activeTips: string[] = $derived.by(() => {
