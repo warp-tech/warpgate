@@ -276,7 +276,7 @@ pub async fn proxy_normal_request(
     }
 
     client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode.clone();
+        let tls_mode = options.tls.mode;
         let uri = uri.clone();
         move |attempt| {
             if tls_mode == TlsMode::Preferred
@@ -348,7 +348,7 @@ async fn copy_client_body(
     response.set_body(Body::from_bytes_stream(
         client_response
             .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            .map_err(std::io::Error::other),
     ));
     Ok(())
 }

@@ -12,8 +12,6 @@ use x509_cert::time::Validity;
 use x509_cert::{Certificate, TbsCertificate, Version};
 use x509_parser::pem::parse_x509_pem;
 
-use hex;
-
 mod error;
 pub use error::CaError;
 
@@ -107,7 +105,6 @@ pub fn deserialize_ca(
 
     // Validate it's a private key by checking the tag
     let tag = key_pem.tag();
-    dbg!(&tag);
     let ec_private_key_tag = "PRIVATE KEY";
     if tag != ec_private_key_tag {
         return Err(CaError::InvalidKeyFormat);
@@ -146,14 +143,12 @@ pub fn issue_client_certificate(
     };
 
     let subject = {
-        let mut name_attrs = Vec::new();
-        name_attrs.push(AttributeTypeAndValue {
+        let name_attrs = vec![AttributeTypeAndValue {
             oid: rfc4519::UID,
             value: Utf8StringRef::new(&user_id.to_string())?.into(),
-        });
+        }];
 
-        #[allow(clippy::unwrap_used)] // infallible
-        let rdn = RelativeDistinguishedName::try_from(SetOfVec::try_from(name_attrs)?).unwrap();
+        let rdn = RelativeDistinguishedName::from(SetOfVec::try_from(name_attrs)?);
         RdnSequence::from(vec![rdn])
     };
 
@@ -172,6 +167,7 @@ pub fn issue_client_certificate(
                 .to_le_bytes(),
         );
         let hash = hasher.finish();
+        #[allow(clippy::indexing_slicing, reason = "length known")]
         let serial_bytes = &hash.as_ref()[..8]; // Use first 8 bytes
         SerialNumber::new(serial_bytes)?
     };

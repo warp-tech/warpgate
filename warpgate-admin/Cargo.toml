@@ -15,7 +15,7 @@ mime_guess = { version = "2.0", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 rcgen.workspace = true
-rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
 russh.workspace = true
 rust-embed = { version = "8.3", default-features = false }
 sea-orm.workspace = true

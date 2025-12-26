@@ -17,12 +17,14 @@ use tokio_rustls::server::TlsStream;
 use tracing::*;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{
-    ListenEndpoint, SessionId, SingleCertResolver, Target, TargetKubernetesOptions, TargetOptions,
-    TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey, User,
+    ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions, User,
 };
 use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
 use warpgate_db_entities::CertificateCredential;
+use warpgate_tls::{
+    SingleCertResolver, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
 
 use crate::client::create_kube_config;
 use crate::correlator::RequestCorrelator;
@@ -233,6 +235,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 }
 
 #[handler]
+#[allow(clippy::too_many_arguments)]
 async fn handle_api_request(
     req: &Request,
     Path((target_name, path)): Path<(String, String)>,
@@ -261,7 +264,7 @@ async fn handle_api_request(
     };
 
     let client =
-        create_authenticated_client(&k8s_options, &Some(user_info.username.clone()), &services)
+        create_authenticated_client(k8s_options, &Some(user_info.username.clone()), &services)
             .await?;
 
     info!(
@@ -650,19 +653,22 @@ async fn create_authenticated_client(
     match &k8s_options.auth {
         warpgate_common::KubernetesTargetAuth::Token(auth) => {
             info!(
-            "Setting Kubernetes auth token: {}...",
-            &auth.token.expose_secret()[..std::cmp::min(10, auth.token.expose_secret().len())]
-        );
+                "Setting Kubernetes auth token: {}...",
+                &auth.token.expose_secret()[..std::cmp::min(10, auth.token.expose_secret().len())]
+            );
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", auth.token.expose_secret()))
-                    .map_err(|e| {
-                        poem::Error::from_string(
-                            format!("Invalid token: {}", e),
-                            poem::http::StatusCode::BAD_REQUEST,
-                        )
-                    })?,
+                reqwest::header::HeaderValue::from_str(&format!(
+                    "Bearer {}",
+                    auth.token.expose_secret()
+                ))
+                .map_err(|e| {
+                    poem::Error::from_string(
+                        format!("Invalid token: {}", e),
+                        poem::http::StatusCode::BAD_REQUEST,
+                    )
+                })?,
             );
             client_builder = client_builder.default_headers(headers);
         }
@@ -684,7 +690,10 @@ async fn create_authenticated_client(
             info!("Configuring Kubernetes client with mTLS (certificate auth)");
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes()).map_err(|e| {
                 poem::Error::from_string(
-                    format!("Invalid client certificate/key for Kubernetes upstream: {}", e),
+                    format!(
+                        "Invalid client certificate/key for Kubernetes upstream: {}",
+                        e
+                    ),
                     poem::http::StatusCode::BAD_REQUEST,
                 )
             })?;

@@ -5,7 +5,10 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
 
-use crate::{CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role, SsoCredential};
+use crate::{
+    CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role,
+    SsoCredential,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "users")]

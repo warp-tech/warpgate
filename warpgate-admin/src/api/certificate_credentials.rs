@@ -122,7 +122,7 @@ impl ListApi {
         _auth: AnySecurityScheme,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let db = db.lock().await;
-        let params = Parameters::Entity::get(&*db).await?;
+        let params = Parameters::Entity::get(&db).await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let user = User::Entity::find_by_id(*user_id)

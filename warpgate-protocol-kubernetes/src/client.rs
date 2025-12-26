@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kube::{Client, Config};
-use warpgate_common::{KubernetesTargetAuth, TargetKubernetesOptions, TlsMode};
+use warpgate_common::{KubernetesTargetAuth, TargetKubernetesOptions};
+use warpgate_tls::TlsMode;
 
 pub async fn test_connection(options: &TargetKubernetesOptions) -> Result<()> {
     let config = create_kube_config(options).await?;
@@ -14,10 +15,12 @@ pub async fn test_connection(options: &TargetKubernetesOptions) -> Result<()> {
 }
 
 pub async fn create_kube_config(options: &TargetKubernetesOptions) -> Result<Config> {
-    let mut config = Config::infer().await.unwrap_or_else(|_| {
-        // If infer fails, create a basic config
-        Config::new(options.cluster_url.parse().unwrap())
-    });
+    let mut config = Config::new(
+        options
+            .cluster_url
+            .parse()
+            .context("parsing k8s cluster URL")?,
+    );
 
     // Set the cluster URL
     config.cluster_url = options.cluster_url.parse()?;
@@ -50,7 +53,8 @@ pub async fn create_kube_config(options: &TargetKubernetesOptions) -> Result<Con
             config.auth_info.client_key_data = Some(secrecy::SecretBox::new(
                 auth.private_key.expose_secret().clone().into(),
             ));
-            config.auth_info.client_certificate_data = auth.certificate.expose_secret().clone().into()
+            config.auth_info.client_certificate_data =
+                auth.certificate.expose_secret().clone().into()
         }
     }
 

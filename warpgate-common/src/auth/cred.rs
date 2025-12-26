@@ -74,9 +74,9 @@ impl From<UserCertificateCredential> for AuthCredential {
 impl From<AuthCredential> for Option<UserCertificateCredential> {
     fn from(cred: AuthCredential) -> Self {
         match cred {
-            AuthCredential::Certificate { certificate_pem } => Some(UserCertificateCredential {
-                certificate_pem,
-            }),
+            AuthCredential::Certificate { certificate_pem } => {
+                Some(UserCertificateCredential { certificate_pem })
+            }
             _ => None,
         }
     }

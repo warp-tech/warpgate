@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
-use warpgate_core::recordings::{RecordingWriter, Recorder};
+use warpgate_core::recordings::{Recorder, RecordingWriter};
 use warpgate_db_entities::Recording::RecordingKind;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -26,8 +26,12 @@ impl KubernetesRecorder {
         self.started_at.elapsed().as_secs_f32()
     }
 
-    async fn write_item(&mut self, item: &KubernetesRecordingItem) -> Result<(), warpgate_core::recordings::Error> {
-        let mut serialized_item = serde_json::to_vec(&item).map_err(warpgate_core::recordings::Error::Serialization)?;
+    async fn write_item(
+        &mut self,
+        item: &KubernetesRecordingItem,
+    ) -> Result<(), warpgate_core::recordings::Error> {
+        let mut serialized_item =
+            serde_json::to_vec(&item).map_err(warpgate_core::recordings::Error::Serialization)?;
         serialized_item.push(b'\n');
         self.writer.write(&serialized_item).await?;
         Ok(())

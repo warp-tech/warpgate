@@ -68,6 +68,7 @@ pub struct CredentialsState {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum CredentialsStateResponse {
     #[oai(status = 200)]
     Ok(Json<CredentialsState>),
@@ -154,12 +155,6 @@ enum CreateOtpCredentialResponse {
     Created(Json<ExistingOtpCredential>),
     #[oai(status = 401)]
     Unauthorized,
-}
-
-#[derive(Object)]
-struct NewCertificateCredential {
-    label: String,
-    certificate_pem: String,
 }
 
 #[derive(Object)]
@@ -507,10 +502,16 @@ impl Api {
         };
 
         // Fetch CA params
-        let params = Parameters::Entity::get(&*db).await?;
-        let ca = warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
+        let params = Parameters::Entity::get(&db).await?;
+        let ca =
+            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
-        let client_cert = warpgate_ca::issue_client_certificate(&ca, &user_model.username, public_key_pem, user_model.id)?;
+        let client_cert = warpgate_ca::issue_client_certificate(
+            &ca,
+            &user_model.username,
+            public_key_pem,
+            user_model.id,
+        )?;
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
         let object = CertificateCredential::ActiveModel {
@@ -529,7 +530,7 @@ impl Api {
             IssuedCertificateCredential {
                 credential: object.clone().into(),
                 certificate_pem: client_cert_pem,
-            }
+            },
         )))
     }
 

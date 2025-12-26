@@ -33,3 +33,4 @@ uuid.workspace = true
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
