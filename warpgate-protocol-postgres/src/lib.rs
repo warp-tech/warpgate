@@ -18,11 +18,11 @@ use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
 use tracing::*;
-use warpgate_common::{
-    ListenEndpoint, ResolveServerCert, Target, TargetOptions, TlsCertificateAndPrivateKey,
-    TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions};
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use warpgate_tls::{
+    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
+};
 
 pub struct PostgresProtocolServer {
     services: Services,

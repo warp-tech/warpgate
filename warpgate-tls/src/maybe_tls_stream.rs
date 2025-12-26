@@ -6,7 +6,6 @@ use std::task::Poll;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ServerConfig};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tracing::*;
 
 #[derive(thiserror::Error, Debug)]
 pub enum MaybeTlsStreamError {

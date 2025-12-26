@@ -18,11 +18,8 @@ if (localStorage.warpgateMenuLocation) {
 
 onMount(async () => {
     ready = true
-    try {
-        const info = await api.getInfo()
-        externalHost = info.externalHost
-    } catch {
-    }
+    const info = await api.getInfo()
+    externalHost = info.externalHost
 })
 
 function drag (e: MouseEvent) {

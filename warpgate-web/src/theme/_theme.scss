@@ -83,6 +83,7 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     display: flex;
     align-items: center;
     margin: 0.25rem 0 1.5rem;
+    gap: 1rem;
 
     h1 {
         font-family: 'Poppins';
@@ -266,4 +267,10 @@ ul.pagination {
     .modal-backdrop.fade {
         opacity: var(--bs-backdrop-opacity) !important;
     }
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }

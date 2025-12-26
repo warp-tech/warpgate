@@ -1,0 +1,17 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-ldap"
+version = "0.17.0"
+
+[dependencies]
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+ldap3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+poem-openapi.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }

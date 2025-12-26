@@ -6,6 +6,7 @@ version = "0.18.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 anyhow = { version = "1.0", features = ["std"], default-features = false }
 async-trait = { version = "0.1", default-features = false }
@@ -17,8 +18,16 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
-pgwire = { version = "0.30", default-features = false, features = ["server-api-aws-lc-rs"] }
-rsasl = { version = "2.1.0", default-features = false, features = ["config_builder", "scram-sha-2", "std", "plain", "provider"] }
+pgwire = { version = "0.30", default-features = false, features = [
+    "server-api-aws-lc-rs",
+] }
+rsasl = { version = "2.1.0", default-features = false, features = [
+    "config_builder",
+    "scram-sha-2",
+    "std",
+    "plain",
+    "provider",
+] }
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }
 socket2 = { version = "0.5", features = ["all"] }
