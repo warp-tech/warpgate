@@ -79,7 +79,7 @@ export function makeKubernetesContext (opt: ConnectionOptions): string {
     return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
 }
 
-export function makeKubernetesNamespace (opt: ConnectionOptions): string {
+export function makeKubernetesNamespace (_opt: ConnectionOptions): string {
     return 'default'
 }
 
@@ -139,6 +139,6 @@ users:
     }
 }
 
-export function makeExampleKubectlCommand (opt: ConnectionOptions): string {
+export function makeExampleKubectlCommand (_opt: ConnectionOptions): string {
     return shellEscape(['kubectl', '--kubeconfig', 'warpgate-kubeconfig.yaml', 'get', 'pods'])
 }
