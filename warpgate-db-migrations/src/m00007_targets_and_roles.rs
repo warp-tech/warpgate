@@ -36,15 +36,6 @@ pub mod target {
         WebAdmin,
     }
 
-    #[derive(Debug, PartialEq, Eq, Clone, EnumIter, DeriveActiveEnum)]
-    #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
-    pub enum SshAuthKind {
-        #[sea_orm(string_value = "password")]
-        Password,
-        #[sea_orm(string_value = "publickey")]
-        PublicKey,
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "targets")]
     pub struct Model {
