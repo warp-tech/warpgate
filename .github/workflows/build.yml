@@ -11,12 +11,12 @@ jobs:
         include:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             cyclonedx-build: cyclonedx-linux-x64
             cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
           - arch: x86_64-macos
@@ -44,11 +44,11 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b
+      - uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596
 
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
@@ -64,13 +64,17 @@ jobs:
           cargo install --locked just
           cargo install --locked cargo-deny@0.18.9
           cargo install --locked cargo-cyclonedx@^0.5
+          rm -rf ~/.cargo/registry
+
+      - name: Install CycloneDX
+        run: |
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
-          rm -rf ~/.cargo/registry
 
       - name: cargo-deny
         run: |
+          cargo deny --version
           cargo deny check
 
       - name: Install admin UI deps
@@ -149,7 +153,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
 
