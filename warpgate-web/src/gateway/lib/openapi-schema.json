@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.15.0-20-g4fa0f11-modified"
+    "version": "v0.16.0-23-g8b71c2fd-modified"
   },
   "servers": [
     {
@@ -823,6 +823,19 @@
           }
         }
       },
+      "BootstrapThemeColor": {
+        "type": "string",
+        "enum": [
+          "Primary",
+          "Secondary",
+          "Success",
+          "Danger",
+          "Warning",
+          "Info",
+          "Light",
+          "Dark"
+        ]
+      },
       "ChangePasswordRequest": {
         "type": "object",
         "title": "ChangePasswordRequest",
@@ -855,7 +868,8 @@
           "public_keys",
           "certificates",
           "sso",
-          "credential_policy"
+          "credential_policy",
+          "ldap_linked"
         ],
         "properties": {
           "password": {
@@ -887,6 +901,9 @@
           },
           "credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "ldap_linked": {
+            "type": "boolean"
           }
         }
       },
@@ -1008,6 +1025,26 @@
           }
         }
       },
+      "GroupInfo": {
+        "type": "object",
+        "title": "GroupInfo",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
+          }
+        }
+      },
       "Info": {
         "type": "object",
         "title": "Info",
@@ -1015,7 +1052,8 @@
           "ports",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
-          "own_credential_management_allowed"
+          "own_credential_management_allowed",
+          "has_ldap"
         ],
         "properties": {
           "version": {
@@ -1040,6 +1078,9 @@
             "type": "boolean"
           },
           "own_credential_management_allowed": {
+            "type": "boolean"
+          },
+          "has_ldap": {
             "type": "boolean"
           },
           "setup_state": {
@@ -1302,6 +1343,9 @@
           },
           "external_host": {
             "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupInfo"
           }
         }
       },

@@ -26,6 +26,7 @@ struct TargetDataRequest {
     description: Option<String>,
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
+    group_id: Option<Uuid>,
 }
 
 #[derive(ApiResponse)]
@@ -34,6 +35,7 @@ enum GetTargetsResponse {
     Ok(Json<Vec<TargetConfig>>),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum CreateTargetResponse {
     #[oai(status = 201)]
@@ -55,6 +57,7 @@ impl ListApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         search: Query<Option<String>>,
+        group_id: Query<Option<Uuid>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = db.lock().await;
@@ -64,6 +67,10 @@ impl ListApi {
         if let Some(ref search) = *search {
             let search = format!("%{search}%");
             targets = targets.filter(Target::Column::Name.like(search));
+        }
+
+        if let Some(group_id) = *group_id {
+            targets = targets.filter(Target::Column::GroupId.eq(group_id));
         }
 
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
@@ -108,6 +115,7 @@ impl ListApi {
             kind: Set((&body.options).into()),
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
+            group_id: Set(body.group_id),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -118,6 +126,7 @@ impl ListApi {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum GetTargetResponse {
     #[oai(status = 200)]
@@ -126,6 +135,7 @@ enum GetTargetResponse {
     NotFound,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum UpdateTargetResponse {
     #[oai(status = 200)]
@@ -204,6 +214,7 @@ impl DetailApi {
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.group_id = Set(body.group_id);
         let target = model.update(&*db).await?;
 
         drop(db);

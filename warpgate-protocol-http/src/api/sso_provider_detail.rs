@@ -34,6 +34,7 @@ pub struct SsoContext {
     pub request: SsoLoginRequest,
     pub next_url: Option<String>,
     pub supports_single_logout: bool,
+    pub return_host: Option<String>,
 }
 
 #[OpenApi]
@@ -59,17 +60,15 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
-
-        let mut return_url = config.construct_external_url(
-            Some(req),
-            provider_config.return_domain_whitelist.as_deref(),
-        )?;
+        let mut return_url = config
+            .construct_external_url(None, provider_config.return_domain_whitelist.as_deref())?;
         return_url.set_path("@warpgate/api/sso/return");
         debug!("Return URL: {}", &return_url);
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
+        let return_host = req.header("host").map(|h| h.to_string());
 
         let url = sso_req.auth_url().to_string();
         session.set(
@@ -79,6 +78,7 @@ impl Api {
                 request: sso_req,
                 next_url: next.0.clone(),
                 supports_single_logout: client.supports_single_logout().await?,
+                return_host,
             },
         );
 

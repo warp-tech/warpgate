@@ -185,7 +185,6 @@ impl Api {
             .verify_code((*code).clone())
             .await
             .inspect_err(|e| {
-                // More error details visible via Debug
                 warn!("Failed to verify SSO code: {e:?}");
             })?;
 
@@ -281,11 +280,19 @@ impl Api {
                 .await?;
         }
 
-        Ok(Ok(context
+        let mut next_url = context
             .next_url
             .as_deref()
             .unwrap_or("/@warpgate#/login")
-            .to_owned()))
+            .to_owned();
+
+        if let Some(ref host) = context.return_host {
+            if next_url.starts_with('/') {
+                next_url = format!("https://{}{}", host, next_url);
+            }
+        }
+
+        Ok(Ok(next_url))
     }
 
     #[oai(

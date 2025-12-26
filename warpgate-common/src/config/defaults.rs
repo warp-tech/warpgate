@@ -90,3 +90,7 @@ pub(crate) fn _default_ssh_keys_path() -> String {
 pub(crate) fn _default_ssh_inactivity_timeout() -> Duration {
     Duration::from_secs(60 * 5)
 }
+
+pub(crate) fn _default_postgres_idle_timeout_str() -> Option<String> {
+    Some("10m".to_string())
+}

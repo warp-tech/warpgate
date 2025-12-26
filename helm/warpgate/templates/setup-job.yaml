@@ -1,0 +1,104 @@
+{{- if .Values.setup.enabled }}
+{{- if eq .Values.setup.type "job" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "warpgate.fullname" . }}-setup-job
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}-setup
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- if .Values.setup.envFromSecret }}
+          env:
+          {{- range $key, $val := .Values.setup.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+          {{- end }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              if [ -d /ssh-keys ]; then
+                mkdir -p /data/ssh-keys
+                cp /ssh-keys/client-ed25519 /ssh-keys/client-rsa /ssh-keys/host-ed25519 /ssh-keys/host-rsa /data/ssh-keys/
+                chmod -R 600 /data/ssh-keys/*
+              fi
+
+              if [ -d /tls-cert ]; then
+                cp /tls-cert/tls.crt /data/tls.certificate.pem
+                cp /tls-cert/tls.key /data/tls.key.pem
+              fi
+
+              if [ -f /data/warpgate.yaml ]; then
+                # Creates the admin user which is normally only created when the unattended-setup is called. REF: https://github.com/warp-tech/warpgate/issues/1618
+                warpgate -c /data/warpgate.yaml create-user --password "$WARPGATE_ADMIN_PASSWORD" --role warpgate:admin admin
+              else
+                warpgate -c /data/warpgate.yaml unattended-setup --data-path /data \
+                  {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
+                  {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
+                  {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
+                  {{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }} {{- end }}
+                  {{- if .Values.setup.databaseUrl }} --database-url "{{ .Values.setup.databaseUrl }}" {{- end }}
+                  {{- if .Values.setup.recordSessions }} --record-sessions {{- end }}
+
+                {{- if .Values.setup.disableIpV6 }}
+                sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml
+                {{- end }}
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.ssh_keys_secret }}
+            - name: ssh-keys
+              mountPath: /ssh-keys
+            {{- end }}
+            {{- if .Values.tls_cert_secret }}
+            - name: tls-cert
+              mountPath: /tls-cert
+            {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        {{- with .Values.ssh_keys_secret }}
+        - name: ssh-keys
+          secret:
+            secretName: {{ . }}
+        {{- end }}
+        {{- with .Values.tls_cert_secret }}
+        - name: tls-cert
+          secret:
+            secretName: {{ . }}
+        {{- end }}
+        {{- if .Values.data.pvc.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            {{- if .Values.data.pvc.claimName }}
+            claimName: {{ .Values.data.pvc.claimName }}
+            {{- else }}
+            claimName: {{ include "warpgate.fullname" . }}-data
+            {{- end }}
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+{{- end }}
+{{- end }}

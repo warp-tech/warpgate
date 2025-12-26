@@ -39,6 +39,8 @@ pub enum WarpgateError {
     #[error(transparent)]
     Ca(#[from] CaError),
     #[error(transparent)]
+    Ldap(#[from] warpgate_ldap::LdapError),
+    #[error(transparent)]
     RusshKeys(#[from] russh::keys::Error),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),

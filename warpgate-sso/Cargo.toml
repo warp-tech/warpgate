@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-sso"
-version = "0.16.0"
+version = "0.18.0"
 
 [dependencies]
 bytes.workspace = true

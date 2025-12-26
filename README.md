@@ -1,4 +1,3 @@
-
 <p align="center">
 <img src="https://github.com/user-attachments/assets/89be835b-ff96-46df-94c7-ae2d176615e3" />
 </p>
@@ -42,6 +41,19 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 * See the [Getting started](https://warpgate.null.page/getting-started/) docs page (or [Getting started on Docker](https://warpgate.null.page/getting-started-on-docker/)).
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
+
+## How is Warpgate different from a jump host / VPN / Teleport?
+
+| Warpgate | SSH jump host | VPN | Teleport |
+|-|-|-|-|
+| ✅ **Precise 1:1 assignment between users and services** | (Usually) full access to the network behind the jump host | (Usually) full access to the network | ✅ **Precise 1:1 assignment between users and services** |
+| ✅ **No custom client needed** | Jump host config needed | ✅ **No custom client needed** | Custom client required |
+| ✅ **2FA out of the box** | 🟡 2FA possible with additional PAM plugins | 🟡 Depends on the provider | ✅ **2FA out of the box** |
+| ✅ **SSO out of the box** | 🟡 SSO possible with additional PAM plugins | 🟡 Depends on the provider | Paid |
+| ✅ **Command-level audit** | 🟡 Connection-level audit on the jump host, no secure audit on the target if root access is given | No secure audit on the target if root access is given | ✅ **Command-level audit** |
+| ✅ **Full session recording** | No secure recording possible on the target if root access is given | No secure recording possible on the target if root access is given | ✅ **Full session recording** |
+| ✅ **Non-interactive connections** | 🟡 Non-interactive connections are possible if the clients supports jump hosts natively | ✅ **Non-interactive connections** | Non-interactive connections require using an SSH client wrapper or running a tunnel |
+| ✅ **Self-hosted, you own the data** | ✅ **Self-hosted, you own the data** | 🟡 Depends on the provider | SaaS |
 
 <center>
       <img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">
@@ -88,7 +100,7 @@ You can also use the admin web interface to view the live session list, review s
 * You'll need Rust, NodeJS and NPM
 * Clone the repo
 * [Just](https://github.com/casey/just) is used to run tasks - install it: `cargo install just`
-* Install the admin UI deps: `just npm`
+* Install the admin UI deps: `just npm install`
 * Build the frontend: `just npm run build`
 * Build Warpgate: `cargo build` (optionally `--release`)
 
@@ -118,13 +130,17 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Eugeny"><img src="https://avatars.githubusercontent.com/u/161476?v=4?s=100" width="100px;" alt="Eugeny"/><br /><sub><b>Eugeny</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=Eugeny" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://the-empire.systems/"><img src="https://avatars.githubusercontent.com/u/18178614?v=4?s=100" width="100px;" alt="Spencer Heywood"/><br /><sub><b>Spencer Heywood</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=heywoodlh" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apiening"><img src="https://avatars.githubusercontent.com/u/2064875?v=4?s=100" width="100px;" alt="Andreas Piening"/><br /><sub><b>Andreas Piening</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=apiening" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Gurkengewuerz"><img src="https://avatars.githubusercontent.com/u/10966337?v=4?s=100" width="100px;" alt="Niklas"/><br /><sub><b>Niklas</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=Gurkengewuerz" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/notnooblord"><img src="https://avatars.githubusercontent.com/u/11678665?v=4?s=100" width="100px;" alt="Nooblord"/><br /><sub><b>Nooblord</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=notnooblord" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://shea.nz/"><img src="https://avatars.githubusercontent.com/u/51303984?v=4?s=100" width="100px;" alt="Shea Smith"/><br /><sub><b>Shea Smith</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=SheaSmith" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/samtoxie"><img src="https://avatars.githubusercontent.com/u/7732658?v=4?s=100" width="100px;" alt="samtoxie"/><br /><sub><b>samtoxie</b></sub></a><br /><a href="https://github.com/Eugeny/warpgate/commits?author=samtoxie" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Eugeny"><img src="https://avatars.githubusercontent.com/u/161476?v=4?s=100" width="100px;" alt="Eugeny"/><br /><sub><b>Eugeny</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Eugeny" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://the-empire.systems/"><img src="https://avatars.githubusercontent.com/u/18178614?v=4?s=100" width="100px;" alt="Spencer Heywood"/><br /><sub><b>Spencer Heywood</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=heywoodlh" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/apiening"><img src="https://avatars.githubusercontent.com/u/2064875?v=4?s=100" width="100px;" alt="Andreas Piening"/><br /><sub><b>Andreas Piening</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=apiening" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Gurkengewuerz"><img src="https://avatars.githubusercontent.com/u/10966337?v=4?s=100" width="100px;" alt="Niklas"/><br /><sub><b>Niklas</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Gurkengewuerz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/notnooblord"><img src="https://avatars.githubusercontent.com/u/11678665?v=4?s=100" width="100px;" alt="Nooblord"/><br /><sub><b>Nooblord</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=notnooblord" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://shea.nz/"><img src="https://avatars.githubusercontent.com/u/51303984?v=4?s=100" width="100px;" alt="Shea Smith"/><br /><sub><b>Shea Smith</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=SheaSmith" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/samtoxie"><img src="https://avatars.githubusercontent.com/u/7732658?v=4?s=100" width="100px;" alt="samtoxie"/><br /><sub><b>samtoxie</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=samtoxie" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="http://sixteenink.com"><img src="https://avatars.githubusercontent.com/u/1480236?v=4?s=100" width="100px;" alt="Skyler Lewis"/><br /><sub><b>Skyler Lewis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=alairock" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://www.mohammednoureldin.com"><img src="https://avatars.githubusercontent.com/u/14913147?v=4?s=100" width="100px;" alt="Mohammed Noureldin"/><br /><sub><b>Mohammed Noureldin</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=MohammedNoureldin" title="Code">💻</a></td>
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://p.foundation/"><img src="https://avatars.githubusercontent.com/u/80860929?v=4?s=100" width="100px;" alt="P Foundation"/><br /><sub><b>P Foundation</b></sub></a><br /><a href="#financial-pfoundation" title="Financial">💵</a></td>

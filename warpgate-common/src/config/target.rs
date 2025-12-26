@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use poem_openapi::{Enum, Object, Union};
+use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use warpgate_tls::TlsMode;
 
 use super::defaults::*;
 use crate::Secret;
@@ -74,17 +75,6 @@ pub struct TargetHTTPOptions {
     pub external_host: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Enum, PartialEq, Eq, Default)]
-pub enum TlsMode {
-    #[serde(rename = "disabled")]
-    Disabled,
-    #[serde(rename = "preferred")]
-    #[default]
-    Preferred,
-    #[serde(rename = "required")]
-    Required,
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Tls {
     #[serde(default)]
@@ -138,6 +128,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub tls: Tls,
+
+    #[serde(default = "_default_postgres_idle_timeout_str")]
+    pub idle_timeout: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
@@ -190,6 +183,7 @@ pub struct Target {
     #[serde(flatten)]
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub group_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]

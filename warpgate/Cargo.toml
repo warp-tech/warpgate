@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate"
-version = "0.16.0"
+version = "0.18.0"
 
 [dependencies]
 ansi_term = { version = "0.12", default-features = false }
@@ -27,6 +27,7 @@ sea-orm.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
+tracing-log = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = [
     "ansi",
     "env-filter",
@@ -43,6 +44,7 @@ warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
 warpgate-protocol-kubernetes = { version = "*", path = "../warpgate-protocol-kubernetes" }
+warpgate-tls = { version = "*", path = "../warpgate-tls" }
 schemars.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

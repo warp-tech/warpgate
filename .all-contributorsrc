@@ -1,6 +1,6 @@
 {
   "projectName": "warpgate",
-  "projectOwner": "Eugeny",
+  "projectOwner": "warp-tech",
   "repoType": "github",
   "repoHost": "https://github.com",
   "files": [
@@ -81,7 +81,26 @@
       "contributions": [
         "financial"
       ]
+    },
+    {
+      "login": "alairock",
+      "name": "Skyler Lewis",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1480236?v=4",
+      "profile": "http://sixteenink.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "MohammedNoureldin",
+      "name": "Mohammed Noureldin",
+      "avatar_url": "https://avatars.githubusercontent.com/u/14913147?v=4",
+      "profile": "http://www.mohammednoureldin.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
-  "contributorsPerLine": 7
+  "contributorsPerLine": 7,
+  "commitType": "docs"
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type Target } from 'admin/lib/api'
+    import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -25,9 +25,13 @@
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
+    let groups: TargetGroup[] = $state([])
 
     async function init () {
-        target = await api.getTarget({ id: params.id })
+        [target, groups] = await Promise.all([
+            api.getTarget({ id: params.id }),
+            api.listTargetGroups(),
+        ])
     }
 
     async function loadRoles () {
@@ -153,9 +157,26 @@
 
         <h4 class="mt-4">Configuration</h4>
 
-        <FormGroup floating label="Name">
-            <Input class="form-control" bind:value={target.name} />
-        </FormGroup>
+        <div class="row">
+            <div class:col-md-8={groups.length > 0} class:col-md-12={!groups.length}>
+                <FormGroup floating label="Name">
+                    <Input class="form-control" bind:value={target.name} />
+                </FormGroup>
+            </div>
+
+            {#if groups.length > 0}
+            <div class="col-md-4">
+                <FormGroup floating label="Group">
+                    <select class="form-control" bind:value={target.groupId}>
+                        <option value={undefined}>No group</option>
+                        {#each groups as group (group.id)}
+                            <option value={group.id}>{group.name}</option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            </div>
+            {/if}
+        </div>
 
         <FormGroup floating label="Description">
             <Input bind:value={target.description} />
@@ -207,6 +228,21 @@
             </div>
 
             <TlsConfiguration bind:value={target.options.tls} />
+
+            {#if target.options.kind === 'Postgres'}
+                <FormGroup floating label="Idle timeout">
+                    <input
+                        class="form-control"
+                        type="text"
+                        placeholder="10m"
+                        bind:value={target.options.idleTimeout}
+                        title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                    />
+                    <small class="form-text text-muted">
+                        How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
+                    </small>
+                </FormGroup>
+            {/if}
         {/if}
 
         {#if target.options.kind === 'Kubernetes'}

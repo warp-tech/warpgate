@@ -2,23 +2,28 @@ name: Test
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   Tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with:
           submodules: recursive
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           key: "test"
 
       - name: Install build deps
         run: |
           sudo apt-get install openssh-client expect
-          cargo install just
-          cargo install cargo-llvm-cov
+          cargo install --locked just
+          # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
+          # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
+          cargo install --locked cargo-llvm-cov@0.6.15
           cargo clean
           rustup component add llvm-tools-preview
 
@@ -49,19 +54,19 @@ jobs:
           cargo llvm-cov report --lcov > coverage.lcov
 
       - name: Upload coverage
-        uses: actions/upload-artifact@master
+        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
         with:
           name: coverage.lcov
           path: tests/coverage.lcov
 
       - name: Upload coverage (HTML)
-        uses: actions/upload-artifact@master
+        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
         with:
           name: coverage-html
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v4.2.1
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

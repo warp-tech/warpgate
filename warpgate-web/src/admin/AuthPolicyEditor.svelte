@@ -2,8 +2,7 @@
 import { Input } from '@sveltestrap/sveltestrap'
 import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
 import type { ExistingCredential } from './CredentialEditor.svelte'
-import Fa from 'svelte-fa'
-import { faInfoCircle } from '@fortawesome/free-solid-svg-icons'
+import InfoBox from 'common/InfoBox.svelte'
 
 type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes'
 
@@ -112,10 +111,7 @@ function toggle (type: CredentialKind) {
 </div>
 
 {#each activeTips as tip (tip)}
-    <div class="text-muted d-flex align-items-center mt-2">
-        <Fa icon={faInfoCircle} class="me-2" />
-        <small>{tip}</small>
-    </div>
+    <InfoBox class="mt-2">{tip}</InfoBox>
 {/each}
 
 <style lang="scss">

@@ -11,6 +11,7 @@
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
+    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 
     let creds: CredentialsState | undefined = $state()
 
@@ -163,10 +164,19 @@
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Public keys</h4>
         <span class="ms-auto"></span>
-        <Button color="link" onclick={e => {
-            creatingPublicKeyCredential = true
-            e.preventDefault()
-        }}>Add key</Button>
+        <Button
+            color="link"
+            id="addPublicKeyCredentialButton"
+            title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
+            onclick={e => {
+                if (creds?.ldapLinked) {
+                    return
+                }
+                creatingPublicKeyCredential = true
+                e.preventDefault()
+            }}
+        >Add key</Button>
+        <Tooltip delay="250" target="addPublicKeyCredentialButton" animation>Public key credentials will be loaded from LDAP</Tooltip>
     </div>
 
     <div class="list-group list-group-flush mb-3">
@@ -182,6 +192,8 @@
             <Button
                 class="ms-2"
                 color="link"
+                disabled={creds.ldapLinked}
+                title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
                 onclick={e => {
                     deletePublicKey(credential)
                     e.preventDefault()

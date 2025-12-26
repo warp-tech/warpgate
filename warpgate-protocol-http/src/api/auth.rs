@@ -211,6 +211,8 @@ impl Api {
             .await?
         {
             state.add_valid_credential(otp_cred);
+        } else {
+            warn!("Invalid OTP for user {}", state.user_info().username);
         }
 
         match state.verify() {

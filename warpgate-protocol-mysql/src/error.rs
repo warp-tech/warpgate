@@ -1,7 +1,8 @@
 use std::error::Error;
 
-use warpgate_common::{MaybeTlsStreamError, RustlsSetupError, WarpgateError};
+use warpgate_common::WarpgateError;
 use warpgate_database_protocols::error::Error as SqlxError;
+use warpgate_tls::{MaybeTlsStreamError, RustlsSetupError};
 
 use crate::stream::MySqlStreamError;
 

@@ -1,33 +1,91 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
-    import { type Target, api } from 'admin/lib/api'
+    import { type Target, type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
     import EmptyState from 'common/EmptyState.svelte'
+    import { onMount } from 'svelte'
+    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { stringifyError } from 'common/errors'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { firstBy } from 'thenby'
+
+    let error: string|undefined = $state()
+    let groups: TargetGroup[] = $state([])
+    let selectedGroup: TargetGroup|undefined = $state()
+
+    onMount(async () => {
+        try {
+            groups = await api.listTargetGroups()
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    })
 
     function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
         return from(api.getTargets({
             search: options.search,
-        })).pipe(map(targets => ({
-            items: targets,
-            offset: 0,
-            total: targets.length,
-        })))
+            groupId: selectedGroup?.id,
+        })).pipe(
+            map(targets =>  targets.sort(
+                firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
+                    .thenBy<Target, boolean>(x => !x.groupId)
+                    .thenBy<Target, string | undefined>(
+                        target => groups.find(g => g.id === target.groupId)?.name.toLowerCase())
+                    .thenBy(x => x.name.toLowerCase())
+            )),
+            map(targets => ({
+                items: targets,
+                offset: 0,
+                total: targets.length,
+            })))
     }
 </script>
 
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>targets</h1>
-        <a
-            class="btn btn-primary ms-auto"
-            href="/config/targets/create"
-            use:link>
-            Add a target
-        </a>
+        <div class="d-flex gap-2 ms-auto">
+            {#if groups.length > 0}
+            <Dropdown>
+                <DropdownToggle caret>
+                    {selectedGroup?.name ?? 'All groups'}
+                </DropdownToggle>
+                <DropdownMenu>
+                    <DropdownItem onclick={() => {
+                        selectedGroup = undefined
+                    }}>
+                        All groups
+                    </DropdownItem>
+                    {#each groups as group (group.id)}
+                        <DropdownItem onclick={() => {
+                            selectedGroup = group
+                        }} class="d-flex align-items-center gap-2">
+                            {#if group.color}
+                                <GroupColorCircle color={group.color} />
+                            {/if}
+                            {group.name}
+                        </DropdownItem>
+                    {/each}
+                </DropdownMenu>
+            </Dropdown>
+            {/if}
+            <a
+                class="btn btn-primary"
+                href="/config/targets/create"
+                use:link>
+                Add a target
+            </a>
+        </div>
     </div>
 
+    {#if error}
+        <Alert color="danger">{error}</Alert>
+    {/if}
+
+    {#key selectedGroup}
     <ItemList load={getTargets} showSearch={true}>
         {#snippet empty()}
             <EmptyState
@@ -42,9 +100,20 @@
                 href="/config/targets/{target.id}"
                 use:link>
                 <div class="me-auto">
-                    <strong>
-                        {target.name}
-                    </strong>
+                    <div class="d-flex align-items-center gap-2">
+                        {#if target.groupId}
+                            {@const group = groups.find(g => g.id === target.groupId)}
+                            {#if group}
+                                {#if group.color}
+                                    <GroupColorCircle color={group.color} />
+                                {/if}
+                                <small class="text-muted">{group.name}</small>
+                            {/if}
+                        {/if}
+                        <strong>
+                            {target.name}
+                        </strong>
+                    </div>
                     {#if target.description}
                         <small class="d-block text-muted">{target.description}</small>
                     {/if}
@@ -70,8 +139,9 @@
                     {/if}
                 </small>
             </a>
-                {/snippet}
+        {/snippet}
     </ItemList>
+    {/key}
 </div>
 
 <style lang="scss">

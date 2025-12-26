@@ -3,13 +3,14 @@ import { Observable, from, map } from 'rxjs'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
-import { api, type TargetSnapshot, TargetKind } from 'gateway/lib/api'
+import { api, type TargetSnapshot, TargetKind, BootstrapThemeColor } from 'gateway/lib/api'
 import Fa from 'svelte-fa'
 import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
 import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
+import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
@@ -18,6 +19,8 @@ function loadTargets (options: LoadOptions): Observable<PaginatedResponse<Target
         map(result => {
             result = result.sort(
                 firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
+                    .thenBy<TargetSnapshot, boolean>(x => !x.group)
+                    .thenBy<TargetSnapshot, string | undefined>(x => x.group?.name.toLowerCase())
                     .thenBy(x => x.name.toLowerCase())
             )
             return {
@@ -43,6 +46,34 @@ function loadURL (url: string) {
     location.href = url
 }
 
+interface GroupInfo {
+    id: string
+    name: string
+    color: BootstrapThemeColor
+}
+
+function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
+    if (target.kind === TargetKind.WebAdmin) {
+        return {
+            id: '$admin',
+            name: 'Administration',
+            color: BootstrapThemeColor.Danger,
+        }
+    }
+    if (!target.group) {
+        return {
+            id: '$ungrouped',
+            name: 'Ungrouped',
+            color: BootstrapThemeColor.Secondary,
+        }
+    }
+    return {
+        id: target.group.id,
+        name: target.group.name,
+        color: target.group.color ?? BootstrapThemeColor.Secondary,
+    }
+}
+
 </script>
 
 {#if $serverInfo?.setupState}
@@ -50,10 +81,16 @@ function loadURL (url: string) {
         setupState={$serverInfo?.setupState} />
 {/if}
 
-<ItemList load={loadTargets} showSearch={true}>
+<ItemList load={loadTargets} showSearch={true} groupObject={groupInfoFromTarget} groupKey={group => group.id}>
     {#snippet empty()}
         <EmptyState
             title="You don't have access to any targets yet" />
+    {/snippet}
+    {#snippet groupHeader(group)}
+        <div class="d-flex align-items-center gap-2 mb-2 mt-4">
+            <GroupColorCircle color={group.color} />
+            <div class="h5 mb-0">{group.name}</div>
+        </div>
     {/snippet}
     {#snippet item(target)}
         <a
@@ -77,7 +114,7 @@ function loadURL (url: string) {
                 {#if target.kind === TargetKind.WebAdmin}
                     Manage Warpgate
                 {:else}
-                    <div>
+                    <div class="d-flex align-items-center gap-2">
                         {target.name}
                     </div>
                     {#if target.description}

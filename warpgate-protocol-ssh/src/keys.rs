@@ -14,93 +14,41 @@ fn get_keys_path(config: &WarpgateConfig) -> PathBuf {
     path
 }
 
-pub fn generate_host_keys(config: &WarpgateConfig) -> Result<()> {
+pub fn generate_keys(config: &WarpgateConfig, prefix: &str) -> Result<()> {
     let path = get_keys_path(config);
     create_dir_all(&path)?;
     secure_directory(&path)?;
 
-    let key_path = path.join("host-ed25519");
-    if !key_path.exists() {
-        info!("Generating Ed25519 host key");
-        let key = PrivateKey::random(&mut get_crypto_rng(), russh::keys::Algorithm::Ed25519)
-            .context("Failed to generate Ed25519 key")?;
-        let f = File::create(&key_path)?;
-        encode_pkcs8_pem(&key, f)?;
-    }
-    secure_file(&key_path)?;
-
-    let key_path = path.join("host-rsa");
-    if !key_path.exists() {
-        info!("Generating RSA host key (this can take a bit)");
-        let key = PrivateKey::random(
-            &mut get_crypto_rng(),
+    for (algo, name) in [
+        (russh::keys::Algorithm::Ed25519, format!("{prefix}-ed25519")),
+        (
             russh::keys::Algorithm::Rsa {
                 hash: Some(HashAlg::Sha512),
             },
-        )
-        .context("Failed to generate RSA key")?;
-        let f = File::create(&key_path)?;
-        encode_pkcs8_pem(&key, f)?;
+            format!("{prefix}-rsa"),
+        ),
+    ] {
+        let key_path = path.join(name);
+        if !key_path.exists() {
+            info!("Generating {prefix} key ({algo:?})");
+            let key = PrivateKey::random(&mut get_crypto_rng(), algo)
+                .context("Failed to generate key")?;
+            let f = File::create(&key_path)?;
+            encode_pkcs8_pem(&key, f)?;
+        }
+        secure_file(&key_path)?;
     }
-    secure_file(&key_path)?;
 
     Ok(())
 }
 
-pub fn load_host_keys(config: &WarpgateConfig) -> Result<Vec<PrivateKey>, russh::keys::Error> {
+pub fn load_keys(
+    config: &WarpgateConfig,
+    prefix: &str,
+) -> Result<Vec<PrivateKey>, russh::keys::Error> {
     let path = get_keys_path(config);
-    let mut keys = Vec::new();
-
-    let key_path = path.join("host-ed25519");
-    keys.push(load_secret_key(key_path, None)?);
-
-    let key_path = path.join("host-rsa");
-    keys.push(load_secret_key(key_path, None)?);
-
-    Ok(keys)
-}
-
-pub fn generate_client_keys(config: &WarpgateConfig) -> Result<()> {
-    let path = get_keys_path(config);
-    create_dir_all(&path)?;
-    secure_directory(&path)?;
-
-    let key_path = path.join("client-ed25519");
-    if !key_path.exists() {
-        info!("Generating Ed25519 client key");
-        let key = PrivateKey::random(&mut get_crypto_rng(), russh::keys::Algorithm::Ed25519)?;
-        let f = File::create(&key_path)?;
-        encode_pkcs8_pem(&key, f)?;
-    }
-    secure_file(&key_path)?;
-
-    let key_path = path.join("client-rsa");
-    if !key_path.exists() {
-        info!("Generating RSA client key (this can take a bit)");
-        let key = PrivateKey::random(
-            &mut get_crypto_rng(),
-            russh::keys::Algorithm::Rsa {
-                hash: Some(HashAlg::Sha512),
-            },
-        )
-        .context("Failed to generate RSA key")?;
-        let f = File::create(&key_path)?;
-        encode_pkcs8_pem(&key, f)?;
-    }
-    secure_file(&key_path)?;
-
-    Ok(())
-}
-
-pub fn load_client_keys(config: &WarpgateConfig) -> Result<Vec<PrivateKey>, russh::keys::Error> {
-    let path = get_keys_path(config);
-    let mut keys = Vec::new();
-
-    let key_path: PathBuf = path.join("client-ed25519");
-    keys.push(load_secret_key(key_path, None)?);
-
-    let key_path = path.join("client-rsa");
-    keys.push(load_secret_key(key_path, None)?);
-
-    Ok(keys)
+    Ok(vec![
+        load_secret_key(path.join(format!("{prefix}-ed25519")), None)?,
+        load_secret_key(path.join(format!("{prefix}-rsa")), None)?,
+    ])
 }

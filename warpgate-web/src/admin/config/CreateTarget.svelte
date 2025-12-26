@@ -1,14 +1,18 @@
 <script lang="ts">
-    import { api, type TargetOptions, TlsMode } from 'admin/lib/api'
+    import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
     import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import RadioButton from 'common/RadioButton.svelte'
+    import { onMount } from 'svelte'
+    import type { TargetKind } from 'gateway/lib/api'
 
     let error: string|null = $state(null)
     let name = $state('')
-    let type: 'Ssh' | 'Http' | 'MySql' | 'Postgres' | 'Kubernetes' | 'WebAdmin' = $state('Ssh')
+    let type: TargetKind = $state(TargetKind.Ssh)
+    let groups: TargetGroup[] = $state([])
+    let selectedGroupId: string | undefined = $state()
 
     async function create () {
         try {
@@ -75,6 +79,7 @@
                 targetDataRequest: {
                     name,
                     options,
+                    groupId: selectedGroupId,
                 },
             })
             replace(`/config/targets/${target.id}`)
@@ -83,12 +88,20 @@
         }
     }
 
-    const kinds: { name: string, value: 'Ssh' | 'Http' | 'MySql' | 'Postgres' | 'Kubernetes' }[] = [
-        { name: 'SSH', value: 'Ssh' },
-        { name: 'HTTP', value: 'Http' },
-        { name: 'MySQL', value: 'MySql' },
-        { name: 'PostgreSQL', value: 'Postgres' },
-        { name: 'Kubernetes', value: 'Kubernetes' },
+    onMount(async () => {
+        try {
+            groups = await api.listTargetGroups()
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    })
+
+    const kinds: { name: string, value: TargetKind }[] = [
+        { name: 'SSH', value: TargetKind.Ssh },
+        { name: 'HTTP', value: TargetKind.Http },
+        { name: 'MySQL', value: TargetKind.MySql },
+        { name: 'PostgreSQL', value: TargetKind.Postgres },
+        { name: 'Kubernetes', value: TargetKind.Kubernetes },
     ]
 </script>
 
@@ -124,6 +137,17 @@
             <FormGroup floating label="Name">
                 <input class="form-control" required bind:value={name} />
             </FormGroup>
+
+            {#if groups.length > 0}
+            <FormGroup floating label="Group">
+                <select class="form-control" bind:value={selectedGroupId}>
+                    <option value={undefined}>No group</option>
+                    {#each groups as group (group.id)}
+                        <option value={group.id}>{group.name}</option>
+                    {/each}
+                </select>
+            </FormGroup>
+            {/if}
 
             <Button
                 color="primary"

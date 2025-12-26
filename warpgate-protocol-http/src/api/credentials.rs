@@ -64,6 +64,7 @@ pub struct CredentialsState {
     certificates: Vec<ExistingCertificateCredential>,
     sso: Vec<ExistingSsoCredential>,
     credential_policy: UserRequireCredentialsPolicy,
+    ldap_linked: bool,
 }
 
 #[derive(ApiResponse)]
@@ -291,6 +292,7 @@ impl Api {
             certificates: cert_creds.into_iter().map(Into::into).collect(),
             sso: sso_creds.into_iter().map(Into::into).collect(),
             credential_policy: user.credential_policy.unwrap_or_default(),
+            ldap_linked: user_model.ldap_server_id.is_some(),
         })))
     }
 

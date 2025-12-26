@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-entities"
-version = "0.16.0"
+version = "0.18.0"
 
 [dependencies]
 bytes = { version = "1.4", default-features = false }
@@ -20,3 +20,5 @@ serde_json.workspace = true
 uuid.workspace = true
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
 secrecy = "0.10"
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-ldap = { version = "*", path = "../warpgate-ldap" }

@@ -55,6 +55,7 @@ pub struct Model {
     pub kind: TargetKind,
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
+    pub group_id: Option<Uuid>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -68,7 +69,20 @@ impl Related<super::Role::Entity> for Entity {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::TargetGroup::Entity",
+        from = "Column::GroupId",
+        to = "super::TargetGroup::Column::Id"
+    )]
+    TargetGroup,
+}
+
+impl Related<super::TargetGroup::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::TargetGroup.def()
+    }
+}
 
 impl ActiveModelBehavior for ActiveModel {}
 
@@ -84,6 +98,7 @@ impl TryFrom<Model> for Target {
             allow_roles: vec![],
             options,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
+            group_id: model.group_id,
         })
     }
 }

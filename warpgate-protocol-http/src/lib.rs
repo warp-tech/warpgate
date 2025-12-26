@@ -28,10 +28,12 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{
-    load_certificate_and_key, ListenEndpoint, Target, TargetOptions, WarpgateConfig,
-};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions, WarpgateConfig};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_tls::{
+    IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
+    TlsCertificateBundle, TlsPrivateKey,
+};
 use warpgate_web::Assets;
 
 use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKIE_NAME};
@@ -53,6 +55,20 @@ impl HTTPProtocolServer {
 
 fn make_session_storage() -> SharedSessionStorage {
     SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
+}
+
+async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
+    from: &R,
+    config: &WarpgateConfig,
+) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
+    Ok(TlsCertificateAndPrivateKey {
+        certificate: TlsCertificateBundle::from_file(
+            config.paths_relative_to.join(from.certificate_path()),
+        )
+        .await?,
+        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
+            .await?,
+    })
 }
 
 async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
@@ -112,6 +128,43 @@ impl ProtocolServer for HTTPProtocolServer {
                 config.store.http.cookie_max_age,
                 config.store.http.session_max_age,
             )
+        };
+
+        // Set cookie domain to base host (e.g., ".warp.tavahealth.com") so it works for
+        // the base host and all its subdomains (e.g., "foo.warp.tavahealth.com").
+        // This is more restrictive than using the parent domain and ensures cookies only
+        // work for the base host and its subdomains, not sibling domains.
+        let base_cookie_domain: Option<String> = {
+            let config = self.services.config.lock().await;
+            match config.construct_external_url(None, None) {
+                Ok(url) => {
+                    if let Some(host) = url.host_str() {
+                        // Use the base host directly with a leading dot (e.g., ".warp.tavahealth.com")
+                        // This allows cookies to work for:
+                        // - warp.tavahealth.com (exact match)
+                        // - foo.warp.tavahealth.com (subdomain)
+                        // - bar.warp.tavahealth.com (subdomain)
+                        // But NOT for:
+                        // - tavahealth.com (parent domain)
+                        // - reporting.tavahealth.com (sibling domain)
+                        let domain = format!(".{}", host);
+                        tracing::info!(
+                            "Cookie domain configured: {} (base host: {}) - cookies will work for {} and all its subdomains",
+                            domain,
+                            host,
+                            host
+                        );
+                        Some(domain)
+                    } else {
+                        tracing::warn!("Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication.");
+                        None
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.", e);
+                    None
+                }
+            }
         };
 
         let app = Route::new()
@@ -191,7 +244,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     .name(SESSION_COOKIE_NAME),
                 session_storage.clone(),
             ))
-            .with(CookieHostMiddleware::new())
+            .with(CookieHostMiddleware::new(base_cookie_domain))
             .data(self.services.clone())
             .data(session_store.clone())
             .data(session_storage)

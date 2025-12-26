@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.16.0"
+version = "0.18.0"
 
 [dependencies]
 anyhow = "1.0"
@@ -17,7 +17,6 @@ once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 reqwest.workspace = true
-rustls-pemfile.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -27,11 +26,12 @@ tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
 warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }
 warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
 uuid.workspace = true
-regex = { version = "1.6", default-features = false }
+regex.workspace = true
 url = { version = "2.4", default-features = false }

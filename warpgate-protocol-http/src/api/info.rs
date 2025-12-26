@@ -4,10 +4,11 @@ use poem::web::Data;
 use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::EntityTrait;
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
 use warpgate_core::{ConfigProvider, Services};
-use warpgate_db_entities::Parameters;
+use warpgate_db_entities::{LdapServer, Parameters};
 
 use crate::common::{is_user_admin, RequestAuthorization, SessionAuthorization, SessionExt};
 
@@ -44,6 +45,7 @@ pub struct Info {
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
+    has_ldap: bool,
     setup_state: Option<SetupState>,
 }
 
@@ -104,6 +106,12 @@ impl Api {
             }
         };
 
+        let has_ldap = LdapServer::Entity::find()
+            .one(&*services.db.lock().await)
+            .await
+            .context("loading LDAP servers")?
+            .is_some();
+
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: request_authorization
                 .is_some()
@@ -152,6 +160,7 @@ impl Api {
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
             setup_state,
+            has_ldap: request_authorization.is_some() && has_ldap,
         })))
     }
 }
