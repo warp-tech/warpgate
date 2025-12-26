@@ -25,7 +25,7 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo env "PATH=$PATH" cargo install just
+          sudo env "PATH=$PATH" cargo install --locked just
 
       - name: Reprotest
         run: |

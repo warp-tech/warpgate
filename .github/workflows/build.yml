@@ -61,9 +61,9 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install just
-          cargo install cargo-deny@0.18.3
-          cargo install cargo-cyclonedx@^0.5
+          cargo install --locked just
+          cargo install --locked cargo-deny@0.18.3
+          cargo install --locked cargo-cyclonedx@^0.5
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
@@ -155,7 +155,7 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install just
+          cargo install --locked just
 
       - name: Ensure there are no changes in config schema
         run: |
