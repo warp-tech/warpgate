@@ -18,7 +18,7 @@
     "openapi": "npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway"
   },
   "devDependencies": {
-    "@cyclonedx/cyclonedx-npm": "^4.1.1",
+    "@cyclonedx/cyclonedx-npm": "^4.1.2",
     "@fontsource/poppins": "^5.2.7",
     "@fontsource/work-sans": "^5.2.8",
     "@fortawesome/free-brands-svg-icons": "^7.1.0",
