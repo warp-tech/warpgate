@@ -5,11 +5,12 @@ use std::sync::Arc;
 use poem::listener::RustlsCertificate;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::sign::{CertifiedKey, SigningKey};
+use rustls_pki_types::pem::PemObject;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Certificate};
 
-use crate::{HttpConfig, RustlsSetupError, SniCertificateConfig, WarpgateConfig};
+use crate::RustlsSetupError;
 
 #[derive(Clone)]
 pub struct TlsCertificateBundle {
@@ -38,12 +39,13 @@ impl TlsCertificateBundle {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let certificates = rustls_pemfile::certs(&mut &bytes[..])
+        let certificates = CertificateDer::pem_slice_iter(&bytes[..])
             .collect::<Result<Vec<CertificateDer<'static>>, _>>()?;
 
         if certificates.is_empty() {
             return Err(RustlsSetupError::NoCertificates);
         }
+
         Ok(Self {
             bytes,
             certificates,
@@ -121,24 +123,7 @@ impl TlsPrivateKey {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RustlsSetupError> {
-        let key = match rustls_pemfile::pkcs8_private_keys(&mut bytes.as_slice()).next() {
-            Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
-            _ => None,
-        }
-        .or_else(
-            || match rustls_pemfile::ec_private_keys(&mut bytes.as_slice()).next() {
-                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
-                _ => None,
-            },
-        )
-        .or_else(
-            || match rustls_pemfile::rsa_private_keys(&mut bytes.as_slice()).next() {
-                Some(Ok(key)) => Some(PrivateKeyDer::from(key)),
-                _ => None,
-            },
-        );
-
-        let key = key.ok_or(RustlsSetupError::NoKeys)?;
+        let key = PrivateKeyDer::from_pem_slice(bytes.as_slice())?;
         let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
 
         Ok(Self { bytes, key })
@@ -180,38 +165,4 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
 pub trait IntoTlsCertificateRelativePaths {
     fn certificate_path(&self) -> PathBuf;
     fn key_path(&self) -> PathBuf;
-}
-
-impl IntoTlsCertificateRelativePaths for HttpConfig {
-    fn certificate_path(&self) -> PathBuf {
-        self.certificate.as_str().into()
-    }
-
-    fn key_path(&self) -> PathBuf {
-        self.key.as_str().into()
-    }
-}
-
-impl IntoTlsCertificateRelativePaths for SniCertificateConfig {
-    fn certificate_path(&self) -> PathBuf {
-        self.certificate.as_str().into()
-    }
-
-    fn key_path(&self) -> PathBuf {
-        self.key.as_str().into()
-    }
-}
-
-pub async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
-    from: &R,
-    config: &WarpgateConfig,
-) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
-    Ok(TlsCertificateAndPrivateKey {
-        certificate: TlsCertificateBundle::from_file(
-            config.paths_relative_to.join(from.certificate_path()),
-        )
-        .await?,
-        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
-            .await?,
-    })
 }

@@ -9,7 +9,7 @@ jobs:
   Tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with:
           submodules: recursive
 
@@ -20,8 +20,10 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get install openssh-client expect
-          cargo install just
-          cargo install cargo-llvm-cov
+          cargo install --locked just
+          # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
+          # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
+          cargo install --locked cargo-llvm-cov@0.6.15
           cargo clean
           rustup component add llvm-tools-preview
 

@@ -43,6 +43,18 @@
         '/tickets/create': wrap({
             asyncComponent: () => import('./CreateTicket.svelte') as any,
         }),
+        '/ldap-servers': wrap({
+            asyncComponent: () => import('./ldap/LdapServers.svelte') as any,
+        }),
+        '/ldap-servers/create': wrap({
+            asyncComponent: () => import('./ldap/CreateLdapServer.svelte') as any,
+        }),
+        '/ldap-servers/:id': wrap({
+            asyncComponent: () => import('./ldap/LdapServer.svelte') as any,
+        }),
+        '/ldap-servers/:id/users': wrap({
+            asyncComponent: () => import('./ldap/LdapUserBrowser.svelte') as any,
+        }),
         '/target-groups/create': wrap({
             asyncComponent: () => import('./target-groups/CreateTargetGroup.svelte') as any,
         }),
@@ -68,7 +80,7 @@
 
     <NavListItem
         class="mb-2"
-        title="Target Groups"
+        title="Target groups"
         description="Organize targets into groups"
         href="/config/target-groups"
         small={sidebarMode}
@@ -103,6 +115,14 @@
         title="SSH keys"
         description="Own keys and known hosts"
         href="/config/ssh"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="LDAP servers"
+        description="Connect to directory services"
+        href="/config/ldap-servers"
         small={sidebarMode}
     />
 

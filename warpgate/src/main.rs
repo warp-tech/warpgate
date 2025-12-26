@@ -140,15 +140,14 @@ async fn _main() -> Result<()> {
             password: explicit_password,
             role,
         } => {
+            #[allow(clippy::collapsible_else_if)]
             let password = if let Some(p) = explicit_password {
                 p.to_owned()
             } else {
                 if let Ok(p) = std::env::var("WARPGATE_NEW_USER_PASSWORD") {
                     p
                 } else {
-                    error!(
-                        "You must supply the password either through the --password option"
-                    );
+                    error!("You must supply the password either through the --password option");
                     error!("or the WARPGATE_NEW_USER_PASSWORD environment variable.");
                     std::process::exit(1);
                 }
