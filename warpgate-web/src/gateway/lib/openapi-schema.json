@@ -1203,6 +1203,9 @@
           "external_host": {
             "type": "string"
           },
+          "default_database_name": {
+            "type": "string"
+          },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
           }

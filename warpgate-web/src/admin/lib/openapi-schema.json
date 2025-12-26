@@ -3168,6 +3168,9 @@
             "type": "integer",
             "format": "uint32"
           },
+          "default_database_name": {
+            "type": "string"
+          },
           "group_id": {
             "type": "string",
             "format": "uuid"
@@ -3195,6 +3198,9 @@
             "type": "integer",
             "format": "uint32"
           },
+          "default_database_name": {
+            "type": "string"
+	  },
           "group_id": {
             "type": "string",
             "format": "uuid"
