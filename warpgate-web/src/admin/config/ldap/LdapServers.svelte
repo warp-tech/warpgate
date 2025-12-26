@@ -4,6 +4,7 @@
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
 
     interface LdapServer {
         id: string
@@ -35,6 +36,10 @@
             Add LDAP Server
         </a>
     </div>
+
+    <InfoBox>
+        Currently, LDAP can only be used to import users and their SSH keys. Warpgate will automatically sync the public keys of Warpgate users that are linked to LDAP users.
+    </InfoBox>
 
     <ItemList load={getLdapServers} showSearch={true}>
         {#snippet empty()}

@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { faFileContract, faFlaskVial, faInfoCircle } from '@fortawesome/free-solid-svg-icons'
+    import { faFileContract, faFlaskVial } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import ApiTokenManager from './ApiTokenManager.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
 </script>
 
 <ApiTokenManager />
@@ -32,12 +33,9 @@
     </div>
 </div>
 
-<div class="text-muted d-flex align-items-center mt-5">
-    <Fa icon={faInfoCircle} class="me-2" />
-    <small>
-        Pass the token in the <code>X-Warpgate-Token</code> header
-    </small>
-</div>
+<InfoBox class="mt-5">
+    Pass the token in the <code>X-Warpgate-Token</code> header
+</InfoBox>
 
 <style lang="scss">
     .link {

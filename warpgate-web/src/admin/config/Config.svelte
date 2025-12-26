@@ -80,7 +80,7 @@
 
     <NavListItem
         class="mb-2"
-        title="Target Groups"
+        title="Target groups"
         description="Organize targets into groups"
         href="/config/target-groups"
         small={sidebarMode}
@@ -120,7 +120,7 @@
 
     <NavListItem
         class="mb-2"
-        title="LDAP Servers"
+        title="LDAP servers"
         description="Connect to directory services"
         href="/config/ldap-servers"
         small={sidebarMode}
