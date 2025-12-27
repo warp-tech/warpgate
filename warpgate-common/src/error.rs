@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::net::IpAddr;
 
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
@@ -47,6 +48,12 @@ pub enum WarpgateError {
     RateLimiterInvalidQuota(u32),
     #[error("Session end")]
     SessionEnd,
+    #[error("IP address {0} is temporarily blocked: {1}")]
+    IpBlocked(IpAddr, String),
+    #[error("User account '{0}' is locked: {1}")]
+    UserLocked(String, String),
+    #[error("Invalid IP address: {0}")]
+    InvalidIpAddress(String),
 }
 
 impl ResponseError for WarpgateError {
