@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
 pub mod ApiToken;
+pub mod FailedLoginAttempt;
+pub mod IpBlock;
 pub mod KnownHost;
 pub mod LdapServer;
 pub mod LogEntry;
@@ -17,4 +19,5 @@ pub mod TargetGroup;
 pub mod TargetRoleAssignment;
 pub mod Ticket;
 pub mod User;
+pub mod UserLockout;
 pub mod UserRoleAssignment;
