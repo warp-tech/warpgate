@@ -14,6 +14,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
 };
@@ -171,6 +172,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
+        let remote_ip = self.remote_address.ip();
 
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut MySqlSession<S>,
@@ -187,11 +189,52 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             Ok(())
         }
 
+        // Check if IP is blocked
+        match self
+            .services
+            .login_protection
+            .check_ip_blocked(&remote_ip)
+            .await
+        {
+            Ok(Some(block_info)) => {
+                warn!(
+                    ip = %remote_ip,
+                    expires_at = %block_info.expires_at,
+                    "MySQL auth from blocked IP"
+                );
+                return fail(&mut self).await;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(?e, "Failed to check IP block status");
+            }
+        }
+
         match selector {
             AuthSelector::User {
                 username,
                 target_name,
             } => {
+                // Check if user is locked
+                match self
+                    .services
+                    .login_protection
+                    .check_user_locked(&username)
+                    .await
+                {
+                    Ok(Some(_lock_info)) => {
+                        warn!(
+                            username = %username,
+                            "MySQL auth for locked user"
+                        );
+                        return fail(&mut self).await;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(?e, "Failed to check user lockout status");
+                    }
+                }
+
                 let state_arc = self
                     .services
                     .auth_state_store
@@ -240,11 +283,41 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                                 "Target {} not authorized for user {}",
                                 target_name, user_info.username
                             );
+                            // Record failed attempt
+                            let _ = self
+                                .services
+                                .login_protection
+                                .record_failed_attempt(FailedAttemptInfo {
+                                    username: username.clone(),
+                                    remote_ip,
+                                    protocol: "mysql".to_string(),
+                                    credential_type: "password".to_string(),
+                                })
+                                .await;
                             return fail(&mut self).await;
                         }
+                        // Clear failed attempts on successful auth
+                        let _ = self
+                            .services
+                            .login_protection
+                            .clear_failed_attempts(&remote_ip, &user_info.username)
+                            .await;
                         self.run_authorized(handshake, user_info, target_name).await
                     }
-                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
+                    AuthResult::Rejected | AuthResult::Need(_) => {
+                        // Record failed attempt
+                        let _ = self
+                            .services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: username.clone(),
+                                remote_ip,
+                                protocol: "mysql".to_string(),
+                                credential_type: "password".to_string(),
+                            })
+                            .await;
+                        fail(&mut self).await
+                    } // TODO SSO
                 }
             }
             AuthSelector::Ticket { secret } => {

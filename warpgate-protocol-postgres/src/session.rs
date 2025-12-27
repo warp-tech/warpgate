@@ -15,6 +15,7 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
 };
@@ -105,6 +106,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         username: &String,
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
+        let remote_ip = self.remote_address.ip();
 
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut PostgresSession<S>,
@@ -121,11 +123,52 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             Ok(())
         }
 
+        // Check if IP is blocked
+        match self
+            .services
+            .login_protection
+            .check_ip_blocked(&remote_ip)
+            .await
+        {
+            Ok(Some(block_info)) => {
+                warn!(
+                    ip = %remote_ip,
+                    expires_at = %block_info.expires_at,
+                    "PostgreSQL auth from blocked IP"
+                );
+                return fail(&mut self).await;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(?e, "Failed to check IP block status");
+            }
+        }
+
         match selector {
             AuthSelector::User {
                 username,
                 target_name,
             } => {
+                // Check if user is locked
+                match self
+                    .services
+                    .login_protection
+                    .check_user_locked(&username)
+                    .await
+                {
+                    Ok(Some(_lock_info)) => {
+                        warn!(
+                            username = %username,
+                            "PostgreSQL auth for locked user"
+                        );
+                        return fail(&mut self).await;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(?e, "Failed to check user lockout status");
+                    }
+                }
+
                 let state_arc = self
                     .services
                     .auth_state_store
@@ -164,6 +207,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                             };
                             if !target_auth_result {
                                 warn!("Target {target_name} not authorized for user {username}",);
+                                // Record failed attempt
+                                let _ = self
+                                    .services
+                                    .login_protection
+                                    .record_failed_attempt(FailedAttemptInfo {
+                                        username: username.clone(),
+                                        remote_ip,
+                                        protocol: "postgres".to_string(),
+                                        credential_type: "password".to_string(),
+                                    })
+                                    .await;
                                 return fail(&mut self).await;
                             }
 
@@ -171,6 +225,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 self.stream
                                     .push(pgwire::messages::startup::Authentication::Ok)?;
                             }
+                            // Clear failed attempts on successful auth
+                            let _ = self
+                                .services
+                                .login_protection
+                                .clear_failed_attempts(&remote_ip, &user_info.username)
+                                .await;
                             return self.run_authorized(startup, user_info, target_name).await;
                         }
                         AuthResult::Need(kinds) => {
@@ -209,6 +269,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     state.add_valid_credential(credential);
                                 } else {
                                     // Postgres CLI will just send the same password in a loop without prompting the user again
+                                    // Record failed attempt
+                                    let _ = self
+                                        .services
+                                        .login_protection
+                                        .record_failed_attempt(FailedAttemptInfo {
+                                            username: username.clone(),
+                                            remote_ip,
+                                            protocol: "postgres".to_string(),
+                                            credential_type: "password".to_string(),
+                                        })
+                                        .await;
                                     return fail(&mut self).await;
                                 }
                             } else if kinds.contains(&CredentialKind::WebUserApproval) {
@@ -268,7 +339,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 return fail(&mut self).await;
                             }
                         }
-                        AuthResult::Rejected => return fail(&mut self).await,
+                        AuthResult::Rejected => {
+                            // Record failed attempt
+                            let _ = self
+                                .services
+                                .login_protection
+                                .record_failed_attempt(FailedAttemptInfo {
+                                    username: username.clone(),
+                                    remote_ip,
+                                    protocol: "postgres".to_string(),
+                                    credential_type: "password".to_string(),
+                                })
+                                .await;
+                            return fail(&mut self).await;
+                        }
                     }
                 }
             }

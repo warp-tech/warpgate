@@ -26,6 +26,7 @@ use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
     WarpgateError,
 };
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -1439,18 +1440,107 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Password auth as {:?}", selector);
 
+        let remote_ip = self.remote_address.ip();
+
+        // Check if IP is blocked
         match self
-            .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
+            .services
+            .login_protection
+            .check_ip_blocked(&remote_ip)
             .await
         {
-            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
-            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
+            Ok(Some(block_info)) => {
+                warn!(
+                    ip = %remote_ip,
+                    expires_at = %block_info.expires_at,
+                    "SSH password auth from blocked IP"
+                );
+                return russh::server::Auth::Reject {
+                    proceed_with_methods: None,
+                    partial_success: false,
+                };
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(?e, "Failed to check IP block status");
+            }
+        }
+
+        // Extract username from selector for lockout check
+        if let AuthSelector::User { username, .. } = &selector {
+            // Check if user is locked
+            match self
+                .services
+                .login_protection
+                .check_user_locked(username)
+                .await
+            {
+                Ok(Some(_lock_info)) => {
+                    warn!(
+                        username = %username,
+                        "SSH password auth for locked user"
+                    );
+                    return russh::server::Auth::Reject {
+                        proceed_with_methods: None,
+                        partial_success: false,
+                    };
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    warn!(?e, "Failed to check user lockout status");
+                }
+            }
+        }
+
+        let result = self
+            .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
+            .await;
+
+        match &result {
+            Ok(AuthResult::Accepted { user_info }) => {
+                // Clear failed attempts on successful auth
+                let _ = self
+                    .services
+                    .login_protection
+                    .clear_failed_attempts(&remote_ip, &user_info.username)
+                    .await;
+                russh::server::Auth::Accept
+            }
+            Ok(AuthResult::Rejected) => {
+                // Record failed attempt
+                if let AuthSelector::User { username, .. } = &selector {
+                    let _ = self
+                        .services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: username.clone(),
+                            remote_ip,
+                            protocol: "ssh".to_string(),
+                            credential_type: "password".to_string(),
+                        })
+                        .await;
+                }
+                russh::server::Auth::reject()
+            }
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
-                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
+                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds.clone())),
                 partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
+                // Record failed attempt on error
+                if let AuthSelector::User { username, .. } = &selector {
+                    let _ = self
+                        .services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: username.clone(),
+                            remote_ip,
+                            protocol: "ssh".to_string(),
+                            credential_type: "password".to_string(),
+                        })
+                        .await;
+                }
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
                     partial_success: false,
