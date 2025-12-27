@@ -1,0 +1,8 @@
+# Ignore runtime data but keep the structure
+data/db/*
+data/recordings/*
+!data/db/.gitkeep
+!data/recordings/.gitkeep
+
+# Keep SSH keys and TLS certs for convenience
+# (These are test certificates, not production secrets)

@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  warpgate:
+    build:
+      context: ../../../
+      dockerfile: docker/Dockerfile
+    image: warpgate:login-protection-test
+    container_name: warpgate-login-protection
+    ports:
+      - "2222:2222"   # SSH
+      - "8888:8888"   # HTTP/Admin
+      - "33306:33306" # MySQL
+      - "55432:55432" # PostgreSQL
+    volumes:
+      - ./data:/data
+    environment:
+      - RUST_LOG=info,warpgate_core::login_protection=debug
+    stdin_open: true
+    tty: true
+    networks:
+      - warpgate-net
+
+  # Echo server for HTTP target testing
+  echo-server:
+    image: ealen/echo-server
+    container_name: echo-server
+    ports:
+      - "3000:80"
+    networks:
+      - warpgate-net
+
+  # SSH target for testing
+  ssh-target:
+    image: linuxserver/openssh-server
+    container_name: ssh-target
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - PASSWORD_ACCESS=true
+      - USER_NAME=testuser
+      - USER_PASSWORD=testpassword
+    ports:
+      - "2223:2222"
+    networks:
+      - warpgate-net
+
+  # MySQL target for testing
+  mysql-target:
+    image: mysql:8
+    container_name: mysql-target
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=testuser
+      - MYSQL_PASSWORD=testpassword
+    ports:
+      - "3306:3306"
+    networks:
+      - warpgate-net
+
+  # PostgreSQL target for testing
+  postgres-target:
+    image: postgres:15
+    container_name: postgres-target
+    environment:
+      - POSTGRES_DB=testdb
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpassword
+    ports:
+      - "5432:5432"
+    networks:
+      - warpgate-net
+
+networks:
+  warpgate-net:
+    driver: bridge
