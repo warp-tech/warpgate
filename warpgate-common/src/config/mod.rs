@@ -406,6 +406,159 @@ impl Default for LogConfig {
     }
 }
 
+// ============================================================================
+// Login Protection Configuration
+// ============================================================================
+
+/// Configuration for IP-based rate limiting
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct IpRateLimitConfig {
+    /// Maximum failed attempts per IP before blocking
+    #[serde(default = "_default_ip_max_attempts")]
+    pub max_attempts: u32,
+
+    /// Time window in minutes for counting failed attempts
+    #[serde(default = "_default_ip_time_window_minutes")]
+    pub time_window_minutes: u32,
+
+    /// Base block duration in minutes (first block)
+    #[serde(default = "_default_base_block_duration_minutes")]
+    pub base_block_duration_minutes: u32,
+
+    /// Multiplier for exponential backoff (e.g., 2.0 means each block doubles)
+    #[serde(default = "_default_block_duration_multiplier")]
+    pub block_duration_multiplier: f32,
+
+    /// Maximum block duration in hours (cap for exponential backoff)
+    #[serde(default = "_default_max_block_duration_hours")]
+    pub max_block_duration_hours: u32,
+
+    /// Hours without failed attempts before block count resets to zero
+    #[serde(default = "_default_cooldown_reset_hours")]
+    pub cooldown_reset_hours: u32,
+
+    /// Custom message to display to blocked users
+    #[serde(default)]
+    pub blocked_message: Option<String>,
+}
+
+fn _default_ip_max_attempts() -> u32 {
+    5
+}
+fn _default_ip_time_window_minutes() -> u32 {
+    15
+}
+fn _default_base_block_duration_minutes() -> u32 {
+    30
+}
+fn _default_block_duration_multiplier() -> f32 {
+    2.0
+}
+fn _default_max_block_duration_hours() -> u32 {
+    24
+}
+fn _default_cooldown_reset_hours() -> u32 {
+    24
+}
+
+impl Default for IpRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: _default_ip_max_attempts(),
+            time_window_minutes: _default_ip_time_window_minutes(),
+            base_block_duration_minutes: _default_base_block_duration_minutes(),
+            block_duration_multiplier: _default_block_duration_multiplier(),
+            max_block_duration_hours: _default_max_block_duration_hours(),
+            cooldown_reset_hours: _default_cooldown_reset_hours(),
+            blocked_message: None,
+        }
+    }
+}
+
+/// Configuration for user account lockout
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct UserLockoutConfig {
+    /// Maximum failed attempts per user before lockout
+    #[serde(default = "_default_user_max_attempts")]
+    pub max_attempts: u32,
+
+    /// Time window in minutes for counting failed attempts
+    #[serde(default = "_default_user_time_window_minutes")]
+    pub time_window_minutes: u32,
+
+    /// Whether to automatically unlock after lockout duration
+    #[serde(default = "_default_false")]
+    pub auto_unlock: bool,
+
+    /// Lockout duration in minutes (if auto_unlock is enabled)
+    #[serde(default = "_default_lockout_duration_minutes")]
+    pub lockout_duration_minutes: u32,
+
+    /// Custom message to display to locked users
+    #[serde(default)]
+    pub locked_message: Option<String>,
+}
+
+fn _default_user_max_attempts() -> u32 {
+    10
+}
+fn _default_user_time_window_minutes() -> u32 {
+    60
+}
+fn _default_lockout_duration_minutes() -> u32 {
+    60
+}
+
+impl Default for UserLockoutConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: _default_user_max_attempts(),
+            time_window_minutes: _default_user_time_window_minutes(),
+            auto_unlock: false,
+            lockout_duration_minutes: _default_lockout_duration_minutes(),
+            locked_message: None,
+        }
+    }
+}
+
+/// Configuration for login protection (brute-force protection)
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct LoginProtectionConfig {
+    /// Whether login protection is enabled
+    #[serde(default = "_default_true")]
+    pub enabled: bool,
+
+    /// IP-based rate limiting configuration
+    #[serde(default)]
+    pub ip_rate_limit: IpRateLimitConfig,
+
+    /// User account lockout configuration
+    #[serde(default)]
+    pub user_lockout: UserLockoutConfig,
+
+    /// Days to retain failed login attempt records
+    #[serde(default = "_default_retention_days")]
+    pub retention_days: u32,
+}
+
+fn _default_true() -> bool {
+    true
+}
+fn _default_retention_days() -> u32 {
+    30
+}
+
+impl Default for LoginProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: _default_true(),
+            ip_rate_limit: IpRateLimitConfig::default(),
+            user_lockout: UserLockoutConfig::default(),
+            retention_days: _default_retention_days(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct WarpgateConfigStore {
     #[serde(default)]
@@ -435,6 +588,9 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
+
+    #[serde(default)]
+    pub login_protection: LoginProtectionConfig,
 }
 
 impl Default for WarpgateConfigStore {
@@ -449,6 +605,7 @@ impl Default for WarpgateConfigStore {
             mysql: <_>::default(),
             postgres: <_>::default(),
             log: <_>::default(),
+            login_protection: <_>::default(),
         }
     }
 }

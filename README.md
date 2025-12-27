@@ -33,6 +33,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards connection straight to the target in a way that's fully transparent to the client.
 * Native 2FA and SSO support (TOTP & OpenID Connect)
+* Built-in brute-force protection with IP blocking and user lockout (fail2ban-like)
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
 
@@ -41,6 +42,13 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 * See the [Getting started](https://warpgate.null.page/getting-started/) docs page (or [Getting started on Docker](https://warpgate.null.page/getting-started-on-docker/)).
 * [Release / beta binaries](https://github.com/warp-tech/warpgate/releases)
 * [Nightly builds](https://nightly.link/warp-tech/warpgate/workflows/build/main)
+
+## Documentation
+
+Full documentation is available at [warpgate.null.page](https://warpgate.null.page/), including:
+* [Login Protection](https://warpgate.null.page/login-protection/) - Configure brute-force protection
+* [SSO](https://warpgate.null.page/sso/) - Single Sign-On with OpenID Connect
+* [Tickets](https://warpgate.null.page/tickets/) - Temporary access credentials
 
 ## How is Warpgate different from a jump host / VPN / Teleport?
 
@@ -54,6 +62,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 | ✅ **Full session recording** | No secure recording possible on the target if root access is given | No secure recording possible on the target if root access is given | ✅ **Full session recording** |
 | ✅ **Non-interactive connections** | 🟡 Non-interactive connections are possible if the clients supports jump hosts natively | ✅ **Non-interactive connections** | Non-interactive connections require using an SSH client wrapper or running a tunnel |
 | ✅ **Self-hosted, you own the data** | ✅ **Self-hosted, you own the data** | 🟡 Depends on the provider | SaaS |
+| ✅ **Built-in brute-force protection** | 🟡 Requires fail2ban setup | 🟡 Depends on the provider | ✅ **Built-in brute-force protection** |
 
 <center>
       <img width="783" alt="image" src="https://user-images.githubusercontent.com/161476/162640762-a91a2816-48c0-44d9-8b03-5b1e2cb42d51.png">

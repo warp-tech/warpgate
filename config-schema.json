@@ -34,6 +34,29 @@
         "send_to": null
       }
     },
+    "login_protection": {
+      "$ref": "#/$defs/LoginProtectionConfig",
+      "default": {
+        "enabled": true,
+        "ip_rate_limit": {
+          "base_block_duration_minutes": 30,
+          "block_duration_multiplier": 2.0,
+          "blocked_message": null,
+          "cooldown_reset_hours": 24,
+          "max_attempts": 5,
+          "max_block_duration_hours": 24,
+          "time_window_minutes": 15
+        },
+        "retention_days": 30,
+        "user_lockout": {
+          "auto_unlock": false,
+          "locked_message": null,
+          "lockout_duration_minutes": 60,
+          "max_attempts": 10,
+          "time_window_minutes": 60
+        }
+      }
+    },
     "mysql": {
       "$ref": "#/$defs/MySqlConfig",
       "default": {
@@ -147,6 +170,61 @@
         }
       }
     },
+    "IpRateLimitConfig": {
+      "description": "Configuration for IP-based rate limiting",
+      "type": "object",
+      "properties": {
+        "base_block_duration_minutes": {
+          "description": "Base block duration in minutes (first block)",
+          "type": "integer",
+          "format": "uint32",
+          "default": 30,
+          "minimum": 0
+        },
+        "block_duration_multiplier": {
+          "description": "Multiplier for exponential backoff (e.g., 2.0 means each block doubles)",
+          "type": "number",
+          "format": "float",
+          "default": 2.0
+        },
+        "blocked_message": {
+          "description": "Custom message to display to blocked users",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "cooldown_reset_hours": {
+          "description": "Hours without failed attempts before block count resets to zero",
+          "type": "integer",
+          "format": "uint32",
+          "default": 24,
+          "minimum": 0
+        },
+        "max_attempts": {
+          "description": "Maximum failed attempts per IP before blocking",
+          "type": "integer",
+          "format": "uint32",
+          "default": 5,
+          "minimum": 0
+        },
+        "max_block_duration_hours": {
+          "description": "Maximum block duration in hours (cap for exponential backoff)",
+          "type": "integer",
+          "format": "uint32",
+          "default": 24,
+          "minimum": 0
+        },
+        "time_window_minutes": {
+          "description": "Time window in minutes for counting failed attempts",
+          "type": "integer",
+          "format": "uint32",
+          "default": 15,
+          "minimum": 0
+        }
+      }
+    },
     "ListenEndpoint": {
       "type": "string"
     },
@@ -163,6 +241,48 @@
             "null"
           ],
           "default": null
+        }
+      }
+    },
+    "LoginProtectionConfig": {
+      "description": "Configuration for login protection (brute-force protection)",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether login protection is enabled",
+          "type": "boolean",
+          "default": true
+        },
+        "ip_rate_limit": {
+          "description": "IP-based rate limiting configuration",
+          "$ref": "#/$defs/IpRateLimitConfig",
+          "default": {
+            "base_block_duration_minutes": 30,
+            "block_duration_multiplier": 2.0,
+            "blocked_message": null,
+            "cooldown_reset_hours": 24,
+            "max_attempts": 5,
+            "max_block_duration_hours": 24,
+            "time_window_minutes": 15
+          }
+        },
+        "retention_days": {
+          "description": "Days to retain failed login attempt records",
+          "type": "integer",
+          "format": "uint32",
+          "default": 30,
+          "minimum": 0
+        },
+        "user_lockout": {
+          "description": "User account lockout configuration",
+          "$ref": "#/$defs/UserLockoutConfig",
+          "default": {
+            "auto_unlock": false,
+            "locked_message": null,
+            "lockout_duration_minutes": 60,
+            "max_attempts": 10,
+            "time_window_minutes": 60
+          }
         }
       }
     },
@@ -472,6 +592,46 @@
         "name",
         "provider"
       ]
+    },
+    "UserLockoutConfig": {
+      "description": "Configuration for user account lockout",
+      "type": "object",
+      "properties": {
+        "auto_unlock": {
+          "description": "Whether to automatically unlock after lockout duration",
+          "type": "boolean",
+          "default": false
+        },
+        "locked_message": {
+          "description": "Custom message to display to locked users",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lockout_duration_minutes": {
+          "description": "Lockout duration in minutes (if auto_unlock is enabled)",
+          "type": "integer",
+          "format": "uint32",
+          "default": 60,
+          "minimum": 0
+        },
+        "max_attempts": {
+          "description": "Maximum failed attempts per user before lockout",
+          "type": "integer",
+          "format": "uint32",
+          "default": 10,
+          "minimum": 0
+        },
+        "time_window_minutes": {
+          "description": "Time window in minutes for counting failed attempts",
+          "type": "integer",
+          "format": "uint32",
+          "default": 60,
+          "minimum": 0
+        }
+      }
     }
   }
 }
