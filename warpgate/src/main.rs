@@ -10,7 +10,7 @@ use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::Secret;
+use warpgate_common::{LogFormat, Secret};
 
 use crate::config::load_config;
 
@@ -25,6 +25,10 @@ pub struct Cli {
 
     #[clap(long, short, action=ArgAction::Count)]
     debug: u8,
+
+    /// Log output format (text or json)
+    #[clap(long, value_enum)]
+    log_format: Option<LogFormat>,
 }
 
 #[derive(clap::Subcommand)]
