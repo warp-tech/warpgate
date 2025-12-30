@@ -134,6 +134,9 @@
                     {#if target.options.kind === TargetKind.WebAdmin}
                         This web admin interface
                     {/if}
+                    {#if target.options.kind === TargetKind.RemoteRun}
+                        Remote Run
+                    {/if}
                 </small>
             </a>
         {/snippet}

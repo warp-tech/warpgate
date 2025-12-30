@@ -147,6 +147,9 @@
                     {#if target.options.kind === 'WebAdmin'}
                         This web admin interface
                     {/if}
+                    {#if target.options.kind === 'RemoteRun'}
+                        Remote Run target
+                    {/if}
                 </div>
             </div>
         </div>
@@ -237,6 +240,79 @@
                     <small class="form-text text-muted">
                         How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
                     </small>
+                </FormGroup>
+            {/if}
+        {/if}
+
+        {#if target.options.kind === 'RemoteRun'}
+            <FormGroup floating label="Mode">
+                <select class="form-control" bind:value={target.options.mode}>
+                    <option value="Shell">Shell Execution</option>
+                    <option value="OpenStack">OpenStack VM Spawner</option>
+                    <option value="Kubernetes">Kubernetes Ephemeral Pod</option>
+                </select>
+            </FormGroup>
+
+            {#if target.options.mode === 'Shell'}
+                <FormGroup floating label="Command">
+                    <input class="form-control" bind:value={target.options.command} placeholder="ssh -J user@bastion target@host" />
+                </FormGroup>
+                <FormGroup floating label="Jump Host (optional)">
+                    <input class="form-control" bind:value={target.options.jumpHost} placeholder="bastion.example.com" />
+                </FormGroup>
+            {/if}
+
+            {#if target.options.mode === 'OpenStack'}
+                <FormGroup floating label="API URL">
+                    <input class="form-control" bind:value={target.options.apiUrl} placeholder="https://openstack.example.com:5000/v3" />
+                </FormGroup>
+                <div class="row">
+                    <div class="col">
+                        <FormGroup floating label="Flavor ID">
+                            <input class="form-control" bind:value={target.options.flavorId} />
+                        </FormGroup>
+                    </div>
+                    <div class="col">
+                        <FormGroup floating label="Image ID">
+                            <input class="form-control" bind:value={target.options.imageId} />
+                        </FormGroup>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <FormGroup floating label="Network ID">
+                            <input class="form-control" bind:value={target.options.networkId} />
+                        </FormGroup>
+                    </div>
+                    <div class="col">
+                        <FormGroup floating label="GitHub Username">
+                            <input class="form-control" bind:value={target.options.githubUsername} placeholder="octocat" />
+                        </FormGroup>
+                    </div>
+                </div>
+                <FormGroup floating label="Timeout (seconds)">
+                    <input class="form-control" type="number" bind:value={target.options.timeoutSeconds} min="30" max="3600" step="30" />
+                </FormGroup>
+                <small class="form-text text-muted mb-3 d-block">
+                    Authentication uses the OPENSTACK_TOKEN environment variable.
+                </small>
+            {/if}
+
+            {#if target.options.mode === 'Kubernetes'}
+                <FormGroup floating label="Namespace">
+                    <input class="form-control" bind:value={target.options.namespace} placeholder="default" />
+                </FormGroup>
+                <FormGroup floating label="Pod Image">
+                    <input class="form-control" bind:value={target.options.podImage} placeholder="ceph/ceph:latest" />
+                </FormGroup>
+                <FormGroup floating label="Command">
+                    <input class="form-control" bind:value={target.options.command} placeholder="/bin/bash" />
+                </FormGroup>
+                <FormGroup floating label="Kubeconfig Path (optional)">
+                    <input class="form-control" bind:value={target.options.kubeconfig} placeholder="Leave empty for in-cluster config" />
+                </FormGroup>
+                <FormGroup floating label="Timeout (seconds)">
+                    <input class="form-control" type="number" bind:value={target.options.timeoutSeconds} min="30" max="3600" step="30" />
                 </FormGroup>
             {/if}
         {/if}
