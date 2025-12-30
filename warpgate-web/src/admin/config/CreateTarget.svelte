@@ -6,7 +6,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import RadioButton from 'common/RadioButton.svelte'
     import { onMount } from 'svelte'
-    import type { TargetKind } from 'gateway/lib/api'
+    import { TargetKind } from 'gateway/lib/api'
 
     let error: string|null = $state(null)
     let name = $state('')
