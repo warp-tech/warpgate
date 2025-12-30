@@ -6,7 +6,8 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
 use tokio::sync::Mutex;
-use warpgate_common::{WarpgateConfig, WarpgateError};
+use warpgate_common::WarpgateError;
+use warpgate_core::Services;
 
 use super::AnySecurityScheme;
 
@@ -33,11 +34,12 @@ impl Api {
     )]
     async fn api_ssh_get_own_keys(
         &self,
-        config: Data<&Arc<Mutex<WarpgateConfig>>>,
+        services: Data<&Arc<Mutex<Services>>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
-        let config = config.lock().await;
-        let keys = warpgate_protocol_ssh::load_keys(&config, "client")?;
+        let services = services.lock().await;
+        let config = services.config.lock().await;
+        let keys = warpgate_protocol_ssh::load_keys(&config, &services.global_params, "client")?;
 
         let keys = keys
             .into_iter()

@@ -10,7 +10,7 @@ use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::Secret;
+use warpgate_common::{GlobalParams, Secret};
 
 use crate::config::load_config;
 
@@ -25,6 +25,17 @@ pub struct Cli {
 
     #[clap(long, short, action=ArgAction::Count)]
     debug: u8,
+
+    /// Do not tighten UNIX modes of config and data files
+    #[clap(long)]
+    skip_securing_files: bool,
+}
+
+impl Cli {
+    #[allow(clippy::wrong_self_convention)]
+    pub fn into_global_params(&self) -> anyhow::Result<GlobalParams> {
+        warpgate_common::GlobalParams::new(self.config.clone(), !self.skip_securing_files)
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -111,8 +122,9 @@ pub(crate) enum Commands {
 
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
+    let params = cli.into_global_params()?;
 
-    init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await?;
+    init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()
@@ -125,11 +137,11 @@ async fn _main() -> Result<()> {
             Ok(())
         }
         Commands::Run { enable_admin_token } => {
-            crate::commands::run::command(&cli, *enable_admin_token).await
+            crate::commands::run::command(&params, *enable_admin_token).await
         }
-        Commands::Check => crate::commands::check::command(&cli).await,
+        Commands::Check => crate::commands::check::command(&params).await,
         Commands::TestTarget { target_name } => {
-            crate::commands::test_target::command(&cli, target_name).await
+            crate::commands::test_target::command(&params, target_name).await
         }
         Commands::CreateUser {
             username,
@@ -150,7 +162,7 @@ async fn _main() -> Result<()> {
             };
 
             crate::commands::create_user::command(
-                &cli,
+                &params,
                 username,
                 &Secret::new(password.clone()),
                 role,
@@ -158,13 +170,13 @@ async fn _main() -> Result<()> {
             .await
         }
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
-            crate::commands::setup::command(&cli).await
+            crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
+        Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
-            crate::commands::recover_access::command(&cli, username).await
+            crate::commands::recover_access::command(&params, username).await
         }
-        Commands::Healthcheck => crate::commands::healthcheck::command(&cli).await,
+        Commands::Healthcheck => crate::commands::healthcheck::command(&params).await,
     }
 }
 

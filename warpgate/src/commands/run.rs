@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{Context, Result};
 use futures::{FutureExt, StreamExt};
 #[cfg(target_os = "linux")]
@@ -7,7 +5,7 @@ use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
 use tracing::*;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::ListenEndpoint;
+use warpgate_common::{GlobalParams, ListenEndpoint};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
@@ -30,7 +28,7 @@ async fn run_protocol_server<T: ProtocolServer + Send + 'static>(
         .with_context(|| format!("protocol server: {name}"))
 }
 
-pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Result<()> {
+pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<()> {
     let version = warpgate_version();
     info!(%version, "Warpgate");
 
@@ -41,7 +39,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         })
     });
 
-    let config = match load_config(&cli.config, true) {
+    let config = match load_config(params, true) {
         Ok(config) => config,
         Err(error) => {
             error!(?error, "Failed to load config file");
@@ -49,7 +47,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         }
     };
 
-    let services = Services::new(config.clone(), admin_token).await?;
+    let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
     install_database_logger(services.db.clone());
 
@@ -146,10 +144,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         anyhow::bail!("No protocols are enabled in the config file, exiting");
     }
 
-    tokio::spawn(watch_config_and_reload(
-        PathBuf::from(&cli.config),
-        services.clone(),
-    ));
+    tokio::spawn(watch_config_and_reload(services.clone()));
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
 
@@ -178,8 +173,8 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
     Ok(())
 }
 
-pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Result<()> {
-    let mut reload_event = watch_config(path, services.config.clone())?;
+pub async fn watch_config_and_reload(services: Services) -> Result<()> {
+    let mut reload_event = watch_config(&services.global_params, services.config.clone())?;
 
     while let Ok(()) = reload_event.recv().await {
         let state = services.state.lock().await;

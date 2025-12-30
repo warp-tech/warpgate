@@ -1,14 +1,14 @@
 use anyhow::Result;
 use tracing::*;
-use warpgate_common::TargetOptions;
+use warpgate_common::{GlobalParams, TargetOptions};
 use warpgate_core::{ConfigProvider, ProtocolServer, Services, TargetTestError};
 
 use crate::config::load_config;
 use crate::protocols::ProtocolServerEnum;
 
-pub(crate) async fn command(cli: &crate::Cli, target_name: &String) -> Result<()> {
-    let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone(), None).await?;
+pub(crate) async fn command(params: &GlobalParams, target_name: &String) -> Result<()> {
+    let config = load_config(params, true)?;
+    let services = Services::new(config.clone(), None, params.clone()).await?;
 
     let Some(target) = services
         .config_provider

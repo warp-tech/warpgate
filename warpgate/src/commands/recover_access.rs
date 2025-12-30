@@ -4,20 +4,20 @@ use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{Secret, User as UserConfig, UserPasswordCredential};
+use warpgate_common::{GlobalParams, Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, User};
 
 use crate::commands::common::assert_interactive_terminal;
 use crate::config::load_config;
 
-pub(crate) async fn command(cli: &crate::Cli, username: &Option<String>) -> Result<()> {
+pub(crate) async fn command(params: &GlobalParams, username: &Option<String>) -> Result<()> {
     assert_interactive_terminal();
 
-    let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone(), None).await?;
-    warpgate_protocol_ssh::generate_keys(&config, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, "client")?;
+    let config = load_config(params, true)?;
+    let services = Services::new(config.clone(), None, params.clone()).await?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     let theme = ColorfulTheme::default();
     let db = services.db.lock().await;

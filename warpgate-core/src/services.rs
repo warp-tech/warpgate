@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
-use warpgate_common::WarpgateConfig;
+use warpgate_common::{GlobalParams, WarpgateConfig};
 
 use crate::db::{connect_to_db, populate_db};
 use crate::rate_limiting::RateLimiterRegistry;
@@ -21,15 +21,20 @@ pub struct Services {
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    pub global_params: Arc<GlobalParams>,
 }
 
 impl Services {
-    pub async fn new(mut config: WarpgateConfig, admin_token: Option<String>) -> Result<Self> {
-        let mut db = connect_to_db(&config).await?;
+    pub async fn new(
+        mut config: WarpgateConfig,
+        admin_token: Option<String>,
+        params: GlobalParams,
+    ) -> Result<Self> {
+        let mut db = connect_to_db(&config, &params).await?;
         populate_db(&mut db, &mut config).await?;
         let db = Arc::new(Mutex::new(db));
 
-        let recordings = SessionRecordings::new(db.clone(), &config)?;
+        let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
         let recordings = Arc::new(Mutex::new(recordings));
 
         let config = Arc::new(Mutex::new(config));
@@ -61,6 +66,7 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),
+            global_params: Arc::new(params),
         })
     }
 }

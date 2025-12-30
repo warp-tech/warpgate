@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use tokio::time::timeout;
+use warpgate_common::GlobalParams;
 
 use crate::config::load_config;
 
-pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
-    let config = load_config(&cli.config, true)?;
+pub(crate) async fn command(params: &GlobalParams) -> Result<()> {
+    let config = load_config(params, true)?;
 
     let url = format!(
         "https://{}/@warpgate/api/info",

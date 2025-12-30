@@ -1,7 +1,7 @@
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{
-    Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
+    GlobalParams, Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_core::Services;
 use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
@@ -9,13 +9,13 @@ use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
 use crate::config::load_config;
 
 pub(crate) async fn command(
-    cli: &crate::Cli,
+    params: &GlobalParams,
     username: &str,
     password: &Secret<String>,
     role: &Option<String>,
 ) -> anyhow::Result<()> {
-    let config = load_config(&cli.config, true)?;
-    let services = Services::new(config.clone(), None).await?;
+    let config = load_config(params, true)?;
+    let services = Services::new(config.clone(), None, params.clone()).await?;
 
     let db = services.db.lock().await;
 
