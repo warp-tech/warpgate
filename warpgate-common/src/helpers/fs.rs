@@ -1,7 +1,7 @@
 use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 
-use log::*;
+use tracing::*;
 
 fn maybe_apply_permissions<P: AsRef<Path>>(
     path: P,
