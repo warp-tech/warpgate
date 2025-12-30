@@ -12,7 +12,8 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig, WarpgateConfigStore,
+    HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
+    WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 
@@ -191,6 +192,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             }
         }
     }
+
     if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
         if let Some(postgres_port) = postgres_port {
             store.postgres.enable = true;
@@ -217,6 +219,35 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         }
     }
 
+    if let Commands::UnattendedSetup {
+        kubernetes_port, ..
+    } = &cli.command
+    {
+        if let Some(kubernetes_port) = kubernetes_port {
+            store.kubernetes.enable = true;
+            store.kubernetes.listen = ListenEndpoint::from(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                *kubernetes_port,
+            ));
+        }
+    } else {
+        if is_docker() {
+            store.kubernetes.enable = true;
+        } else {
+            store.kubernetes.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept Kubernetes connections?")
+                .interact()?;
+
+            if store.kubernetes.enable {
+                store.kubernetes.listen = prompt_endpoint(
+                    "Endpoint to listen for Kubernetes connections on",
+                    KubernetesConfig::default().listen,
+                );
+            }
+        }
+    }
+
     store.http.certificate = data_path
         .join("tls.certificate.pem")
         .to_string_lossy()
@@ -229,6 +260,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     store.postgres.certificate = store.http.certificate.clone();
     store.postgres.key = store.http.key.clone();
+
+    store.kubernetes.certificate = store.http.certificate.clone();
+    store.kubernetes.key = store.http.key.clone();
 
     // ---
 
