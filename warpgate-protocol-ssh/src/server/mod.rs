@@ -47,6 +47,11 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             config.store.ssh.client_auth_keyboard_interactive
         );
 
+        // Warn if no auth methods are enabled - this is likely a misconfiguration
+        if auth_methods.is_empty() {
+            error!("No SSH authentication methods enabled! All connection attempts will fail. Check your ssh.client_auth_* configuration.");
+        }
+
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
