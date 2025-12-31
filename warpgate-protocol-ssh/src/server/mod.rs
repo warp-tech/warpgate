@@ -26,18 +26,33 @@ use crate::server::session_handle::SSHSessionHandle;
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
     let russh_config = {
         let config = services.config.lock().await;
+
+        // Build authentication methods based on config
+        let mut auth_methods = Vec::new();
+        if config.store.ssh.client_auth_publickey {
+            auth_methods.push(MethodKind::PublicKey);
+        }
+        if config.store.ssh.client_auth_password {
+            auth_methods.push(MethodKind::Password);
+        }
+        if config.store.ssh.client_auth_keyboard_interactive {
+            auth_methods.push(MethodKind::KeyboardInteractive);
+        }
+
+        // Log which auth methods are enabled
+        info!(
+            "SSH authentication methods enabled: publickey={}, password={}, keyboard_interactive={}",
+            config.store.ssh.client_auth_publickey,
+            config.store.ssh.client_auth_password,
+            config.store.ssh.client_auth_keyboard_interactive
+        );
+
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             keepalive_interval: config.store.ssh.keepalive_interval,
-            methods: MethodSet::from(
-                &[
-                    MethodKind::PublicKey,
-                    MethodKind::Password,
-                    MethodKind::KeyboardInteractive,
-                ][..],
-            ),
+            methods: MethodSet::from(&auth_methods[..]),
             keys: load_keys(&config, "host")?,
             event_buffer_size: 100,
             nodelay: true,

@@ -207,6 +207,19 @@ pub struct SshConfig {
 
     #[serde(default)]
     pub keepalive_interval: Option<Duration>,
+
+    /// Enable public key authentication for SSH clients.
+    #[serde(default = "_default_true")]
+    pub client_auth_publickey: bool,
+
+    /// Enable password authentication for SSH clients.
+    /// Set to false to prevent brute-force attacks and require key-based auth.
+    #[serde(default = "_default_true")]
+    pub client_auth_password: bool,
+
+    /// Enable keyboard-interactive authentication for SSH clients (used for OTP/2FA).
+    #[serde(default = "_default_true")]
+    pub client_auth_keyboard_interactive: bool,
 }
 
 impl Default for SshConfig {
@@ -219,6 +232,9 @@ impl Default for SshConfig {
             external_port: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
             keepalive_interval: None,
+            client_auth_publickey: true,
+            client_auth_password: true,
+            client_auth_keyboard_interactive: true,
         }
     }
 }
