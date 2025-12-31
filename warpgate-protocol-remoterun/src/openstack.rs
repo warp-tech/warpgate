@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use warpgate_common::RemoteRunOpenStackOptions;
 use warpgate_core::Services;
 
@@ -23,18 +23,42 @@ fn get_auth_token() -> Result<String> {
         .context("OPENSTACK_TOKEN environment variable not set")
 }
 
+/// Create a secure HTTP client with TLS verification enabled.
+/// This ensures all connections use TLS and certificate verification.
+fn create_secure_client() -> Result<Client> {
+    Client::builder()
+        .https_only(true)  // Enforce HTTPS for all requests
+        .build()
+        .context("Failed to create secure HTTP client")
+}
+
+/// Validate that a URL uses HTTPS scheme.
+fn validate_https_url(url: &str, context: &str) -> Result<()> {
+    if !url.starts_with("https://") {
+        anyhow::bail!(
+            "{} must use HTTPS for secure communication. Got: {}",
+            context,
+            url
+        );
+    }
+    Ok(())
+}
+
 /// Fetch SSH public keys from GitHub for a user.
+/// Note: SSH public keys are inherently non-sensitive as they are designed
+/// to be shared publicly. This function fetches them over HTTPS from GitHub.
 async fn fetch_github_keys(client: &Client, username: &str) -> Result<String> {
     let url = format!("https://github.com/{}.keys", username);
+    
     let response = client
         .get(&url)
         .send()
         .await
-        .context("Failed to fetch GitHub keys")?;
+        .context("Failed to fetch GitHub public keys")?;
 
     if !response.status().is_success() {
         anyhow::bail!(
-            "Failed to fetch GitHub keys for {}: {}",
+            "Failed to fetch GitHub public keys for {}: {}",
             username,
             response.status()
         );
@@ -45,7 +69,7 @@ async fn fetch_github_keys(client: &Client, username: &str) -> Result<String> {
         anyhow::bail!("No SSH public keys found for GitHub user {}", username);
     }
 
-    debug!(username = %username, key_count = keys.lines().count(), "Fetched GitHub SSH keys");
+    debug!(username = %username, key_count = keys.lines().count(), "Fetched GitHub SSH public keys");
     Ok(keys)
 }
 
@@ -252,12 +276,15 @@ async fn wait_for_server_active(
 
 /// Execute an OpenStack VM spawner session.
 pub async fn execute(_services: &Services, opts: &RemoteRunOpenStackOptions) -> Result<()> {
+    // Validate that OpenStack API URL uses HTTPS
+    validate_https_url(&opts.api_url, "OpenStack API URL")?;
+    
     let token = get_auth_token()?;
-    let client = Client::new();
+    let client = create_secure_client()?;
 
     info!(api_url = %opts.api_url, github_user = %opts.github_username, "Starting OpenStack VM provisioning");
 
-    // 1. Fetch GitHub SSH keys
+    // 1. Fetch GitHub SSH public keys (public keys are non-sensitive by design)
     let public_keys = fetch_github_keys(&client, &opts.github_username).await?;
 
     // Use first key for the keypair
@@ -302,8 +329,11 @@ pub async fn execute(_services: &Services, opts: &RemoteRunOpenStackOptions) -> 
 
 /// Test OpenStack API connectivity.
 pub async fn test_connection(opts: &RemoteRunOpenStackOptions) -> Result<()> {
+    // Validate that OpenStack API URL uses HTTPS
+    validate_https_url(&opts.api_url, "OpenStack API URL")?;
+    
     let token = get_auth_token()?;
-    let client = Client::new();
+    let client = create_secure_client()?;
 
     // Test API endpoint by listing flavors
     let url = format!("{}/flavors", opts.api_url.trim_end_matches('/'));
@@ -319,7 +349,7 @@ pub async fn test_connection(opts: &RemoteRunOpenStackOptions) -> Result<()> {
         anyhow::bail!("OpenStack API returned error: {}", status);
     }
 
-    // Test GitHub keys fetch
+    // Test GitHub public keys fetch (public keys are non-sensitive by design)
     fetch_github_keys(&client, &opts.github_username).await?;
 
     info!(api_url = %opts.api_url, "OpenStack connection test passed");
