@@ -9,7 +9,9 @@ use sea_orm::{
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError};
+use warpgate_common::{
+    GlobalParams, TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError,
+};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
 use warpgate_db_migrations::migrate_database;
@@ -17,11 +19,14 @@ use warpgate_db_migrations::migrate_database;
 use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
 use crate::recordings::SessionRecordings;
 
-pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection> {
+pub async fn connect_to_db(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
     if url.scheme() == "sqlite" {
         let path = url.path();
-        let mut abs_path = config.paths_relative_to.clone();
+        let mut abs_path = params.paths_relative_to().clone();
         abs_path.push(path);
         abs_path.push("db.sqlite3");
 
@@ -40,7 +45,9 @@ pub async fn connect_to_db(config: &WarpgateConfig) -> Result<DatabaseConnection
         let db = Database::connect(ConnectOptions::new(url.to_string())).await?;
         db.begin().await?.commit().await?;
 
-        secure_file(&abs_path)?;
+        if params.should_secure_files() {
+            secure_file(&abs_path)?;
+        }
     }
 
     let mut opt = ConnectOptions::new(url.to_string());

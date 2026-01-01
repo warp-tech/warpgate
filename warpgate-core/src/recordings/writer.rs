@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::try_block;
+use warpgate_common::{try_block, GlobalParams};
 use warpgate_db_entities::Recording;
 
 use super::{Error, Result};
@@ -29,9 +29,12 @@ impl RecordingWriter {
         model: Recording::Model,
         db: Arc<Mutex<DatabaseConnection>>,
         live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+        params: &GlobalParams,
     ) -> Result<Self> {
         let file = File::create(&path).await?;
-        secure_file(&path)?;
+        if params.should_secure_files() {
+            secure_file(&path)?;
+        }
         let mut writer = BufWriter::new(file);
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);

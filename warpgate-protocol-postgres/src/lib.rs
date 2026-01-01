@@ -40,10 +40,9 @@ impl ProtocolServer for PostgresProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
             let config = self.services.config.lock().await;
-            let certificate_path = config
-                .paths_relative_to
-                .join(&config.store.postgres.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.postgres.key);
+            let paths_rel_to = self.services.global_params.paths_relative_to();
+            let certificate_path = paths_rel_to.join(&config.store.postgres.certificate);
+            let key_path = paths_rel_to.join(&config.store.postgres.key);
 
             TlsCertificateAndPrivateKey {
                 certificate: TlsCertificateBundle::from_file(&certificate_path)

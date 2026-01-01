@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{RecordingsConfig, SessionId, WarpgateConfig};
+use warpgate_common::{GlobalParams, RecordingsConfig, SessionId, WarpgateConfig};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod terminal;
 mod traffic;
@@ -50,21 +50,29 @@ pub struct SessionRecordings {
     path: PathBuf,
     config: RecordingsConfig,
     live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    params: GlobalParams,
 }
 
 impl SessionRecordings {
-    pub fn new(db: Arc<Mutex<DatabaseConnection>>, config: &WarpgateConfig) -> Result<Self> {
-        let mut path = config.paths_relative_to.clone();
+    pub fn new(
+        db: Arc<Mutex<DatabaseConnection>>,
+        config: &WarpgateConfig,
+        params: &GlobalParams,
+    ) -> Result<Self> {
+        let mut path = params.paths_relative_to().clone();
         path.push(&config.store.recordings.path);
         if config.store.recordings.enable {
             std::fs::create_dir_all(&path)?;
-            secure_directory(&path)?;
+            if params.should_secure_files() {
+                secure_directory(&path)?;
+            }
         }
         Ok(Self {
             db,
             config: config.store.recordings.clone(),
             path,
             live: Arc::new(Mutex::new(HashMap::new())),
+            params: params.clone(),
         })
     }
 
@@ -95,7 +103,14 @@ impl SessionRecordings {
             values.insert(&*db).await.map_err(Error::Database)?
         };
 
-        let writer = RecordingWriter::new(path, model, self.db.clone(), self.live.clone()).await?;
+        let writer = RecordingWriter::new(
+            path,
+            model,
+            self.db.clone(),
+            self.live.clone(),
+            &self.params,
+        )
+        .await?;
         Ok(T::new(writer))
     }
 

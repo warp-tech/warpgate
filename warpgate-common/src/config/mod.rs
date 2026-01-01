@@ -468,7 +468,6 @@ impl Default for WarpgateConfigStore {
 #[derive(Debug, Clone)]
 pub struct WarpgateConfig {
     pub store: WarpgateConfigStore,
-    pub paths_relative_to: PathBuf,
 }
 
 impl WarpgateConfig {
