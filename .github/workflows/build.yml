@@ -97,7 +97,7 @@ jobs:
       - name: Generate admin UI BOM
         run: |
           just npm prune
-          NODE_ENV=dev cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
+          cd warpgate-web && NODE_ENV=dev cyclonedx-npm --output-format xml > ../cdx/admin-ui.cdx.xml
 
       - name: Build
         uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
