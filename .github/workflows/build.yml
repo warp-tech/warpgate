@@ -91,6 +91,7 @@ jobs:
 
       - name: Generate admin UI BOM
         run: |
+          just npm prune
           NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
 
       - name: Build
