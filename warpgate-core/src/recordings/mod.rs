@@ -15,7 +15,7 @@ mod traffic;
 mod writer;
 pub use terminal::*;
 pub use traffic::*;
-use writer::RecordingWriter;
+pub use writer::RecordingWriter;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

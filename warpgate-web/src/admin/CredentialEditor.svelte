@@ -3,17 +3,19 @@
         { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
         | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
         | { kind: typeof CredentialKind.PublicKey } & ExistingPublicKeyCredential
+        | { kind: typeof CredentialKind.Certificate } & ExistingCertificateCredential
         | { kind: typeof CredentialKind.Totp } & ExistingOtpCredential
 </script>
 
 <script lang="ts">
-    import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
+    import { faIdBadge, faKey, faKeyboard, faMobileScreen, faCertificate } from '@fortawesome/free-solid-svg-icons'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type ExistingCertificateCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
+    import CertificateCredentialModal from './CertificateCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
@@ -38,14 +40,16 @@
     let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
     let editingPublicKeyCredential = $state(false)
     let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
+    let editingCertificateCredential = $state(false)
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres', name: string }[] = [
+    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes', name: string }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
+        { id: 'kubernetes', name: 'Kubernetes' },
     ]
 
     async function load () {
@@ -53,6 +57,7 @@
             loadPasswords(),
             loadSso(),
             loadPublicKeys(),
+            loadCertificates(),
             loadOtp(),
         ])
     }
@@ -74,6 +79,13 @@
     async function loadPublicKeys () {
         credentials.push(...(await api.getPublicKeyCredentials({ userId })).map(c => ({
             kind: CredentialKind.PublicKey,
+            ...c,
+        })))
+    }
+
+    async function loadCertificates () {
+        credentials.push(...(await api.getCertificateCredentials({ userId })).map(c => ({
+            kind: CredentialKind.Certificate,
             ...c,
         })))
     }
@@ -104,6 +116,14 @@
                 id: credential.id,
                 userId,
             })
+        }
+        if (credential.kind === CredentialKind.Certificate) {
+            if (confirm('Permanently revoke certificate?')) {
+                await api.revokeCertificateCredential({
+                    id: credential.id,
+                    userId,
+                })
+            }
         }
         if (credential.kind === CredentialKind.Totp) {
             await api.deleteOtpCredential({
@@ -207,6 +227,23 @@
         editingPublicKeyCredentialInstance = null
     }
 
+    async function saveCertificateCredential (label: string, publicKeyPem: string) {
+        const response = await api.issueCertificateCredential({
+            userId,
+            issueCertificateCredentialRequest: {
+                label,
+                publicKeyPem,
+            },
+        })
+
+        credentials.push({
+            kind: CredentialKind.Certificate,
+            ...response.credential,
+        })
+
+        return response
+    }
+
     function assertDefined<T>(value: T|undefined): T {
         if (value === undefined) {
             throw new Error('Value is undefined')
@@ -221,6 +258,9 @@
     <Button size="sm" color="link" on:click={() => creatingPassword = true}>
         Add password
     </Button>
+    <Button size="sm" color="link" on:click={() => {
+        editingCertificateCredential = true
+    }}>Issue certificate</Button>
     <Button
         id="addPublicKeyCredentialButton"
         size="sm"
@@ -252,7 +292,7 @@
     {/if}
     <div class="list-group list-group-flush mb-3">
         {#each credentials as credential (credential.id)}
-        <div class="list-group-item credential">
+        <div class="list-group-item credential gap-2">
             {#if credential.kind === CredentialKind.Password }
                 <Fa fw icon={faKeyboard} />
                 <span class="label me-auto">Password</span>
@@ -266,7 +306,16 @@
                     <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
                 </div>
                 <CredentialUsedStateBadge credential={credential} />
-                <div class="me-2"></div>
+            {/if}
+            {#if credential.kind === CredentialKind.Certificate}
+                <Fa fw icon={faCertificate} />
+                <div class="main me-auto abbreviate">
+                    <div class="label d-flex align-items-center">
+                        {credential.label}
+                    </div>
+                    <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
+                </div>
+                <CredentialUsedStateBadge credential={credential} />
             {/if}
             {#if credential.kind === 'Totp'}
                 <Fa fw icon={faMobileScreen} />
@@ -275,7 +324,7 @@
             {#if credential.kind === CredentialKind.Sso}
                 <Fa fw icon={faIdBadge} />
                 <span class="label">Single sign-on</span>
-                <span class="text-muted ms-2 me-auto">
+                <span class="text-muted me-auto">
                     {credential.email}
                     {#if credential.provider} ({credential.provider}){/if}
                 </span>
@@ -283,7 +332,7 @@
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
                 disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
                 onclick={e => {
@@ -301,7 +350,7 @@
             </Button>
             {/if}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
                 disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
                 onclick={e => {
@@ -363,6 +412,17 @@
     bind:isOpen={editingPublicKeyCredential}
     instance={editingPublicKeyCredentialInstance ?? undefined}
     save={savePublicKeyCredential}
+/>
+{/if}
+
+{#if editingCertificateCredential}
+<CertificateCredentialModal
+    bind:isOpen={editingCertificateCredential}
+    save={saveCertificateCredential}
+    {username}
+    onClose={() => {
+        editingCertificateCredential = false
+    }}
 />
 {/if}
 
