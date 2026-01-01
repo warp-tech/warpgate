@@ -40,7 +40,6 @@
     "copy-text-to-clipboard": "^3.2.2",
     "date-fns": "^4.1.0",
     "eslint": "^9",
-    "eslint-config-standard": "^17.1.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-node": "^11.1.0",
@@ -70,9 +69,6 @@
   "overrides": {
     "svelte-observable": {
       "svelte": "^5"
-    },
-    "eslint-config-standard": {
-      "eslint": "^9"
     },
     "@eslint-community/eslint-utils": {
       "eslint": "^9"
