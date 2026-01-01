@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
+    import { compare as naturalCompare } from 'natural-orderby'
     import { type Target, type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
@@ -34,7 +35,8 @@
                     .thenBy<Target, boolean>(x => !x.groupId)
                     .thenBy<Target, string | undefined>(
                         target => groups.find(g => g.id === target.groupId)?.name.toLowerCase())
-                    .thenBy(x => x.name.toLowerCase())
+                    .thenBy((a, b) =>
+                        naturalCompare(a.name.toLowerCase(), b.name.toLowerCase()))
             )),
             map(targets => ({
                 items: targets,

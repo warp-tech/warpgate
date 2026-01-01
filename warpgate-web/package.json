@@ -72,5 +72,8 @@
     "@eslint-community/eslint-utils": {
       "eslint": "^9"
     }
+  },
+  "dependencies": {
+    "natural-orderby": "^5.0.0"
   }
 }
