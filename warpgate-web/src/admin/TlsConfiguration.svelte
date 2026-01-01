@@ -3,14 +3,18 @@
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
 
     interface Props {
-        value: Tls;
+        value: Tls
+        class?: string
     }
 
-    let { value = $bindable() }: Props = $props()
-
+    // eslint-disable-next-line svelte/no-unused-props
+    let {
+        value = $bindable(),
+        'class': className = '',
+    }: Props = $props()
 </script>
 
-<div class="row align-items-center">
+<div class="row align-items-center {className}">
     <div class="col">
         <FormGroup floating label="TLS mode">
             <select bind:value={value.mode} class="form-control">

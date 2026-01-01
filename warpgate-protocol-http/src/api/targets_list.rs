@@ -72,10 +72,10 @@ impl Api {
             let search = search.to_lowercase();
             targets.retain(|t| {
                 let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
-                return t.name.to_lowercase().contains(&search)
+                t.name.to_lowercase().contains(&search)
                     || group
                         .map(|g| g.name.to_lowercase().contains(&search))
-                        .unwrap_or(false);
+                        .unwrap_or(false)
             })
         }
 

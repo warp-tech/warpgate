@@ -46,16 +46,17 @@ spec:
                 cp /tls-cert/tls.key /data/tls.key.pem
               fi
 
-              if [ ! -f /data/warpgate.yaml ]; then
-                warpgate -c /data/warpgate.yaml  unattended-setup --data-path /data
+              if [ -f /data/warpgate.yaml ]; then
+                # Creates the admin user which is normally only created when the unattended-setup is called. REF: https://github.com/warp-tech/warpgate/issues/1618
+                warpgate -c /data/warpgate.yaml create-user --password "$WARPGATE_ADMIN_PASSWORD" --role warpgate:admin admin
+              else
+                warpgate -c /data/warpgate.yaml unattended-setup --data-path /data \
                   {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
                   {{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }} {{- end }}
                   {{- if .Values.setup.databaseUrl }} --database-url "{{ .Values.setup.databaseUrl }}" {{- end }}
                   {{- if .Values.setup.recordSessions }} --record-sessions {{- end }}
-
-                  {{/*{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}*/}}
 
                 {{- if .Values.setup.disableIpV6 }}
                 sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml

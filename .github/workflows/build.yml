@@ -11,12 +11,12 @@ jobs:
         include:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             cyclonedx-build: cyclonedx-linux-x64
             cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
           - arch: x86_64-macos
@@ -61,16 +61,20 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install just
-          cargo install cargo-deny@0.18.3
-          cargo install cargo-cyclonedx@^0.5
+          cargo install --locked just
+          cargo install --locked cargo-deny@0.18.9
+          cargo install --locked cargo-cyclonedx@^0.5
+          rm -rf ~/.cargo/registry
+
+      - name: Install CycloneDX
+        run: |
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
-          rm -rf ~/.cargo/registry
 
       - name: cargo-deny
         run: |
+          cargo deny --version
           cargo deny check
 
       - name: Install admin UI deps
@@ -155,7 +159,7 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install just
+          cargo install --locked just
 
       - name: Ensure there are no changes in config schema
         run: |

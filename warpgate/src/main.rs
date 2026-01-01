@@ -10,7 +10,7 @@ use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::*;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::Secret;
+use warpgate_common::{LogFormat, Secret};
 
 use crate::config::load_config;
 
@@ -25,6 +25,10 @@ pub struct Cli {
 
     #[clap(long, short, action=ArgAction::Count)]
     debug: u8,
+
+    /// Log output format (text or json)
+    #[clap(long, value_enum)]
+    log_format: Option<LogFormat>,
 }
 
 #[derive(clap::Subcommand)]
@@ -136,15 +140,14 @@ async fn _main() -> Result<()> {
             password: explicit_password,
             role,
         } => {
+            #[allow(clippy::collapsible_else_if)]
             let password = if let Some(p) = explicit_password {
                 p.to_owned()
             } else {
                 if let Ok(p) = std::env::var("WARPGATE_NEW_USER_PASSWORD") {
                     p
                 } else {
-                    error!(
-                        "You must supply the password either through the --password option"
-                    );
+                    error!("You must supply the password either through the --password option");
                     error!("or the WARPGATE_NEW_USER_PASSWORD environment variable.");
                     std::process::exit(1);
                 }

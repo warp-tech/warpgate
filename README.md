@@ -1,4 +1,3 @@
-
 <p align="center">
 <img src="https://github.com/user-attachments/assets/89be835b-ff96-46df-94c7-ae2d176615e3" />
 </p>
@@ -141,6 +140,8 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="http://sixteenink.com"><img src="https://avatars.githubusercontent.com/u/1480236?v=4?s=100" width="100px;" alt="Skyler Lewis"/><br /><sub><b>Skyler Lewis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=alairock" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://www.mohammednoureldin.com"><img src="https://avatars.githubusercontent.com/u/14913147?v=4?s=100" width="100px;" alt="Mohammed Noureldin"/><br /><sub><b>Mohammed Noureldin</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=MohammedNoureldin" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mrmm"><img src="https://avatars.githubusercontent.com/u/796467?v=4?s=100" width="100px;" alt="Mourad Maatoug"/><br /><sub><b>Mourad Maatoug</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=mrmm" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

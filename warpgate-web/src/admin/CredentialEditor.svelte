@@ -20,13 +20,15 @@
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 
     interface Props {
         userId: string
         username: string
         credentialPolicy: UserRequireCredentialsPolicy,
+        ldapLinked?: boolean
     }
-    let { userId, username, credentialPolicy = $bindable() }: Props = $props()
+    let { userId, username, credentialPolicy = $bindable(), ldapLinked = false }: Props = $props()
 
     let credentials: ExistingCredential[] = $state([])
 
@@ -219,10 +221,21 @@
     <Button size="sm" color="link" on:click={() => creatingPassword = true}>
         Add password
     </Button>
-    <Button size="sm" color="link" on:click={() => {
-        editingPublicKeyCredentialInstance = null
-        editingPublicKeyCredential = true
-    }}>Add public key</Button>
+    <Button
+        id="addPublicKeyCredentialButton"
+        size="sm"
+        color="link"
+        on:click={() => {
+            if (ldapLinked) {
+                return
+            }
+            editingPublicKeyCredentialInstance = null
+            editingPublicKeyCredential = true
+        }}
+        title={ldapLinked ? 'SSH keys are managed by LDAP' : ''}
+    >Add public key</Button>
+    <Tooltip delay="250" target="addPublicKeyCredentialButton" animation>Public key credentials will be loaded from LDAP</Tooltip>
+
     <Button size="sm" color="link" on:click={() => creatingOtp = true}>Add OTP</Button>
     <Button size="sm" color="link" on:click={() => {
         editingSsoCredentialInstance = null
@@ -272,6 +285,7 @@
             <Button
                 class="ms-2 px-0"
                 color="link"
+                disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
@@ -289,6 +303,7 @@
             <Button
                 class="ms-2 px-0"
                 color="link"
+                disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
                 onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()

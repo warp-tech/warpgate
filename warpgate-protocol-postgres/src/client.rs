@@ -9,7 +9,8 @@ use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 use tracing::*;
-use warpgate_common::{configure_tls_connector, TargetPostgresOptions, TlsMode};
+use warpgate_common::TargetPostgresOptions;
+use warpgate_tls::{configure_tls_connector, TlsMode};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};

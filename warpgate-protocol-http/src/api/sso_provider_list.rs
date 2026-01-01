@@ -185,7 +185,6 @@ impl Api {
             .verify_code((*code).clone())
             .await
             .inspect_err(|e| {
-                // More error details visible via Debug
                 warn!("Failed to verify SSO code: {e:?}");
             })?;
 

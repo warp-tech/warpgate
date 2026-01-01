@@ -16,6 +16,7 @@ use uri::Scheme;
 use url::Url;
 use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
+use warpgate_tls::IntoTlsCertificateRelativePaths;
 
 use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
@@ -137,6 +138,8 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub rate_limit_bytes_per_second: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ldap_server_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -171,6 +174,14 @@ pub enum SshHostKeyVerificationMode {
     AutoAccept,
     #[serde(rename = "auto_reject")]
     AutoReject,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    #[default]
+    Text,
+    Json,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
@@ -274,6 +285,26 @@ impl HttpConfig {
     }
 }
 
+impl IntoTlsCertificateRelativePaths for HttpConfig {
+    fn certificate_path(&self) -> PathBuf {
+        self.certificate.as_str().into()
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.key.as_str().into()
+    }
+}
+
+impl IntoTlsCertificateRelativePaths for SniCertificateConfig {
+    fn certificate_path(&self) -> PathBuf {
+        self.certificate.as_str().into()
+    }
+
+    fn key_path(&self) -> PathBuf {
+        self.key.as_str().into()
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct MySqlConfig {
     #[serde(default = "_default_false")]
@@ -372,6 +403,9 @@ pub struct LogConfig {
 
     #[serde(default)]
     pub send_to: Option<String>,
+
+    #[serde(default)]
+    pub format: LogFormat,
 }
 
 impl Default for LogConfig {
@@ -379,6 +413,7 @@ impl Default for LogConfig {
         Self {
             retention: _default_retention(),
             send_to: None,
+            format: LogFormat::default(),
         }
     }
 }

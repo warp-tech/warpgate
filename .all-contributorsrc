@@ -81,6 +81,24 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "MohammedNoureldin",
+      "name": "Mohammed Noureldin",
+      "avatar_url": "https://avatars.githubusercontent.com/u/14913147?v=4",
+      "profile": "http://www.mohammednoureldin.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "mrmm",
+      "name": "Mourad Maatoug",
+      "avatar_url": "https://avatars.githubusercontent.com/u/796467?v=4",
+      "profile": "https://github.com/mrmm",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

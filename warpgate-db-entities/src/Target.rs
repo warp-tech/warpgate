@@ -67,10 +67,13 @@ impl Related<super::Role::Entity> for Entity {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(belongs_to = "super::TargetGroup::Entity", from = "Column::GroupId", to = "super::TargetGroup::Column::Id")]
+    #[sea_orm(
+        belongs_to = "super::TargetGroup::Entity",
+        from = "Column::GroupId",
+        to = "super::TargetGroup::Column::Id"
+    )]
     TargetGroup,
 }
-
 
 impl Related<super::TargetGroup::Entity> for Entity {
     fn to() -> RelationDef {

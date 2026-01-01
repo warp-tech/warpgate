@@ -6,6 +6,7 @@ version = "0.18.0"
 
 [dependencies]
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols", default-features = false }
@@ -22,7 +23,6 @@ rand.workspace = true
 sha1 = { version = "0.10", default-features = false }
 password-hash.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 webpki = { version = "0.22", default-features = false }
