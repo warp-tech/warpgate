@@ -65,6 +65,9 @@
     "ssh": {
       "$ref": "#/$defs/SshConfig",
       "default": {
+        "client_auth_keyboard_interactive": true,
+        "client_auth_password": true,
+        "client_auth_publickey": true,
         "enable": false,
         "external_port": null,
         "host_key_verification": "prompt",
@@ -271,6 +274,21 @@
     "SshConfig": {
       "type": "object",
       "properties": {
+        "client_auth_keyboard_interactive": {
+          "description": "Enable keyboard-interactive authentication for SSH clients (used for OTP/2FA).",
+          "type": "boolean",
+          "default": true
+        },
+        "client_auth_password": {
+          "description": "Enable password authentication for SSH clients.\n Set to false to prevent brute-force attacks and require key-based auth.",
+          "type": "boolean",
+          "default": true
+        },
+        "client_auth_publickey": {
+          "description": "Enable public key authentication for SSH clients.",
+          "type": "boolean",
+          "default": true
+        },
         "enable": {
           "type": "boolean",
           "default": false
