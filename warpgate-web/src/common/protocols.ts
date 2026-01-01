@@ -18,7 +18,24 @@ export function makeSSHUsername (opt: ConnectionOptions): string {
 }
 
 export function makeExampleSSHCommand (opt: ConnectionOptions): string {
-    return shellEscape(['ssh', `${makeSSHUsername(opt)}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}`, '-p', (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString()])
+    return shellEscape([
+        'ssh',
+        `${makeSSHUsername(opt)}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}`,
+        '-p',
+        (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString(),
+    ])
+}
+
+export function makeExampleSCPCommand (opt: ConnectionOptions): string {
+    return shellEscape([
+        'scp',
+        '-o',
+        `User="${makeSSHUsername(opt)}"`,
+        '-P',
+        (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString(),
+        'local-file',
+        `${opt.serverInfo?.externalHost ?? 'warpgate-host'}:remote-file`,
+    ])
 }
 
 export function makeMySQLUsername (opt: ConnectionOptions): string {
