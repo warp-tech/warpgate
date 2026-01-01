@@ -13,7 +13,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
           node-version: 24
 
