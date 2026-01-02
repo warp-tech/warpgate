@@ -59,6 +59,10 @@ jobs:
         with:
           key: "build"
 
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 24
+
       - name: Install tools
         run: |
           cargo install --locked just
@@ -71,6 +75,11 @@ jobs:
           mkdir cdx
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
+
+      - name: Install CycloneDX-npm
+        run: |
+          cd /
+          npm i -g @cyclonedx/cyclonedx-npm@4.1.2
 
       - name: cargo-deny
         run: |
@@ -87,7 +96,8 @@ jobs:
 
       - name: Generate admin UI BOM
         run: |
-          NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
+          just npm prune
+          cd warpgate-web && NODE_ENV=dev cyclonedx-npm --output-format xml > ../cdx/admin-ui.cdx.xml
 
       - name: Build
         uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
