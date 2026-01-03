@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-tls"
-version = "0.17.0"
+version = "0.18.0"
 
 [dependencies]
 once_cell = { version = "1.17", default-features = false }
