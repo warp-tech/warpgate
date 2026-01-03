@@ -89,3 +89,12 @@ pub(crate) fn _default_ssh_inactivity_timeout() -> Duration {
 pub(crate) fn _default_postgres_idle_timeout_str() -> Option<String> {
     Some("10m".to_string())
 }
+
+pub(crate) const fn _default_remoterun_timeout() -> u32 {
+    300 // 5 minutes
+}
+
+#[inline]
+pub(crate) fn _default_remoterun_shell_command() -> String {
+    "/bin/bash".to_owned()
+}

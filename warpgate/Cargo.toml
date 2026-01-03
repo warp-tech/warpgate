@@ -41,6 +41,7 @@ warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
+warpgate-protocol-remoterun = { version = "*", path = "../warpgate-protocol-remoterun" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
 warpgate-tls = { version = "*", path = "../warpgate-tls" }
 schemars.workspace = true

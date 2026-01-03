@@ -37,6 +37,9 @@ pub(crate) async fn command(params: &GlobalParams, target_name: &String) -> Resu
         TargetOptions::Postgres(_) => ProtocolServerEnum::PostgresProtocolServer(
             warpgate_protocol_postgres::PostgresProtocolServer::new(&services).await?,
         ),
+        TargetOptions::RemoteRun(_) => ProtocolServerEnum::RemoteRunProtocolServer(
+            warpgate_protocol_remoterun::RemoteRunProtocolServer::new(&services).await?,
+        ),
         TargetOptions::WebAdmin(_) => {
             error!("Unsupported target type");
             return Ok(());

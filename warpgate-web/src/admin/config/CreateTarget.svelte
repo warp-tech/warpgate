@@ -56,6 +56,11 @@
                     username: 'postgres',
                     password: '',
                 },
+                [TargetKind.RemoteRun]: {
+                    kind: TargetKind.RemoteRun,
+                    mode: 'Shell',
+                    command: 'echo "Hello from Warpgate"',
+                },
                 [TargetKind.WebAdmin]: null as any,
             }[type]
             if (!options) {
@@ -87,6 +92,7 @@
         { name: 'HTTP', value: TargetKind.Http },
         { name: 'MySQL', value: TargetKind.MySql },
         { name: 'PostgreSQL', value: TargetKind.Postgres },
+        { name: 'Remote Run', value: TargetKind.RemoteRun },
     ]
 </script>
 
