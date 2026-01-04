@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: warp-tech/warpgate
+  IMAGE_NAME: warp-tech/senolcolak
 
 jobs:
   build:
