@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.18.0-11-g422b4f76-modified"
+    "version": "v0.18.0-22-g77ea693-modified"
   },
   "servers": [
     {
@@ -3638,6 +3638,98 @@
           "Traffic"
         ]
       },
+      "RemoteRunKubernetesOptions": {
+        "type": "object",
+        "title": "RemoteRunKubernetesOptions",
+        "description": "Kubernetes ephemeral pod sub-mode for RemoteRun",
+        "required": [
+          "namespace",
+          "pod_image",
+          "command",
+          "timeout_seconds"
+        ],
+        "properties": {
+          "kubeconfig": {
+            "type": "string",
+            "description": "Path to kubeconfig file, or empty to use in-cluster config"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Kubernetes namespace for the ephemeral pod"
+          },
+          "pod_image": {
+            "type": "string",
+            "description": "Container image for the pod (e.g., \"ceph/ceph:latest\")"
+          },
+          "command": {
+            "type": "string",
+            "description": "Command to run in the container (default: \"/bin/bash\")"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Timeout in seconds for pod creation (default: 300)"
+          }
+        }
+      },
+      "RemoteRunOpenStackOptions": {
+        "type": "object",
+        "title": "RemoteRunOpenStackOptions",
+        "description": "OpenStack VM spawner sub-mode for RemoteRun",
+        "required": [
+          "api_url",
+          "flavor_id",
+          "image_id",
+          "network_id",
+          "github_username",
+          "timeout_seconds"
+        ],
+        "properties": {
+          "api_url": {
+            "type": "string",
+            "description": "OpenStack Identity API URL (e.g., \"https://openstack.example.com:5000/v3\")"
+          },
+          "flavor_id": {
+            "type": "string",
+            "description": "Flavor ID for the VM instance"
+          },
+          "image_id": {
+            "type": "string",
+            "description": "Image ID for the VM instance"
+          },
+          "network_id": {
+            "type": "string",
+            "description": "Network ID for the VM instance"
+          },
+          "github_username": {
+            "type": "string",
+            "description": "GitHub username to fetch SSH public keys from"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Timeout in seconds for VM provisioning (default: 300)"
+          }
+        }
+      },
+      "RemoteRunShellOptions": {
+        "type": "object",
+        "title": "RemoteRunShellOptions",
+        "description": "Shell execution sub-mode for RemoteRun",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Command to execute (e.g., \"ssh -J user@bastion target@host\")"
+          },
+          "jump_host": {
+            "type": "string",
+            "description": "Optional jump host for SSH tunneling"
+          }
+        }
+      },
       "Role": {
         "type": "object",
         "title": "Role",
@@ -4013,6 +4105,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRemoteRunOptions"
           }
         ],
         "discriminator": {
@@ -4022,7 +4117,8 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
-            "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
+            "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions",
+            "RemoteRun": "#/components/schemas/TargetOptions_TargetRemoteRunOptions"
           }
         }
       },
@@ -4089,6 +4185,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetPostgresOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetRemoteRunOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "RemoteRun"
+                ],
+                "example": "RemoteRun"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRemoteRunOptions"
           }
         ]
       },
@@ -4166,6 +4284,98 @@
             "type": "string"
           }
         }
+      },
+      "TargetRemoteRunOptions": {
+        "type": "object",
+        "description": "Union of all RemoteRun execution modes",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TargetRemoteRunOptions_RemoteRunShellOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetRemoteRunOptions_RemoteRunOpenStackOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetRemoteRunOptions_RemoteRunKubernetesOptions"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "Shell": "#/components/schemas/TargetRemoteRunOptions_RemoteRunShellOptions",
+            "OpenStack": "#/components/schemas/TargetRemoteRunOptions_RemoteRunOpenStackOptions",
+            "Kubernetes": "#/components/schemas/TargetRemoteRunOptions_RemoteRunKubernetesOptions"
+          }
+        }
+      },
+      "TargetRemoteRunOptions_RemoteRunKubernetesOptions": {
+        "description": "Union of all RemoteRun execution modes",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Kubernetes"
+                ],
+                "example": "Kubernetes"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RemoteRunKubernetesOptions"
+          }
+        ]
+      },
+      "TargetRemoteRunOptions_RemoteRunOpenStackOptions": {
+        "description": "Union of all RemoteRun execution modes",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "OpenStack"
+                ],
+                "example": "OpenStack"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RemoteRunOpenStackOptions"
+          }
+        ]
+      },
+      "TargetRemoteRunOptions_RemoteRunShellOptions": {
+        "description": "Union of all RemoteRun execution modes",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Shell"
+                ],
+                "example": "Shell"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RemoteRunShellOptions"
+          }
+        ]
       },
       "TargetSSHOptions": {
         "type": "object",

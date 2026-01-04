@@ -121,6 +121,67 @@ pub struct TargetPostgresOptions {
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct TargetWebAdminOptions {}
 
+// ========== RemoteRun Configuration Structs ==========
+
+/// Shell execution sub-mode for RemoteRun
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct RemoteRunShellOptions {
+    /// Command to execute (e.g., "ssh -J user@bastion target@host")
+    pub command: String,
+    /// Optional jump host for SSH tunneling
+    #[serde(default)]
+    pub jump_host: Option<String>,
+}
+
+/// OpenStack VM spawner sub-mode for RemoteRun
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct RemoteRunOpenStackOptions {
+    /// OpenStack Identity API URL (e.g., "https://openstack.example.com:5000/v3")
+    pub api_url: String,
+    /// Flavor ID for the VM instance
+    pub flavor_id: String,
+    /// Image ID for the VM instance
+    pub image_id: String,
+    /// Network ID for the VM instance
+    pub network_id: String,
+    /// GitHub username to fetch SSH public keys from
+    pub github_username: String,
+    /// Timeout in seconds for VM provisioning (default: 300)
+    #[serde(default = "_default_remoterun_timeout")]
+    pub timeout_seconds: u32,
+}
+
+/// Kubernetes ephemeral pod sub-mode for RemoteRun
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct RemoteRunKubernetesOptions {
+    /// Path to kubeconfig file, or empty to use in-cluster config
+    #[serde(default)]
+    pub kubeconfig: Option<String>,
+    /// Kubernetes namespace for the ephemeral pod
+    pub namespace: String,
+    /// Container image for the pod (e.g., "ceph/ceph:latest")
+    pub pod_image: String,
+    /// Command to run in the container (default: "/bin/bash")
+    #[serde(default = "_default_remoterun_shell_command")]
+    pub command: String,
+    /// Timeout in seconds for pod creation (default: 300)
+    #[serde(default = "_default_remoterun_timeout")]
+    pub timeout_seconds: u32,
+}
+
+/// Union of all RemoteRun execution modes
+#[derive(Debug, Deserialize, Serialize, Clone, Union)]
+#[serde(tag = "mode")]
+#[oai(discriminator_name = "mode", one_of)]
+pub enum TargetRemoteRunOptions {
+    #[serde(rename = "shell")]
+    Shell(RemoteRunShellOptions),
+    #[serde(rename = "openstack")]
+    OpenStack(RemoteRunOpenStackOptions),
+    #[serde(rename = "kubernetes")]
+    Kubernetes(RemoteRunKubernetesOptions),
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
     #[serde(default)]
@@ -148,4 +209,6 @@ pub enum TargetOptions {
     Postgres(TargetPostgresOptions),
     #[serde(rename = "web_admin")]
     WebAdmin(TargetWebAdminOptions),
+    #[serde(rename = "remote_run")]
+    RemoteRun(TargetRemoteRunOptions),
 }

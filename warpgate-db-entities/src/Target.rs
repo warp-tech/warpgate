@@ -17,6 +17,8 @@ pub enum TargetKind {
     Postgres,
     #[sea_orm(string_value = "web_admin")]
     WebAdmin,
+    #[sea_orm(string_value = "remote_run")]
+    RemoteRun,
 }
 
 impl From<&TargetOptions> for TargetKind {
@@ -27,6 +29,7 @@ impl From<&TargetOptions> for TargetKind {
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
             TargetOptions::WebAdmin(_) => Self::WebAdmin,
+            TargetOptions::RemoteRun(_) => Self::RemoteRun,
         }
     }
 }

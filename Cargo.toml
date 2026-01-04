@@ -14,6 +14,7 @@ members = [
     "warpgate-protocol-http",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
+    "warpgate-protocol-remoterun",
     "warpgate-protocol-ssh",
     "warpgate-sso",
     "warpgate-web",
