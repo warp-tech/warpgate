@@ -47,10 +47,11 @@ COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
-HEALTHCHECK CMD warpgate --config /data/warpgate.yaml healthcheck
+ENV WARPGATE_CONFIG=/data/warpgate.yaml
+
+HEALTHCHECK CMD warpgate healthcheck
 
 ENV DOCKER=1
-
 USER warpgate
-ENTRYPOINT ["warpgate", "--config", "/data/warpgate.yaml"]
+ENTRYPOINT ["warpgate"]
 CMD ["run"]
