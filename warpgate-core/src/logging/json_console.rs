@@ -64,16 +64,14 @@ where
         // Serialize with fallback on error (Requirement 3.3)
         let json = match serde_json::to_string(&entry) {
             Ok(j) => j,
-            Err(_) => {
-                json!({
-                    "timestamp": entry.timestamp,
-                    "level": entry.level,
-                    "target": entry.target,
-                    "message": entry.message,
-                    "_serialization_error": true
-                })
-                .to_string()
-            }
+            Err(_) => json!({
+                "timestamp": entry.timestamp,
+                "level": entry.level,
+                "target": entry.target,
+                "message": entry.message,
+                "_serialization_error": true
+            })
+            .to_string(),
         };
 
         let _ = writeln!(io::stdout(), "{}", json);

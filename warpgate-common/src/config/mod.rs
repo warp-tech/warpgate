@@ -176,7 +176,9 @@ pub enum SshHostKeyVerificationMode {
     AutoReject,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema, clap::ValueEnum)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema, clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
     #[default]

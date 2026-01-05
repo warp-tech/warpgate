@@ -59,8 +59,8 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     });
 
     // Create text console layers (only active when format is Text)
-    let text_layer_non_interactive =
-        (log_format == LogFormat::Text && !console::user_attended()).then({
+    let text_layer_non_interactive = (log_format == LogFormat::Text && !console::user_attended())
+        .then({
             let env_filter = env_filter.clone();
             || {
                 tracing_subscriber::fmt::layer()
