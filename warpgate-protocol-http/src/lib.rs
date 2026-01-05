@@ -28,7 +28,7 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, WarpgateConfig};
+use warpgate_common::{GlobalParams, ListenEndpoint, Target, TargetOptions, WarpgateConfig};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_tls::{
     IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
@@ -59,20 +59,23 @@ fn make_session_storage() -> SharedSessionStorage {
 
 async fn load_certificate_and_key<R: IntoTlsCertificateRelativePaths>(
     from: &R,
-    config: &WarpgateConfig,
+    params: &GlobalParams,
 ) -> Result<TlsCertificateAndPrivateKey, RustlsSetupError> {
     Ok(TlsCertificateAndPrivateKey {
         certificate: TlsCertificateBundle::from_file(
-            config.paths_relative_to.join(from.certificate_path()),
+            params.paths_relative_to().join(from.certificate_path()),
         )
         .await?,
-        private_key: TlsPrivateKey::from_file(config.paths_relative_to.join(from.key_path()))
+        private_key: TlsPrivateKey::from_file(params.paths_relative_to().join(from.key_path()))
             .await?,
     })
 }
 
-async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
-    let certificate_and_key = load_certificate_and_key(&config.store.http, config)
+async fn make_rustls_config(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+) -> Result<RustlsConfig> {
+    let certificate_and_key = load_certificate_and_key(&config.store.http, params)
         .await
         .with_context(|| {
             format!(
@@ -83,7 +86,7 @@ async fn make_rustls_config(config: &WarpgateConfig) -> Result<RustlsConfig> {
 
     let mut cfg = RustlsConfig::new().fallback(certificate_and_key.into());
     for sni in &config.store.http.sni_certificates {
-        let certificate_and_key = load_certificate_and_key(sni, config)
+        let certificate_and_key = load_certificate_and_key(sni, params)
             .await
             .with_context(|| format!("loading SNI TLS certificate: {sni:?}",))?;
 
@@ -259,7 +262,9 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let rustls_config = {
             let config = self.services.config.lock().await;
-            make_rustls_config(&config).await.context("rustls setup")?
+            make_rustls_config(&config, &self.services.global_params)
+                .await
+                .context("rustls setup")?
         };
 
         Server::new(address.poem_listener().await?.rustls(rustls_config))

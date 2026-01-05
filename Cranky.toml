@@ -6,6 +6,7 @@ deny = [
   "clippy::indexing_slicing",
   "clippy::dbg_macro",
 ]
+
 allow = [
   "clippy::result_large_err",
 ]

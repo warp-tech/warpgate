@@ -2,7 +2,7 @@
     import { FormGroup } from '@sveltestrap/sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand } from 'common/protocols'
+    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from './sveltestrap-s5-ports/Alert.svelte'
 
@@ -31,6 +31,7 @@
     })
     let sshUsername = $derived(makeSSHUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
+    let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
     let mySQLUsername = $derived(makeMySQLUsername(opts))
     let exampleMySQLCommand = $derived(makeExampleMySQLCommand(opts))
     let exampleMySQLURI = $derived(makeExampleMySQLURI(opts))
@@ -49,9 +50,14 @@
         <CopyButton text={sshUsername} />
     </FormGroup>
 
-    <FormGroup floating label="Example command" class="d-flex align-items-center">
+    <FormGroup floating label="Example SSH command" class="d-flex align-items-center">
         <input type="text" class="form-control" readonly value={exampleSSHCommand} />
         <CopyButton text={exampleSSHCommand} />
+    </FormGroup>
+
+    <FormGroup floating label="Example SCP command" class="d-flex align-items-center">
+        <input type="text" class="form-control" readonly value={exampleSCPCommand} />
+        <CopyButton text={exampleSCPCommand} />
     </FormGroup>
 {/if}
 

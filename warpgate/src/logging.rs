@@ -8,8 +8,10 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
-use warpgate_common::WarpgateConfig;
-use warpgate_core::logging::{make_database_logger_layer, make_socket_logger_layer};
+use warpgate_common::{LogFormat, WarpgateConfig};
+use warpgate_core::logging::{
+    make_database_logger_layer, make_json_console_logger_layer, make_socket_logger_layer,
+};
 
 use crate::Cli;
 
@@ -30,6 +32,12 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     let env_filter = Arc::new(EnvFilter::from_default_env());
     let enable_colors = console::user_attended();
 
+    // Determine effective log format (CLI overrides config)
+    let log_format = cli
+        .log_format
+        .or(config.map(|c| c.store.log.format))
+        .unwrap_or_default();
+
     let registry = tracing_subscriber::registry();
 
     // #[cfg(all(debug_assertions, feature = "tokio-console"))]
@@ -42,8 +50,17 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
         None => None,
     };
 
-    let registry = registry
-        .with((!console::user_attended()).then({
+    // Create JSON console layer (only active when format is JSON)
+    let json_layer = (log_format == LogFormat::Json).then(|| {
+        let env_filter = env_filter.clone();
+        make_json_console_logger_layer().with_filter(dynamic_filter_fn(move |m, c| {
+            env_filter.enabled(m, c.clone())
+        }))
+    });
+
+    // Create text console layers (only active when format is Text)
+    let text_layer_non_interactive = (log_format == LogFormat::Text && !console::user_attended())
+        .then({
             let env_filter = env_filter.clone();
             || {
                 tracing_subscriber::fmt::layer()
@@ -58,23 +75,30 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
                         env_filter.enabled(m, c.clone())
                     }))
             }
-        }))
-        .with(console::user_attended().then({
-            || {
-                tracing_subscriber::fmt::layer()
-                    .compact()
-                    .with_ansi(enable_colors)
-                    .with_target(false)
-                    .with_timer(OffsetTime::new(
-                        offset,
-                        #[allow(clippy::unwrap_used)]
-                        format_description::parse("[hour]:[minute]:[second]").unwrap(),
-                    ))
-                    .with_filter(dynamic_filter_fn(move |m, c| {
-                        env_filter.enabled(m, c.clone())
-                    }))
-            }
-        }))
+        });
+
+    let text_layer_interactive =
+        (log_format == LogFormat::Text && console::user_attended()).then(|| {
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_ansi(enable_colors)
+                .with_target(false)
+                .with_timer(OffsetTime::new(
+                    offset,
+                    #[allow(clippy::unwrap_used)]
+                    format_description::parse("[hour]:[minute]:[second]").unwrap(),
+                ))
+                .with_filter(dynamic_filter_fn(move |m, c| {
+                    env_filter.enabled(m, c.clone())
+                }))
+        });
+
+    let registry = registry
+        .with(json_layer)
+        .with(text_layer_non_interactive)
+        .with(text_layer_interactive);
+
+    let registry = registry
         .with(make_database_logger_layer())
         .with(socket_layer);
 

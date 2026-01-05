@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.16.0-23-g8b71c2fd-modified"
+    "version": "v0.18.0-37-g2f1469c8-modified"
   },
   "servers": [
     {
@@ -3327,13 +3327,13 @@
             "default": "(objectClass=person)"
           },
           "tls_mode": {
-            "default": "preferred",
+            "default": "Preferred",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TlsMode"
               },
               {
-                "default": "preferred"
+                "default": "Preferred"
               }
             ]
           },
@@ -4722,9 +4722,9 @@
       "TlsMode": {
         "type": "string",
         "enum": [
-          "disabled",
-          "preferred",
-          "required"
+          "Disabled",
+          "Preferred",
+          "Required"
         ]
       },
       "UpdateCertificateCredential": {

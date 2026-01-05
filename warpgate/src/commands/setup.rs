@@ -12,14 +12,14 @@ use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig,
-    WarpgateConfigStore,
+    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
+    Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
-use crate::Commands;
+use crate::{Cli, Commands};
 
 fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     loop {
@@ -43,7 +43,7 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
     }
 }
 
-pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
+pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
@@ -106,7 +106,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let db_path = data_path.join("db");
     create_dir_all(&db_path)?;
-    secure_directory(&db_path)?;
+    if params.should_secure_files() {
+        secure_directory(&db_path)?;
+    }
 
     store.database_url = Secret::new(match &cli.command {
         Commands::UnattendedSetup {
@@ -325,13 +327,13 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     File::create(&cli.config)?.write_all(yaml.as_bytes())?;
     info!("Saved into {}", cli.config.display());
 
-    let config = load_config(&cli.config, true)?;
-    warpgate_protocol_ssh::generate_keys(&config, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, "client")?;
+    let config = load_config(params, true)?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     // Create the admin user
     crate::commands::create_user::command(
-        cli,
+        params,
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
         &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
@@ -345,14 +347,16 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             "localhost".to_string(),
         ])?;
 
-        let certificate_path = config
-            .paths_relative_to
+        let certificate_path = params
+            .paths_relative_to()
             .join(&config.store.http.certificate);
-        let key_path = config.paths_relative_to.join(&config.store.http.key);
+        let key_path = params.paths_relative_to().join(&config.store.http.key);
         std::fs::write(&certificate_path, cert.cert.pem())?;
         std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
-        secure_file(&certificate_path)?;
-        secure_file(&key_path)?;
+        if params.should_secure_files() {
+            secure_file(&certificate_path)?;
+            secure_file(&key_path)?;
+        }
     }
 
     info!("");

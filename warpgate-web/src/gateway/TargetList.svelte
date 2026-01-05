@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Observable, from, map } from 'rxjs'
+import { compare as naturalCompare } from 'natural-orderby'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
@@ -21,7 +22,8 @@ function loadTargets (options: LoadOptions): Observable<PaginatedResponse<Target
                 firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
                     .thenBy<TargetSnapshot, boolean>(x => !x.group)
                     .thenBy<TargetSnapshot, string | undefined>(x => x.group?.name.toLowerCase())
-                    .thenBy(x => x.name.toLowerCase())
+                    .thenBy((a, b) =>
+                        naturalCompare(a.name.toLowerCase(), b.name.toLowerCase()))
             )
             return {
                 items: result,

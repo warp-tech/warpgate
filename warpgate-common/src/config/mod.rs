@@ -187,6 +187,16 @@ pub enum SshHostKeyVerificationMode {
     AutoReject,
 }
 
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema, clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct SshConfig {
     #[serde(default = "_default_false")]
@@ -447,6 +457,9 @@ pub struct LogConfig {
 
     #[serde(default)]
     pub send_to: Option<String>,
+
+    #[serde(default)]
+    pub format: LogFormat,
 }
 
 impl Default for LogConfig {
@@ -454,6 +467,7 @@ impl Default for LogConfig {
         Self {
             retention: _default_retention(),
             send_to: None,
+            format: LogFormat::default(),
         }
     }
 }
@@ -512,7 +526,6 @@ impl Default for WarpgateConfigStore {
 #[derive(Debug, Clone)]
 pub struct WarpgateConfig {
     pub store: WarpgateConfigStore,
-    pub paths_relative_to: PathBuf,
 }
 
 impl WarpgateConfig {

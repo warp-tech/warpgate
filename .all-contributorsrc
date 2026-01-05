@@ -99,6 +99,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "mrmm",
+      "name": "Mourad Maatoug",
+      "avatar_url": "https://avatars.githubusercontent.com/u/796467?v=4",
+      "profile": "https://github.com/mrmm",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
