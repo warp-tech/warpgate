@@ -4327,9 +4327,9 @@
       "TlsMode": {
         "type": "string",
         "enum": [
-          "disabled",
-          "preferred",
-          "required"
+          "Disabled",
+          "Preferred",
+          "Required"
         ]
       },
       "UpdateLdapServerRequest": {
