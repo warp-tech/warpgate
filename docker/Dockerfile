@@ -49,7 +49,7 @@ VOLUME /data
 
 ENV WARPGATE_CONFIG=/data/warpgate.yaml
 
-HEALTHCHECK CMD healthcheck
+HEALTHCHECK CMD warpgate healthcheck
 
 ENV DOCKER=1
 USER warpgate
