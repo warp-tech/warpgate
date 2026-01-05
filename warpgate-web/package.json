@@ -63,7 +63,7 @@
     "ua-parser-js": "^2.0.7",
     "vite": "^7.3.0",
     "vite-plugin-checker": "^0.12.0",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^6.0.3"
   },
   "overrides": {
     "svelte-observable": {
