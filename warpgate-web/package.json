@@ -34,7 +34,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/ua-parser-js": "^0.7.36",
     "@xterm/addon-serialize": "^0.14",
-    "@xterm/xterm": "^5.5",
+    "@xterm/xterm": "^6.0",
     "bootstrap": "^5.3.8",
     "copy-text-to-clipboard": "^3.2.2",
     "date-fns": "^4.1.0",
