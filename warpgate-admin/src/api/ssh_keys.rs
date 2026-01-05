@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
-use tokio::sync::Mutex;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 
@@ -34,10 +31,9 @@ impl Api {
     )]
     async fn api_ssh_get_own_keys(
         &self,
-        services: Data<&Arc<Mutex<Services>>>,
+        services: Data<&Services>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
-        let services = services.lock().await;
         let config = services.config.lock().await;
         let keys = warpgate_protocol_ssh::load_keys(&config, &services.global_params, "client")?;
 
