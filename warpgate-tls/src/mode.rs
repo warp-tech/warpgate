@@ -3,9 +3,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Enum, PartialEq, Eq, Default)]
 pub enum TlsMode {
+    #[serde(rename = "disabled")]
     Disabled,
+    #[serde(rename = "preferred")]
     #[default]
     Preferred,
+    #[serde(rename = "required")]
     Required,
 }
 
