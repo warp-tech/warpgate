@@ -5,14 +5,24 @@
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
 
-    function getTargetGroups (): Observable<PaginatedResponse<TargetGroup>> {
+    function getTargetGroups(): Observable<PaginatedResponse<TargetGroup>> {
         return from(api.listTargetGroups()).pipe(
-            map(groups => ({
-                items: groups,
-                offset: 0,
-                total: groups.length,
-            })),
+            map(groups => {
+                const sorted = groups.sort((a, b) =>
+                    naturalCompareFactory()(
+                        a.name.toLowerCase(),
+                        b.name.toLowerCase()
+                    )
+                )
+
+                return {
+                    items: sorted,
+                    offset: 0,
+                    total: sorted.length,
+                }
+            })
         )
     }
 </script>

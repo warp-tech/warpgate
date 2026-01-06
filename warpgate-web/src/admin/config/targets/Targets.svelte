@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
-    import { compare as naturalCompare } from 'natural-orderby'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
     import { type Target, type TargetGroup, api } from 'admin/lib/api'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
@@ -19,30 +19,58 @@
 
     onMount(async () => {
         try {
-            groups = await api.listTargetGroups()
+            const natural = naturalCompareFactory()
+
+            groups = (await api.listTargetGroups()).sort((a, b) =>
+                natural(
+                    a.name.toLowerCase(),
+                    b.name.toLowerCase()
+                )
+            )
         } catch (err) {
             error = await stringifyError(err)
         }
     })
 
-    function getTargets (options: LoadOptions): Observable<PaginatedResponse<Target>> {
-        return from(api.getTargets({
-            search: options.search,
-            groupId: selectedGroup?.id,
-        })).pipe(
-            map(targets =>  targets.sort(
-                firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
-                    .thenBy<Target, boolean>(x => !x.groupId)
-                    .thenBy<Target, string | undefined>(
-                        target => groups.find(g => g.id === target.groupId)?.name.toLowerCase())
-                    .thenBy((a, b) =>
-                        naturalCompare(a.name.toLowerCase(), b.name.toLowerCase()))
-            )),
+    function getTargets(
+        options: LoadOptions
+    ): Observable<PaginatedResponse<Target>> {
+        return from(
+            api.getTargets({
+                search: options.search,
+                groupId: selectedGroup?.id,
+            })
+        ).pipe(
+            map(targets => {
+                const natural = naturalCompareFactory()
+
+                return targets.sort(
+                    firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
+                        .thenBy((x: Target) => !x.groupId)
+                        // Natural sort between groups
+                        .thenBy(
+                            (a: Target, b: Target) =>
+                                natural(
+                                    (groups.find(g => g.id === a.groupId)?.name ?? "").toLowerCase(),
+                                    (groups.find(g => g.id === b.groupId)?.name ?? "").toLowerCase()
+                                )
+                        )
+                        // Natural sort within a group
+                        .thenBy(
+                            (a, b) =>
+                                natural(
+                                    a.name.toLowerCase(),
+                                    b.name.toLowerCase()
+                                )
+                        )
+                )
+            }),
             map(targets => ({
                 items: targets,
                 offset: 0,
                 total: targets.length,
-            })))
+            }))
+        )
     }
 </script>
 

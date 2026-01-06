@@ -1,6 +1,6 @@
 <script lang="ts">
-import { Observable, from, map } from 'rxjs'
-import { compare as naturalCompare } from 'natural-orderby'
+import { Observable, from, map, tap } from 'rxjs'
+import { compare as naturalCompareFactory } from 'natural-orderby'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
@@ -15,21 +15,40 @@ import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
-function loadTargets (options: LoadOptions): Observable<PaginatedResponse<TargetSnapshot>> {
+function loadTargets(
+    options: LoadOptions
+): Observable<PaginatedResponse<TargetSnapshot>> {
     return from(api.getTargets({ search: options.search })).pipe(
         map(result => {
+            const naturalCompare = naturalCompareFactory()
+
             result = result.sort(
                 firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
-                    .thenBy<TargetSnapshot, boolean>(x => !x.group)
-                    .thenBy<TargetSnapshot, string | undefined>(x => x.group?.name.toLowerCase())
-                    .thenBy((a, b) =>
-                        naturalCompare(a.name.toLowerCase(), b.name.toLowerCase()))
+                    .thenBy((x: TargetSnapshot) => !x.group)
+                    // Natural sort between groups
+                    .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
+                        naturalCompare(
+                            (a.group?.name ?? "").toLowerCase(),
+                            (b.group?.name ?? "").toLowerCase()
+                        )
+                    )
+                    // Natural sort within a group
+                    .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
+                        naturalCompare(
+                            a.name.toLowerCase(),
+                            b.name.toLowerCase()
+                        )
+                    )
             )
+
             return {
                 items: result,
                 offset: 0,
                 total: result.length,
             }
+        }),
+        tap(response => {
+            console.log("loadTargets result:", response)
         })
     )
 }
