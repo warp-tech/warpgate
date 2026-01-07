@@ -4,13 +4,14 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::WarpgateError;
-use warpgate_core::helpers::extract_client_ip;
+use warpgate_core::logging::http::get_client_ip;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 
 use crate::session_handle::KubernetesSessionHandle;
 
-type CorrelationKey = (String, String, String); // (username, target_name, ip)
+type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
 
 pub struct RequestCorrelator {
     handles: HashMap<CorrelationKey, (Arc<Mutex<WarpgateServerHandle>>, Instant)>,
@@ -30,10 +31,11 @@ impl RequestCorrelator {
     pub async fn session_for_request(
         &mut self,
         request: &Request,
+        user_info: &AuthStateUserInfo,
         target_name: &str,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let key = self
-            .correlation_key_for_request(request, target_name)
+            .correlation_key_for_request(request, user_info, target_name)
             .await?;
         let now = Instant::now();
         if let Some((handle, _created)) = self.handles.get(&key) {
@@ -41,13 +43,13 @@ impl RequestCorrelator {
             return Ok(handle.clone());
         }
 
-        let ip = extract_client_ip(request, &self.services).await;
+        let ip = get_client_ip(request, Some(&self.services)).await;
 
         let handle = State::register_session(
             &self.services.state,
             &crate::PROTOCOL_NAME,
             SessionStateInit {
-                remote_address: ip.parse().ok(),
+                remote_address: ip.and_then(|x| x.parse().ok()),
                 handle: Box::new(KubernetesSessionHandle),
             },
         )
@@ -59,11 +61,11 @@ impl RequestCorrelator {
     async fn correlation_key_for_request(
         &self,
         request: &Request,
+        user_info: &AuthStateUserInfo,
         target_name: &str,
     ) -> Result<CorrelationKey, WarpgateError> {
-        let username = self.extract_username(request)?;
-        let ip = extract_client_ip(request, &self.services).await;
-        Ok((username, target_name.into(), ip))
+        let ip = get_client_ip(request, Some(&self.services)).await;
+        Ok((user_info.username.clone(), target_name.into(), ip))
     }
 
     /// Remove handles older than session_max_age
@@ -91,11 +93,5 @@ impl RequestCorrelator {
                 guard.vacuum().await;
             }
         });
-    }
-
-    // Placeholder: fill in with your username extraction logic
-    fn extract_username(&self, _request: &Request) -> Result<String, WarpgateError> {
-        return Ok("TODO".into());
-        // TODO: Extract username from request/session/auth
     }
 }

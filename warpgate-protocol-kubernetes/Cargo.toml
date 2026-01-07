@@ -18,6 +18,7 @@ kube.workspace = true
 lazy_static = { version = "1.4", default-features = false }
 md5 = { version = "0.7", default-features = false }
 poem.workspace = true
+poem-openapi.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true

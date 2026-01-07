@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.18.0-37-g2f1469c8-modified"
+    "version": "v0.19.1-20-gacb987e0-modified"
   },
   "servers": [
     {
@@ -251,6 +251,39 @@
           }
         ],
         "operationId": "get_recording"
+      }
+    },
+    "/recordings/{id}/kubernetes": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KubernetesRecordingItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_kubernetes_recording"
       }
     },
     "/roles": {
@@ -3599,6 +3632,35 @@
           "certificate_pem": {
             "type": "string"
           }
+        }
+      },
+      "KubernetesRecordingItem": {
+        "type": "object",
+        "title": "KubernetesRecordingItem",
+        "required": [
+          "time",
+          "request_method",
+          "request_path",
+          "request_body",
+          "response_body"
+        ],
+        "properties": {
+          "time": {
+            "type": "number",
+            "format": "float"
+          },
+          "request_method": {
+            "type": "string"
+          },
+          "request_path": {
+            "type": "string"
+          },
+          "request_body": {},
+          "response_status": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "response_body": {}
         }
       },
       "KubernetesTargetAuth": {

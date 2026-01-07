@@ -1,6 +1,6 @@
 mod client;
 mod correlator;
-mod recording;
+pub mod recording;
 mod server;
 mod session_handle;
 
@@ -8,7 +8,6 @@ use std::fmt::Debug;
 
 use anyhow::Result;
 pub use client::*;
-pub use recording::*;
 pub use server::run_server;
 use warpgate_common::{
     ListenEndpoint, ProtocolName, Target, TargetKubernetesOptions, TargetOptions,

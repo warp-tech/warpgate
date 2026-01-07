@@ -159,3 +159,16 @@ users:
 export function makeExampleKubectlCommand (_opt: ConnectionOptions): string {
     return shellEscape(['kubectl', '--kubeconfig', 'warpgate-kubeconfig.yaml', 'get', 'pods'])
 }
+
+
+export interface ProtocolProperties {
+    sessionsCanBeClosed: boolean
+}
+
+export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
+    ssh: { sessionsCanBeClosed: true },
+    http: { sessionsCanBeClosed: true },
+    mysql: { sessionsCanBeClosed: true },
+    postgres: { sessionsCanBeClosed: true },
+    kubernetes: { sessionsCanBeClosed: false },
+}

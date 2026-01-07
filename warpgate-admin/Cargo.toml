@@ -32,4 +32,5 @@ warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
+warpgate-protocol-kubernetes = { version = "*", path = "../warpgate-protocol-kubernetes" }
 regex.workspace = true

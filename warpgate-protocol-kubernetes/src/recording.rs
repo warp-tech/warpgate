@@ -1,12 +1,24 @@
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
-use tokio::time::Instant;
 use warpgate_core::recordings::{Recorder, RecordingWriter};
 use warpgate_db_entities::Recording::RecordingKind;
 
+#[derive(Debug, Object)]
+#[oai(rename = "KubernetesRecordingItem")]
+pub struct KubernetesRecordingItemApiObject {
+    pub timestamp: DateTime<Utc>,
+    pub request_method: String,
+    pub request_path: String,
+    pub request_body: serde_json::Value,
+    pub response_status: Option<u16>,
+    pub response_body: serde_json::Value,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KubernetesRecordingItem {
-    pub time: f32,
+    pub timestamp: DateTime<Utc>,
     pub request_method: String,
     pub request_path: String,
     pub request_headers: std::collections::HashMap<String, String>,
@@ -16,16 +28,28 @@ pub struct KubernetesRecordingItem {
     pub response_body: Option<Vec<u8>>,
 }
 
+impl From<KubernetesRecordingItem> for KubernetesRecordingItemApiObject {
+    fn from(item: KubernetesRecordingItem) -> Self {
+        KubernetesRecordingItemApiObject {
+            timestamp: item.timestamp,
+            request_method: item.request_method,
+            request_path: item.request_path,
+            request_body: serde_json::from_slice(&item.request_body[..])
+                .unwrap_or(serde_json::Value::Null),
+            response_status: item.response_status,
+            response_body: item
+                .response_body
+                .and_then(|body| serde_json::from_slice(&body[..]).ok())
+                .unwrap_or(serde_json::Value::Null),
+        }
+    }
+}
+
 pub struct KubernetesRecorder {
     writer: RecordingWriter,
-    started_at: Instant,
 }
 
 impl KubernetesRecorder {
-    fn get_time(&self) -> f32 {
-        self.started_at.elapsed().as_secs_f32()
-    }
-
     async fn write_item(
         &mut self,
         item: &KubernetesRecordingItem,
@@ -35,25 +59,6 @@ impl KubernetesRecorder {
         serialized_item.push(b'\n');
         self.writer.write(&serialized_item).await?;
         Ok(())
-    }
-
-    pub async fn record_request(
-        &mut self,
-        method: &str,
-        path: &str,
-        headers: std::collections::HashMap<String, String>,
-        body: &[u8],
-    ) -> Result<(), warpgate_core::recordings::Error> {
-        self.write_item(&KubernetesRecordingItem {
-            time: self.get_time(),
-            request_method: method.to_string(),
-            request_path: path.to_string(),
-            request_headers: headers,
-            request_body: Bytes::from(body.to_vec()),
-            response_status: None,
-            response_body: None,
-        })
-        .await
     }
 
     pub async fn record_response(
@@ -66,7 +71,7 @@ impl KubernetesRecorder {
         response_body: &[u8],
     ) -> Result<(), warpgate_core::recordings::Error> {
         self.write_item(&KubernetesRecordingItem {
-            time: self.get_time(),
+            timestamp: Utc::now(),
             request_method: method.to_string(),
             request_path: path.to_string(),
             request_headers: headers,
@@ -84,9 +89,6 @@ impl Recorder for KubernetesRecorder {
     }
 
     fn new(writer: RecordingWriter) -> Self {
-        KubernetesRecorder {
-            writer,
-            started_at: Instant::now(),
-        }
+        KubernetesRecorder { writer }
     }
 }

@@ -19,6 +19,9 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{
     ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions, User,
 };
+use warpgate_core::logging::http::{
+    get_client_ip, log_request_error, log_request_result, span_for_request,
+};
 use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
 use warpgate_db_entities::CertificateCredential;
@@ -131,9 +134,14 @@ where
         let enhanced_remote_addr = if let Some(cert_der) = extract_peer_certificates(&tls_stream) {
             // Serialize certificate as base64 and embed in remote_addr
             let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
+            let original_remote_addr_str = match &remote_addr.0 {
+                Addr::SocketAddr(addr) => addr.to_string(),
+                Addr::Unix(_) => remote_addr.to_string(),
+                Addr::Custom(_, _) => "".into(),
+            };
             RemoteAddr(Addr::Custom(
                 "captured-cert",
-                format!("{}|cert:{}", remote_addr.0, cert_b64).into(),
+                format!("{original_remote_addr_str}|cert:{cert_b64}").into(),
             ))
         } else {
             remote_addr
@@ -181,20 +189,20 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         .data(auth_state_store)
         .data(recordings)
         .data(services.clone())
-        .data(correlator)
-        .before(|req: Request| async move {
-            info!("Received Kubernetes API request: {}", req.uri());
-            Ok(req)
-        });
+        .data(correlator);
 
     info!(?address, "Kubernetes protocol listening");
 
     let certificate_and_key = {
         let config = services.config.lock().await;
-        let certificate_path = config
-            .paths_relative_to
+        let certificate_path = services
+            .global_params
+            .paths_relative_to()
             .join(&config.store.kubernetes.certificate);
-        let key_path = config.paths_relative_to.join(&config.store.kubernetes.key);
+        let key_path = services
+            .global_params
+            .paths_relative_to()
+            .join(&config.store.kubernetes.key);
 
         TlsCertificateAndPrivateKey {
             certificate: TlsCertificateBundle::from_file(&certificate_path)
@@ -263,11 +271,66 @@ async fn handle_api_request(
         ));
     };
 
+    let handle = correlator
+        .lock()
+        .await
+        .session_for_request(req, &user_info, &target.name)
+        .await?;
+
+    let (session_id, log_span) = {
+        let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
+            handle.lock().await;
+        handle.set_target(&target).await?;
+        handle.set_user_info(user_info.clone()).await?;
+        (handle.id(), span_for_request(&req, Some(&*handle)).await?)
+    };
+
+    async {
+        let response = _handle_request_inner(
+            req,
+            body,
+            k8s_options,
+            &path,
+            user_info,
+            session_id,
+            *services,
+            *recordings,
+        )
+        .await;
+
+        let client_ip = get_client_ip(req, Some(&*services)).await;
+        let response = response.inspect_err(|e| {
+            log_request_error(&req.method(), &req.original_uri(), client_ip.as_deref(), e);
+        })?;
+
+        log_request_result(
+            &req.method(),
+            &req.original_uri(),
+            client_ip.as_deref(),
+            &response.status(),
+        );
+
+        Ok(response)
+    }
+    .instrument(log_span)
+    .await
+}
+
+async fn _handle_request_inner(
+    req: &Request,
+    body: Body,
+    k8s_options: &TargetKubernetesOptions,
+    path: &str,
+    user_info: AuthStateUserInfo,
+    session_id: SessionId,
+    services: &Services,
+    recordings: &Arc<Mutex<SessionRecordings>>,
+) -> Result<Response, poem::Error> {
     let client =
         create_authenticated_client(k8s_options, &Some(user_info.username.clone()), &services)
             .await?;
 
-    info!(
+    debug!(
         "Target Kubernetes options: cluster_url={}, auth={:?}",
         k8s_options.cluster_url,
         match &k8s_options.auth {
@@ -278,17 +341,7 @@ async fn handle_api_request(
 
     let method = req.method().as_str();
 
-    // Extract the API path by removing the target name prefix from the original URI
-    let original_path = req.uri().path();
-    let api_path = if let Some(stripped) = original_path.strip_prefix(&format!("/{}/", target_name))
-    {
-        format!("/{}", stripped)
-    } else if original_path == format!("/{}", target_name) {
-        "/".to_string()
-    } else {
-        // Fallback to the path parameter method
-        format!("/{}", path)
-    };
+    let api_path = format!("/{}", path);
 
     let query = req.uri().query().unwrap_or("");
 
@@ -298,15 +351,6 @@ async fn handle_api_request(
     } else {
         format!("{}{}?{}", k8s_options.cluster_url, api_path, query)
     };
-
-    debug!(
-        target_name = target_name,
-        original_path = original_path,
-        api_path = api_path,
-        cluster_url = k8s_options.cluster_url,
-        full_url = full_url,
-        "Constructing upstream Kubernetes API URL"
-    );
 
     // Extract headers
     let mut headers = HashMap::new();
@@ -324,26 +368,12 @@ async fn handle_api_request(
         )
     })?;
 
-    let session = correlator
-        .lock()
-        .await
-        .session_for_request(req, &target_name)
-        .await?;
-
-    let session_id = {
-        let session = session.lock().await;
-        session.set_target(&target).await?;
-        session.set_user_info(user_info).await?;
-        session.id()
-    };
-
     // Record the request if recording is enabled
     let mut recorder_opt = {
-        // Check if recording is enabled in the config
-        let config = services.config.lock().await;
-        if config.store.recordings.enable {
-            drop(config);
-
+        if {
+            let config = services.config.lock().await;
+            config.store.recordings.enable
+        } {
             match start_recording(&session_id, &recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
@@ -355,15 +385,6 @@ async fn handle_api_request(
             None
         }
     };
-
-    if let Some(ref mut recorder) = recorder_opt {
-        if let Err(e) = recorder
-            .record_request(method, &full_url, headers.clone(), &body_bytes)
-            .await
-        {
-            warn!("Failed to record Kubernetes request: {}", e);
-        }
-    }
 
     // Forward request to Kubernetes API
     let mut request_builder = client.request(
@@ -652,10 +673,6 @@ async fn create_authenticated_client(
 
     match &k8s_options.auth {
         warpgate_common::KubernetesTargetAuth::Token(auth) => {
-            info!(
-                "Setting Kubernetes auth token: {}...",
-                &auth.token.expose_secret()[..std::cmp::min(10, auth.token.expose_secret().len())]
-            );
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
@@ -748,7 +765,7 @@ async fn validate_client_certificate(
             let provided_cert = normalize_certificate_pem(&cert_pem);
 
             if stored_cert == provided_cert {
-                info!(
+                debug!(
                     user = user.username,
                     cert_label = cert_credential.label,
                     "Client certificate validated for user"
@@ -827,28 +844,29 @@ where
     type Output = E::Output;
     async fn call(&self, mut req: poem::Request) -> poem::Result<Self::Output> {
         // Extract certificate from enhanced remote_addr if present
-        let remote_addr = req.remote_addr().to_string();
-        if let Some(cert_part) = remote_addr.split("|cert:").nth(1) {
-            // Decode the base64 certificate
-            match base64::engine::general_purpose::STANDARD.decode(cert_part) {
-                Ok(cert_der) => {
-                    debug!(
+        if let RemoteAddr(Addr::Custom("captured-cert", value)) = req.remote_addr() {
+            if let Some(cert_part) = value.split("|cert:").nth(1) {
+                // Decode the base64 certificate
+                match base64::engine::general_purpose::STANDARD.decode(cert_part) {
+                    Ok(cert_der) => {
+                        debug!(
                         "Middleware: Successfully extracted client certificate from remote_addr"
                     );
 
-                    let client_cert = ClientCertificate {
-                        der_bytes: cert_der,
-                    };
+                        let client_cert = ClientCertificate {
+                            der_bytes: cert_der,
+                        };
 
-                    // Store certificate in request extensions for later access
-                    req.extensions_mut().insert(client_cert);
-                    debug!("Middleware: Client certificate stored in request extensions");
-                }
-                Err(e) => {
-                    warn!(
-                        "Middleware: Failed to decode client certificate from remote_addr: {}",
-                        e
-                    );
+                        // Store certificate in request extensions for later access
+                        req.extensions_mut().insert(client_cert);
+                        debug!("Middleware: Client certificate stored in request extensions");
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Middleware: Failed to decode client certificate from remote_addr: {}",
+                            e
+                        );
+                    }
                 }
             }
         } else {

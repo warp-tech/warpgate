@@ -2,7 +2,6 @@ pub mod api;
 mod catchall;
 mod common;
 mod error;
-mod logging;
 mod middleware;
 mod proxy;
 mod session;
@@ -16,7 +15,6 @@ use anyhow::{Context, Result};
 use common::{inject_request_authorization, page_admin_auth};
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
-use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
 use poem::middleware::SetHeader;
@@ -29,6 +27,7 @@ use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, Target, TargetOptions, WarpgateConfig};
+use warpgate_core::logging::http::{get_client_ip, log_request_error, log_request_result, span_for_request};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_tls::{
     IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
@@ -40,6 +39,7 @@ use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKI
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
+use crate::session_handle::WarpgateServerHandleFromRequest;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -201,17 +201,23 @@ impl ProtocolServer for HTTPProtocolServer {
                         EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
                             .with(cache_bust()),
                     )
-                    .around(move |ep, req| async move {
-                        let method = req.method().clone();
-                        let url = req.original_uri().clone();
-                        let client_ip = get_client_ip(&req).await?;
+                    .around({
+                        let services = self.services.clone();
+                        move |ep, req| {
+                            let services = services.clone();
+                            async move {
+                                let method = req.method().clone();
+                                let url = req.original_uri().clone();
+                                let client_ip = get_client_ip(&req, Some(&services)).await;
 
-                        let response = ep.call(req).await.inspect_err(|e| {
-                            log_request_error(&method, &url, &client_ip, e);
-                        })?;
+                                let response = ep.call(req).await.inspect_err(|e| {
+                                    log_request_error(&method, &url, client_ip.as_deref(), e);
+                                })?;
 
-                        log_request_result(&method, &url, &client_ip, &response.status());
-                        Ok(response)
+                                log_request_result(&method, &url, client_ip.as_deref(), &response.status());
+                                Ok(response)
+                            }
+                        }
                     }),
             )
             .nest_no_strip(
@@ -230,8 +236,16 @@ impl ProtocolServer for HTTPProtocolServer {
                     .clone();
 
                 let req = { sm.lock().await.process_request(req).await? };
-
-                let span = span_for_request(&req).await?;
+                let handle = WarpgateServerHandleFromRequest::from_request_without_body(&req)
+                    .await
+                    .ok();
+                let span = match handle {
+                    Some(ref handle) => {
+                        let handle = handle.lock().await;
+                        span_for_request(&req, Some(&*handle)).await?
+                    }
+                    None => span_for_request(&req, None).await?,
+                };
 
                 ep.call(req).instrument(span).await
             })

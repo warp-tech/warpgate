@@ -3,7 +3,6 @@ mod config_providers;
 pub mod consts;
 mod data;
 pub mod db;
-pub mod helpers;
 pub mod logging;
 mod protocols;
 pub mod rate_limiting;

@@ -6068,6 +6068,7 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-ldap",
+ "warpgate-protocol-kubernetes",
  "warpgate-protocol-ssh",
  "warpgate-tls",
 ]
@@ -6305,6 +6306,7 @@ dependencies = [
  "lazy_static",
  "md5",
  "poem",
+ "poem-openapi",
  "reqwest",
  "rustls",
  "sea-orm",

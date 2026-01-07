@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
@@ -86,21 +86,34 @@ impl SessionRecordings {
 
         let path = self.path_for(id, &name);
         tokio::fs::create_dir_all(&path.parent().ok_or(Error::InvalidPath)?).await?;
-        info!(%name, path=?path, "Recording session {}", id);
 
         let model = {
-            use sea_orm::ActiveValue::Set;
-            let values = Recording::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                started: Set(chrono::Utc::now()),
-                session_id: Set(*id),
-                name: Set(name),
-                kind: Set(T::kind()),
-                ..Default::default()
-            };
-
             let db = self.db.lock().await;
-            values.insert(&*db).await.map_err(Error::Database)?
+            let existing = Recording::Entity::find()
+                .filter(
+                    Recording::Column::SessionId
+                        .eq(*id)
+                        .and(Recording::Column::Name.eq(name.clone()))
+                        .and(Recording::Column::Kind.eq(T::kind())),
+                )
+                .one(&*db)
+                .await?;
+            match existing {
+                Some(e) => e,
+                None => {
+                    info!(%name, path=?path, "Recording session {}", id);
+                    use sea_orm::ActiveValue::Set;
+                    let values = Recording::ActiveModel {
+                        id: Set(Uuid::new_v4()),
+                        started: Set(chrono::Utc::now()),
+                        session_id: Set(*id),
+                        name: Set(name.clone()),
+                        kind: Set(T::kind()),
+                        ..Default::default()
+                    };
+                    values.insert(&*db).await.map_err(Error::Database)?
+                }
+            }
         };
 
         let writer = RecordingWriter::new(
