@@ -20,7 +20,7 @@ pub struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
-    #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set)]
+    #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set, env="WARPGATE_CONFIG")]
     config: PathBuf,
 
     #[clap(long, short, action=ArgAction::Count)]
