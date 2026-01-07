@@ -156,6 +156,6 @@ impl ProtocolServer for PostgresProtocolServer {
 
 impl Debug for PostgresProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PostgresProtocolServer")
+        f.debug_struct("PostgresProtocolServer").finish()
     }
 }

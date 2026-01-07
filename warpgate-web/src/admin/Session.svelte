@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions } from 'admin/lib/api'
+    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -15,6 +15,7 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+    import { PROTOCOL_PROPERTIES } from 'common/protocols';
 
     interface Props {
         params: { id: string }
@@ -53,6 +54,10 @@
             if (session.target.options.kind === 'Http') {
                 const options = session.target.options as unknown as TargetHTTPOptions
                 address = options.url
+            }
+            if (session.target.options.kind === 'Kubernetes') {
+                const options = session.target.options as unknown as TargetKubernetesOptions
+                address = options.clusterUrl
             }
             return `${session.target.name} (${address})`
         } else {
@@ -108,7 +113,7 @@
                 </span>
             </div>
         </div>
-        {#if !session.ended}
+        {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
             <div class="ms-auto">
                 <AsyncButton color="warning" click={close}>
                     Close now

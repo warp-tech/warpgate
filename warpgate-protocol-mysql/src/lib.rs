@@ -137,6 +137,6 @@ impl ProtocolServer for MySQLProtocolServer {
 
 impl Debug for MySQLProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MySQLProtocolServer")
+        f.debug_struct("MySQLProtocolServer").finish()
     }
 }

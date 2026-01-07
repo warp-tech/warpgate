@@ -13,17 +13,19 @@ use http::{HeaderValue, Uri};
 use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::{Message, WebSocket};
+use poem::web::Data;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
+use warpgate_core::logging::http::{get_client_ip, log_request_result};
+use warpgate_core::Services;
 use warpgate_tls::{configure_tls_connector, TlsMode};
 use warpgate_web::lookup_built_file;
 
 use crate::common::{SessionAuthorization, SessionExt};
-use crate::logging::{get_client_ip, log_request_result};
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -263,6 +265,7 @@ pub async fn proxy_normal_request(
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
+    let services = Data::<&Services>::from_request_without_body(req).await?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -276,7 +279,7 @@ pub async fn proxy_normal_request(
     }
 
     client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode.clone();
+        let tls_mode = options.tls.mode;
         let uri = uri.clone();
         move |attempt| {
             if tls_mode == TlsMode::Preferred
@@ -326,7 +329,7 @@ pub async fn proxy_normal_request(
     log_request_result(
         req.method(),
         req.original_uri(),
-        &get_client_ip(req).await?,
+        get_client_ip(req, Some(*services)).await.as_deref(),
         &status,
     );
 
@@ -348,7 +351,7 @@ async fn copy_client_body(
     response.set_body(Body::from_bytes_stream(
         client_response
             .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            .map_err(std::io::Error::other),
     ));
     Ok(())
 }
