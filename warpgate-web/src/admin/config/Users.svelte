@@ -5,17 +5,31 @@
     import { link, push } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from '@sveltestrap/sveltestrap'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
 
     let ldapServers = $state<LdapServerResponse[]>([])
 
-    function getUsers (options: LoadOptions): Observable<PaginatedResponse<User>> {
-        return from(api.getUsers({
-            search: options.search,
-        })).pipe(map(targets => ({
-            items: targets,
-            offset: 0,
-            total: targets.length,
-        })))
+    function getUsers(options: LoadOptions): Observable<PaginatedResponse<User>> {
+        return from(
+            api.getUsers({
+                search: options.search,
+            })
+        ).pipe(
+            map(users => {
+                const sorted = users.sort((a, b) =>
+                    naturalCompareFactory()(
+                        a.username.toLowerCase(),
+                        b.username.toLowerCase()
+                    )
+                )
+
+                return {
+                    items: sorted,
+                    offset: 0,
+                    total: sorted.length,
+                }
+            })
+        )
     }
 
     onMount(() => {
