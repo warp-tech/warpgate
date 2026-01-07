@@ -488,12 +488,17 @@ impl RemoteClient {
             Preferred::default()
         };
 
-        let config = russh::client::Config {
+        let mut config = russh::client::Config {
             preferred: algos,
             nodelay: true,
-            gex: russh::client::GexParams::new(2048, 2048, 8192)?,
             ..Default::default()
         };
+        if ssh_options.allow_insecure_algos.unwrap_or(false) {
+            if let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192) {
+                config.gex = gex;
+            }
+        }
+
         let config = Arc::new(config);
 
         let (event_tx, mut event_rx) = unbounded_channel();
