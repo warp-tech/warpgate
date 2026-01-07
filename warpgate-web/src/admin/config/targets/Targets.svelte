@@ -51,8 +51,8 @@
                         .thenBy(
                             (a: Target, b: Target) =>
                                 natural(
-                                    (groups.find(g => g.id === a.groupId)?.name ?? "").toLowerCase(),
-                                    (groups.find(g => g.id === b.groupId)?.name ?? "").toLowerCase()
+                                    (groups.find(g => g.id === a.groupId)?.name ?? '').toLowerCase(),
+                                    (groups.find(g => g.id === b.groupId)?.name ?? '').toLowerCase()
                                 )
                         )
                         // Natural sort within a group

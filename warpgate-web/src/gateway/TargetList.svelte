@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Observable, from, map, tap } from 'rxjs'
+import { Observable, from, map } from 'rxjs'
 import { compare as naturalCompareFactory } from 'natural-orderby'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
@@ -28,8 +28,8 @@ function loadTargets(
                     // Natural sort between groups
                     .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
                         naturalCompare(
-                            (a.group?.name ?? "").toLowerCase(),
-                            (b.group?.name ?? "").toLowerCase()
+                            (a.group?.name ?? '').toLowerCase(),
+                            (b.group?.name ?? '').toLowerCase()
                         )
                     )
                     // Natural sort within a group
@@ -47,9 +47,6 @@ function loadTargets(
                 total: result.length,
             }
         }),
-        tap(response => {
-            console.log("loadTargets result:", response)
-        })
     )
 }
 
