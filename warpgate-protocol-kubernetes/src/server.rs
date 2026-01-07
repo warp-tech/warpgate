@@ -282,7 +282,7 @@ async fn handle_api_request(
             handle.lock().await;
         handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
-        (handle.id(), span_for_request(&req, Some(&*handle)).await?)
+        (handle.id(), span_for_request(req, Some(&*handle)).await?)
     };
 
     async {
@@ -298,14 +298,14 @@ async fn handle_api_request(
         )
         .await;
 
-        let client_ip = get_client_ip(req, Some(&*services)).await;
+        let client_ip = get_client_ip(req, Some(*services)).await;
         let response = response.inspect_err(|e| {
-            log_request_error(&req.method(), &req.original_uri(), client_ip.as_deref(), e);
+            log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;
 
         log_request_result(
-            &req.method(),
-            &req.original_uri(),
+            req.method(),
+            req.original_uri(),
             client_ip.as_deref(),
             &response.status(),
         );
@@ -316,6 +316,7 @@ async fn handle_api_request(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn _handle_request_inner(
     req: &Request,
     body: Body,
@@ -327,7 +328,7 @@ async fn _handle_request_inner(
     recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> Result<Response, poem::Error> {
     let client =
-        create_authenticated_client(k8s_options, &Some(user_info.username.clone()), &services)
+        create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)
             .await?;
 
     debug!(
@@ -370,11 +371,12 @@ async fn _handle_request_inner(
 
     // Record the request if recording is enabled
     let mut recorder_opt = {
-        if {
+        let enabled = {
             let config = services.config.lock().await;
             config.store.recordings.enable
-        } {
-            match start_recording(&session_id, &recordings).await {
+        };
+        if enabled {
+            match start_recording(&session_id, recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);

@@ -19,6 +19,7 @@ pub async fn get_client_ip(req: &Request, services: Option<&Services>) -> Option
     let socket_addr = match req.remote_addr() {
         // See [CertificateExtractorEndpoint]
         RemoteAddr(Addr::Custom("captured-cert", value)) => {
+            #[allow(clippy::unwrap_used)]
             let original_remote_addr = value.split("|").next().unwrap();
             original_remote_addr
                 .to_socket_addrs()
@@ -44,7 +45,7 @@ pub async fn span_for_request(
     handle: Option<&WarpgateServerHandle>,
 ) -> poem::Result<Span> {
     let services = Data::<&Services>::from_request_without_body(req).await.ok();
-    let client_ip = get_client_ip(req, services.as_deref().map(|x| *x))
+    let client_ip = get_client_ip(req, services.as_deref().copied())
         .await
         .unwrap_or("<unknown>".into());
 
@@ -68,7 +69,7 @@ pub fn log_request_result(
     client_ip: Option<&str>,
     status: &StatusCode,
 ) {
-    let client_ip = client_ip.unwrap_or("<unknown>".into());
+    let client_ip = client_ip.unwrap_or("<unknown>");
     if status.is_server_error() || status.is_client_error() {
         warn!(%method, %url, %status, %client_ip, "Request failed");
     } else {
@@ -77,6 +78,6 @@ pub fn log_request_result(
 }
 
 pub fn log_request_error<E: Error>(method: &Method, url: &Uri, client_ip: Option<&str>, error: E) {
-    let client_ip = client_ip.unwrap_or("<unknown>".into());
+    let client_ip = client_ip.unwrap_or("<unknown>");
     error!(%method, %url, %error, %client_ip, "Request failed");
 }
