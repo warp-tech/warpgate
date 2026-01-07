@@ -491,7 +491,7 @@ impl RemoteClient {
         let config = russh::client::Config {
             preferred: algos,
             nodelay: true,
-            gex: russh::client::GexParams::new(2048, 2048, 2048)?,
+            gex: russh::client::GexParams::new(2048, 2048, 8192)?,
             ..Default::default()
         };
         let config = Arc::new(config);
