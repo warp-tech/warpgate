@@ -27,7 +27,9 @@ use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, Target, TargetOptions, WarpgateConfig};
-use warpgate_core::logging::http::{get_client_ip, log_request_error, log_request_result, span_for_request};
+use warpgate_core::logging::http::{
+    get_client_ip, log_request_error, log_request_result, span_for_request,
+};
 use warpgate_core::{ProtocolServer, Services, TargetTestError};
 use warpgate_tls::{
     IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
@@ -214,7 +216,12 @@ impl ProtocolServer for HTTPProtocolServer {
                                     log_request_error(&method, &url, client_ip.as_deref(), e);
                                 })?;
 
-                                log_request_result(&method, &url, client_ip.as_deref(), &response.status());
+                                log_request_result(
+                                    &method,
+                                    &url,
+                                    client_ip.as_deref(),
+                                    &response.status(),
+                                );
                                 Ok(response)
                             }
                         }

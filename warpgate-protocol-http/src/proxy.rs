@@ -20,8 +20,8 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
-use warpgate_core::Services;
 use warpgate_core::logging::http::{get_client_ip, log_request_result};
+use warpgate_core::Services;
 use warpgate_tls::{configure_tls_connector, TlsMode};
 use warpgate_web::lookup_built_file;
 
