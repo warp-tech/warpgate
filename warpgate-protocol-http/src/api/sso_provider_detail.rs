@@ -61,7 +61,7 @@ impl Api {
             return Ok(StartSsoResponse::NotFound);
         };
         let mut return_url = config
-            .construct_external_url(None, provider_config.return_domain_whitelist.as_deref())?;
+            .construct_external_url(Some(req), provider_config.return_domain_whitelist.as_deref())?;
         return_url.set_path("@warpgate/api/sso/return");
         debug!("Return URL: {}", &return_url);
 
