@@ -8,6 +8,7 @@ export interface ConnectionOptions {
     serverInfo?: Info
     targetExternalHost?: string
     ticketSecret?: string
+    targetDefaultDatabaseName?: string
 }
 
 export function makeSSHUsername (opt: ConnectionOptions): string {
@@ -46,7 +47,8 @@ export function makeMySQLUsername (opt: ConnectionOptions): string {
 }
 
 export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
-    let cmd = shellEscape(['mysql', '-u', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port').toString(), '--ssl'])
+    const dbName = (opt.targetDefaultDatabaseName?.trim() && opt.targetDefaultDatabaseName.trim().length > 0) ? opt.targetDefaultDatabaseName.trim() : 'database-name'
+    let cmd = shellEscape(['mysql', '-u', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port').toString(), '--ssl', dbName])
     if (!opt.ticketSecret) {
         cmd += ' -p'
     }
@@ -55,18 +57,26 @@ export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
 
 export function makeExampleMySQLURI (opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
-    return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port'}?sslMode=required`
+    const dbName = (opt.targetDefaultDatabaseName?.trim() && opt.targetDefaultDatabaseName.trim().length > 0) ? opt.targetDefaultDatabaseName.trim() : 'database-name'
+    return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port'}/${dbName}?sslMode=required`
 }
 
 export const makePostgreSQLUsername = makeMySQLUsername
 
 export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
-    return shellEscape(['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString(), '--password', 'database-name'])
+    const dbName = (opt.targetDefaultDatabaseName?.trim() && opt.targetDefaultDatabaseName.trim().length > 0) ? opt.targetDefaultDatabaseName.trim() : 'database-name'
+    let args = ['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString()]
+    if (!opt.ticketSecret) {
+        args.push('-W')
+    }
+    args.push(dbName)
+    return shellEscape(args)
 }
 
 export function makeExamplePostgreSQLURI (opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
-    return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port'}/database-name?sslmode=require`
+    const dbName = (opt.targetDefaultDatabaseName?.trim() && opt.targetDefaultDatabaseName.trim().length > 0) ? opt.targetDefaultDatabaseName.trim() : 'database-name'
+    return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port'}/${dbName}?sslmode=require`
 }
 
 export function makeTargetURL (opt: ConnectionOptions): string {

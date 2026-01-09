@@ -170,6 +170,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
             targetName={selectedTarget?.name}
             username={$serverInfo?.username}
             targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
+            targetDefaultDatabaseName={(selectedTarget as any)?.defaultDatabaseName}
         />
     </ModalBody>
     <ModalFooter>

@@ -12,6 +12,7 @@
         targetExternalHost?: string;
         username?: string;
         ticketSecret?: string;
+        targetDefaultDatabaseName?: string;
     }
 
     let {
@@ -20,15 +21,19 @@
         targetExternalHost = undefined,
         username,
         ticketSecret = undefined,
+        targetDefaultDatabaseName = undefined,
     }: Props = $props()
 
-    let opts = $derived({
+    // Create a reactive opts object that updates when any prop or serverInfo changes
+    let opts = $derived.by(() => ({
         targetName,
         username,
         serverInfo: $serverInfo,
         ticketSecret,
         targetExternalHost,
-    })
+        targetDefaultDatabaseName,
+    }))
+    
     let sshUsername = $derived(makeSSHUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
     let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
