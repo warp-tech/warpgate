@@ -133,7 +133,5 @@ impl Api {
             .collect();
 
         Ok(GetTargetsResponse::Ok(Json(result)))
-        )))
->>>>>>> 7a7abe5 (Allow Targets to Customize default connection string)
     }
 }
