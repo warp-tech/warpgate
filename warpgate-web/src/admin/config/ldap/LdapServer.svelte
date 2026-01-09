@@ -29,7 +29,7 @@
     let enabled = $state(true)
     let autoLinkSsoUsers = $state(false)
     let description = $state('')
-    let usernameAttribute = $state(LdapUsernameAttribute.Cn)
+    let usernameAttribute = $state<LdapUsernameAttribute>(LdapUsernameAttribute.Cn)
     let sshKeyAttribute = $state('sshPublicKey')
     let error = $state<string | null>(null)
     let testResult = $state<{ success: boolean; message: string } | null>(null)
@@ -56,6 +56,7 @@
         autoLinkSsoUsers = result.autoLinkSsoUsers
         description = result.description || ''
         sshKeyAttribute = result.sshKeyAttribute || 'sshPublicKey'
+        usernameAttribute = result.usernameAttribute
         isLoaded = true
     }
 
@@ -230,7 +231,7 @@
                     Import users
                 </AsyncButton>
                 <div class="me-auto"></div>
-                <AsyncButton type="submit" class="btn btn-primary" click={save}>
+                <AsyncButton type="button" class="btn btn-primary" click={save}>
                     Save
                 </AsyncButton>
                 <AsyncButton type="button" class="btn btn-danger" click={remove}>
