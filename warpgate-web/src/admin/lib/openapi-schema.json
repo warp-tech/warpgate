@@ -3946,10 +3946,6 @@
           },
           "color": {
             "$ref": "#/components/schemas/BootstrapThemeColor"
-=======
-          "default_database_name": {
-            "type": "string"
->>>>>>> 7a7abe5 (Allow Targets to Customize default connection string)
           }
         }
       },
