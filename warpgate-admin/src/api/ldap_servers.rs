@@ -1,3 +1,22 @@
+use std::sync::Arc;
+
+use poem::web::Data;
+use poem_openapi::param::{Path, Query};
+use poem_openapi::payload::Json;
+use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    QueryOrder, Set,
+};
+use tokio::sync::Mutex;
+use uuid::Uuid;
+use warpgate_common::{Secret, WarpgateError};
+use warpgate_db_entities::LdapServer;
+use warpgate_ldap::LdapUsernameAttribute;
+use warpgate_tls::TlsMode;
+
+use super::AnySecurityScheme;
+
 #[derive(Object)]
 struct ImportLdapUsersRequest {
     dns: Vec<String>,
@@ -62,24 +81,6 @@ impl ImportApi {
         Ok(ImportLdapUsersResponse::Ok(Json(imported)))
     }
 }
-use std::sync::Arc;
-
-use poem::web::Data;
-use poem_openapi::param::{Path, Query};
-use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
-};
-use tokio::sync::Mutex;
-use uuid::Uuid;
-use warpgate_common::{Secret, WarpgateError};
-use warpgate_db_entities::LdapServer;
-use warpgate_ldap::LdapUsernameAttribute;
-use warpgate_tls::TlsMode;
-
-use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct LdapServerResponse {
@@ -504,6 +505,7 @@ impl DetailApi {
         model.auto_link_sso_users = Set(body.auto_link_sso_users);
         model.description = Set(body.description.clone().unwrap_or_default());
         model.username_attribute = Set(body.username_attribute.attribute_name().into());
+        model.ssh_key_attribute = Set(body.ssh_key_attribute.clone());
 
         // Re-discover base DNs if connection details changed
         let ldap_config = warpgate_ldap::LdapConfig {
