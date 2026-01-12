@@ -9,17 +9,23 @@ use crate::connection::connect;
 use crate::error::{LdapError, Result};
 use crate::types::{LdapConfig, LdapUser};
 
-const LDAP_USER_ATTRIBUTES: &[&str] = &[
-    "uid",
-    "cn",
-    "mail",
-    "displayName",
-    "sAMAccountName",
-    "userPrincipalName",
-    "objectGUID",
-    "entryUUID",
-    "sshPublicKey",
-];
+fn ldap_user_attributes(config: &LdapConfig) -> Vec<String> {
+    let mut attrs: Vec<String> = vec![
+        "mail".into(),
+        "displayName".into(),
+        "userPrincipalName".into(),
+        "objectGUID".into(),
+        "entryUUID".into(),
+    ];
+    let username_attribute = config.username_attribute.attribute_name().to_string();
+    if !attrs.contains(&username_attribute) {
+        attrs.push(username_attribute);
+    }
+    if !attrs.contains(&config.ssh_key_attribute) {
+        attrs.push(config.ssh_key_attribute.clone());
+    }
+    attrs
+}
 
 /// Extract user details from an LDAP [SearchEntry].
 /// Returns None if no valid username can be determined.
@@ -85,7 +91,7 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
                 base_dn,
                 Scope::Subtree,
                 &config.user_filter,
-                LDAP_USER_ATTRIBUTES.to_vec(),
+                &ldap_user_attributes(config),
             )
             .await
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?
@@ -132,7 +138,7 @@ pub async fn find_user_by_username(
                 base_dn,
                 Scope::Subtree,
                 &filter,
-                LDAP_USER_ATTRIBUTES.to_vec(),
+                &ldap_user_attributes(config),
             )
             .await
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?
