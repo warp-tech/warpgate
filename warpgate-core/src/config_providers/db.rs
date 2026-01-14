@@ -179,6 +179,11 @@ impl DatabaseConfigProvider {
             }
         }
 
+        if ldap_server_id.is_some() && ldap_object_uuid.is_none() {
+            warn!("Cannot auto-create SSO user {preferred_username}: LDAP user found has no UUID",);
+            return Ok(None);
+        }
+
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),

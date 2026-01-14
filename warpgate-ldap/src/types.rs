@@ -51,6 +51,7 @@ pub struct LdapConfig {
     pub user_filter: String,
     pub username_attribute: LdapUsernameAttribute,
     pub ssh_key_attribute: String,
+    pub uuid_attribute: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

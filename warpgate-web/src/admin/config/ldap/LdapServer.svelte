@@ -31,6 +31,7 @@
     let description = $state('')
     let usernameAttribute = $state<LdapUsernameAttribute>(LdapUsernameAttribute.Cn)
     let sshKeyAttribute = $state('sshPublicKey')
+    let uuidAttribute = $state('')
     let error = $state<string | null>(null)
     let testResult = $state<{ success: boolean; message: string } | null>(null)
     let isLoaded = $state(false)
@@ -56,6 +57,7 @@
         autoLinkSsoUsers = result.autoLinkSsoUsers
         description = result.description || ''
         sshKeyAttribute = result.sshKeyAttribute || 'sshPublicKey'
+        uuidAttribute = result.uuidAttribute || ''
         usernameAttribute = result.usernameAttribute
         isLoaded = true
     }
@@ -103,6 +105,7 @@
                     description: description || undefined,
                     usernameAttribute,
                     sshKeyAttribute,
+                    uuidAttribute,
                 },
             })
             await load()
@@ -158,6 +161,7 @@
                 bind:userFilter
                 bind:usernameAttribute
                 bind:sshKeyAttribute
+                bind:uuidAttribute
                 passwordPlaceholder="Keep current password"
                 passwordRequired={false}
             />

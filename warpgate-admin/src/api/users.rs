@@ -9,6 +9,7 @@ use sea_orm::{
     QueryOrder, Set,
 };
 use tokio::sync::Mutex;
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_common::{
     Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
@@ -314,11 +315,18 @@ impl DetailApi {
                 Ok(Some(ldap_user)) => {
                     ldap_server_id = Some(ldap_server.id);
                     ldap_object_uuid = ldap_user.object_uuid;
+
+                    if ldap_server_id.is_some() && ldap_object_uuid.is_none() {
+                        error!(
+                            "Cannot auto-create SSO user {username}: LDAP user found but has no UUID",
+                        );
+                        continue;
+                    }
                     break;
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    tracing::warn!("Error searching for LDAP user in {}: {e}", ldap_server.name,);
+                    warn!("Error searching for LDAP user in {}: {e}", ldap_server.name);
                     continue;
                 }
             }

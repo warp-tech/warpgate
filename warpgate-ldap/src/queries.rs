@@ -14,9 +14,19 @@ fn ldap_user_attributes(config: &LdapConfig) -> Vec<String> {
         "mail".into(),
         "displayName".into(),
         "userPrincipalName".into(),
-        "objectGUID".into(),
-        "entryUUID".into(),
     ];
+
+    // Add UUID attributes - either custom or default ones
+    if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        if !attrs.contains(custom_uuid_attr) {
+            attrs.push(custom_uuid_attr.clone());
+        }
+    } else {
+        // Default behavior: query both objectGUID and entryUUID
+        attrs.push("objectGUID".into());
+        attrs.push("entryUUID".into());
+    }
+
     let username_attribute = config.username_attribute.attribute_name().to_string();
     if !attrs.contains(&username_attribute) {
         attrs.push(username_attribute);
@@ -51,13 +61,23 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .and_then(|v| v.first())
         .cloned();
 
-    // Extract object UUID (Active Directory uses objectGUID, OpenLDAP uses entryUUID)
-    let object_uuid = search_entry
-        .bin_attrs
-        .get("objectGUID")
-        .or_else(|| search_entry.bin_attrs.get("entryUUID"))
-        .and_then(|v: &Vec<Vec<u8>>| v.first())
-        .and_then(|b| Uuid::from_slice(&b[..]).ok());
+    // Extract object UUID - use custom attribute if set, otherwise default to objectGUID/entryUUID
+    let object_uuid = if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        // Try custom attribute from binary attributes first
+        search_entry
+            .bin_attrs
+            .get(custom_uuid_attr)
+            .and_then(|v: &Vec<Vec<u8>>| v.first())
+            .and_then(|b| Uuid::from_slice(&b[..]).ok())
+    } else {
+        // Default behavior: Active Directory uses objectGUID, OpenLDAP uses entryUUID
+        search_entry
+            .bin_attrs
+            .get("objectGUID")
+            .or_else(|| search_entry.bin_attrs.get("entryUUID"))
+            .and_then(|v: &Vec<Vec<u8>>| v.first())
+            .and_then(|b| Uuid::from_slice(&b[..]).ok())
+    };
 
     // Extract SSH public keys
     let ssh_public_keys = search_entry
@@ -184,10 +204,20 @@ pub async fn find_user_by_uuid(
         s
     });
 
-    let filter = format!(
-        "(&{}(|(objectGUID={})(objectGUID={})(entryUUID={})))",
-        config.user_filter, uuid_str, ad_guid_hex, uuid_str
-    );
+    // Build the filter based on whether we have a custom UUID attribute
+    let filter = if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        // Use custom UUID attribute
+        format!(
+            "(&{}(|({custom_uuid_attr}={uuid_str})({custom_uuid_attr}={ad_guid_hex})))",
+            config.user_filter,
+        )
+    } else {
+        // Default behavior: query both objectGUID and entryUUID
+        format!(
+            "(&{}(|(objectGUID={uuid_str})(objectGUID={ad_guid_hex})(entryUUID={uuid_str})))",
+            config.user_filter,
+        )
+    };
 
     for base_dn in &config.base_dns {
         let (rs, _res) = ldap
