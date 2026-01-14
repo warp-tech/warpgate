@@ -3871,6 +3871,9 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },
@@ -3898,6 +3901,9 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },
