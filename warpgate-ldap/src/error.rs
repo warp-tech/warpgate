@@ -29,6 +29,12 @@ pub enum LdapError {
     #[error("rustls setup: {0}")]
     RustlSetup(#[from] RustlsSetupError),
 
+    #[error("cannot determine username for user DN: {0}")]
+    NoUsername(String),
+
+    #[error("cannot determine UUID for user DN: {0}")]
+    NoUUID(String),
+
     #[error("Other error: {0}")]
     Other(String),
 }

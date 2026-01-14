@@ -70,7 +70,7 @@ impl ImportApi {
                         )?),
                         description: Set(user.display_name.clone().unwrap_or_default()),
                         rate_limit_bytes_per_second: Set(None),
-                        ldap_object_uuid: Set(user.object_uuid),
+                        ldap_object_uuid: Set(Some(user.object_uuid)),
                         ldap_server_id: Set(Some(server.id)),
                     };
                     values.insert(&*db).await?;

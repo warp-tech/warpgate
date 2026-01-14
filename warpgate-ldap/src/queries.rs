@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 
 use ldap3::{Scope, SearchEntry};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::connection::connect;
@@ -38,8 +38,8 @@ fn ldap_user_attributes(config: &LdapConfig) -> Vec<String> {
 }
 
 /// Extract user details from an LDAP [SearchEntry].
-/// Returns None if no valid username can be determined.
-fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<LdapUser> {
+/// Returns None if no valid username or UUID can be determined.
+fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<LdapUser> {
     let dn = search_entry.dn.clone();
 
     // Extract username - try different attributes
@@ -47,7 +47,8 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .attrs
         .get(config.username_attribute.attribute_name())
         .and_then(|v| v.first())
-        .cloned()?;
+        .cloned()
+        .ok_or(LdapError::NoUsername(dn.clone()))?;
 
     let email = search_entry
         .attrs
@@ -77,7 +78,8 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
             .or_else(|| search_entry.bin_attrs.get("entryUUID"))
             .and_then(|v: &Vec<Vec<u8>>| v.first())
             .and_then(|b| Uuid::from_slice(&b[..]).ok())
-    };
+    }
+    .ok_or(LdapError::NoUUID(dn.clone()))?;
 
     // Extract SSH public keys
     let ssh_public_keys = search_entry
@@ -86,7 +88,7 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .cloned()
         .unwrap_or_default();
 
-    Some(LdapUser {
+    Ok(LdapUser {
         username,
         email,
         display_name,
@@ -128,8 +130,14 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
             }
             seen_dns.insert(dn.clone());
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
-                all_users.push(user);
+            match extract_ldap_user(search_entry, config) {
+                Ok(user) => {
+                    all_users.push(user);
+                }
+                Err(e) => {
+                    warn!("Skipping LDAP user {dn}: {e}");
+                    continue;
+                }
             }
         }
     }
@@ -168,7 +176,7 @@ pub async fn find_user_by_username(
         if let Some(first_result) = rs.into_iter().next() {
             let search_entry = SearchEntry::construct(first_result);
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
+            if let Ok(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
                 info!(
@@ -236,7 +244,7 @@ pub async fn find_user_by_uuid(
             #[allow(clippy::unwrap_used, reason = "length checked")]
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
+            if let Ok(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
                 debug!(
