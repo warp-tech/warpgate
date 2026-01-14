@@ -62,14 +62,32 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<L
         .and_then(|v| v.first())
         .cloned();
 
-    // Extract object UUID - use custom attribute if set, otherwise default to objectGUID/entryUUID
     let object_uuid = if let Some(custom_uuid_attr) = &config.uuid_attribute {
-        // Try custom attribute from binary attributes first
+        // Try parsing as a binary UUID
         search_entry
             .bin_attrs
             .get(custom_uuid_attr)
             .and_then(|v: &Vec<Vec<u8>>| v.first())
-            .and_then(|b| Uuid::from_slice(&b[..]).ok())
+            .and_then(|b|
+                Uuid::from_slice(&b[..])
+                    .inspect_err(|e| {
+                        warn!("Failed to parse UUID {b:?} from LDAP attribute {custom_uuid_attr}: {e}");
+                    })
+                    .ok())
+            .or_else(|| {
+                // Try parsing as a string UUID
+                search_entry
+                    .attrs
+                    .get(custom_uuid_attr)
+                    .and_then(|v| v.first())
+                    .and_then(|s| {
+                        Uuid::parse_str(&s)
+                            .inspect_err(|e| {
+                                warn!("Failed to parse UUID {s} from LDAP attribute {custom_uuid_attr}: {e}");
+                            })
+                            .ok()
+                    })
+            })
     } else {
         // Default behavior: Active Directory uses objectGUID, OpenLDAP uses entryUUID
         search_entry
