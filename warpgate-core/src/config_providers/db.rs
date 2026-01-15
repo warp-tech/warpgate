@@ -41,7 +41,6 @@ impl DatabaseConfigProvider {
         ldap_server_id: Uuid,
         ldap_object_uuid: &Uuid,
     ) -> Result<(), WarpgateError> {
-        debug!("sync_ldap_ssh_keys: start");
         // Fetch LDAP server config
         let ldap_server = entities::LdapServer::Entity::find_by_id(ldap_server_id)
             .one(db)
@@ -49,8 +48,6 @@ impl DatabaseConfigProvider {
             .ok_or_else(|| {
                 warpgate_ldap::LdapError::InvalidConfiguration("LDAP server not found".to_string())
             })?;
-
-        debug!("sync_ldap_ssh_keys: found server");
 
         if !ldap_server.enabled {
             debug!(
@@ -60,13 +57,10 @@ impl DatabaseConfigProvider {
             return Ok(());
         }
 
-        debug!("sync_ldap_ssh_keys: server is enabled");
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server)?;
 
-        debug!("sync_ldap_ssh_keys: got config");
         // Find user in LDAP by object UUID
         let ldap_user = warpgate_ldap::find_user_by_uuid(&ldap_config, ldap_object_uuid).await?;
-        debug!("sync_ldap_ssh_keys: queried for user");
 
         let Some(ldap_user) = ldap_user else {
             warn!(
@@ -76,19 +70,14 @@ impl DatabaseConfigProvider {
             return Ok(());
         };
 
-        debug!("sync_ldap_ssh_keys: found user in LDAP");
-
         // Delete existing public key credentials for this user
         entities::PublicKeyCredential::Entity::delete_many()
             .filter(entities::PublicKeyCredential::Column::UserId.eq(user_id))
             .exec(db)
             .await?;
 
-        debug!("sync_ldap_ssh_keys: removed existing PKs");
-
         // Insert SSH keys from LDAP
         for ssh_key in &ldap_user.ssh_public_keys {
-            debug!("sync_ldap_ssh_keys: LDAP PK {}", ssh_key);
             let ssh_key = ssh_key.trim();
             if ssh_key.is_empty() {
                 continue;
@@ -97,7 +86,6 @@ impl DatabaseConfigProvider {
             // Parse and validate the SSH key
             let key_result = russh::keys::PublicKey::from_openssh(ssh_key);
             if let Ok(mut key) = key_result {
-                debug!("sync_ldap_ssh_keys: parsed PK");
                 key.set_comment("");
                 let openssh_key = key.to_openssh().map_err(russh::keys::Error::from)?;
 
@@ -113,7 +101,6 @@ impl DatabaseConfigProvider {
                 }
                 .insert(db)
                 .await?;
-                debug!("sync_ldap_ssh_keys: saved PK");
             } else {
                 warn!("Invalid SSH key from LDAP: {}", ssh_key);
             }
@@ -415,15 +402,11 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(false);
         };
 
-        debug!("validate_credential: found user {username}");
-
         // Sync SSH keys from LDAP if user is linked
         if matches!(client_credential, AuthCredential::PublicKey { .. }) {
-            debug!("validate_credential: is a PK credential");
             if let (Some(ldap_server_id), Some(ldap_object_uuid)) =
                 (user_model.ldap_server_id, &user_model.ldap_object_uuid)
             {
-                debug!("validate_credential: user is a linked LDAP user");
                 if let Err(e) = self
                     .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
                     .await
@@ -433,16 +416,6 @@ impl ConfigProvider for DatabaseConfigProvider {
                         username, e
                     );
                 }
-            } else {
-                debug!("validate_credential: user is not a linked LDAP user");
-                debug!(
-                    "validate_credential: server id {:?}",
-                    user_model.ldap_server_id
-                );
-                debug!(
-                    "validate_credential: object uuid {:?}",
-                    user_model.ldap_object_uuid
-                );
             }
         }
 
