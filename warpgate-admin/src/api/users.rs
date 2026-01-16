@@ -9,6 +9,7 @@ use sea_orm::{
     QueryOrder, Set,
 };
 use tokio::sync::Mutex;
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
     Role as RoleConfig, User as UserConfig, UserRequireCredentialsPolicy, WarpgateError,
@@ -315,12 +316,12 @@ impl DetailApi {
             match warpgate_ldap::find_user_by_username(&ldap_config, username).await {
                 Ok(Some(ldap_user)) => {
                     ldap_server_id = Some(ldap_server.id);
-                    ldap_object_uuid = ldap_user.object_uuid;
+                    ldap_object_uuid = Some(ldap_user.object_uuid);
                     break;
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    tracing::warn!("Error searching for LDAP user in {}: {e}", ldap_server.name,);
+                    warn!("Error searching for LDAP user in {}: {e}", ldap_server.name);
                     continue;
                 }
             }

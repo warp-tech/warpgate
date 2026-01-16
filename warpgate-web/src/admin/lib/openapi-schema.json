@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-20-gacb987e0-modified"
+    "version": "v0.19.1-33-gfd126cae-modified"
   },
   "servers": [
     {
@@ -3399,6 +3399,10 @@
           "ssh_key_attribute": {
             "type": "string",
             "default": "sshPublicKey"
+          },
+          "uuid_attribute": {
+            "type": "string",
+            "default": ""
           }
         }
       },
@@ -3638,16 +3642,16 @@
         "type": "object",
         "title": "KubernetesRecordingItem",
         "required": [
-          "time",
+          "timestamp",
           "request_method",
           "request_path",
           "request_body",
           "response_body"
         ],
         "properties": {
-          "time": {
-            "type": "number",
-            "format": "float"
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
           },
           "request_method": {
             "type": "string"
@@ -3770,7 +3774,8 @@
           "auto_link_sso_users",
           "description",
           "username_attribute",
-          "ssh_key_attribute"
+          "ssh_key_attribute",
+          "uuid_attribute"
         ],
         "properties": {
           "id": {
@@ -3818,6 +3823,9 @@
             "$ref": "#/components/schemas/LdapUsernameAttribute"
           },
           "ssh_key_attribute": {
+            "type": "string"
+          },
+          "uuid_attribute": {
             "type": "string"
           }
         }
@@ -4815,7 +4823,8 @@
           "enabled",
           "auto_link_sso_users",
           "username_attribute",
-          "ssh_key_attribute"
+          "ssh_key_attribute",
+          "uuid_attribute"
         ],
         "properties": {
           "name": {
@@ -4856,6 +4865,9 @@
             "$ref": "#/components/schemas/LdapUsernameAttribute"
           },
           "ssh_key_attribute": {
+            "type": "string"
+          },
+          "uuid_attribute": {
             "type": "string"
           }
         }

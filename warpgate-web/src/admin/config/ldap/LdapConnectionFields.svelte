@@ -14,6 +14,7 @@
         passwordRequired?: boolean
         usernameAttribute: LdapUsernameAttribute,
         sshKeyAttribute: string,
+        uuidAttribute: string,
     }
 
     let {
@@ -23,6 +24,7 @@
         bindPassword = $bindable(),
         usernameAttribute = $bindable(),
         sshKeyAttribute = $bindable(),
+        uuidAttribute = $bindable(),
         tls = $bindable(),
         userFilter = $bindable(),
         passwordPlaceholder = undefined,
@@ -96,6 +98,9 @@
         </FormGroup>
         <FormGroup floating label="LDAP attribute to read SSH keys from">
             <Input bind:value={sshKeyAttribute} placeholder="sshPublicKey" />
+        </FormGroup>
+        <FormGroup floating label="LDAP object UUID attribute">
+            <Input bind:value={uuidAttribute} placeholder="Automatic (objectGUID / entryUUID)" />
         </FormGroup>
     </div>
 </div>

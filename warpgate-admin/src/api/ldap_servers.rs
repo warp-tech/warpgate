@@ -1,3 +1,22 @@
+use std::sync::Arc;
+
+use poem::web::Data;
+use poem_openapi::param::{Path, Query};
+use poem_openapi::payload::Json;
+use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    QueryOrder, Set,
+};
+use tokio::sync::Mutex;
+use uuid::Uuid;
+use warpgate_common::{Secret, WarpgateError};
+use warpgate_db_entities::LdapServer;
+use warpgate_ldap::LdapUsernameAttribute;
+use warpgate_tls::TlsMode;
+
+use super::AnySecurityScheme;
+
 #[derive(Object)]
 struct ImportLdapUsersRequest {
     dns: Vec<String>,
@@ -49,7 +68,7 @@ impl ImportApi {
                         )?),
                         description: Set(user.display_name.clone().unwrap_or_default()),
                         rate_limit_bytes_per_second: Set(None),
-                        ldap_object_uuid: Set(user.object_uuid),
+                        ldap_object_uuid: Set(Some(user.object_uuid)),
                         ldap_server_id: Set(Some(server.id)),
                     };
                     values.insert(&*db).await?;
@@ -60,24 +79,6 @@ impl ImportApi {
         Ok(ImportLdapUsersResponse::Ok(Json(imported)))
     }
 }
-use std::sync::Arc;
-
-use poem::web::Data;
-use poem_openapi::param::{Path, Query};
-use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
-};
-use tokio::sync::Mutex;
-use uuid::Uuid;
-use warpgate_common::{Secret, WarpgateError};
-use warpgate_db_entities::LdapServer;
-use warpgate_ldap::LdapUsernameAttribute;
-use warpgate_tls::TlsMode;
-
-use super::AnySecurityScheme;
 
 #[derive(Object)]
 struct LdapServerResponse {
@@ -95,6 +96,7 @@ struct LdapServerResponse {
     description: String,
     username_attribute: LdapUsernameAttribute,
     ssh_key_attribute: String,
+    uuid_attribute: String,
 }
 
 impl From<LdapServer::Model> for LdapServerResponse {
@@ -119,6 +121,7 @@ impl From<LdapServer::Model> for LdapServerResponse {
                 .try_into()
                 .unwrap_or(LdapUsernameAttribute::Cn),
             ssh_key_attribute: model.ssh_key_attribute,
+            uuid_attribute: model.uuid_attribute,
         }
     }
 }
@@ -146,6 +149,8 @@ struct CreateLdapServerRequest {
     username_attribute: LdapUsernameAttribute,
     #[oai(default = "default_ssh_key_attribute")]
     ssh_key_attribute: String,
+    #[oai(default = "default_uuid_attribute")]
+    uuid_attribute: String,
 }
 
 fn default_port() -> i32 {
@@ -180,6 +185,10 @@ fn default_ssh_key_attribute() -> String {
     "sshPublicKey".to_string()
 }
 
+fn default_uuid_attribute() -> String {
+    String::new()
+}
+
 #[derive(Object)]
 struct UpdateLdapServerRequest {
     name: String,
@@ -195,6 +204,7 @@ struct UpdateLdapServerRequest {
     description: Option<String>,
     username_attribute: LdapUsernameAttribute,
     ssh_key_attribute: String,
+    uuid_attribute: String,
 }
 
 #[derive(Object)]
@@ -335,6 +345,11 @@ impl ListApi {
             user_filter: body.user_filter.clone(),
             username_attribute: body.username_attribute,
             ssh_key_attribute: body.ssh_key_attribute.clone(),
+            uuid_attribute: if body.uuid_attribute.is_empty() {
+                None
+            } else {
+                Some(body.uuid_attribute.clone())
+            },
         };
 
         // Discover base DNs
@@ -358,6 +373,7 @@ impl ListApi {
             description: Set(body.description.clone().unwrap_or_default()),
             username_attribute: Set(body.username_attribute.attribute_name().into()),
             ssh_key_attribute: Set(body.ssh_key_attribute.clone()),
+            uuid_attribute: Set(body.uuid_attribute.clone()),
         };
 
         let server = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -386,6 +402,7 @@ impl ListApi {
             user_filter: String::new(),
             username_attribute: LdapUsernameAttribute::Cn,
             ssh_key_attribute: "sshPublicKey".to_string(),
+            uuid_attribute: None,
         };
 
         match warpgate_ldap::test_connection(&ldap_config).await {
@@ -502,6 +519,8 @@ impl DetailApi {
         model.auto_link_sso_users = Set(body.auto_link_sso_users);
         model.description = Set(body.description.clone().unwrap_or_default());
         model.username_attribute = Set(body.username_attribute.attribute_name().into());
+        model.ssh_key_attribute = Set(body.ssh_key_attribute.clone());
+        model.uuid_attribute = Set(body.uuid_attribute.clone());
 
         // Re-discover base DNs if connection details changed
         let ldap_config = warpgate_ldap::LdapConfig {
@@ -519,6 +538,7 @@ impl DetailApi {
             user_filter: body.user_filter.clone(),
             username_attribute: body.username_attribute,
             ssh_key_attribute: body.ssh_key_attribute.clone(),
+            uuid_attribute: None,
         };
 
         if let Ok(base_dns) = warpgate_ldap::discover_base_dns(&ldap_config).await {
