@@ -148,7 +148,7 @@ impl DatabaseConfigProvider {
                         preferred_username, ldap_user.username
                     );
                     ldap_server_id = Some(ldap_server.id);
-                    ldap_object_uuid = ldap_user.object_uuid;
+                    ldap_object_uuid = Some(ldap_user.object_uuid);
                     break;
                 }
                 Ok(None) => {
