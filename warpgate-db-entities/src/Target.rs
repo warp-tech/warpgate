@@ -9,6 +9,8 @@ use warpgate_common::{Target, TargetOptions};
 pub enum TargetKind {
     #[sea_orm(string_value = "http")]
     Http,
+    #[sea_orm(string_value = "kubernetes")]
+    Kubernetes,
     #[sea_orm(string_value = "mysql")]
     MySql,
     #[sea_orm(string_value = "ssh")]
@@ -23,6 +25,7 @@ impl From<&TargetOptions> for TargetKind {
     fn from(options: &TargetOptions) -> Self {
         match options {
             TargetOptions::Http(_) => Self::Http,
+            TargetOptions::Kubernetes(_) => Self::Kubernetes,
             TargetOptions::MySql(_) => Self::MySql,
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,

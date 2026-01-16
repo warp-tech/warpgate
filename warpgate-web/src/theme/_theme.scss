@@ -39,7 +39,7 @@
 // @import "bootstrap/scss/images";
 @import "bootstrap/scss/containers";
 @import "bootstrap/scss/grid";
-// @import "bootstrap/scss/tables";
+@import "bootstrap/scss/tables";
 @import "bootstrap/scss/forms";
 @import "bootstrap/scss/buttons";
 @import "bootstrap/scss/transitions";
@@ -267,6 +267,14 @@ ul.pagination {
     .modal-backdrop.fade {
         opacity: var(--bs-backdrop-opacity) !important;
     }
+}
+
+.abbreviate {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .dropdown-item {
