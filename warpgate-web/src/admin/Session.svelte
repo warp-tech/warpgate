@@ -15,7 +15,7 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
-    import { PROTOCOL_PROPERTIES } from 'common/protocols';
+    import { PROTOCOL_PROPERTIES } from 'common/protocols'
 
     interface Props {
         params: { id: string }
