@@ -64,7 +64,8 @@ impl Api {
             q = q.filter(
                 LogEntry::Column::Text
                     .contains(search)
-                    .or(LogEntry::Column::Username.contains(search)),
+                    .or(LogEntry::Column::Username.contains(search))
+                    .or(LogEntry::Column::Values.contains(search)),
             );
         }
 
