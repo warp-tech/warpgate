@@ -8,7 +8,7 @@
 
 <script lang="ts">
     import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues } from 'admin/lib/api'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
@@ -31,6 +31,7 @@
     let { userId, username, credentialPolicy = $bindable(), ldapLinked = false }: Props = $props()
 
     let credentials: ExistingCredential[] = $state([])
+    let globalParameters: ParameterValues | undefined = $state()
 
     let creatingPassword = $state(false)
     let creatingOtp = $state(false)
@@ -48,13 +49,47 @@
         { id: 'postgres', name: 'PostgreSQL' },
     ]
 
+    // Get effective possible credentials for a protocol, considering global SSH auth settings
+    function getEffectivePossibleCredentials(protocolId: string): Set<CredentialKind> {
+        const base = possibleCredentials[protocolId]
+        if (!base) return new Set()
+        
+        // For SSH, filter based on global auth method settings
+        if (protocolId === 'ssh' && globalParameters) {
+            const filtered = new Set<CredentialKind>()
+            for (const kind of base) {
+                // PublicKey requires publickey auth enabled
+                if (kind === CredentialKind.PublicKey && !globalParameters.sshClientAuthPublickey) {
+                    continue
+                }
+                // Password requires password auth enabled
+                if (kind === CredentialKind.Password && !globalParameters.sshClientAuthPassword) {
+                    continue
+                }
+                // Totp and WebUserApproval require keyboard-interactive auth enabled
+                if ((kind === CredentialKind.Totp || kind === CredentialKind.WebUserApproval) && !globalParameters.sshClientAuthKeyboardInteractive) {
+                    continue
+                }
+                filtered.add(kind)
+            }
+            return filtered
+        }
+        
+        return base
+    }
+
     async function load () {
         await Promise.all([
             loadPasswords(),
             loadSso(),
             loadPublicKeys(),
             loadOtp(),
+            loadParameters(),
         ])
+    }
+
+    async function loadParameters () {
+        globalParameters = await api.getParameters({})
     }
 
     async function loadPasswords () {
@@ -141,10 +176,11 @@
         // Automatically set up a 2FA policy when adding an OTP
         for (const protocol of ['http', 'ssh'] as ('http'|'ssh')[]) {
             for (const ck of [CredentialKind.Password, CredentialKind.PublicKey]) {
+                const effectiveCreds = getEffectivePossibleCredentials(protocol)
                 if (
                     !credentialPolicy[protocol]
                     && credentials.some(x => x.kind === ck)
-                    && possibleCredentials[protocol]?.has(ck)
+                    && effectiveCreds.has(ck)
                 ) {
                     credentialPolicy = {
                         ...credentialPolicy ?? {},
@@ -317,20 +353,22 @@
     <h4>Auth policy</h4>
     <div class="list-group list-group-flush mb-3">
         {#each policyProtocols as protocol (protocol)}
-        <div class="list-group-item">
-            <div class="mb-1">
-                <strong>{protocol.name}</strong>
+            {@const effectiveCredentials = getEffectivePossibleCredentials(protocol.id)}
+            <div class="list-group-item">
+                <div class="mb-1">
+                    <strong>{protocol.name}</strong>
+                </div>
+                {#if effectiveCredentials.size > 0}
+                    <AuthPolicyEditor
+                        bind:value={credentialPolicy}
+                        existingCredentials={credentials}
+                        possibleCredentials={effectiveCredentials}
+                        protocolId={protocol.id}
+                    />
+                {:else}
+                    <span class="text-muted">No authentication methods available for this protocol</span>
+                {/if}
             </div>
-            {#if possibleCredentials[protocol.id]}
-                {@const _possibleCredentials = assertDefined(possibleCredentials[protocol.id])}
-                <AuthPolicyEditor
-                    bind:value={credentialPolicy}
-                    existingCredentials={credentials}
-                    possibleCredentials={_possibleCredentials}
-                    protocolId={protocol.id}
-                />
-            {/if}
-        </div>
         {/each}
     </div>
 </Loadable>

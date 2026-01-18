@@ -19,6 +19,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{Services, SessionStateInit, State};
+use warpgate_db_entities::Parameters;
 
 use crate::keys::load_keys;
 use crate::server::session_handle::SSHSessionHandle;
@@ -26,18 +27,47 @@ use crate::server::session_handle::SSHSessionHandle;
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
     let russh_config = {
         let config = services.config.lock().await;
+        
+        // Fetch SSH auth method settings from Parameters
+        let db = services.db.lock().await;
+        let parameters = Parameters::Entity::get(&db).await?;
+        drop(db);
+        
+        // Build MethodSet based on parameters
+        let mut methods_vec: Vec<MethodKind> = Vec::new();
+        if parameters.ssh_client_auth_publickey {
+            methods_vec.push(MethodKind::PublicKey);
+        }
+        if parameters.ssh_client_auth_password {
+            methods_vec.push(MethodKind::Password);
+        }
+        if parameters.ssh_client_auth_keyboard_interactive {
+            methods_vec.push(MethodKind::KeyboardInteractive);
+        }
+        
+        // Ensure at least one method is enabled, fall back to all if none
+        if methods_vec.is_empty() {
+            warn!("All SSH authentication methods are disabled in parameters. Enabling all methods as fallback.");
+            methods_vec = vec![
+                MethodKind::PublicKey,
+                MethodKind::Password,
+                MethodKind::KeyboardInteractive,
+            ];
+        }
+        
+        info!(
+            "SSH server authentication methods: publickey={}, password={}, keyboard-interactive={}",
+            parameters.ssh_client_auth_publickey,
+            parameters.ssh_client_auth_password,
+            parameters.ssh_client_auth_keyboard_interactive
+        );
+        
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
             inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
             keepalive_interval: config.store.ssh.keepalive_interval,
-            methods: MethodSet::from(
-                &[
-                    MethodKind::PublicKey,
-                    MethodKind::Password,
-                    MethodKind::KeyboardInteractive,
-                ][..],
-            ),
+            methods: MethodSet::from(&methods_vec[..]),
             keys: load_keys(&config, &services.global_params, "host")?,
             event_buffer_size: 100,
             nodelay: true,

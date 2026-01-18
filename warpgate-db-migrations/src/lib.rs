@@ -27,6 +27,7 @@ mod m00022_user_ldap_link;
 mod m00023_ldap_username_attribute;
 mod m00024_ssh_key_attribute;
 mod m00025_ldap_uuid_attribute;
+mod m00026_ssh_client_auth;
 
 pub struct Migrator;
 
@@ -59,6 +60,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00023_ldap_username_attribute::Migration),
             Box::new(m00024_ssh_key_attribute::Migration),
             Box::new(m00025_ldap_uuid_attribute::Migration),
+            Box::new(m00026_ssh_client_auth::Migration),
         ]
     }
 }

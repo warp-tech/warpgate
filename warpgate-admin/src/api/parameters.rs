@@ -15,12 +15,18 @@ pub struct Api;
 struct ParameterValues {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub ssh_client_auth_publickey: bool,
+    pub ssh_client_auth_password: bool,
+    pub ssh_client_auth_keyboard_interactive: bool,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub ssh_client_auth_publickey: bool,
+    pub ssh_client_auth_password: bool,
+    pub ssh_client_auth_keyboard_interactive: bool,
 }
 
 #[derive(ApiResponse)]
@@ -49,6 +55,9 @@ impl Api {
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
             rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
+            ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
+            ssh_client_auth_password: parameters.ssh_client_auth_password,
+            ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
         })))
     }
 
@@ -69,6 +78,9 @@ impl Api {
             id: Set(Parameters::Entity::get(&db).await?.id),
             allow_own_credential_management: Set(body.allow_own_credential_management),
             rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
+            ssh_client_auth_publickey: Set(body.ssh_client_auth_publickey),
+            ssh_client_auth_password: Set(body.ssh_client_auth_password),
+            ssh_client_auth_keyboard_interactive: Set(body.ssh_client_auth_keyboard_interactive),
         };
 
         Parameters::Entity::update(am).exec(&*db).await?;
