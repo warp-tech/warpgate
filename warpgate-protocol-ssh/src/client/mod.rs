@@ -391,7 +391,12 @@ impl RemoteClient {
                 Err(e) => {
                     debug!("Connect error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e));
+
+                    // Allow some time for the SessionServer to process the ConnectionError and print a message to the terminal
+                    // before closing the session. If we don't wait, the session might close too quickly and the user won't see the error.
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     self.set_disconnected();
+
                     return Ok(true);
                 }
             },
