@@ -15,12 +15,16 @@ pub struct Api;
 struct ParameterValues {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -49,6 +53,7 @@ impl Api {
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
             rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
+            file_transfer_hash_threshold_bytes: parameters.file_transfer_hash_threshold_bytes,
         })))
     }
 
@@ -69,6 +74,7 @@ impl Api {
             id: Set(Parameters::Entity::get(&db).await?.id),
             allow_own_credential_management: Set(body.allow_own_credential_management),
             rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
+            file_transfer_hash_threshold_bytes: Set(body.file_transfer_hash_threshold_bytes),
         };
 
         Parameters::Entity::update(am).exec(&*db).await?;

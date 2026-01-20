@@ -548,6 +548,81 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(intersect)
     }
 
+    async fn authorize_target_file_transfer(
+        &mut self,
+        username: &str,
+        target: &warpgate_common::Target,
+    ) -> Result<super::FileTransferPermission, WarpgateError> {
+        let db = self.db.lock().await;
+
+        // Get user's role IDs
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
+            error!("Selected user not found: {}", username);
+            return Ok(super::FileTransferPermission::default());
+        };
+
+        let user_roles: HashSet<uuid::Uuid> = user_model
+            .find_related(entities::Role::Entity)
+            .all(&*db)
+            .await?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+
+        // Get target's role assignments with file transfer permissions
+        let assignments: Vec<entities::TargetRoleAssignment::Model> =
+            entities::TargetRoleAssignment::Entity::find()
+                .filter(entities::TargetRoleAssignment::Column::TargetId.eq(target.id))
+                .all(&*db)
+                .await?;
+
+        // Permissive model: if ANY matching role allows, grant permission
+        let mut result = super::FileTransferPermission::default();
+
+        for assignment in assignments {
+            if user_roles.contains(&assignment.role_id) {
+                // Permissive: any true grants access
+                result.upload_allowed |= assignment.allow_file_upload;
+                result.download_allowed |= assignment.allow_file_download;
+
+                // For restrictions, use most permissive (union paths, largest size limit)
+                if let Some(paths) = assignment.allowed_paths {
+                    if let Ok(paths) = serde_json::from_value::<Vec<String>>(paths) {
+                        match &mut result.allowed_paths {
+                            Some(existing) => existing.extend(paths),
+                            None => result.allowed_paths = Some(paths),
+                        }
+                    }
+                }
+
+                // Blocked extensions: intersection (only block if ALL roles block)
+                if let Some(extensions) = assignment.blocked_extensions {
+                    if let Ok(extensions) = serde_json::from_value::<Vec<String>>(extensions) {
+                        match &mut result.blocked_extensions {
+                            Some(existing) => {
+                                // Keep only extensions blocked by ALL roles
+                                existing.retain(|ext| extensions.contains(ext));
+                            }
+                            None => result.blocked_extensions = Some(extensions),
+                        }
+                    }
+                }
+
+                // Size limit: use largest (most permissive)
+                if let Some(size) = assignment.max_file_size {
+                    result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     async fn apply_sso_role_mappings(
         &mut self,
         username: &str,
