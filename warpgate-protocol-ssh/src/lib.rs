@@ -3,7 +3,9 @@ mod common;
 mod compat;
 mod keys;
 pub mod known_hosts;
+pub mod scp;
 mod server;
+pub mod sftp;
 use std::fmt::Debug;
 
 use anyhow::Result;

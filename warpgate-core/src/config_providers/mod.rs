@@ -5,6 +5,7 @@ pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
@@ -12,6 +13,34 @@ use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, C
 use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
+
+/// File transfer permission settings for a user-target combination.
+/// Used to control SCP/SFTP access and track transfer metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileTransferPermission {
+    /// Whether file uploads (SCP -t / SFTP write) are allowed
+    pub upload_allowed: bool,
+    /// Whether file downloads (SCP -f / SFTP read) are allowed
+    pub download_allowed: bool,
+    /// Allowed paths (None = all paths allowed)
+    pub allowed_paths: Option<Vec<String>>,
+    /// Blocked file extensions (None = no extensions blocked)
+    pub blocked_extensions: Option<Vec<String>>,
+    /// Maximum file size in bytes (None = no limit)
+    pub max_file_size: Option<i64>,
+}
+
+impl Default for FileTransferPermission {
+    fn default() -> Self {
+        Self {
+            upload_allowed: false,
+            download_allowed: false,
+            allowed_paths: None,
+            blocked_extensions: None,
+            max_file_size: None,
+        }
+    }
+}
 
 #[enum_dispatch]
 pub enum ConfigProviderEnum {
@@ -56,6 +85,14 @@ pub trait ConfigProvider {
         username: &str,
         target: &str,
     ) -> Result<bool, WarpgateError>;
+
+    /// Check if file transfer is allowed for a user to a specific target.
+    /// Uses the permissive model: if ANY matching role allows, permission is granted.
+    async fn authorize_target_file_transfer(
+        &mut self,
+        username: &str,
+        target: &Target,
+    ) -> Result<FileTransferPermission, WarpgateError>;
 
     async fn update_public_key_last_used(
         &self,

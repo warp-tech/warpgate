@@ -1265,6 +1265,120 @@
         "operationId": "delete_target_role"
       }
     },
+    "/targets/{id}/roles/{role_id}/file-transfer": {
+      "get": {
+        "summary": "Get file transfer permissions for a target-role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileTransferPermissionData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_target_role_file_transfer_permission"
+      },
+      "put": {
+        "summary": "Update file transfer permissions for a target-role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/FileTransferPermissionData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileTransferPermissionData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_target_role_file_transfer_permission"
+      }
+    },
     "/target-groups": {
       "get": {
         "responses": {
@@ -3563,6 +3677,44 @@
           }
         }
       },
+      "FileTransferPermissionData": {
+        "type": "object",
+        "title": "FileTransferPermissionData",
+        "description": "Request/response for file transfer permissions",
+        "required": [
+          "allow_file_upload",
+          "allow_file_download"
+        ],
+        "properties": {
+          "allow_file_upload": {
+            "type": "boolean",
+            "description": "Allow file uploads via SCP/SFTP"
+          },
+          "allow_file_download": {
+            "type": "boolean",
+            "description": "Allow file downloads via SCP/SFTP"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "Allowed paths (null = all paths allowed)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocked_extensions": {
+            "type": "array",
+            "description": "Blocked file extensions (null = no extensions blocked)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_file_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum file size in bytes (null = no limit)"
+          }
+        }
+      },
       "GetLogsRequest": {
         "type": "object",
         "title": "GetLogsRequest",
@@ -3992,6 +4144,7 @@
             "type": "integer",
             "format": "uint32"
           },
+<<<<<<< HEAD
           "ssh_client_auth_publickey": {
             "type": "boolean"
           },
@@ -4000,6 +4153,12 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+=======
+          "file_transfer_hash_threshold_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+>>>>>>> 17815d9 (feat: add SCP/SFTP file transfer access control per role-target)
           }
         }
       },
@@ -4020,6 +4179,7 @@
             "type": "integer",
             "format": "uint32"
           },
+<<<<<<< HEAD
           "ssh_client_auth_publickey": {
             "type": "boolean"
           },
@@ -4028,6 +4188,12 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+=======
+          "file_transfer_hash_threshold_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+>>>>>>> 17815d9 (feat: add SCP/SFTP file transfer access control per role-target)
           }
         }
       },

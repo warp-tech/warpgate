@@ -32,6 +32,8 @@ mod m00027_ca;
 mod m00028_certificate_credentials;
 mod m00029_certificate_revocation;
 mod m00030_add_recording_metadata;
+mod m00031_file_transfer_permissions;
+mod m00032_file_transfer_config;
 
 pub struct Migrator;
 
@@ -69,6 +71,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00028_certificate_credentials::Migration),
             Box::new(m00029_certificate_revocation::Migration),
             Box::new(m00030_add_recording_metadata::Migration),
+            Box::new(m00031_file_transfer_permissions::Migration),
+            Box::new(m00032_file_transfer_config::Migration),
         ]
     }
 }

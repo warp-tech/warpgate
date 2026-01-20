@@ -19,6 +19,8 @@ struct ParameterValues {
     pub ssh_client_auth_publickey: bool,
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 #[derive(Serialize, Object)]
@@ -28,6 +30,8 @@ struct ParameterUpdate {
     pub ssh_client_auth_publickey: Option<bool>,
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -59,6 +63,7 @@ impl Api {
             ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
+            file_transfer_hash_threshold_bytes: parameters.file_transfer_hash_threshold_bytes,
         })))
     }
 
@@ -84,6 +89,8 @@ impl Api {
         parameters.ssh_client_auth_keyboard_interactive = body
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
+        parameters.file_transfer_hash_threshold_bytes =
+            Set(body.file_transfer_hash_threshold_bytes);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

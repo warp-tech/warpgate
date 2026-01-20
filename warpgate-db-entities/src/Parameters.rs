@@ -16,6 +16,9 @@ pub struct Model {
     pub ssh_client_auth_publickey: bool,
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    /// Default: 10MB (10485760 bytes)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -37,6 +40,7 @@ impl Entity {
                     ssh_client_auth_publickey: Set(true),
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
+                    file_transfer_hash_threshold_bytes: Set(Some(10485760)), // 10MB default
                 }
                 .insert(db)
                 .await

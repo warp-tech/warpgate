@@ -18,12 +18,21 @@
         params: { id: string };
     }
 
+    interface FileTransferPermission {
+        allow_file_upload: boolean
+        allow_file_download: boolean
+        allowed_paths: string[] | null
+        blocked_extensions: string[] | null
+        max_file_size: number | null
+    }
+
     let { params }: Props = $props()
 
     let error: string|undefined = $state()
     let selectedUsername: string|undefined = $state($serverInfo?.username)
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
+    let fileTransferPermissions: Record<string, FileTransferPermission> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
 
@@ -34,10 +43,12 @@
         ])
     }
 
-    async function loadRoles () {
+    async function loadRoles (): Promise<Role[]> {
         const allRoles = await api.getRoles()
         const allowedRoles = await api.getTargetRoles(target!)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
+        // Load file transfer permissions for allowed roles
+        await loadAllFileTransferPermissions()
         return allRoles
     }
 
@@ -69,12 +80,59 @@
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
+            // Remove file transfer permissions from state
+            const newPerms = { ...fileTransferPermissions }
+            delete newPerms[role.id]
+            fileTransferPermissions = newPerms
         } else {
             await api.addTargetRole({
                 id: target!.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
+            // Load file transfer permissions for the new role
+            await loadFileTransferPermission(role.id)
+        }
+    }
+
+    async function loadFileTransferPermission (roleId: string) {
+        try {
+            const response = await fetch(`/@warpgate/admin/api/targets/${target!.id}/roles/${roleId}/file-transfer`)
+            if (response.ok) {
+                const perm = await response.json()
+                fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
+            }
+        } catch {
+            // Assignment may not have permissions yet
+        }
+    }
+
+    async function loadAllFileTransferPermissions () {
+        for (const roleId of Object.keys(roleIsAllowed).filter(id => roleIsAllowed[id])) {
+            await loadFileTransferPermission(roleId)
+        }
+    }
+
+    async function updateFileTransferPermission (roleId: string, field: keyof FileTransferPermission, value: boolean) {
+        const current = fileTransferPermissions[roleId] || {
+            allow_file_upload: true,
+            allow_file_download: true,
+            allowed_paths: null,
+            blocked_extensions: null,
+            max_file_size: null
+        }
+
+        const updated = { ...current, [field]: value }
+
+        const response = await fetch(`/@warpgate/admin/api/targets/${target!.id}/roles/${roleId}/file-transfer`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updated)
+        })
+
+        if (response.ok) {
+            const perm = await response.json()
+            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
         }
     }
 </script>
@@ -265,26 +323,51 @@
 
         <h4 class="mt-4">Allow access for roles</h4>
         <Loadable promise={loadRoles()}>
-            {#snippet children(roles)}
+            {#snippet children(roles: Role[])}
                 <div class="list-group list-group-flush mb-3">
                     {#each roles as role (role.id)}
-                        <label
-                            for="role-{role.id}"
-                            class="list-group-item list-group-item-action d-flex align-items-center"
-                        >
-                            <Input
-                                id="role-{role.id}"
-                                class="mb-0 me-2"
-                                type="switch"
-                                on:change={() => toggleRole(role)}
-                                checked={roleIsAllowed[role.id]} />
-                            <div>
-                                <div>{role.name}</div>
-                                {#if role.description}
-                                    <small class="text-muted">{role.description}</small>
-                                {/if}
-                            </div>
-                        </label>
+                        <div class="list-group-item">
+                            <label
+                                for="role-{role.id}"
+                                class="d-flex align-items-center"
+                            >
+                                <Input
+                                    id="role-{role.id}"
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    on:change={() => toggleRole(role)}
+                                    checked={roleIsAllowed[role.id]} />
+                                <div>
+                                    <div>{role.name}</div>
+                                    {#if role.description}
+                                        <small class="text-muted">{role.description}</small>
+                                    {/if}
+                                </div>
+                            </label>
+                            {#if roleIsAllowed[role.id] && target?.options.kind === 'Ssh'}
+                                <div class="ms-4 mt-2 ps-3 border-start">
+                                    <small class="text-muted d-block mb-2">File Transfer (SCP/SFTP)</small>
+                                    <div class="d-flex gap-3">
+                                        <label class="form-check d-flex align-items-center gap-1">
+                                            <Input
+                                                type="checkbox"
+                                                checked={fileTransferPermissions[role.id]?.allow_file_upload ?? true}
+                                                on:change={(e) => updateFileTransferPermission(role.id, 'allow_file_upload', e.target.checked)}
+                                            />
+                                            <span class="form-check-label">Upload</span>
+                                        </label>
+                                        <label class="form-check d-flex align-items-center gap-1">
+                                            <Input
+                                                type="checkbox"
+                                                checked={fileTransferPermissions[role.id]?.allow_file_download ?? true}
+                                                on:change={(e) => updateFileTransferPermission(role.id, 'allow_file_download', e.target.checked)}
+                                            />
+                                            <span class="form-check-label">Download</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            {/if}
+                        </div>
                     {/each}
                 </div>
             {/snippet}

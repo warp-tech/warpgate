@@ -31,7 +31,8 @@ use warpgate_core::recordings::{
     TrafficRecorder,
 };
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    authorize_ticket, consume_ticket, ConfigProvider, FileTransferPermission, Services,
+    WarpgateServerHandle,
 };
 
 use super::channel_writer::ChannelWriter;
@@ -39,8 +40,10 @@ use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
+use crate::scp::{ScpCommand, ScpParser};
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
+use crate::sftp::{build_permission_denied_response, SftpFileOperation, SftpParser};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
@@ -108,6 +111,14 @@ pub struct ServerSession {
     keyboard_interactive_state: KeyboardInteractiveState,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
+    /// File transfer permissions for the current session (fetched after auth)
+    file_transfer_permission: Option<FileTransferPermission>,
+    /// SCP command parser
+    scp_parser: ScpParser,
+    /// SFTP parser (stateless)
+    sftp_parser: SftpParser,
+    /// Channels that are SFTP subsystems (need packet inspection)
+    sftp_channels: HashSet<Uuid>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -167,6 +178,10 @@ impl ServerSession {
             keyboard_interactive_state: KeyboardInteractiveState::None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
+            file_transfer_permission: None,
+            scp_parser: ScpParser::new(),
+            sftp_parser: SftpParser::new(),
+            sftp_channels: HashSet::new(),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -1162,6 +1177,29 @@ impl ServerSession {
             }
             Ok::<&str, _>(command) => {
                 debug!(channel=%channel_id, %command, "Requested exec");
+
+                // Check if this is an SCP command and verify permissions
+                let scp_command = self.scp_parser.parse_command(command);
+                match &scp_command {
+                    ScpCommand::Upload { path, .. } => {
+                        if let Err(e) = self.check_file_transfer_permission(true, false).await {
+                            warn!(channel=%channel_id, path=%path, "SCP upload denied: {}", e);
+                            anyhow::bail!("SCP upload not permitted: {}", e);
+                        }
+                        info!(channel=%channel_id, path=%path, "SCP upload access granted");
+                    }
+                    ScpCommand::Download { path, .. } => {
+                        if let Err(e) = self.check_file_transfer_permission(false, true).await {
+                            warn!(channel=%channel_id, path=%path, "SCP download denied: {}", e);
+                            anyhow::bail!("SCP download not permitted: {}", e);
+                        }
+                        info!(channel=%channel_id, path=%path, "SCP download access granted");
+                    }
+                    ScpCommand::NotScp => {
+                        // Not SCP, allow normal exec
+                    }
+                }
+
                 let _ = self.maybe_connect_remote().await;
                 let _ = self.send_command(RCCommand::Channel(
                     channel_id,
@@ -1273,12 +1311,209 @@ impl ServerSession {
     ) -> Result<(), SshClientError> {
         let channel_id = self.map_channel(&server_channel_id)?;
         info!(channel=%channel_id, "Requesting subsystem {}", &name);
+
+        // Check SFTP permission if this is an SFTP subsystem request
+        // Allow SFTP if either upload or download is permitted
+        if name == "sftp" {
+            let upload_check = self.check_file_transfer_permission(true, false).await;
+            let download_check = self.check_file_transfer_permission(false, true).await;
+            if upload_check.is_err() && download_check.is_err() {
+                warn!(channel=%channel_id, "SFTP access denied: neither upload nor download permitted");
+                return Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(
+                    russh::ChannelOpenFailure::AdministrativelyProhibited,
+                )));
+            }
+            // Track this channel as SFTP for fine-grained operation blocking
+            self.sftp_channels.insert(channel_id);
+            info!(channel=%channel_id, "SFTP subsystem access granted (fine-grained blocking enabled)");
+        }
+
         let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestSubsystem(name),
         ))
         .await?;
+        Ok(())
+    }
+
+    /// Check if file transfer is permitted for the current session.
+    /// Returns Ok(()) if permitted, Err with reason if not.
+    async fn check_file_transfer_permission(
+        &mut self,
+        needs_upload: bool,
+        needs_download: bool,
+    ) -> Result<(), String> {
+        // Ensure we have file transfer permissions loaded
+        if self.file_transfer_permission.is_none() {
+            self.load_file_transfer_permission().await;
+        }
+
+        let Some(ref permission) = self.file_transfer_permission else {
+            return Err("File transfer permissions not available".to_string());
+        };
+
+        if needs_upload && !permission.upload_allowed {
+            return Err("File upload not permitted".to_string());
+        }
+
+        if needs_download && !permission.download_allowed {
+            return Err("File download not permitted".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Load file transfer permissions for the current session.
+    async fn load_file_transfer_permission(&mut self) {
+        let username = match &self.username {
+            Some(u) => u.clone(),
+            None => {
+                warn!("Cannot load file transfer permissions: no authenticated user");
+                return;
+            }
+        };
+
+        let target = match &self.target {
+            TargetSelection::Found(t, _) => t.clone(),
+            _ => {
+                warn!("Cannot load file transfer permissions: no target selected");
+                return;
+            }
+        };
+
+        match self
+            .services
+            .config_provider
+            .lock()
+            .await
+            .authorize_target_file_transfer(&username, &target)
+            .await
+        {
+            Ok(permission) => {
+                debug!(
+                    upload=%permission.upload_allowed,
+                    download=%permission.download_allowed,
+                    "Loaded file transfer permissions"
+                );
+                self.file_transfer_permission = Some(permission);
+            }
+            Err(e) => {
+                error!(?e, "Failed to load file transfer permissions");
+                // Default to no permissions on error
+                self.file_transfer_permission = Some(FileTransferPermission::default());
+            }
+        }
+    }
+
+    /// Check SFTP operation and return request_id if blocked
+    ///
+    /// Returns Some(request_id) if the operation should be blocked,
+    /// None if the operation is allowed.
+    async fn check_sftp_operation(&mut self, data: &[u8]) -> Option<u32> {
+        // Parse the SFTP packet
+        let operation = self.sftp_parser.parse_packet(data)?;
+
+        // Get permissions (should already be loaded)
+        let permission = self.file_transfer_permission.as_ref()?;
+
+        match &operation {
+            SftpFileOperation::Open {
+                request_id,
+                path,
+                is_upload,
+                is_download,
+                ..
+            } => {
+                if *is_upload && !permission.upload_allowed {
+                    warn!(path=%path, "SFTP open (write) blocked - upload not permitted");
+                    return Some(*request_id);
+                }
+                if *is_download && !permission.download_allowed {
+                    warn!(path=%path, "SFTP open (read) blocked - download not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Write { request_id, .. } => {
+                if !permission.upload_allowed {
+                    warn!("SFTP write blocked - upload not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Read { request_id, .. } => {
+                if !permission.download_allowed {
+                    warn!("SFTP read blocked - download not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Remove { request_id, path } => {
+                if !permission.upload_allowed {
+                    warn!(path=%path, "SFTP remove blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Rename {
+                request_id,
+                old_path,
+                new_path,
+            } => {
+                if !permission.upload_allowed {
+                    warn!(old_path=%old_path, new_path=%new_path, "SFTP rename blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Mkdir { request_id, path } => {
+                if !permission.upload_allowed {
+                    warn!(path=%path, "SFTP mkdir blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Rmdir { request_id, path } => {
+                if !permission.upload_allowed {
+                    warn!(path=%path, "SFTP rmdir blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Setstat { request_id, path } => {
+                if !permission.upload_allowed {
+                    warn!(path=%path, "SFTP setstat blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Symlink {
+                request_id,
+                link_path,
+                target_path,
+            } => {
+                if !permission.upload_allowed {
+                    warn!(link_path=%link_path, target_path=%target_path, "SFTP symlink blocked - upload/write not permitted");
+                    return Some(*request_id);
+                }
+            }
+            SftpFileOperation::Close { .. } => {
+                // Always allow close operations
+            }
+        }
+
+        None // Operation allowed
+    }
+
+    /// Send SFTP permission denied response to client
+    async fn send_sftp_permission_denied(
+        &mut self,
+        server_channel_id: ServerChannelId,
+        request_id: u32,
+    ) -> Result<()> {
+        let response = build_permission_denied_response(request_id);
+
+        if let Some(session) = self.session_handle.clone() {
+            self.channel_writer.write(
+                session,
+                server_channel_id.0,
+                CryptoVec::from_slice(&response),
+            );
+        }
+
         Ok(())
     }
 
@@ -1289,6 +1524,16 @@ impl ServerSession {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             self.request_disconnect().await;
             return Ok(());
+        }
+
+        // Check if this is an SFTP channel and inspect packets for access control
+        if self.sftp_channels.contains(&channel_id) {
+            if let Some(blocked_request_id) = self.check_sftp_operation(&data).await {
+                // Send permission denied response to client
+                self.send_sftp_permission_denied(server_channel_id, blocked_request_id)
+                    .await?;
+                return Ok(()); // Don't forward to target
+            }
         }
 
         if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
@@ -1822,6 +2067,8 @@ impl ServerSession {
     async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
+        // Clean up SFTP tracking for this channel
+        self.sftp_channels.remove(&channel_id);
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
         Ok(())
