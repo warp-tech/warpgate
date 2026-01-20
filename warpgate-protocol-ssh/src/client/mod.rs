@@ -561,8 +561,9 @@ impl RemoteClient {
                             ).await.unwrap_or(false);
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
+                            } else {
+                                auth_error = Some("Password authentication was rejected by the SSH target".to_string());
                             }
-                            auth_error = Some("Password authentication was rejected by the SSH target".to_string());
                         }
                         SSHTargetAuth::PublicKey(_) => {
                             let best_hash = session.best_supported_rsa_hash().await?.flatten();
@@ -621,7 +622,7 @@ impl RemoteClient {
                     }
 
                     if !auth_result {
-                        let reason = auth_error.unwrap_or_else(|| "Authentication was rejected by the SSH server".to_string());
+                        let reason = auth_error.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
                         error!(reason=%reason, "Warpgate could not authenticate with SSH target");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
