@@ -132,3 +132,14 @@ pub enum TransferStatus {
     Failed,
     Denied,
 }
+
+/// Parsed SFTP response (server -> client)
+#[derive(Debug, Clone)]
+pub enum SftpResponse {
+    /// SSH_FXP_HANDLE - response to OPEN with the file handle
+    Handle { request_id: u32, handle: Vec<u8> },
+    /// SSH_FXP_DATA - response to READ with file data
+    Data { request_id: u32, data: Vec<u8> },
+    /// SSH_FXP_STATUS - response indicating success/failure
+    Status { request_id: u32, code: u32 },
+}

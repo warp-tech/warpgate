@@ -40,10 +40,13 @@ use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
-use crate::scp::{ScpCommand, ScpParser};
+use crate::scp::{ScpCommand, ScpMessage, ScpParser};
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
-use crate::sftp::{build_permission_denied_response, SftpFileOperation, SftpParser};
+use crate::sftp::{
+    build_permission_denied_response, FileTransferTracker, SftpFileOperation, SftpParser,
+    SftpResponse, TransferComplete, TransferDirection,
+};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
@@ -76,6 +79,36 @@ enum KeyboardInteractiveState {
 struct CachedSuccessfulTicketAuth {
     ticket: Secret<String>,
     user_info: AuthStateUserInfo,
+}
+
+/// SCP transfer state for tracking file data
+struct ScpTransferState {
+    direction: TransferDirection,
+    base_path: String,
+    current_file: Option<ScpFileState>,
+}
+
+/// State for an individual SCP file being transferred
+struct ScpFileState {
+    filename: String,
+    expected_size: u64,
+    bytes_transferred: u64,
+}
+
+/// Pending SFTP open request (waiting for HANDLE response)
+struct PendingOpen {
+    path: String,
+    direction: TransferDirection,
+}
+
+/// SFTP channel state for tracking file transfers
+struct SftpChannelState {
+    /// Pending OPEN requests: request_id -> (path, direction)
+    pending_opens: HashMap<u32, PendingOpen>,
+    /// Pending READ requests: request_id -> handle (to associate DATA responses)
+    pending_reads: HashMap<u32, Vec<u8>>,
+    /// File transfer tracker for hash calculation
+    tracker: FileTransferTracker,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -119,6 +152,12 @@ pub struct ServerSession {
     sftp_parser: SftpParser,
     /// Channels that are SFTP subsystems (need packet inspection)
     sftp_channels: HashSet<Uuid>,
+    /// SFTP channel state (pending opens, tracker) per channel
+    sftp_channel_state: HashMap<Uuid, SftpChannelState>,
+    /// SCP transfer state per channel
+    scp_channels: HashMap<Uuid, ScpTransferState>,
+    /// Hash threshold in bytes (from config)
+    hash_threshold: u64,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -182,6 +221,9 @@ impl ServerSession {
             scp_parser: ScpParser::new(),
             sftp_parser: SftpParser::new(),
             sftp_channels: HashSet::new(),
+            sftp_channel_state: HashMap::new(),
+            scp_channels: HashMap::new(),
+            hash_threshold: 10 * 1024 * 1024, // 10MB default, will be updated from config
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -736,6 +778,16 @@ impl ServerSession {
                     }
                 }
 
+                // Handle SFTP responses (server -> client) for file transfer tracking
+                if self.sftp_channels.contains(&channel) {
+                    self.handle_sftp_response(channel, &data);
+                }
+
+                // Handle SCP download data (server -> client) for file transfer tracking
+                if self.scp_channels.contains_key(&channel) {
+                    self.handle_scp_data(channel, &data);
+                }
+
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
                     self.channel_writer.write(
@@ -1183,17 +1235,45 @@ impl ServerSession {
                 match &scp_command {
                     ScpCommand::Upload { path, .. } => {
                         if let Err(e) = self.check_file_transfer_permission(true, false).await {
-                            warn!(channel=%channel_id, path=%path, "SCP upload denied: {}", e);
+                            self.log_transfer_denied("scp", Some(path), "upload not permitted");
                             anyhow::bail!("SCP upload not permitted: {}", e);
                         }
+                        // Check path/extension restrictions
+                        if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                            self.log_transfer_denied("scp", Some(path), &reason);
+                            anyhow::bail!("SCP upload not permitted: {}", reason);
+                        }
                         info!(channel=%channel_id, path=%path, "SCP upload access granted");
+                        // Initialize SCP tracking state
+                        self.scp_channels.insert(
+                            channel_id,
+                            ScpTransferState {
+                                direction: TransferDirection::Upload,
+                                base_path: path.clone(),
+                                current_file: None,
+                            },
+                        );
                     }
                     ScpCommand::Download { path, .. } => {
                         if let Err(e) = self.check_file_transfer_permission(false, true).await {
-                            warn!(channel=%channel_id, path=%path, "SCP download denied: {}", e);
+                            self.log_transfer_denied("scp", Some(path), "download not permitted");
                             anyhow::bail!("SCP download not permitted: {}", e);
                         }
+                        // Check path/extension restrictions
+                        if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                            self.log_transfer_denied("scp", Some(path), &reason);
+                            anyhow::bail!("SCP download not permitted: {}", reason);
+                        }
                         info!(channel=%channel_id, path=%path, "SCP download access granted");
+                        // Initialize SCP tracking state
+                        self.scp_channels.insert(
+                            channel_id,
+                            ScpTransferState {
+                                direction: TransferDirection::Download,
+                                base_path: path.clone(),
+                                current_file: None,
+                            },
+                        );
                     }
                     ScpCommand::NotScp => {
                         // Not SCP, allow normal exec
@@ -1325,6 +1405,15 @@ impl ServerSession {
             }
             // Track this channel as SFTP for fine-grained operation blocking
             self.sftp_channels.insert(channel_id);
+            // Initialize SFTP channel state for tracking file transfers
+            self.sftp_channel_state.insert(
+                channel_id,
+                SftpChannelState {
+                    pending_opens: HashMap::new(),
+                    pending_reads: HashMap::new(),
+                    tracker: FileTransferTracker::new(self.hash_threshold),
+                },
+            );
             info!(channel=%channel_id, "SFTP subsystem access granted (fine-grained blocking enabled)");
         }
 
@@ -1406,16 +1495,17 @@ impl ServerSession {
         }
     }
 
-    /// Check SFTP operation and return request_id if blocked
+    /// Check SFTP operation and return request_id if blocked.
+    /// Also tracks file transfers for logging and hash calculation.
     ///
     /// Returns Some(request_id) if the operation should be blocked,
     /// None if the operation is allowed.
-    async fn check_sftp_operation(&mut self, data: &[u8]) -> Option<u32> {
+    fn check_sftp_operation(&mut self, channel_id: Uuid, data: &[u8]) -> Option<u32> {
         // Parse the SFTP packet
         let operation = self.sftp_parser.parse_packet(data)?;
 
         // Get permissions (should already be loaded)
-        let permission = self.file_transfer_permission.as_ref()?;
+        let permission = self.file_transfer_permission.clone()?;
 
         match &operation {
             SftpFileOperation::Open {
@@ -1425,30 +1515,78 @@ impl ServerSession {
                 is_download,
                 ..
             } => {
+                // Check basic upload/download permission
                 if *is_upload && !permission.upload_allowed {
-                    warn!(path=%path, "SFTP open (write) blocked - upload not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "upload not permitted");
                     return Some(*request_id);
                 }
                 if *is_download && !permission.download_allowed {
-                    warn!(path=%path, "SFTP open (read) blocked - download not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "download not permitted");
                     return Some(*request_id);
                 }
+
+                // Check advanced restrictions (path, extension)
+                if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    self.log_transfer_denied("sftp", Some(path), &reason);
+                    return Some(*request_id);
+                }
+
+                // Determine transfer direction
+                let direction = if *is_upload {
+                    TransferDirection::Upload
+                } else {
+                    TransferDirection::Download
+                };
+
+                // Track pending open - we'll complete it when we receive the HANDLE response
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    state.pending_opens.insert(
+                        *request_id,
+                        PendingOpen {
+                            path: path.clone(),
+                            direction,
+                        },
+                    );
+                }
+
+                self.log_transfer_started("sftp", direction, path);
             }
-            SftpFileOperation::Write { request_id, .. } => {
+            SftpFileOperation::Write {
+                request_id, handle, ..
+            } => {
                 if !permission.upload_allowed {
-                    warn!("SFTP write blocked - upload not permitted");
+                    self.log_transfer_denied("sftp", None, "upload not permitted");
                     return Some(*request_id);
                 }
+                // Track data for hash calculation (upload: client -> server)
+                // We need to extract the actual data from the packet for hashing
+                // The data starts after: length(4) + type(1) + request_id(4) + handle_len(4) + handle + offset(8) + data_len(4)
+                let write_data = Self::extract_sftp_write_data(data, handle.len());
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    if let Some(write_data) = write_data {
+                        state.tracker.data_transferred(handle, &write_data);
+                    }
+                }
             }
-            SftpFileOperation::Read { request_id, .. } => {
+            SftpFileOperation::Read {
+                request_id, handle, ..
+            } => {
                 if !permission.download_allowed {
-                    warn!("SFTP read blocked - download not permitted");
+                    self.log_transfer_denied("sftp", None, "download not permitted");
                     return Some(*request_id);
+                }
+                // Track this READ request so we can associate the DATA response with the handle
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    state.pending_reads.insert(*request_id, handle.clone());
                 }
             }
             SftpFileOperation::Remove { request_id, path } => {
                 if !permission.upload_allowed {
-                    warn!(path=%path, "SFTP remove blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "remove not permitted");
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    self.log_transfer_denied("sftp", Some(path), &reason);
                     return Some(*request_id);
                 }
             }
@@ -1458,25 +1596,46 @@ impl ServerSession {
                 new_path,
             } => {
                 if !permission.upload_allowed {
-                    warn!(old_path=%old_path, new_path=%new_path, "SFTP rename blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(old_path), "rename not permitted");
+                    return Some(*request_id);
+                }
+                // Check both paths
+                if let Err(reason) = self.check_advanced_restrictions(old_path, None) {
+                    self.log_transfer_denied("sftp", Some(old_path), &reason);
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(new_path, None) {
+                    self.log_transfer_denied("sftp", Some(new_path), &reason);
                     return Some(*request_id);
                 }
             }
             SftpFileOperation::Mkdir { request_id, path } => {
                 if !permission.upload_allowed {
-                    warn!(path=%path, "SFTP mkdir blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "mkdir not permitted");
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    self.log_transfer_denied("sftp", Some(path), &reason);
                     return Some(*request_id);
                 }
             }
             SftpFileOperation::Rmdir { request_id, path } => {
                 if !permission.upload_allowed {
-                    warn!(path=%path, "SFTP rmdir blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "rmdir not permitted");
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    self.log_transfer_denied("sftp", Some(path), &reason);
                     return Some(*request_id);
                 }
             }
             SftpFileOperation::Setstat { request_id, path } => {
                 if !permission.upload_allowed {
-                    warn!(path=%path, "SFTP setstat blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(path), "setstat not permitted");
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    self.log_transfer_denied("sftp", Some(path), &reason);
                     return Some(*request_id);
                 }
             }
@@ -1486,16 +1645,78 @@ impl ServerSession {
                 target_path,
             } => {
                 if !permission.upload_allowed {
-                    warn!(link_path=%link_path, target_path=%target_path, "SFTP symlink blocked - upload/write not permitted");
+                    self.log_transfer_denied("sftp", Some(link_path), "symlink not permitted");
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(link_path, None) {
+                    self.log_transfer_denied("sftp", Some(link_path), &reason);
+                    return Some(*request_id);
+                }
+                if let Err(reason) = self.check_advanced_restrictions(target_path, None) {
+                    self.log_transfer_denied("sftp", Some(target_path), &reason);
                     return Some(*request_id);
                 }
             }
-            SftpFileOperation::Close { .. } => {
-                // Always allow close operations
+            SftpFileOperation::Close { handle, .. } => {
+                // Handle file close - finalize transfer and log completion
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    if let Some(complete) = state.tracker.file_closed(handle) {
+                        self.log_transfer_completed(&complete, "sftp");
+                    }
+                }
             }
         }
 
         None // Operation allowed
+    }
+
+    /// Extract write data from an SFTP WRITE packet for hash calculation
+    fn extract_sftp_write_data(data: &[u8], handle_len: usize) -> Option<Vec<u8>> {
+        // SFTP WRITE packet format:
+        // length(4) + type(1) + request_id(4) + handle_len(4) + handle(N) + offset(8) + data_len(4) + data(M)
+        let header_size = 4 + 1 + 4 + 4 + handle_len + 8 + 4;
+        if data.len() <= header_size {
+            return None;
+        }
+        Some(data[header_size..].to_vec())
+    }
+
+    /// Handle SFTP response from server (for tracking file handles and download data)
+    fn handle_sftp_response(&mut self, channel_id: Uuid, data: &[u8]) {
+        let Some(response) = self.sftp_parser.parse_response(data) else {
+            return;
+        };
+
+        match response {
+            SftpResponse::Handle { request_id, handle } => {
+                // Got a file handle - associate it with the pending open
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    if let Some(pending) = state.pending_opens.remove(&request_id) {
+                        // Register the file with the tracker
+                        state
+                            .tracker
+                            .file_opened(handle, pending.path, pending.direction);
+                    }
+                }
+            }
+            SftpResponse::Data {
+                request_id,
+                data: file_data,
+            } => {
+                // Download data from server - track for hash calculation
+                // Look up which handle this data belongs to via the pending_reads mapping
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    if let Some(handle) = state.pending_reads.remove(&request_id) {
+                        // Track download data for this handle
+                        state.tracker.data_transferred(&handle, &file_data);
+                    }
+                }
+            }
+            SftpResponse::Status { .. } => {
+                // Status response - could indicate success/failure of operations
+                // Not needed for basic tracking
+            }
+        }
     }
 
     /// Send SFTP permission denied response to client
@@ -1517,6 +1738,208 @@ impl ServerSession {
         Ok(())
     }
 
+    /// Log file transfer started event
+    fn log_transfer_started(&self, protocol: &str, direction: TransferDirection, path: &str) {
+        info!(
+            event_type = "file_transfer",
+            protocol = protocol,
+            direction = ?direction,
+            status = "started",
+            remote_path = path,
+            "File transfer started"
+        );
+    }
+
+    /// Log file transfer completed event
+    fn log_transfer_completed(&self, info: &TransferComplete, protocol: &str) {
+        info!(
+            event_type = "file_transfer",
+            protocol = protocol,
+            direction = ?info.direction,
+            status = "completed",
+            remote_path = %info.path,
+            file_size = info.bytes_transferred,
+            bytes_transferred = info.bytes_transferred,
+            file_hash = info.hash.as_deref().unwrap_or(""),
+            hash_algorithm = "sha256",
+            duration_ms = info.duration_ms,
+            "File transfer completed"
+        );
+    }
+
+    /// Log file transfer denied event
+    fn log_transfer_denied(&self, protocol: &str, path: Option<&str>, reason: &str) {
+        warn!(
+            event_type = "file_transfer",
+            protocol = protocol,
+            status = "denied",
+            remote_path = path.unwrap_or(""),
+            denied_reason = reason,
+            "File transfer denied"
+        );
+    }
+
+    /// Check if a path is allowed based on path restrictions
+    fn is_path_allowed(&self, path: &str, allowed_paths: &[String]) -> bool {
+        if allowed_paths.is_empty() {
+            return true;
+        }
+        for pattern in allowed_paths {
+            // Simple glob matching: support * as wildcard
+            if pattern.ends_with("/*") {
+                let prefix = &pattern[..pattern.len() - 2];
+                if path.starts_with(prefix) {
+                    return true;
+                }
+            } else if pattern.ends_with("/**") {
+                let prefix = &pattern[..pattern.len() - 3];
+                if path.starts_with(prefix) {
+                    return true;
+                }
+            } else if pattern == path {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a file extension is blocked
+    fn is_extension_blocked(&self, path: &str, blocked_extensions: &[String]) -> bool {
+        if blocked_extensions.is_empty() {
+            return false;
+        }
+        for ext in blocked_extensions {
+            let ext_lower = ext.to_lowercase();
+            let ext_with_dot = if ext_lower.starts_with('.') {
+                ext_lower
+            } else {
+                format!(".{}", ext_lower)
+            };
+            if path.to_lowercase().ends_with(&ext_with_dot) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check advanced restrictions (path, extension, size) for a file operation
+    fn check_advanced_restrictions(
+        &self,
+        path: &str,
+        file_size: Option<u64>,
+    ) -> Result<(), String> {
+        let Some(ref permission) = self.file_transfer_permission else {
+            return Ok(());
+        };
+
+        // Check path restrictions
+        if let Some(ref allowed_paths) = permission.allowed_paths {
+            if !self.is_path_allowed(path, allowed_paths) {
+                return Err(format!("path '{}' not in allowed paths", path));
+            }
+        }
+
+        // Check extension restrictions
+        if let Some(ref blocked_extensions) = permission.blocked_extensions {
+            if self.is_extension_blocked(path, blocked_extensions) {
+                return Err(format!("file extension blocked for '{}'", path));
+            }
+        }
+
+        // Check size limit
+        if let (Some(max_size), Some(size)) = (permission.max_file_size, file_size) {
+            if size > max_size as u64 {
+                return Err(format!("file size {} exceeds limit {}", size, max_size));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle SCP data for tracking and logging
+    fn handle_scp_data(&mut self, channel_id: Uuid, data: &[u8]) {
+        // Parse SCP protocol message first (no borrow of scp_channels needed)
+        let msg = self.scp_parser.parse_message(data);
+
+        // Now work with scp_channels, collecting log events to emit after
+        enum LogEvent {
+            Started {
+                direction: TransferDirection,
+                path: String,
+            },
+            Completed(TransferComplete),
+        }
+        let mut log_event: Option<LogEvent> = None;
+
+        if let Some(scp_state) = self.scp_channels.get_mut(&channel_id) {
+            if let Some(msg) = msg {
+                match msg {
+                    ScpMessage::FileHeader { size, filename, .. } => {
+                        // Start of a new file transfer
+                        let full_path = if scp_state.base_path.ends_with('/') {
+                            format!("{}{}", scp_state.base_path, filename)
+                        } else {
+                            format!("{}/{}", scp_state.base_path, filename)
+                        };
+                        log_event = Some(LogEvent::Started {
+                            direction: scp_state.direction,
+                            path: full_path.clone(),
+                        });
+                        scp_state.current_file = Some(ScpFileState {
+                            filename: full_path,
+                            expected_size: size,
+                            bytes_transferred: 0,
+                        });
+                    }
+                    ScpMessage::Data(file_data) => {
+                        // Track data transfer
+                        if let Some(ref mut file_state) = scp_state.current_file {
+                            file_state.bytes_transferred += file_data.len() as u64;
+
+                            // Check if transfer is complete
+                            if file_state.bytes_transferred >= file_state.expected_size {
+                                log_event = Some(LogEvent::Completed(TransferComplete {
+                                    path: file_state.filename.clone(),
+                                    direction: scp_state.direction,
+                                    bytes_transferred: file_state.bytes_transferred,
+                                    hash: None, // SCP doesn't easily support streaming hash
+                                    duration_ms: 0, // Would need to track start time
+                                }));
+                                scp_state.current_file = None;
+                            }
+                        }
+                    }
+                    ScpMessage::Ok | ScpMessage::EndDir => {
+                        // End of current file or directory
+                        if let Some(ref file_state) = scp_state.current_file {
+                            log_event = Some(LogEvent::Completed(TransferComplete {
+                                path: file_state.filename.clone(),
+                                direction: scp_state.direction,
+                                bytes_transferred: file_state.bytes_transferred,
+                                hash: None,
+                                duration_ms: 0,
+                            }));
+                        }
+                        scp_state.current_file = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Emit log events after releasing the mutable borrow
+        if let Some(event) = log_event {
+            match event {
+                LogEvent::Started { direction, path } => {
+                    self.log_transfer_started("scp", direction, &path);
+                }
+                LogEvent::Completed(complete) => {
+                    self.log_transfer_completed(&complete, "scp");
+                }
+            }
+        }
+    }
+
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
@@ -1528,12 +1951,17 @@ impl ServerSession {
 
         // Check if this is an SFTP channel and inspect packets for access control
         if self.sftp_channels.contains(&channel_id) {
-            if let Some(blocked_request_id) = self.check_sftp_operation(&data).await {
+            if let Some(blocked_request_id) = self.check_sftp_operation(channel_id, &data) {
                 // Send permission denied response to client
                 self.send_sftp_permission_denied(server_channel_id, blocked_request_id)
                     .await?;
                 return Ok(()); // Don't forward to target
             }
+        }
+
+        // Track SCP data for logging
+        if self.scp_channels.contains_key(&channel_id) {
+            self.handle_scp_data(channel_id, &data);
         }
 
         if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
@@ -2067,8 +2495,10 @@ impl ServerSession {
     async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
-        // Clean up SFTP tracking for this channel
+        // Clean up SFTP and SCP tracking for this channel
         self.sftp_channels.remove(&channel_id);
+        self.sftp_channel_state.remove(&channel_id);
+        self.scp_channels.remove(&channel_id);
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
         Ok(())

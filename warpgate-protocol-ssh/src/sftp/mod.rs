@@ -12,4 +12,4 @@ mod types;
 pub use parser::SftpParser;
 pub use response::build_permission_denied_response;
 pub use tracker::{FileTransferTracker, TransferComplete};
-pub use types::*;
+pub use types::{SftpFileOperation, SftpResponse, TransferDirection, TransferStatus};

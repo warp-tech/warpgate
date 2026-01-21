@@ -4,7 +4,7 @@
 
 use bytes::{Buf, Bytes};
 
-use super::types::SftpFileOperation;
+use super::types::{SftpFileOperation, SftpResponse};
 
 /// SFTP Protocol Parser
 ///
@@ -213,6 +213,76 @@ impl SftpParser {
         }
         Some(buf.copy_to_bytes(len).to_vec())
     }
+
+    /// Parse an SFTP response packet (server -> client)
+    pub fn parse_response(&self, data: &[u8]) -> Option<SftpResponse> {
+        if data.len() < 5 {
+            return None;
+        }
+
+        let mut buf = Bytes::copy_from_slice(data);
+        let length = buf.get_u32() as usize;
+
+        if buf.remaining() < length || length < 1 {
+            return None;
+        }
+
+        let packet_type = buf.get_u8();
+
+        match packet_type {
+            101 => self.parse_status_response(&mut buf), // SSH_FXP_STATUS
+            102 => self.parse_handle_response(&mut buf), // SSH_FXP_HANDLE
+            103 => self.parse_data_response(&mut buf, length - 1), // SSH_FXP_DATA
+            _ => None,
+        }
+    }
+
+    fn parse_handle_response(&self, buf: &mut Bytes) -> Option<SftpResponse> {
+        if buf.remaining() < 4 {
+            return None;
+        }
+        let request_id = buf.get_u32();
+        let handle = self.read_bytes(buf)?;
+        Some(SftpResponse::Handle { request_id, handle })
+    }
+
+    fn parse_data_response(
+        &self,
+        buf: &mut Bytes,
+        remaining_length: usize,
+    ) -> Option<SftpResponse> {
+        if buf.remaining() < 4 {
+            return None;
+        }
+        let request_id = buf.get_u32();
+
+        // Read the data length
+        if buf.remaining() < 4 {
+            return None;
+        }
+        let data_len = buf.get_u32() as usize;
+
+        // Sanity check: data_len should not exceed remaining packet length
+        if data_len > remaining_length.saturating_sub(8) {
+            return None;
+        }
+
+        if buf.remaining() < data_len {
+            return None;
+        }
+        let data = buf.copy_to_bytes(data_len).to_vec();
+
+        Some(SftpResponse::Data { request_id, data })
+    }
+
+    fn parse_status_response(&self, buf: &mut Bytes) -> Option<SftpResponse> {
+        if buf.remaining() < 8 {
+            return None;
+        }
+        let request_id = buf.get_u32();
+        let code = buf.get_u32();
+        Some(SftpResponse::Status { request_id, code })
+    }
 }
 
 #[cfg(test)]
@@ -324,6 +394,72 @@ mod tests {
             assert_eq!(handle, b"handle123");
         } else {
             panic!("Expected Close operation");
+        }
+    }
+
+    #[test]
+    fn test_parse_handle_response() {
+        let parser = SftpParser::new();
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&42u32.to_be_bytes()); // request_id
+        payload.extend_from_slice(&build_string("file_handle_xyz")); // handle
+
+        let packet = build_sftp_packet(102, &payload); // SSH_FXP_HANDLE
+
+        let result = parser.parse_response(&packet);
+        assert!(result.is_some());
+
+        if let Some(SftpResponse::Handle { request_id, handle }) = result {
+            assert_eq!(request_id, 42);
+            assert_eq!(handle, b"file_handle_xyz");
+        } else {
+            panic!("Expected Handle response");
+        }
+    }
+
+    #[test]
+    fn test_parse_data_response() {
+        let parser = SftpParser::new();
+
+        let test_data = b"Hello, World! This is file content.";
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&99u32.to_be_bytes()); // request_id
+        payload.extend_from_slice(&(test_data.len() as u32).to_be_bytes()); // data length
+        payload.extend_from_slice(test_data); // data
+
+        let packet = build_sftp_packet(103, &payload); // SSH_FXP_DATA
+
+        let result = parser.parse_response(&packet);
+        assert!(result.is_some());
+
+        if let Some(SftpResponse::Data { request_id, data }) = result {
+            assert_eq!(request_id, 99);
+            assert_eq!(data, test_data);
+        } else {
+            panic!("Expected Data response");
+        }
+    }
+
+    #[test]
+    fn test_parse_status_response() {
+        let parser = SftpParser::new();
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&123u32.to_be_bytes()); // request_id
+        payload.extend_from_slice(&0u32.to_be_bytes()); // status code (SSH_FX_OK)
+                                                        // Error message and language tag follow but we don't parse them
+
+        let packet = build_sftp_packet(101, &payload); // SSH_FXP_STATUS
+
+        let result = parser.parse_response(&packet);
+        assert!(result.is_some());
+
+        if let Some(SftpResponse::Status { request_id, code }) = result {
+            assert_eq!(request_id, 123);
+            assert_eq!(code, 0);
+        } else {
+            panic!("Expected Status response");
         }
     }
 }
