@@ -30,3 +30,6 @@ dhat-heap.json
 
 cdx.xml
 *.cdx.xml
+
+# Docker test environment data
+docker/data/
