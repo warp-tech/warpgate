@@ -554,13 +554,11 @@ impl RolesApi {
         model.allowed_paths = Set(body
             .allowed_paths
             .as_ref()
-            .map(|v| serde_json::to_value(v).ok())
-            .flatten());
+            .and_then(|v| serde_json::to_value(v).ok()));
         model.blocked_extensions = Set(body
             .blocked_extensions
             .as_ref()
-            .map(|v| serde_json::to_value(v).ok())
-            .flatten());
+            .and_then(|v| serde_json::to_value(v).ok()));
         model.max_file_size = Set(body.max_file_size);
 
         let updated = model.update(&*db).await.map_err(WarpgateError::from)?;
