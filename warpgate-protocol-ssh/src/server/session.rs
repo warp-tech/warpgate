@@ -618,8 +618,16 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ExecRequest(channel, data, reply) => {
-                self._channel_exec_request(channel, data).await?;
-                let _ = reply.send(true);
+                match self._channel_exec_request(channel, data).await {
+                    Ok(()) => {
+                        let _ = reply.send(true);
+                    }
+                    Err(e) => {
+                        // Send error message to client via stderr before failing
+                        warn!(channel=?channel, error=%e, "Exec request denied");
+                        let _ = reply.send(false);
+                    }
+                }
             }
 
             ServerHandlerEvent::ChannelOpenDirectTcpIp(channel, params, reply) => {
@@ -1392,17 +1400,10 @@ impl ServerSession {
         let channel_id = self.map_channel(&server_channel_id)?;
         info!(channel=%channel_id, "Requesting subsystem {}", &name);
 
-        // Check SFTP permission if this is an SFTP subsystem request
-        // Allow SFTP if either upload or download is permitted
+        // For SFTP subsystem, always allow the connection but enforce permissions
+        // at the operation level. This provides better UX - users see "Permission denied"
+        // for specific operations rather than "subsystem request failed".
         if name == "sftp" {
-            let upload_check = self.check_file_transfer_permission(true, false).await;
-            let download_check = self.check_file_transfer_permission(false, true).await;
-            if upload_check.is_err() && download_check.is_err() {
-                warn!(channel=%channel_id, "SFTP access denied: neither upload nor download permitted");
-                return Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(
-                    russh::ChannelOpenFailure::AdministrativelyProhibited,
-                )));
-            }
             // Track this channel as SFTP for fine-grained operation blocking
             self.sftp_channels.insert(channel_id);
             // Initialize SFTP channel state for tracking file transfers
@@ -1414,7 +1415,22 @@ impl ServerSession {
                     tracker: FileTransferTracker::new(self.hash_threshold),
                 },
             );
-            info!(channel=%channel_id, "SFTP subsystem access granted (fine-grained blocking enabled)");
+            // Load permissions for later enforcement
+            self.load_file_transfer_permission().await;
+            let upload_allowed = self
+                .file_transfer_permission
+                .as_ref()
+                .is_some_and(|p| p.upload_allowed);
+            let download_allowed = self
+                .file_transfer_permission
+                .as_ref()
+                .is_some_and(|p| p.download_allowed);
+            info!(
+                channel=%channel_id,
+                upload_allowed,
+                download_allowed,
+                "SFTP subsystem access granted (permissions enforced at operation level)"
+            );
         }
 
         let _ = self.maybe_connect_remote().await;
@@ -1495,12 +1511,36 @@ impl ServerSession {
         }
     }
 
-    /// Check SFTP operation and return request_id if blocked.
+    /// Get the current target name for error messages
+    fn get_target_name(&self) -> String {
+        match &self.target {
+            TargetSelection::Found(t, _) => t.name.clone(),
+            TargetSelection::NotFound(name) => name.clone(),
+            TargetSelection::None => "unknown".to_string(),
+        }
+    }
+
+    /// Build a detailed permission denied message
+    fn build_permission_message(&self, action: &str, path: Option<&str>) -> String {
+        let target_name = self.get_target_name();
+        match path {
+            Some(p) => format!(
+                "Permission denied: {} is not allowed on target '{}' for path '{}'",
+                action, target_name, p
+            ),
+            None => format!(
+                "Permission denied: {} is not allowed on target '{}'",
+                action, target_name
+            ),
+        }
+    }
+
+    /// Check SFTP operation and return request_id and denial message if blocked.
     /// Also tracks file transfers for logging and hash calculation.
     ///
-    /// Returns Some(request_id) if the operation should be blocked,
+    /// Returns Some((request_id, message)) if the operation should be blocked,
     /// None if the operation is allowed.
-    fn check_sftp_operation(&mut self, channel_id: Uuid, data: &[u8]) -> Option<u32> {
+    fn check_sftp_operation(&mut self, channel_id: Uuid, data: &[u8]) -> Option<(u32, String)> {
         // Parse the SFTP packet
         let operation = self.sftp_parser.parse_packet(data)?;
 
@@ -1517,18 +1557,21 @@ impl ServerSession {
             } => {
                 // Check basic upload/download permission
                 if *is_upload && !permission.upload_allowed {
+                    let msg = self.build_permission_message("file upload", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "upload not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if *is_download && !permission.download_allowed {
+                    let msg = self.build_permission_message("file download", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "download not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
 
                 // Check advanced restrictions (path, extension)
                 if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    let msg = self.build_permission_message(&reason, Some(path));
                     self.log_transfer_denied("sftp", Some(path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
 
                 // Determine transfer direction
@@ -1555,8 +1598,9 @@ impl ServerSession {
                 request_id, handle, ..
             } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("file write", None);
                     self.log_transfer_denied("sftp", None, "upload not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 // Track data for hash calculation (upload: client -> server)
                 // We need to extract the actual data from the packet for hashing
@@ -1572,8 +1616,9 @@ impl ServerSession {
                 request_id, handle, ..
             } => {
                 if !permission.download_allowed {
+                    let msg = self.build_permission_message("file read", None);
                     self.log_transfer_denied("sftp", None, "download not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 // Track this READ request so we can associate the DATA response with the handle
                 if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
@@ -1582,12 +1627,14 @@ impl ServerSession {
             }
             SftpFileOperation::Remove { request_id, path } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("file remove", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "remove not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    let msg = self.build_permission_message(&reason, Some(path));
                     self.log_transfer_denied("sftp", Some(path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Rename {
@@ -1596,47 +1643,56 @@ impl ServerSession {
                 new_path,
             } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("file rename", Some(old_path));
                     self.log_transfer_denied("sftp", Some(old_path), "rename not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 // Check both paths
                 if let Err(reason) = self.check_advanced_restrictions(old_path, None) {
+                    let msg = self.build_permission_message(&reason, Some(old_path));
                     self.log_transfer_denied("sftp", Some(old_path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(new_path, None) {
+                    let msg = self.build_permission_message(&reason, Some(new_path));
                     self.log_transfer_denied("sftp", Some(new_path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Mkdir { request_id, path } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("mkdir", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "mkdir not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    let msg = self.build_permission_message(&reason, Some(path));
                     self.log_transfer_denied("sftp", Some(path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Rmdir { request_id, path } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("rmdir", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "rmdir not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    let msg = self.build_permission_message(&reason, Some(path));
                     self.log_transfer_denied("sftp", Some(path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Setstat { request_id, path } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("setstat", Some(path));
                     self.log_transfer_denied("sftp", Some(path), "setstat not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(path, None) {
+                    let msg = self.build_permission_message(&reason, Some(path));
                     self.log_transfer_denied("sftp", Some(path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Symlink {
@@ -1645,16 +1701,19 @@ impl ServerSession {
                 target_path,
             } => {
                 if !permission.upload_allowed {
+                    let msg = self.build_permission_message("symlink", Some(link_path));
                     self.log_transfer_denied("sftp", Some(link_path), "symlink not permitted");
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(link_path, None) {
+                    let msg = self.build_permission_message(&reason, Some(link_path));
                     self.log_transfer_denied("sftp", Some(link_path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
                 if let Err(reason) = self.check_advanced_restrictions(target_path, None) {
+                    let msg = self.build_permission_message(&reason, Some(target_path));
                     self.log_transfer_denied("sftp", Some(target_path), &reason);
-                    return Some(*request_id);
+                    return Some((*request_id, msg));
                 }
             }
             SftpFileOperation::Close { handle, .. } => {
@@ -1724,8 +1783,9 @@ impl ServerSession {
         &mut self,
         server_channel_id: ServerChannelId,
         request_id: u32,
+        message: &str,
     ) -> Result<()> {
-        let response = build_permission_denied_response(request_id);
+        let response = build_permission_denied_response(request_id, message);
 
         if let Some(session) = self.session_handle.clone() {
             self.channel_writer.write(
@@ -1951,9 +2011,11 @@ impl ServerSession {
 
         // Check if this is an SFTP channel and inspect packets for access control
         if self.sftp_channels.contains(&channel_id) {
-            if let Some(blocked_request_id) = self.check_sftp_operation(channel_id, &data) {
-                // Send permission denied response to client
-                self.send_sftp_permission_denied(server_channel_id, blocked_request_id)
+            if let Some((blocked_request_id, message)) =
+                self.check_sftp_operation(channel_id, &data)
+            {
+                // Send permission denied response to client with detailed message
+                self.send_sftp_permission_denied(server_channel_id, blocked_request_id, &message)
                     .await?;
                 return Ok(()); // Don't forward to target
             }

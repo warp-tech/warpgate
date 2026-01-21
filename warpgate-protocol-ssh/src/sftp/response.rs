@@ -26,11 +26,11 @@ pub mod packet_types {
 ///
 /// This is sent back to the client when an operation is blocked due to
 /// file transfer permissions.
-pub fn build_permission_denied_response(request_id: u32) -> Vec<u8> {
+pub fn build_permission_denied_response(request_id: u32, message: &str) -> Vec<u8> {
     build_status_response(
         request_id,
         status_codes::SSH_FX_PERMISSION_DENIED,
-        "Permission denied",
+        message,
         "en",
     )
 }
@@ -81,7 +81,10 @@ mod tests {
 
     #[test]
     fn test_build_permission_denied_response() {
-        let response = build_permission_denied_response(42);
+        let response = build_permission_denied_response(
+            42,
+            "Permission denied: file upload is not allowed on target 'prod-server'",
+        );
 
         // Verify structure
         assert!(response.len() > 4);
