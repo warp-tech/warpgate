@@ -13,6 +13,21 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    // File transfer defaults for this role
+    /// Allow file uploads by default for targets with this role
+    #[sea_orm(default_value = true)]
+    pub allow_file_upload: bool,
+    /// Allow file downloads by default for targets with this role
+    #[sea_orm(default_value = true)]
+    pub allow_file_download: bool,
+    /// Default allowed paths (JSON array of path patterns, null = all paths allowed)
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub allowed_paths: Option<serde_json::Value>,
+    /// Default blocked file extensions (JSON array, null = no extensions blocked)
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub blocked_extensions: Option<serde_json::Value>,
+    /// Default maximum file size in bytes (null = no limit)
+    pub max_file_size: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -46,6 +61,15 @@ impl From<Model> for Role {
             id: model.id,
             name: model.name,
             description: model.description,
+            allow_file_upload: model.allow_file_upload,
+            allow_file_download: model.allow_file_download,
+            allowed_paths: model
+                .allowed_paths
+                .and_then(|v| serde_json::from_value(v).ok()),
+            blocked_extensions: model
+                .blocked_extensions
+                .and_then(|v| serde_json::from_value(v).ok()),
+            max_file_size: model.max_file_size,
         }
     }
 }

@@ -168,12 +168,32 @@ impl Deref for UserDetails {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Object)]
 pub struct Role {
     #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    // File transfer defaults for this role
+    /// Allow file uploads by default for targets with this role
+    #[serde(default = "default_true")]
+    pub allow_file_upload: bool,
+    /// Allow file downloads by default for targets with this role
+    #[serde(default = "default_true")]
+    pub allow_file_download: bool,
+    /// Default allowed paths (list of path patterns, null = all paths allowed)
+    #[serde(default)]
+    pub allowed_paths: Option<Vec<String>>,
+    /// Default blocked file extensions (list, null = no extensions blocked)
+    #[serde(default)]
+    pub blocked_extensions: Option<Vec<String>>,
+    /// Default maximum file size in bytes (null = no limit)
+    #[serde(default)]
+    pub max_file_size: Option<i64>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
