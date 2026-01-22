@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
+    import { api, type Role, type RoleFileTransferDefaults, type Target, type TargetGroup } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -18,12 +18,13 @@
         params: { id: string };
     }
 
+    // Nullable values mean "inherit from role"
     interface FileTransferPermission {
-        allow_file_upload: boolean
-        allow_file_download: boolean
-        allowed_paths: string[] | null
-        blocked_extensions: string[] | null
-        max_file_size: number | null
+        allowFileUpload: boolean | null
+        allowFileDownload: boolean | null
+        allowedPaths: string[] | null
+        blockedExtensions: string[] | null
+        maxFileSize: number | null
     }
 
     let { params }: Props = $props()
@@ -33,8 +34,10 @@
     let target: Target | undefined = $state()
     let roleIsAllowed: Record<string, any> = $state({})
     let fileTransferPermissions: Record<string, FileTransferPermission> = $state({})
+    let roleDefaults: Record<string, RoleFileTransferDefaults> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
+    let expandedFileTransfer: Record<string, boolean> = $state({})
 
     async function init () {
         [target, groups] = await Promise.all([
@@ -47,9 +50,32 @@
         const allRoles = await api.getRoles()
         const allowedRoles = await api.getTargetRoles(target!)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
-        // Load file transfer permissions for allowed roles
+        // Load file transfer permissions and role defaults for allowed roles
         await loadAllFileTransferPermissions()
+        await loadAllRoleDefaults(allRoles)
         return allRoles
+    }
+
+    async function loadRoleDefaults(roleId: string) {
+        try {
+            const defaults = await api.getRoleFileTransferDefaults({ id: roleId })
+            roleDefaults = { ...roleDefaults, [roleId]: defaults }
+        } catch {
+            // Defaults not available
+            roleDefaults = { ...roleDefaults, [roleId]: {
+                allowFileUpload: true,
+                allowFileDownload: true,
+                allowedPaths: null,
+                blockedExtensions: null,
+                maxFileSize: null,
+            } }
+        }
+    }
+
+    async function loadAllRoleDefaults(allRoles: Role[]) {
+        for (const role of allRoles) {
+            await loadRoleDefaults(role.id)
+        }
     }
 
     async function update () {
@@ -81,8 +107,8 @@
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
             // Remove file transfer permissions from state
-            const newPerms = { ...fileTransferPermissions }
-            delete newPerms[role.id]
+            const { [role.id]: _removed, ...newPerms } = fileTransferPermissions
+            void _removed
             fileTransferPermissions = newPerms
         } else {
             await api.addTargetRole({
@@ -97,13 +123,20 @@
 
     async function loadFileTransferPermission (roleId: string) {
         try {
-            const response = await fetch(`/@warpgate/admin/api/targets/${target!.id}/roles/${roleId}/file-transfer`)
-            if (response.ok) {
-                const perm = await response.json()
-                fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
-            }
+            const perm = await api.getTargetRoleFileTransferPermission({
+                id: target!.id,
+                roleId: roleId,
+            })
+            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
         } catch {
-            // Assignment may not have permissions yet
+            // Assignment may not have permissions yet - use null (inherit)
+            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: {
+                allowFileUpload: null,
+                allowFileDownload: null,
+                allowedPaths: null,
+                blockedExtensions: null,
+                maxFileSize: null,
+            } }
         }
     }
 
@@ -113,27 +146,40 @@
         }
     }
 
-    async function updateFileTransferPermission (roleId: string, field: keyof FileTransferPermission, value: boolean) {
+    async function updateFileTransferPermission (roleId: string, field: keyof FileTransferPermission, value: boolean | null) {
         const current = fileTransferPermissions[roleId] || {
-            allow_file_upload: true,
-            allow_file_download: true,
-            allowed_paths: null,
-            blocked_extensions: null,
-            max_file_size: null
+            allowFileUpload: null,
+            allowFileDownload: null,
+            allowedPaths: null,
+            blockedExtensions: null,
+            maxFileSize: null,
         }
 
         const updated = { ...current, [field]: value }
 
-        const response = await fetch(`/@warpgate/admin/api/targets/${target!.id}/roles/${roleId}/file-transfer`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updated)
-        })
-
-        if (response.ok) {
-            const perm = await response.json()
+        try {
+            const perm = await api.updateTargetRoleFileTransferPermission({
+                id: target!.id,
+                roleId: roleId,
+                fileTransferPermissionData: updated,
+            })
             fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
+        } catch (err) {
+            error = await stringifyError(err)
         }
+    }
+
+    function getPermissionState(roleId: string, field: 'allowFileUpload' | 'allowFileDownload'): 'inherit' | 'allow' | 'deny' {
+        const value = fileTransferPermissions[roleId]?.[field]
+        if (value === null || value === undefined) {
+            return 'inherit'
+        }
+        return value ? 'allow' : 'deny'
+    }
+
+    function setPermissionState(roleId: string, field: 'allowFileUpload' | 'allowFileDownload', state: 'inherit' | 'allow' | 'deny') {
+        const value = state === 'inherit' ? null : state === 'allow'
+        updateFileTransferPermission(roleId, field, value)
     }
 </script>
 
@@ -345,26 +391,53 @@
                                 </div>
                             </label>
                             {#if roleIsAllowed[role.id] && target?.options.kind === 'Ssh'}
-                                <div class="ms-4 mt-2 ps-3 border-start">
-                                    <small class="text-muted d-block mb-2">File Transfer (SCP/SFTP)</small>
-                                    <div class="d-flex gap-3">
-                                        <label class="form-check d-flex align-items-center gap-1">
-                                            <Input
-                                                type="checkbox"
-                                                checked={fileTransferPermissions[role.id]?.allow_file_upload ?? true}
-                                                on:change={(e) => updateFileTransferPermission(role.id, 'allow_file_upload', e.target.checked)}
-                                            />
-                                            <span class="form-check-label">Upload</span>
-                                        </label>
-                                        <label class="form-check d-flex align-items-center gap-1">
-                                            <Input
-                                                type="checkbox"
-                                                checked={fileTransferPermissions[role.id]?.allow_file_download ?? true}
-                                                on:change={(e) => updateFileTransferPermission(role.id, 'allow_file_download', e.target.checked)}
-                                            />
-                                            <span class="form-check-label">Download</span>
-                                        </label>
-                                    </div>
+                                <div class="ms-4 mt-1">
+                                    <button
+                                        type="button"
+                                        class="btn btn-link btn-sm text-muted p-0 text-decoration-none"
+                                        onclick={() => { expandedFileTransfer[role.id] = !expandedFileTransfer[role.id] }}
+                                    >
+                                        {expandedFileTransfer[role.id] ? '▼' : '▶'} File Transfer
+                                        {#if !expandedFileTransfer[role.id]}
+                                            <span class="text-muted small">
+                                                (Upload: {getPermissionState(role.id, 'allowFileUpload')}, Download: {getPermissionState(role.id, 'allowFileDownload')})
+                                            </span>
+                                        {/if}
+                                    </button>
+                                    {#if expandedFileTransfer[role.id]}
+                                        <div class="ps-3 mt-1 border-start">
+                                            <div class="row g-2">
+                                                <div class="col-auto">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">Upload</span>
+                                                        <select
+                                                            class="form-select form-select-sm"
+                                                            value={getPermissionState(role.id, 'allowFileUpload')}
+                                                            onchange={(e) => setPermissionState(role.id, 'allowFileUpload', (e.target as HTMLSelectElement).value as 'inherit' | 'allow' | 'deny')}
+                                                        >
+                                                            <option value="inherit">Inherit ({roleDefaults[role.id]?.allowFileUpload ? 'allow' : 'deny'})</option>
+                                                            <option value="allow">Allow</option>
+                                                            <option value="deny">Deny</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="col-auto">
+                                                    <div class="input-group input-group-sm">
+                                                        <span class="input-group-text">Download</span>
+                                                        <select
+                                                            class="form-select form-select-sm"
+                                                            value={getPermissionState(role.id, 'allowFileDownload')}
+                                                            onchange={(e) => setPermissionState(role.id, 'allowFileDownload', (e.target as HTMLSelectElement).value as 'inherit' | 'allow' | 'deny')}
+                                                        >
+                                                            <option value="inherit">Inherit ({roleDefaults[role.id]?.allowFileDownload ? 'allow' : 'deny'})</option>
+                                                            <option value="allow">Allow</option>
+                                                            <option value="deny">Deny</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {/if}
                                 </div>
                             {/if}
                         </div>

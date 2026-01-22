@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type Target, type User } from 'admin/lib/api'
+    import { api, type Role, type RoleFileTransferDefaults, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { link, replace } from 'svelte-spa-router'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
@@ -17,6 +17,7 @@
 
     let error: string|null = $state(null)
     let role: Role | undefined = $state()
+    let fileTransferDefaults: RoleFileTransferDefaults | undefined = $state()
     const initPromise = init()
 
     let disabled = $state(false)
@@ -24,6 +25,38 @@
     async function init () {
         role = await api.getRole({ id: params.id })
         disabled = role.name === 'warpgate:admin'
+        await loadFileTransferDefaults()
+    }
+
+    async function loadFileTransferDefaults() {
+        try {
+            fileTransferDefaults = await api.getRoleFileTransferDefaults({ id: params.id })
+        } catch {
+            // Defaults may not exist yet
+            fileTransferDefaults = {
+                allowFileUpload: true,
+                allowFileDownload: true,
+                allowedPaths: null,
+                blockedExtensions: null,
+                maxFileSize: null,
+            }
+        }
+    }
+
+    async function updateFileTransferDefaults() {
+        if (!fileTransferDefaults) {
+            return
+        }
+
+        try {
+            fileTransferDefaults = await api.updateRoleFileTransferDefaults({
+                id: params.id,
+                roleFileTransferDefaults: fileTransferDefaults,
+            })
+            error = null
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     function loadUsers (): rx.Observable<PaginatedResponse<User>> {
@@ -91,6 +124,50 @@
                 disabled={disabled}
             />
         </FormGroup>
+
+        <h4 class="mt-4">File Transfer Defaults</h4>
+        <p class="text-muted small">
+            These are the default file transfer permissions for SSH targets. Targets can override these settings.
+        </p>
+
+        {#if fileTransferDefaults}
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mb-2">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="allowUpload"
+                                    bind:checked={fileTransferDefaults.allowFileUpload}
+                                    disabled={disabled}
+                                    onchange={updateFileTransferDefaults}
+                                />
+                                <label class="form-check-label" for="allowUpload">
+                                    Allow file upload (SCP/SFTP)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mb-2">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="allowDownload"
+                                    bind:checked={fileTransferDefaults.allowFileDownload}
+                                    disabled={disabled}
+                                    onchange={updateFileTransferDefaults}
+                                />
+                                <label class="form-check-label" for="allowDownload">
+                                    Allow file download (SCP/SFTP)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {/if}
     </Loadable>
 
     {#if error}
