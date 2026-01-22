@@ -2,28 +2,44 @@ use std::collections::HashSet;
 use std::fmt::Write;
 
 use ldap3::{Scope, SearchEntry};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::connection::connect;
 use crate::error::{LdapError, Result};
 use crate::types::{LdapConfig, LdapUser};
 
-const LDAP_USER_ATTRIBUTES: &[&str] = &[
-    "uid",
-    "cn",
-    "mail",
-    "displayName",
-    "sAMAccountName",
-    "userPrincipalName",
-    "objectGUID",
-    "entryUUID",
-    "sshPublicKey",
-];
+fn ldap_user_attributes(config: &LdapConfig) -> Vec<String> {
+    let mut attrs: Vec<String> = vec![
+        "mail".into(),
+        "displayName".into(),
+        "userPrincipalName".into(),
+    ];
+
+    // Add UUID attributes - either custom or default ones
+    if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        if !attrs.contains(custom_uuid_attr) {
+            attrs.push(custom_uuid_attr.clone());
+        }
+    } else {
+        // Default behavior: query both objectGUID and entryUUID
+        attrs.push("objectGUID".into());
+        attrs.push("entryUUID".into());
+    }
+
+    let username_attribute = config.username_attribute.attribute_name().to_string();
+    if !attrs.contains(&username_attribute) {
+        attrs.push(username_attribute);
+    }
+    if !attrs.contains(&config.ssh_key_attribute) {
+        attrs.push(config.ssh_key_attribute.clone());
+    }
+    attrs
+}
 
 /// Extract user details from an LDAP [SearchEntry].
-/// Returns None if no valid username can be determined.
-fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<LdapUser> {
+/// Returns None if no valid username or UUID can be determined.
+fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<LdapUser> {
     let dn = search_entry.dn.clone();
 
     // Extract username - try different attributes
@@ -31,7 +47,8 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .attrs
         .get(config.username_attribute.attribute_name())
         .and_then(|v| v.first())
-        .cloned()?;
+        .cloned()
+        .ok_or(LdapError::NoUsername(dn.clone()))?;
 
     let email = search_entry
         .attrs
@@ -45,13 +62,42 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .and_then(|v| v.first())
         .cloned();
 
-    // Extract object UUID (Active Directory uses objectGUID, OpenLDAP uses entryUUID)
-    let object_uuid = search_entry
-        .bin_attrs
-        .get("objectGUID")
-        .or_else(|| search_entry.bin_attrs.get("entryUUID"))
-        .and_then(|v: &Vec<Vec<u8>>| v.first())
-        .and_then(|b| Uuid::from_slice(&b[..]).ok());
+    let object_uuid = if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        // Try parsing as a binary UUID
+        search_entry
+            .bin_attrs
+            .get(custom_uuid_attr)
+            .and_then(|v: &Vec<Vec<u8>>| v.first())
+            .and_then(|b|
+                Uuid::from_slice(&b[..])
+                    .inspect_err(|e| {
+                        warn!("Failed to parse UUID {b:?} from LDAP attribute {custom_uuid_attr}: {e}");
+                    })
+                    .ok())
+            .or_else(|| {
+                // Try parsing as a string UUID
+                search_entry
+                    .attrs
+                    .get(custom_uuid_attr)
+                    .and_then(|v| v.first())
+                    .and_then(|s| {
+                        Uuid::parse_str(&s)
+                            .inspect_err(|e| {
+                                warn!("Failed to parse UUID {s} from LDAP attribute {custom_uuid_attr}: {e}");
+                            })
+                            .ok()
+                    })
+            })
+    } else {
+        // Default behavior: Active Directory uses objectGUID, OpenLDAP uses entryUUID
+        search_entry
+            .bin_attrs
+            .get("objectGUID")
+            .or_else(|| search_entry.bin_attrs.get("entryUUID"))
+            .and_then(|v: &Vec<Vec<u8>>| v.first())
+            .and_then(|b| Uuid::from_slice(&b[..]).ok())
+    }
+    .ok_or(LdapError::NoUUID(dn.clone()))?;
 
     // Extract SSH public keys
     let ssh_public_keys = search_entry
@@ -60,7 +106,7 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Option<L
         .cloned()
         .unwrap_or_default();
 
-    Some(LdapUser {
+    Ok(LdapUser {
         username,
         email,
         display_name,
@@ -85,7 +131,7 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
                 base_dn,
                 Scope::Subtree,
                 &config.user_filter,
-                LDAP_USER_ATTRIBUTES.to_vec(),
+                &ldap_user_attributes(config),
             )
             .await
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?
@@ -102,8 +148,14 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
             }
             seen_dns.insert(dn.clone());
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
-                all_users.push(user);
+            match extract_ldap_user(search_entry, config) {
+                Ok(user) => {
+                    all_users.push(user);
+                }
+                Err(e) => {
+                    warn!("Skipping LDAP user {dn}: {e}");
+                    continue;
+                }
             }
         }
     }
@@ -132,7 +184,7 @@ pub async fn find_user_by_username(
                 base_dn,
                 Scope::Subtree,
                 &filter,
-                LDAP_USER_ATTRIBUTES.to_vec(),
+                &ldap_user_attributes(config),
             )
             .await
             .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?
@@ -142,7 +194,7 @@ pub async fn find_user_by_username(
         if let Some(first_result) = rs.into_iter().next() {
             let search_entry = SearchEntry::construct(first_result);
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
+            if let Ok(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
                 info!(
@@ -178,10 +230,20 @@ pub async fn find_user_by_uuid(
         s
     });
 
-    let filter = format!(
-        "(&{}(|(objectGUID={})(objectGUID={})(entryUUID={})))",
-        config.user_filter, uuid_str, ad_guid_hex, uuid_str
-    );
+    // Build the filter based on whether we have a custom UUID attribute
+    let filter = if let Some(custom_uuid_attr) = &config.uuid_attribute {
+        // Use custom UUID attribute
+        format!(
+            "(&{}(|({custom_uuid_attr}={uuid_str})({custom_uuid_attr}={ad_guid_hex})))",
+            config.user_filter,
+        )
+    } else {
+        // Default behavior: query both objectGUID and entryUUID
+        format!(
+            "(&{}(|(objectGUID={uuid_str})(objectGUID={ad_guid_hex})(entryUUID={uuid_str})))",
+            config.user_filter,
+        )
+    };
 
     for base_dn in &config.base_dns {
         let (rs, _res) = ldap
@@ -200,7 +262,7 @@ pub async fn find_user_by_uuid(
             #[allow(clippy::unwrap_used, reason = "length checked")]
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
-            if let Some(user) = extract_ldap_user(search_entry, config) {
+            if let Ok(user) = extract_ldap_user(search_entry, config) {
                 let _ = ldap.unbind().await;
 
                 debug!(
