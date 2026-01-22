@@ -13,7 +13,7 @@
     }
 
     async function update() {
-        api.updateParameters({
+        await api.updateParameters({
             parameterUpdate: parameters!,
         })
     }
