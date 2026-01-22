@@ -5,7 +5,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00025_target_default_database_name"
+        "m00026_target_default_database_name"
     }
 }
 
