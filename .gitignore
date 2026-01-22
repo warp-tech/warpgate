@@ -33,3 +33,11 @@ cdx.xml
 
 # Docker test environment data
 docker/data/
+docker/*.sample.yaml
+
+# Development environment files
+AGENTS.md
+mise.toml
+.github/workflows/opencode.yml
+*.log
+thoughts/
