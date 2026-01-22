@@ -50,7 +50,7 @@ def setup_user_and_target(
                 openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
             ),
         )
-        api.add_user_role(user.id, role.id)
+        api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
         ssh_target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
@@ -117,7 +117,13 @@ class TestFileTransferPermissions:
         wg_c_ed25519_pubkey,
         shared_wg: WarpgateProcess,
     ):
-        """By default, file transfers should be allowed (backward compat)."""
+        """By default, file transfers should be allowed (backward compat).
+
+        With the new inheritance model:
+        - Target-role permissions default to NULL (inherit from role)
+        - Role defaults are True for both upload and download
+        - Effective permission is True (inherited from role)
+        """
         user, ssh_target, role = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
@@ -125,9 +131,11 @@ class TestFileTransferPermissions:
         # Get default permissions
         perm = get_file_transfer_permission(shared_wg, ssh_target.id, role.id)
 
-        # Default should allow both upload and download
-        assert perm.allow_file_upload is True
-        assert perm.allow_file_download is True
+        # Default is NULL (inherit from role), not explicit True
+        # This means "inherit from role defaults which are True"
+        # None means "inherit", True/False means explicit override
+        assert perm.allow_file_upload is None or perm.allow_file_upload is True
+        assert perm.allow_file_download is None or perm.allow_file_download is True
 
     def test_sftp_download_allowed(
         self,
@@ -510,8 +518,12 @@ class TestFileTransferPermissions:
                     openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
                 ),
             )
-            api.add_user_role(user.id, role1.id)
-            api.add_user_role(user.id, role2.id)
+            api.add_user_role(
+                user.id, role1.id, sdk.AddUserRoleRequest(expires_at=None)
+            )
+            api.add_user_role(
+                user.id, role2.id, sdk.AddUserRoleRequest(expires_at=None)
+            )
 
             # Create target with both roles
             ssh_target = api.create_target(
@@ -664,7 +676,9 @@ class TestFileTransferLogging:
                         .strip(),
                     ),
                 )
-                api.add_user_role(user.id, role.id)
+                api.add_user_role(
+                    user.id, role.id, sdk.AddUserRoleRequest(expires_at=None)
+                )
                 ssh_target = api.create_target(
                     sdk.TargetDataRequest(
                         name=f"ssh-{uuid4()}",
@@ -858,7 +872,9 @@ class TestFileTransferLogging:
                         .strip(),
                     ),
                 )
-                api.add_user_role(user.id, role.id)
+                api.add_user_role(
+                    user.id, role.id, sdk.AddUserRoleRequest(expires_at=None)
+                )
                 ssh_target = api.create_target(
                     sdk.TargetDataRequest(
                         name=f"ssh-{uuid4()}",

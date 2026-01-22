@@ -46,7 +46,7 @@ class Test:
                         openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
                     ),
                 )
-            api.add_user_role(user.id, role.id)
+            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
             api.update_user(
                 user.id,
                 sdk.UserDataRequest(

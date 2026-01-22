@@ -11,19 +11,17 @@ pub struct Model {
     pub id: i32,
     pub target_id: Uuid,
     pub role_id: Uuid,
-    /// Allow file uploads via SCP/SFTP
-    #[sea_orm(default_value = true)]
-    pub allow_file_upload: bool,
-    /// Allow file downloads via SCP/SFTP
-    #[sea_orm(default_value = true)]
-    pub allow_file_download: bool,
-    /// Allowed paths (JSON array of path patterns, null = all paths allowed)
+    /// Allow file uploads via SCP/SFTP (null = inherit from role)
+    pub allow_file_upload: Option<bool>,
+    /// Allow file downloads via SCP/SFTP (null = inherit from role)
+    pub allow_file_download: Option<bool>,
+    /// Allowed paths (JSON array of path patterns, null = inherit from role)
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub allowed_paths: Option<serde_json::Value>,
-    /// Blocked file extensions (JSON array, null = no extensions blocked)
+    /// Blocked file extensions (JSON array, null = inherit from role)
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub blocked_extensions: Option<serde_json::Value>,
-    /// Maximum file size in bytes (null = no limit)
+    /// Maximum file size in bytes (null = inherit from role)
     pub max_file_size: Option<i64>,
 }
 
