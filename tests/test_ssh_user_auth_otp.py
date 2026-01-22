@@ -55,7 +55,7 @@ class Test:
                     ),
                 ),
             )
-            api.add_user_role(user.id, role.id)
+            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
             ssh_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",

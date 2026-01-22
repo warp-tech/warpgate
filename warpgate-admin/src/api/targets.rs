@@ -336,18 +336,18 @@ enum DeleteTargetRoleResponse {
     NotFound,
 }
 
-/// Request/response for file transfer permissions
+/// Request/response for file transfer permissions with inheritance support
 #[derive(Object, Clone, Debug)]
 struct FileTransferPermissionData {
-    /// Allow file uploads via SCP/SFTP
-    allow_file_upload: bool,
-    /// Allow file downloads via SCP/SFTP
-    allow_file_download: bool,
-    /// Allowed paths (null = all paths allowed)
+    /// Allow file uploads via SCP/SFTP (null = inherit from role)
+    allow_file_upload: Option<bool>,
+    /// Allow file downloads via SCP/SFTP (null = inherit from role)
+    allow_file_download: Option<bool>,
+    /// Allowed paths (null = inherit from role)
     allowed_paths: Option<Vec<String>>,
-    /// Blocked file extensions (null = no extensions blocked)
+    /// Blocked file extensions (null = inherit from role)
     blocked_extensions: Option<Vec<String>>,
-    /// Maximum file size in bytes (null = no limit)
+    /// Maximum file size in bytes (null = inherit from role)
     max_file_size: Option<i64>,
 }
 
@@ -549,6 +549,7 @@ impl RolesApi {
         };
 
         let mut model: TargetRoleAssignment::ActiveModel = assignment.into();
+        // Nullable booleans for inheritance support
         model.allow_file_upload = Set(body.allow_file_upload);
         model.allow_file_download = Set(body.allow_file_download);
         model.allowed_paths = Set(body

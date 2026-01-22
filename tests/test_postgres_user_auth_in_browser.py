@@ -25,7 +25,7 @@ class Test:
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
-            api.add_user_role(user.id, role.id)
+            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
             api.update_user(
                 user.id,
                 sdk.UserDataRequest(
