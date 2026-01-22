@@ -1,34 +1,11 @@
 services:
   warpgate:
-    image: warpgate-local:dev
-    container_name: warpgate
+    image: ghcr.io/warp-tech/warpgate
     ports:
-      - "2222:2222"   # SSH
-      - "8888:8888"   # HTTPS Admin
-      - "33306:33306" # MySQL
+      - 2222:2222
+      - 8888:8888
+      - 33306:33306
     volumes:
       - ./data:/data
     stdin_open: true
     tty: true
-    depends_on:
-      - ssh-server
-    networks:
-      - warpgate-net
-
-  # SSH server for testing file transfer permissions
-  ssh-server:
-    build:
-      context: ./ssh-server
-    container_name: ssh-server
-    hostname: ssh-server
-    networks:
-      - warpgate-net
-    volumes:
-      - ssh-data:/home/testuser
-
-networks:
-  warpgate-net:
-    driver: bridge
-
-volumes:
-  ssh-data:
