@@ -8,6 +8,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     QueryOrder, Set,
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{
@@ -84,6 +85,12 @@ impl ListApi {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
+            // Default file transfer settings for new roles
+            allow_file_upload: Set(true),
+            allow_file_download: Set(true),
+            allowed_paths: Set(None),
+            blocked_extensions: Set(None),
+            max_file_size: Set(None),
         };
 
         let role = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -255,6 +262,144 @@ impl DetailApi {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, WarpgateError>>()?,
+        )))
+    }
+}
+
+// ========== File Transfer Defaults API ==========
+
+/// Request/response for role file transfer defaults
+#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+struct RoleFileTransferDefaults {
+    /// Allow file uploads by default for targets with this role
+    allow_file_upload: bool,
+    /// Allow file downloads by default for targets with this role
+    allow_file_download: bool,
+    /// Default allowed paths (null = all paths allowed)
+    allowed_paths: Option<Vec<String>>,
+    /// Default blocked file extensions (null = no extensions blocked)
+    blocked_extensions: Option<Vec<String>>,
+    /// Default maximum file size in bytes (null = no limit)
+    max_file_size: Option<i64>,
+}
+
+#[derive(ApiResponse)]
+enum GetRoleFileTransferResponse {
+    #[oai(status = 200)]
+    Ok(Json<RoleFileTransferDefaults>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum UpdateRoleFileTransferResponse {
+    #[oai(status = 200)]
+    Ok(Json<RoleFileTransferDefaults>),
+    #[oai(status = 403)]
+    Forbidden,
+    #[oai(status = 404)]
+    NotFound,
+}
+
+pub struct FileTransferApi;
+
+#[OpenApi]
+impl FileTransferApi {
+    /// Get file transfer defaults for a role
+    #[oai(
+        path = "/role/:id/file-transfer",
+        method = "get",
+        operation_id = "get_role_file_transfer_defaults"
+    )]
+    async fn api_get_role_file_transfer(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetRoleFileTransferResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(GetRoleFileTransferResponse::NotFound);
+        };
+
+        let allowed_paths: Option<Vec<String>> = role
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let blocked_extensions: Option<Vec<String>> = role
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        Ok(GetRoleFileTransferResponse::Ok(Json(
+            RoleFileTransferDefaults {
+                allow_file_upload: role.allow_file_upload,
+                allow_file_download: role.allow_file_download,
+                allowed_paths,
+                blocked_extensions,
+                max_file_size: role.max_file_size,
+            },
+        )))
+    }
+
+    /// Update file transfer defaults for a role
+    #[oai(
+        path = "/role/:id/file-transfer",
+        method = "put",
+        operation_id = "update_role_file_transfer_defaults"
+    )]
+    async fn api_update_role_file_transfer(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        body: Json<RoleFileTransferDefaults>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UpdateRoleFileTransferResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(UpdateRoleFileTransferResponse::NotFound);
+        };
+
+        if role.name == BUILTIN_ADMIN_ROLE_NAME {
+            return Ok(UpdateRoleFileTransferResponse::Forbidden);
+        }
+
+        let mut model: Role::ActiveModel = role.into();
+        model.allow_file_upload = Set(body.allow_file_upload);
+        model.allow_file_download = Set(body.allow_file_download);
+        model.allowed_paths = Set(body
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::to_value(v).ok()));
+        model.blocked_extensions = Set(body
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::to_value(v).ok()));
+        model.max_file_size = Set(body.max_file_size);
+
+        let updated = model.update(&*db).await?;
+
+        let allowed_paths: Option<Vec<String>> = updated
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let blocked_extensions: Option<Vec<String>> = updated
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        Ok(UpdateRoleFileTransferResponse::Ok(Json(
+            RoleFileTransferDefaults {
+                allow_file_upload: updated.allow_file_upload,
+                allow_file_download: updated.allow_file_download,
+                allowed_paths,
+                blocked_extensions,
+                max_file_size: updated.max_file_size,
+            },
         )))
     }
 }
