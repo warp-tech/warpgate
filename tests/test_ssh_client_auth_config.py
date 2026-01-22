@@ -76,7 +76,7 @@ class TestSSHClientAuthConfigE2E:
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
         # Give Docker time to set up port forwarding
-        time.sleep(1)
+        time.sleep(3)
         wait_port(ssh_port)
         return ssh_port
 

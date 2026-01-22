@@ -56,6 +56,7 @@
         Control which authentication methods are offered to SSH clients.
         Disabling password authentication can help prevent brute-force attacks.
         Changes take effect on server restart.
+        If all methods are disabled, all will be enabled by default.
     </InfoBox>
     <label
         for="sshClientAuthPublickey"
