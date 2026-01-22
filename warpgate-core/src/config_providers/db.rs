@@ -29,6 +29,18 @@ pub struct DatabaseConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
 }
 
+fn is_user_role_active(assignment: &entities::UserRoleAssignment::Model) -> bool {
+    if assignment.revoked_at.is_some() {
+        return false;
+    }
+    if let Some(expires_at) = assignment.expires_at {
+        if expires_at <= Utc::now() {
+            return false;
+        }
+    }
+    true
+}
+
 impl DatabaseConfigProvider {
     pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
@@ -534,8 +546,19 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_roles: HashSet<String> = user_model
-            .find_related(entities::Role::Entity)
+        let user_assignments = entities::UserRoleAssignment::Entity::find()
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
+            .all(&*db)
+            .await?;
+
+        let user_role_ids: HashSet<Uuid> = user_assignments
+            .iter()
+            .filter(|a| is_user_role_active(a))
+            .map(|a| a.role_id)
+            .collect();
+
+        let user_roles: HashSet<String> = entities::Role::Entity::find()
+            .filter(entities::Role::Column::Id.is_in(user_role_ids))
             .all(&*db)
             .await?
             .into_iter()
@@ -566,16 +589,19 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(super::FileTransferPermission::default());
         };
 
-        let user_roles: HashSet<uuid::Uuid> = user_model
-            .find_related(entities::Role::Entity)
+        let user_assignments = entities::UserRoleAssignment::Entity::find()
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
             .all(&*db)
-            .await?
-            .into_iter()
-            .map(|r| r.id)
+            .await?;
+
+        let user_role_ids: HashSet<uuid::Uuid> = user_assignments
+            .iter()
+            .filter(|a| is_user_role_active(a))
+            .map(|a| a.role_id)
             .collect();
 
         // Get target's role assignments with file transfer permissions
-        let assignments: Vec<entities::TargetRoleAssignment::Model> =
+        let target_role_assignments: Vec<entities::TargetRoleAssignment::Model> =
             entities::TargetRoleAssignment::Entity::find()
                 .filter(entities::TargetRoleAssignment::Column::TargetId.eq(target.id))
                 .all(&*db)
@@ -584,39 +610,81 @@ impl ConfigProvider for DatabaseConfigProvider {
         // Permissive model: if ANY matching role allows, grant permission
         let mut result = super::FileTransferPermission::default();
 
-        for assignment in assignments {
-            if user_roles.contains(&assignment.role_id) {
-                // Permissive: any true grants access
-                result.upload_allowed |= assignment.allow_file_upload;
-                result.download_allowed |= assignment.allow_file_download;
+        for target_role in target_role_assignments {
+            if !user_role_ids.contains(&target_role.role_id) {
+                continue;
+            }
 
-                // For restrictions, use most permissive (union paths, largest size limit)
-                if let Some(paths) = assignment.allowed_paths {
-                    if let Ok(paths) = serde_json::from_value::<Vec<String>>(paths) {
-                        match &mut result.allowed_paths {
-                            Some(existing) => existing.extend(paths),
-                            None => result.allowed_paths = Some(paths),
-                        }
+            // 1. Get role defaults
+            let Some(role) = entities::Role::Entity::find_by_id(target_role.role_id)
+                .one(&*db)
+                .await?
+            else {
+                continue;
+            };
+
+            // Start with role defaults
+            let mut perm = super::FileTransferPermission {
+                upload_allowed: role.allow_file_upload,
+                download_allowed: role.allow_file_download,
+                allowed_paths: role
+                    .allowed_paths
+                    .and_then(|v| serde_json::from_value(v).ok()),
+                blocked_extensions: role
+                    .blocked_extensions
+                    .and_then(|v| serde_json::from_value(v).ok()),
+                max_file_size: role.max_file_size,
+            };
+
+            // 2. Apply target-role overrides (NULL = inherit from role)
+            if let Some(upload) = target_role.allow_file_upload {
+                perm.upload_allowed = upload;
+            }
+            if let Some(download) = target_role.allow_file_download {
+                perm.download_allowed = download;
+            }
+            // For other fields, explicit value overrides role default
+            if target_role.allowed_paths.is_some() {
+                perm.allowed_paths = target_role
+                    .allowed_paths
+                    .and_then(|v| serde_json::from_value(v).ok());
+            }
+            if target_role.blocked_extensions.is_some() {
+                perm.blocked_extensions = target_role
+                    .blocked_extensions
+                    .and_then(|v| serde_json::from_value(v).ok());
+            }
+            if target_role.max_file_size.is_some() {
+                perm.max_file_size = target_role.max_file_size;
+            }
+
+            // 3. Merge permissively with result
+            // Permissive: any true grants access
+            result.upload_allowed |= perm.upload_allowed;
+            result.download_allowed |= perm.download_allowed;
+
+            // For restrictions, use most permissive (union paths, largest size limit)
+            if let Some(paths) = perm.allowed_paths {
+                match &mut result.allowed_paths {
+                    Some(existing) => existing.extend(paths),
+                    None => result.allowed_paths = Some(paths),
+                }
+            }
+
+            // Blocked extensions: intersection (only block if ALL roles block)
+            if let Some(extensions) = perm.blocked_extensions {
+                match &mut result.blocked_extensions {
+                    Some(existing) => {
+                        // Keep only extensions blocked by ALL roles
+                        existing.retain(|ext| extensions.contains(ext));
                     }
+                    None => result.blocked_extensions = Some(extensions),
                 }
+            }
 
-                // Blocked extensions: intersection (only block if ALL roles block)
-                if let Some(extensions) = assignment.blocked_extensions {
-                    if let Ok(extensions) = serde_json::from_value::<Vec<String>>(extensions) {
-                        match &mut result.blocked_extensions {
-                            Some(existing) => {
-                                // Keep only extensions blocked by ALL roles
-                                existing.retain(|ext| extensions.contains(ext));
-                            }
-                            None => result.blocked_extensions = Some(extensions),
-                        }
-                    }
-                }
-
-                // Size limit: use largest (most permissive)
-                if let Some(size) = assignment.max_file_size {
-                    result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
-                }
+            // Size limit: use largest (most permissive)
+            if let Some(size) = perm.max_file_size {
+                result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
             }
         }
 
@@ -673,7 +741,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await?;
+                    let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
+                    model.revoked_at = Set(Some(Utc::now()));
+                    model.revoked_by = Set(None);
+                    model.update(&*db).await?;
                 }
                 _ => (),
             }

@@ -30,6 +30,7 @@ mod m00025_ldap_uuid_attribute;
 mod m00026_ssh_client_auth;
 mod m00027_file_transfer_permissions;
 mod m00028_file_transfer_config;
+mod m00029_user_role_expiry_history;
 
 pub struct Migrator;
 
@@ -65,6 +66,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00026_ssh_client_auth::Migration),
             Box::new(m00027_file_transfer_permissions::Migration),
             Box::new(m00028_file_transfer_config::Migration),
+            Box::new(m00029_user_role_expiry_history::Migration),
         ]
     }
 }
