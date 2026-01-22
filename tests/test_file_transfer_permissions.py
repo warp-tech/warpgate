@@ -33,6 +33,8 @@ def setup_user_and_target(
         trusted_keys=[warpgate_client_key.read_text()],
     )
     wait_port(ssh_port)
+    # Brief stabilization delay for CI environments
+    time.sleep(0.1)
 
     url = f"https://localhost:{wg.http_port}"
     with admin_client(url) as api:
