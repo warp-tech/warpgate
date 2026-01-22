@@ -33,7 +33,7 @@ pub fn get() -> impl OpenApi {
         (
             (sessions_list::Api, sessions_detail::Api),
             recordings_detail::Api,
-            (roles::ListApi, roles::DetailApi),
+            (roles::ListApi, roles::DetailApi, roles::FileTransferApi),
             (tickets_list::Api, tickets_detail::Api),
             (known_hosts_list::Api, known_hosts_detail::Api),
             ssh_keys::Api,

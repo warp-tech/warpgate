@@ -34,6 +34,7 @@ mod m00029_certificate_revocation;
 mod m00030_add_recording_metadata;
 mod m00031_file_transfer_permissions;
 mod m00032_file_transfer_config;
+mod m00033_user_role_expiry_history;
 
 pub struct Migrator;
 
@@ -73,6 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00030_add_recording_metadata::Migration),
             Box::new(m00031_file_transfer_permissions::Migration),
             Box::new(m00032_file_transfer_config::Migration),
+            Box::new(m00033_user_role_expiry_history::Migration),
         ]
     }
 }

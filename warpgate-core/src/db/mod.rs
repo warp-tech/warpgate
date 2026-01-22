@@ -103,6 +103,11 @@ pub async fn populate_db(
                 id: Set(Uuid::new_v4()),
                 description: Set("Built-in admin role".into()),
                 name: Set(BUILTIN_ADMIN_ROLE_NAME.to_owned()),
+                allow_file_upload: Set(true),
+                allow_file_download: Set(true),
+                allowed_paths: Set(None),
+                blocked_extensions: Set(None),
+                max_file_size: Set(None),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
         }
