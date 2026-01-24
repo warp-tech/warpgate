@@ -166,12 +166,16 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
     <ModalBody>
+        {#if selectedTarget}
         <ConnectionInstructions
-            targetName={selectedTarget?.name}
+            targetName={selectedTarget.name}
             username={$serverInfo?.username}
-            targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
-            targetDefaultDatabaseName={(selectedTarget as any)?.defaultDatabaseName}
+            targetKind={selectedTarget.kind ?? TargetKind.Ssh}
+            targetDefaultDatabaseName={
+                (selectedTarget.kind === TargetKind.MySql || selectedTarget.kind === TargetKind.Postgres)
+                    ? selectedTarget.defaultDatabaseName : undefined}
         />
+        {/if}
     </ModalBody>
     <ModalFooter>
         <Button

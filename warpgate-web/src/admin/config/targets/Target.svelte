@@ -46,17 +46,9 @@
             if (target!.options.kind === 'Http') {
                 target!.options.externalHost = target!.options.externalHost || undefined
             }
-            // Only send fields that TargetDataRequest expects
-            const updateData = {
-                name: target!.name,
-                description: target!.description,
-                options: target!.options,
-                rateLimitBytesPerSecond: target!.rateLimitBytesPerSecond,
-                groupId: target!.groupId,
-            }
             target = await api.updateTarget({
                 id: params.id,
-                targetDataRequest: updateData,
+                targetDataRequest: target!,
             })
         } catch (err) {
             error = await stringifyError(err)
