@@ -9,6 +9,9 @@ pub struct Model {
     pub id: Uuid,
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<i64>,
+    /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
+    /// Default: 10MB (10485760 bytes)
+    pub file_transfer_hash_threshold_bytes: Option<i64>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -25,6 +28,7 @@ impl Entity {
                     id: Set(Uuid::new_v4()),
                     allow_own_credential_management: Set(true),
                     rate_limit_bytes_per_second: Set(None),
+                    file_transfer_hash_threshold_bytes: Set(Some(10485760)), // 10MB default
                 }
                 .insert(db)
                 .await

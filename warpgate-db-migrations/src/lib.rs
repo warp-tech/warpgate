@@ -27,6 +27,11 @@ mod m00022_user_ldap_link;
 mod m00023_ldap_username_attribute;
 mod m00024_ssh_key_attribute;
 mod m00025_ldap_uuid_attribute;
+mod m00026_file_transfer_permissions;
+mod m00027_file_transfer_config;
+mod m00028_user_role_expiry_history;
+mod m00029_role_file_transfer_defaults;
+mod m00030_target_role_nullable_overrides;
 
 pub struct Migrator;
 
@@ -59,6 +64,11 @@ impl MigratorTrait for Migrator {
             Box::new(m00023_ldap_username_attribute::Migration),
             Box::new(m00024_ssh_key_attribute::Migration),
             Box::new(m00025_ldap_uuid_attribute::Migration),
+            Box::new(m00026_file_transfer_permissions::Migration),
+            Box::new(m00027_file_transfer_config::Migration),
+            Box::new(m00028_user_role_expiry_history::Migration),
+            Box::new(m00029_role_file_transfer_defaults::Migration),
+            Box::new(m00030_target_role_nullable_overrides::Migration),
         ]
     }
 }
