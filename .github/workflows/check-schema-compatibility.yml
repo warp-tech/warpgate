@@ -26,9 +26,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Download openapi-diff
+      - name: Install oasdiff
         run: |
-          wget https://repo1.maven.org/maven2/org/openapitools/openapi-diff/3.1.0/openapi-diff-3.1.0-all.jar -O openapi-diff.jar
+          wget https://github.com/oasdiff/oasdiff/releases/download/v1.11.8/oasdiff_1.11.8_linux_amd64.deb -O oasdiff.deb
+          sudo dpkg -i oasdiff.deb
 
       - name: Install just
         run: |
@@ -52,7 +53,7 @@ jobs:
         run: |
           set -e
           # Compare admin OpenAPI schema
-          java -jar openapi-diff.jar --fail-on-incompatible /Users/eugene/Work/warpgate/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /Users/eugene/Work/warpgate/warpgate-web/src/admin/lib/openapi-schema.json
+          oasdiff breaking ./main-branch/warpgate-web/src/admin/lib/openapi-schema.json ./warpgate-web/src/admin/lib/openapi-schema.json
           # Compare gateway OpenAPI schema
-          java -jar openapi-diff.jar --fail-on-incompatible /Users/eugene/Work/warpgate/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /Users/eugene/Work/warpgate/warpgate-web/src/gateway/lib/openapi-schema.json
+          oasdiff breaking ./main-branch/warpgate-web/src/gateway/lib/openapi-schema.json ./warpgate-web/src/gateway/lib/openapi-schema.json
         shell: bash
