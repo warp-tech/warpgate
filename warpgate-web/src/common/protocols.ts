@@ -65,7 +65,7 @@ export const makePostgreSQLUsername = makeMySQLUsername
 
 export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
     const dbName = (opt.targetDefaultDatabaseName?.trim() && opt.targetDefaultDatabaseName.trim().length > 0) ? opt.targetDefaultDatabaseName.trim() : 'database-name'
-    let args = ['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString()]
+    const args = ['psql', '-U', makeMySQLUsername(opt), '--host', opt.serverInfo?.externalHost ?? 'warpgate-host', '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString()]
     if (!opt.ticketSecret) {
         args.push('-W')
     }

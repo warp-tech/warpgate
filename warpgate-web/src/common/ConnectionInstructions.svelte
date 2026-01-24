@@ -33,7 +33,7 @@
         targetExternalHost,
         targetDefaultDatabaseName,
     }))
-    
+
     let sshUsername = $derived(makeSSHUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
     let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
