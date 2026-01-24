@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-10-g1bd5ccc9-modified"
+    "version": "v0.19.1-30-g84716401-modified"
   },
   "servers": [
     {
@@ -4001,6 +4001,9 @@
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },
@@ -4171,6 +4174,9 @@
             "$ref": "#/components/schemas/Tls"
           },
           "idle_timeout": {
+            "type": "string"
+          },
+          "default_database_name": {
             "type": "string"
           }
         }

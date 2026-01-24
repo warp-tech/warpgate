@@ -31,6 +31,7 @@ pub struct TargetSnapshot {
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
     pub group: Option<GroupInfo>,
+    pub default_database_name: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -123,6 +124,11 @@ impl Api {
                     kind: (&t.options).into(),
                     external_host: match t.options {
                         TargetOptions::Http(ref opt) => opt.external_host.clone(),
+                        _ => None,
+                    },
+                    default_database_name: match t.options {
+                        TargetOptions::Postgres(ref opt) => opt.default_database_name.clone(),
+                        TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
                         _ => None,
                     },
                     group,

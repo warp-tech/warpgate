@@ -3,6 +3,7 @@ import { Input } from '@sveltestrap/sveltestrap'
 import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
 import type { ExistingCredential } from './CredentialEditor.svelte'
 import InfoBox from 'common/InfoBox.svelte'
+import { SvelteSet } from 'svelte/reactivity'
 
 type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres'
 
@@ -51,8 +52,7 @@ let activeTips: string[] = $derived.by(() => {
 })
 
 const validCredentials = $derived.by(() => {
-    let vc = new Set<CredentialKind>()
-    vc = new Set(existingCredentials.map(x => x.kind as CredentialKind))
+    const vc = new SvelteSet(existingCredentials.map(x => x.kind as CredentialKind))
     vc.add(CredentialKind.WebUserApproval)
     return vc
 })
