@@ -1,0 +1,58 @@
+name: Check API Schema Compatibility
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "*"
+
+jobs:
+  check-schema-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download openapi-diff
+        run: |
+          wget https://repo1.maven.org/maven2/org/openapitools/openapi-diff/3.1.0/openapi-diff-3.1.0-all.jar -O openapi-diff.jar
+
+      - name: Install just
+        run: |
+          cargo install just
+
+      - name: Install npm dependencies
+        run: |
+          cd warpgate-web && npm ci
+
+      - name: Generate API schema files
+        run: |
+          just openapi-all
+
+      - name: Checkout main branch to compare
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-branch
+
+      - name: Compare OpenAPI schemas for compatibility
+        run: |
+          set -e
+          # Compare admin OpenAPI schema
+          java -jar openapi-diff.jar --fail-on-incompatible /Users/eugene/Work/warpgate/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /Users/eugene/Work/warpgate/warpgate-web/src/admin/lib/openapi-schema.json
+          # Compare gateway OpenAPI schema
+          java -jar openapi-diff.jar --fail-on-incompatible /Users/eugene/Work/warpgate/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /Users/eugene/Work/warpgate/warpgate-web/src/gateway/lib/openapi-schema.json
+        shell: bash
