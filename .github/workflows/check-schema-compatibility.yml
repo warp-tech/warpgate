@@ -39,8 +39,8 @@ jobs:
 
       - name: Check admin API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
 
       - name: Check gateway API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
