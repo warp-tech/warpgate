@@ -18,17 +18,6 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
-      - name: Set up Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install oasdiff
-        run: |
-          wget https://github.com/oasdiff/oasdiff/releases/download/v1.11.8/oasdiff_1.11.8_linux_amd64.deb -O oasdiff.deb
-          sudo dpkg -i oasdiff.deb
-
       - name: Install just
         run: |
           cargo install just
@@ -48,11 +37,10 @@ jobs:
           ref: main
           path: main-branch
 
-      - name: Compare OpenAPI schemas for compatibility
+      - name: Check admin API
         run: |
-          set -e
-          # Compare admin OpenAPI schema
-          oasdiff breaking ./main-branch/warpgate-web/src/admin/lib/openapi-schema.json ./warpgate-web/src/admin/lib/openapi-schema.json
-          # Compare gateway OpenAPI schema
-          oasdiff breaking ./main-branch/warpgate-web/src/gateway/lib/openapi-schema.json ./warpgate-web/src/gateway/lib/openapi-schema.json
-        shell: bash
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking --fail-on INFO /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+
+      - name: Check gateway API
+        run: |
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking --fail-on INFO /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
