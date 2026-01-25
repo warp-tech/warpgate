@@ -41,6 +41,7 @@ jobs:
 
       - name: Generate API schema files
         run: |
+          mkdir warpgate-web/dist
           just openapi-all
 
       - name: Checkout main branch to compare
