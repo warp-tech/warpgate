@@ -550,7 +550,7 @@ impl RemoteClient {
                     };
 
                     let mut auth_result = false;
-                    let mut auth_error: Option<String> = None;
+                    let mut auth_error_msg: Option<String> = None;
                     match ssh_options.auth {
                         SSHTargetAuth::Password(auth) => {
                             let response = session
@@ -567,7 +567,7 @@ impl RemoteClient {
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
                             } else {
-                                auth_error = Some("Password authentication was rejected by the SSH target".to_string());
+                                auth_error_msg = Some("Password authentication was rejected by the SSH target".to_string());
                             }
                         }
                         SSHTargetAuth::PublicKey(_) => {
@@ -620,15 +620,15 @@ impl RemoteClient {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 } else {
-                                    auth_error = Some(format!("PublicKey authentication was rejected by the SSH target"));
+                                    auth_error_msg = Some(format!("Public key authentication was rejected by the SSH target"));
                                 }
                             }
                         }
                     }
 
                     if !auth_result {
-                        let reason = auth_error.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
-                        error!(reason=%reason, "Warpgate could not authenticate with SSH target");
+                        let reason = auth_error_msg.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
+                        error!(%reason, "Warpgate could not authenticate with SSH target");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
                             .await;
