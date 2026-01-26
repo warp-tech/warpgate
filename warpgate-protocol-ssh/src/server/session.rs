@@ -677,15 +677,24 @@ impl ServerSession {
                         )
                         .await?;
                         self.emit_service_message(
-                        "you can remove the old key in the Warpgate management UI and try again",
-                    )
-                    .await?;
+                            "you can remove the old key in the Warpgate management UI and try again",
+                        )
+                        .await?;
+                    }
+                    ConnectionError::Authentication => {
+                        self.service_output.emit_output(Bytes::from(format!(
+                            "{}{}\r\n",
+                            ERASE_PROGRESS_SPINNER,
+                            Colour::Black
+                                .on(Colour::Red)
+                                .paint(" ✗ SSH target rejected Warpgate authentication request ")
+                        )));
                     }
                     error => {
                         self.service_output.emit_output(Bytes::from(format!(
                             "{}{} {}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black.on(Colour::Red).paint(" Connection failed "),
+                            Colour::Black.on(Colour::Red).paint(" ✗ Connection failed "),
                             error
                         )));
                     }
