@@ -4,7 +4,6 @@
 
 <br/>
 
-
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/readme/brand-dark.svg">

@@ -103,18 +103,17 @@
                     </Loadable>
                 {/if}
 
-                <ConnectionInstructions
-                    targetName={target.name}
-                    username={selectedUsername}
-                    targetKind={{
-                        Ssh: TargetKind.Ssh,
-                        WebAdmin: TargetKind.WebAdmin,
-                        Http: TargetKind.Http,
-                        MySql: TargetKind.MySql,
-                        Postgres: TargetKind.Postgres,
-                    }[target.options.kind ?? '']}
-                    targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
-                />
+                {#key connectionsInstructionsModalOpen} <!-- regenerate examples when modal opens -->
+                    <ConnectionInstructions
+                        targetName={target.name}
+                        username={selectedUsername}
+                        targetKind={target.options.kind}
+                        targetExternalHost={target.options.kind === TargetKind.Http ? target.options.externalHost : undefined}
+                        targetDefaultDatabaseName={
+                            (target.options.kind === TargetKind.MySql || target.options.kind === TargetKind.Postgres)
+                                ? target.options.defaultDatabaseName : undefined}
+                    />
+                {/key}
             </ModalBody>
             <ModalFooter>
                 <Button
@@ -224,21 +223,6 @@
             </div>
 
             <TlsConfiguration bind:value={target.options.tls} />
-
-            {#if target.options.kind === 'Postgres'}
-                <FormGroup floating label="Idle timeout">
-                    <input
-                        class="form-control"
-                        type="text"
-                        placeholder="10m"
-                        bind:value={target.options.idleTimeout}
-                        title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
-                    />
-                    <small class="form-text text-muted">
-                        How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
-                    </small>
-                </FormGroup>
-            {/if}
         {/if}
 
         <h4 class="mt-4">Allow access for roles</h4>
@@ -268,14 +252,45 @@
             {/snippet}
         </Loadable>
 
-        <h4 class="mt-4">Traffic</h4>
-        <FormGroup class="mb-5">
+        <h4 class="mt-4">Advanced</h4>
+        {#if target.options.kind === 'Postgres'}
+            <FormGroup floating label="Idle timeout">
+                <input
+                    class="form-control"
+                    type="text"
+                    placeholder="10m"
+                    bind:value={target.options.idleTimeout}
+                    title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                />
+                <small class="form-text text-muted">
+                    How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
+                </small>
+            </FormGroup>
+        {/if}
+
+        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+            <FormGroup floating label="Default database name for connection examples">
+                <input
+                    class="form-control"
+                    type="text"
+                    placeholder="database-name"
+                    bind:value={target.options.defaultDatabaseName}
+                />
+                <small class="form-text text-muted">
+                    Default database name used in connection examples. This is only for display purposes and does not restrict which databases users can access. Leave empty to use the global default.
+                </small>
+            </FormGroup>
+        {/if}
+
+        <FormGroup>
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput
                 id="rateLimitBytesPerSecond"
                 bind:value={target.rateLimitBytesPerSecond}
             />
         </FormGroup>
+
+        <div class="mb-5"></div>
     {/if}
     </Loadable>
 
