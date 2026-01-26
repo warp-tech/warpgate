@@ -22,7 +22,6 @@ use super::AnySecurityScheme;
 #[derive(Object)]
 struct CreateUserRequest {
     username: String,
-    xxbreaking: String,
     description: Option<String>,
 }
 
