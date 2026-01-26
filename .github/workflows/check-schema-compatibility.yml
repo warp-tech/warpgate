@@ -1,0 +1,41 @@
+name: Check API Schema Compatibility
+
+on: [pull_request]
+permissions:
+  contents: read
+
+jobs:
+  check-schema-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Install just
+        run: |
+          cargo install just
+
+      - name: Install npm dependencies
+        run: |
+          cd warpgate-web && npm ci
+
+      - name: Generate API schema files
+        run: |
+          mkdir warpgate-web/dist
+          just openapi-all
+
+      - name: Checkout main branch to compare
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: main
+          path: main-branch
+
+      - name: Check admin API
+        run: |
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+
+      - name: Check gateway API
+        run: |
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
