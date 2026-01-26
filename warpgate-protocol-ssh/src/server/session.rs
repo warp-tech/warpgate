@@ -39,6 +39,7 @@ use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
+use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
@@ -114,6 +115,7 @@ pub struct ServerSession {
     auth_state: Option<Arc<Mutex<AuthState>>>,
     keyboard_interactive_state: KeyboardInteractiveState,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
+    allowed_auth_methods: MethodSet,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -172,6 +174,7 @@ impl ServerSession {
             auth_state: None,
             keyboard_interactive_state: KeyboardInteractiveState::None,
             cached_successful_ticket_auth: None,
+            allowed_auth_methods: get_allowed_auth_methods(services).await?,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -1355,6 +1358,16 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
 
+        info!(
+            "Client offers public key auth as {selector:?} with key {}",
+            key.public_key_base64()
+        );
+
+        if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
+            warn!("Client attempted public key auth even though it was not advertised");
+            return russh::server::Auth::reject();
+        }
+
         if let Ok(true) = self
             .try_validate_public_key_offer(
                 &selector,
@@ -1386,10 +1399,14 @@ impl ServerSession {
         let selector: AuthSelector = ssh_username.expose_secret().into();
 
         info!(
-            "Public key auth as {:?} with key {}",
-            selector,
+            "Public key auth as {selector:?} with key {}",
             key.public_key_base64()
         );
+
+        if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
+            warn!("Client attempted public key auth even though it was not advertised");
+            return russh::server::Auth::reject();
+        }
 
         let key = Some(AuthCredential::PublicKey {
             kind: key.algorithm(),
@@ -1437,7 +1454,12 @@ impl ServerSession {
         password: Secret<String>,
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
-        info!("Password auth as {:?}", selector);
+        info!("Password auth as {selector:?}");
+
+        if !self.allowed_auth_methods.contains(&MethodKind::Password) {
+            warn!("Client attempted password auth even though it was not advertised");
+            return russh::server::Auth::reject();
+        }
 
         match self
             .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
@@ -1466,6 +1488,14 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
+
+        if !self
+            .allowed_auth_methods
+            .contains(&MethodKind::KeyboardInteractive)
+        {
+            warn!("Client attempted keyboard-interactive auth even though it was not advertised");
+            return russh::server::Auth::reject();
+        }
 
         let cred;
         match &mut self.keyboard_interactive_state {
@@ -1567,19 +1597,25 @@ impl ServerSession {
 
     fn get_remaining_auth_methods(&self, kinds: HashSet<CredentialKind>) -> MethodSet {
         let mut m = MethodSet::empty();
-        for kind in kinds {
-            match kind {
-                CredentialKind::Password => m.push(MethodKind::Password),
-                CredentialKind::Totp => m.push(MethodKind::KeyboardInteractive),
-                CredentialKind::WebUserApproval => m.push(MethodKind::KeyboardInteractive),
-                CredentialKind::PublicKey => m.push(MethodKind::PublicKey),
-                CredentialKind::Sso => m.push(MethodKind::KeyboardInteractive),
+
+        for cred_kind in kinds {
+            let method_kind = match cred_kind {
+                CredentialKind::Password => MethodKind::Password,
+                CredentialKind::Totp => MethodKind::KeyboardInteractive,
+                CredentialKind::WebUserApproval => MethodKind::KeyboardInteractive,
+                CredentialKind::PublicKey => MethodKind::PublicKey,
+                CredentialKind::Sso => MethodKind::KeyboardInteractive,
+            };
+            if self.allowed_auth_methods.contains(&method_kind) {
+                m.push(method_kind);
             }
         }
+
         if m.contains(&MethodKind::KeyboardInteractive) {
             // Ensure keyboard-interactive is always the last method
             m.push(MethodKind::KeyboardInteractive);
         }
+
         m
     }
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::TryStreamExt;
-use russh::keys::{Algorithm, HashAlg};
+use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
 pub use session::ServerSession;
@@ -24,82 +24,29 @@ use warpgate_db_entities::Parameters;
 use crate::keys::load_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
-pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
-    let russh_config = {
-        let config = services.config.lock().await;
-        
-        // Fetch SSH auth method settings from Parameters
-        let db = services.db.lock().await;
-        let parameters = Parameters::Entity::get(&db).await?;
-        drop(db);
-        
-        // Build MethodSet based on parameters
-        let mut methods_vec: Vec<MethodKind> = Vec::new();
-        if parameters.ssh_client_auth_publickey {
-            methods_vec.push(MethodKind::PublicKey);
-        }
-        if parameters.ssh_client_auth_password {
-            methods_vec.push(MethodKind::Password);
-        }
-        if parameters.ssh_client_auth_keyboard_interactive {
-            methods_vec.push(MethodKind::KeyboardInteractive);
-        }
-        
-        // Ensure at least one method is enabled, fall back to all if none
-        if methods_vec.is_empty() {
-            warn!("All SSH authentication methods are disabled in parameters. Enabling all methods as fallback.");
-            methods_vec = vec![
-                MethodKind::PublicKey,
-                MethodKind::Password,
-                MethodKind::KeyboardInteractive,
-            ];
-        }
-        
-        info!(
-            "SSH server authentication methods: publickey={}, password={}, keyboard-interactive={}",
-            parameters.ssh_client_auth_publickey,
-            parameters.ssh_client_auth_password,
-            parameters.ssh_client_auth_keyboard_interactive
-        );
-        
-        russh::server::Config {
-            auth_rejection_time: Duration::from_secs(1),
-            auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
-            keepalive_interval: config.store.ssh.keepalive_interval,
-            methods: MethodSet::from(&methods_vec[..]),
-            keys: load_keys(&config, &services.global_params, "host")?,
-            event_buffer_size: 100,
-            nodelay: true,
-            preferred: Preferred {
-                key: Cow::Borrowed(&[
-                    Algorithm::Ed25519,
-                    Algorithm::Rsa {
-                        hash: Some(HashAlg::Sha512),
-                    },
-                    Algorithm::Rsa {
-                        hash: Some(HashAlg::Sha256),
-                    },
-                    Algorithm::Rsa { hash: None },
-                ]),
-                ..<_>::default()
-            },
-            ..<_>::default()
-        }
-    };
+#[derive(Clone)]
+struct RusshConfigInit {
+    keys: Vec<PrivateKey>,
+}
 
-    let russh_config = Arc::new(russh_config);
+pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
+    let russh_config_init = Arc::new({
+        let config = services.config.lock().await;
+        RusshConfigInit {
+            keys: load_keys(&config, &services.global_params, "host")?,
+        }
+    });
 
     let mut listener = address.tcp_accept_stream().await?;
 
     while let Some(stream) = listener.try_next().await.context("accepting connection")? {
-        let russh_config = russh_config.clone();
+        let russh_config_init = russh_config_init.clone();
         let services = services.clone();
 
         tokio::task::Builder::new()
             .name("SSH new connection setup")
             .spawn(async move {
-                if let Err(e) = _handle_connection(services, russh_config, stream).await {
+                if let Err(e) = _handle_connection(services, russh_config_init, stream).await {
                     error!(%e, "Connection handling failed");
                 }
             })?;
@@ -109,7 +56,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
 async fn _handle_connection(
     services: Services,
-    russh_config: Arc<russh::server::Config>,
+    russh_config_init: Arc<RusshConfigInit>,
     stream: TcpStream,
 ) -> Result<()> {
     stream.set_nodelay(true)?;
@@ -152,6 +99,37 @@ async fn _handle_connection(
         }
     };
 
+    let russh_config = {
+        let config = services.config.lock().await;
+
+        russh::server::Config {
+            auth_rejection_time: Duration::from_secs(1),
+            auth_rejection_time_initial: Some(Duration::from_secs(0)),
+            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
+            keepalive_interval: config.store.ssh.keepalive_interval,
+            methods: get_allowed_auth_methods(&services).await?,
+            keys: russh_config_init.keys.clone(),
+            event_buffer_size: 100,
+            nodelay: true,
+            preferred: Preferred {
+                key: Cow::Borrowed(&[
+                    Algorithm::Ed25519,
+                    Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha512),
+                    },
+                    Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha256),
+                    },
+                    Algorithm::Rsa { hash: None },
+                ]),
+                ..<_>::default()
+            },
+            ..<_>::default()
+        }
+    };
+
+    let russh_config = Arc::new(russh_config);
+
     tokio::task::Builder::new()
         .name(&format!("SSH {id} session"))
         .spawn(session)?;
@@ -183,4 +161,28 @@ where
     }
 
     ret
+}
+
+pub(crate) async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
+    let parameters = {
+        let db = services.db.lock().await;
+        Parameters::Entity::get(&db).await?
+    };
+
+    let mut methods_vec: Vec<MethodKind> = Vec::new();
+    if parameters.ssh_client_auth_publickey {
+        methods_vec.push(MethodKind::PublicKey);
+    }
+    if parameters.ssh_client_auth_password {
+        methods_vec.push(MethodKind::Password);
+    }
+    if parameters.ssh_client_auth_keyboard_interactive {
+        methods_vec.push(MethodKind::KeyboardInteractive);
+    }
+
+    if methods_vec.is_empty() {
+        warn!("All SSH authentication methods are disabled in parameters. Enabling all methods as fallback.");
+    }
+
+    Ok(MethodSet::from(&methods_vec[..]))
 }
