@@ -629,8 +629,6 @@ impl ServerSession {
     }
 
     pub async fn handle_remote_event(&mut self, event: RCEvent) -> Result<()> {
-        info!(event=?event, "Remote client event");
-
         match event {
             RCEvent::State(state) => {
                 self.rc_state = state;
