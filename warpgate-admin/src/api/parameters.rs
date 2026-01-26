@@ -1,7 +1,8 @@
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{EntityTrait, Set};
+use sea_orm::ActiveValue::NotSet;
+use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::WarpgateError;
 use warpgate_core::Services;
@@ -24,9 +25,9 @@ struct ParameterValues {
 struct ParameterUpdate {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
-    pub ssh_client_auth_publickey: bool,
-    pub ssh_client_auth_password: bool,
-    pub ssh_client_auth_keyboard_interactive: bool,
+    pub ssh_client_auth_publickey: Option<bool>,
+    pub ssh_client_auth_password: Option<bool>,
+    pub ssh_client_auth_keyboard_interactive: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -73,17 +74,18 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         let db = services.db.lock().await;
+        let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
-        let am = Parameters::ActiveModel {
-            id: Set(Parameters::Entity::get(&db).await?.id),
-            allow_own_credential_management: Set(body.allow_own_credential_management),
-            rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
-            ssh_client_auth_publickey: Set(body.ssh_client_auth_publickey),
-            ssh_client_auth_password: Set(body.ssh_client_auth_password),
-            ssh_client_auth_keyboard_interactive: Set(body.ssh_client_auth_keyboard_interactive),
-        };
+        parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
+        parameters.rate_limit_bytes_per_second =
+            Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
+        parameters.ssh_client_auth_password = body.ssh_client_auth_password.map_or(NotSet, Set);
+        parameters.ssh_client_auth_keyboard_interactive = body
+            .ssh_client_auth_keyboard_interactive
+            .map_or(NotSet, Set);
 
-        Parameters::Entity::update(am).exec(&*db).await?;
+        Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);
 
         services
