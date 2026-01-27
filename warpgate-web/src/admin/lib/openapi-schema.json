@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-30-g84716401-modified"
+    "version": "v0.19.1-30-g35acb1d6-modified"
   },
   "servers": [
     {
@@ -3585,6 +3585,15 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
           }
         }
       },
@@ -3592,7 +3601,10 @@
         "type": "object",
         "title": "ParameterValues",
         "required": [
-          "allow_own_credential_management"
+          "allow_own_credential_management",
+          "ssh_client_auth_publickey",
+          "ssh_client_auth_password",
+          "ssh_client_auth_keyboard_interactive"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -3601,6 +3613,15 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
           }
         }
       },
