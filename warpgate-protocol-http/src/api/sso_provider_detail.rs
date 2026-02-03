@@ -10,6 +10,8 @@ use warpgate_common::WarpgateError;
 use warpgate_core::Services;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
+use crate::common::base_path_from_request;
+
 pub struct Api;
 
 #[derive(Object)]
@@ -64,7 +66,8 @@ impl Api {
             Some(req),
             provider_config.return_domain_whitelist.as_deref(),
         )?;
-        return_url.set_path("warpgate/api/sso/return");
+        let base_path = base_path_from_request(req);
+        return_url.set_path(&format!("{base_path}/api/sso/return"));
         debug!("Return URL: {}", &return_url);
 
         let client = SsoClient::new(provider_config.provider.clone())?;

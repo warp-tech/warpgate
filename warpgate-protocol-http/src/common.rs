@@ -25,6 +25,8 @@ static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
+const WARPGATE_BASE_PATH: &str = "warpgate";
+const WARPGATE_AT_BASE_PATH: &str = "@warpgate";
 
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
@@ -280,15 +282,27 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     })
 }
 
+pub fn base_path_from_request(req: &Request) -> &'static str {
+    let path = req.original_uri().path();
+    if path == "/@warpgate" || path.starts_with("/@warpgate/") {
+        WARPGATE_AT_BASE_PATH
+    } else if path == "/warpgate" || path.starts_with("/warpgate/") {
+        WARPGATE_BASE_PATH
+    } else {
+        WARPGATE_BASE_PATH
+    }
+}
+
 pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
         .map(|p| p.to_string())
         .unwrap_or_else(|| "".into());
+    let base_path = base_path_from_request(req);
 
     let path = format!(
-        "/@warpgate#/login?next={}",
+        "/{base_path}#/login?next={}",
         utf8_percent_encode(&path, NON_ALPHANUMERIC),
     );
 

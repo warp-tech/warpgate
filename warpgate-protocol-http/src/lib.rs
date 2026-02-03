@@ -98,32 +98,73 @@ async fn make_rustls_config(
     Ok(cfg)
 }
 
+fn build_warpgate_route(services: &Services, base_path: &str) -> Route {
+    let admin_api_app = admin_api_app(services).into_endpoint();
+    let api_service = OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
+        .server(format!("/{base_path}/api"));
+    let ui = api_service.stoplight_elements();
+    let spec = api_service.spec_endpoint();
+
+    let cache_bust = || {
+        SetHeader::new().overriding(
+            http::header::CACHE_CONTROL,
+            HeaderValue::from_static("must-revalidate,no-cache,no-store"),
+        )
+    };
+
+    let cache_static = || {
+        SetHeader::new().overriding(
+            http::header::CACHE_CONTROL,
+            HeaderValue::from_static("max-age=86400"),
+        )
+    };
+
+    Route::new()
+        .nest("/api/playground", ui)
+        .nest("/api", api_service.with(cache_bust()))
+        .nest("/api/openapi.json", spec)
+        .nest_no_strip(
+            "/assets",
+            EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
+        )
+        .nest(
+            "/admin/api",
+            endpoint_auth(endpoint_admin_auth(admin_api_app)).with(cache_bust()),
+        )
+        .at(
+            "/admin",
+            page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
+                "src/admin/index.html",
+            )))
+            .with(cache_bust()),
+        )
+        .at(
+            "/api/auth/web-auth-requests/stream",
+            endpoint_auth(api::auth::api_get_web_auth_requests_stream),
+        )
+        .at(
+            "",
+            EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html").with(cache_bust()),
+        )
+        .around(move |ep, req| async move {
+            let method = req.method().clone();
+            let url = req.original_uri().clone();
+            let client_ip = get_client_ip(&req).await?;
+
+            let response = ep.call(req).await.inspect_err(|e| {
+                log_request_error(&method, &url, &client_ip, e);
+            })?;
+
+            log_request_result(&method, &url, &client_ip, &response.status());
+            Ok(response)
+        })
+}
+
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
-        let admin_api_app = admin_api_app(&self.services).into_endpoint();
-        let api_service =
-            OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
-                .server("/@warpgate/api");
-        let ui = api_service.stoplight_elements();
-        let spec = api_service.spec_endpoint();
-
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
         let db = self.services.db.clone();
-
-        let cache_bust = || {
-            SetHeader::new().overriding(
-                http::header::CACHE_CONTROL,
-                HeaderValue::from_static("must-revalidate,no-cache,no-store"),
-            )
-        };
-
-        let cache_static = || {
-            SetHeader::new().overriding(
-                http::header::CACHE_CONTROL,
-                HeaderValue::from_static("max-age=86400"),
-            )
-        };
 
         let (cookie_max_age, session_max_age) = {
             let config = self.services.config.lock().await;
@@ -173,46 +214,11 @@ impl ProtocolServer for HTTPProtocolServer {
         let app = Route::new()
             .nest(
                 "/@warpgate",
-                Route::new()
-                    .nest("/api/playground", ui)
-                    .nest("/api", api_service.with(cache_bust()))
-                    .nest("/api/openapi.json", spec)
-                    .nest_no_strip(
-                        "/assets",
-                        EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
-                    )
-                    .nest(
-                        "/admin/api",
-                        endpoint_auth(endpoint_admin_auth(admin_api_app)).with(cache_bust()),
-                    )
-                    .at(
-                        "/admin",
-                        page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
-                            "src/admin/index.html",
-                        )))
-                        .with(cache_bust()),
-                    )
-                    .at(
-                        "/api/auth/web-auth-requests/stream",
-                        endpoint_auth(api::auth::api_get_web_auth_requests_stream),
-                    )
-                    .at(
-                        "",
-                        EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
-                            .with(cache_bust()),
-                    )
-                    .around(move |ep, req| async move {
-                        let method = req.method().clone();
-                        let url = req.original_uri().clone();
-                        let client_ip = get_client_ip(&req).await?;
-
-                        let response = ep.call(req).await.inspect_err(|e| {
-                            log_request_error(&method, &url, &client_ip, e);
-                        })?;
-
-                        log_request_result(&method, &url, &client_ip, &response.status());
-                        Ok(response)
-                    }),
+                build_warpgate_route(&self.services, "@warpgate"),
+            )
+            .nest(
+                "/warpgate",
+                build_warpgate_route(&self.services, "warpgate"),
             )
             .nest_no_strip(
                 "/",

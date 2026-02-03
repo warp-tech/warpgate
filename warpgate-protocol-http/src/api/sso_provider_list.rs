@@ -17,7 +17,9 @@ use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
 use crate::api::common::logout;
-use crate::common::{authorize_session, get_auth_state_for_request, SessionExt};
+use crate::common::{
+    authorize_session, base_path_from_request, get_auth_state_for_request, SessionExt,
+};
 use crate::session::SessionStore;
 use crate::SsoLoginState;
 
@@ -79,9 +81,9 @@ enum StartSloResponse {
     NotFound,
 }
 
-fn make_redirect_url(err: &str) -> String {
+fn make_redirect_url(base_path: &str, err: &str) -> String {
     error!("SSO error: {err}");
-    format!("/warpgate?login_error={err}")
+    format!("/{base_path}?login_error={err}")
 }
 
 #[OpenApi]
@@ -122,10 +124,11 @@ impl Api {
         services: Data<&Services>,
         code: Query<Option<String>>,
     ) -> Result<Response<ReturnToSsoResponse>, WarpgateError> {
+        let base_path = base_path_from_request(req);
         let url = self
             .api_return_to_sso_get_common(req, session, services, &code)
             .await?
-            .unwrap_or_else(|x| make_redirect_url(&x));
+            .unwrap_or_else(|x| make_redirect_url(base_path, &x));
 
         Ok(Response::new(ReturnToSsoResponse::Ok).header("Location", url))
     }
@@ -142,10 +145,11 @@ impl Api {
         services: Data<&Services>,
         data: Form<ReturnToSsoFormData>,
     ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
+        let base_path = base_path_from_request(req);
         let url = self
             .api_return_to_sso_get_common(req, session, services, &data.code)
             .await?
-            .unwrap_or_else(|x| make_redirect_url(&x));
+            .unwrap_or_else(|x| make_redirect_url(base_path, &x));
         let serialized_url = serde_json::to_string(&url)?;
         Ok(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
@@ -280,10 +284,12 @@ impl Api {
                 .await?;
         }
 
+        let base_path = base_path_from_request(req);
+        let default_next_url = format!("/{base_path}#/login");
         let mut next_url = context
             .next_url
             .as_deref()
-            .unwrap_or("/warpgate#/login")
+            .unwrap_or(default_next_url.as_str())
             .to_owned();
 
         if let Some(ref host) = context.return_host {
