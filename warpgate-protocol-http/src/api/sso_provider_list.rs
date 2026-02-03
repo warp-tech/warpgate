@@ -81,7 +81,7 @@ enum StartSloResponse {
 
 fn make_redirect_url(err: &str) -> String {
     error!("SSO error: {err}");
-    format!("/@warpgate?login_error={err}")
+    format!("/warpgate?login_error={err}")
 }
 
 #[OpenApi]
@@ -283,7 +283,7 @@ impl Api {
         let mut next_url = context
             .next_url
             .as_deref()
-            .unwrap_or("/@warpgate#/login")
+            .unwrap_or("/warpgate#/login")
             .to_owned();
 
         if let Some(ref host) = context.return_host {

@@ -7,8 +7,8 @@
     ],
     "AllowAccessTokensViaBrowser": true,
     "RedirectUris": [
-      "https://warpgate.com/@warpgate/api/sso/return",
-      "https://127.0.0.1:8888/@warpgate/api/sso/return"
+      "https://warpgate.com/warpgate/api/sso/return",
+      "https://127.0.0.1:8888/warpgate/api/sso/return"
     ],
     "AllowedScopes": [
       "openid",
@@ -38,8 +38,8 @@
     ],
     "ClientClaimsPrefix": "",
     "RedirectUris": [
-      "https://warpgate.com/@warpgate/api/sso/return",
-      "https://127.0.0.1:8888/@warpgate/api/sso/return"
+      "https://warpgate.com/warpgate/api/sso/return",
+      "https://127.0.0.1:8888/warpgate/api/sso/return"
     ],
     "Claims": [
       {

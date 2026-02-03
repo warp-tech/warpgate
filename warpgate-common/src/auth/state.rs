@@ -162,7 +162,7 @@ impl AuthState {
         config: &WarpgateConfig,
     ) -> Result<url::Url, WarpgateError> {
         let mut external_url = config.construct_external_url(None, None)?;
-        external_url.set_path("@warpgate");
+        external_url.set_path("warpgate");
         external_url.set_fragment(Some(&format!("/login/{}", self.id())));
         Ok(external_url)
     }
