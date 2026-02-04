@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-33-gfd126cae-modified"
+    "version": "v0.19.1-44-gca1755f9-modified"
   },
   "servers": [
     {
@@ -3991,6 +3991,15 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
           }
         }
       },
@@ -3998,7 +4007,10 @@
         "type": "object",
         "title": "ParameterValues",
         "required": [
-          "allow_own_credential_management"
+          "allow_own_credential_management",
+          "ssh_client_auth_publickey",
+          "ssh_client_auth_password",
+          "ssh_client_auth_keyboard_interactive"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4007,6 +4019,15 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
           }
         }
       },
@@ -4432,6 +4453,9 @@
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },
@@ -4628,6 +4652,9 @@
             "$ref": "#/components/schemas/Tls"
           },
           "idle_timeout": {
+            "type": "string"
+          },
+          "default_database_name": {
             "type": "string"
           }
         }

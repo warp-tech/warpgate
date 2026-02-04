@@ -391,7 +391,12 @@ impl RemoteClient {
                 Err(e) => {
                     debug!("Connect error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e));
+
+                    // Allow some time for the SessionServer to process the ConnectionError and print a message to the terminal
+                    // before closing the session. If we don't wait, the session might close too quickly and the user won't see the error.
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     self.set_disconnected();
+
                     return Ok(true);
                 }
             },
@@ -545,6 +550,7 @@ impl RemoteClient {
                     };
 
                     let mut auth_result = false;
+                    let mut auth_error_msg: Option<String> = None;
                     match ssh_options.auth {
                         SSHTargetAuth::Password(auth) => {
                             let response = session
@@ -560,6 +566,8 @@ impl RemoteClient {
                             ).await.unwrap_or(false);
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
+                            } else {
+                                auth_error_msg = Some("Password authentication was rejected by the SSH target".to_string());
                             }
                         }
                         SSHTargetAuth::PublicKey(_) => {
@@ -611,13 +619,16 @@ impl RemoteClient {
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
+                                } else {
+                                    auth_error_msg = Some(format!("Public key authentication was rejected by the SSH target"));
                                 }
                             }
                         }
                     }
 
                     if !auth_result {
-                        error!("Auth rejected");
+                        let reason = auth_error_msg.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
+                        error!(%reason, "Warpgate could not authenticate with SSH target");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
                             .await;

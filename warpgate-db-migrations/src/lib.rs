@@ -27,9 +27,10 @@ mod m00022_user_ldap_link;
 mod m00023_ldap_username_attribute;
 mod m00024_ssh_key_attribute;
 mod m00025_ldap_uuid_attribute;
-mod m00026_ca;
-mod m00027_certificate_credentials;
-mod m00028_certificate_revocation;
+mod m00026_ssh_client_auth;
+mod m00027_ca;
+mod m00028_certificate_credentials;
+mod m00029_certificate_revocation;
 
 pub struct Migrator;
 
@@ -62,9 +63,10 @@ impl MigratorTrait for Migrator {
             Box::new(m00023_ldap_username_attribute::Migration),
             Box::new(m00024_ssh_key_attribute::Migration),
             Box::new(m00025_ldap_uuid_attribute::Migration),
-            Box::new(m00026_ca::Migration),
-            Box::new(m00027_certificate_credentials::Migration),
-            Box::new(m00028_certificate_revocation::Migration),
+            Box::new(m00026_ssh_client_auth::Migration),
+            Box::new(m00027_ca::Migration),
+            Box::new(m00028_certificate_credentials::Migration),
+            Box::new(m00029_certificate_revocation::Migration),
         ]
     }
 }

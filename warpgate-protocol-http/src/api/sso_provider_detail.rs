@@ -60,8 +60,10 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
-        let mut return_url = config
-            .construct_external_url(Some(req), provider_config.return_domain_whitelist.as_deref())?;
+        let mut return_url = config.construct_external_url(
+            Some(req),
+            provider_config.return_domain_whitelist.as_deref(),
+        )?;
         return_url.set_path("@warpgate/api/sso/return");
         debug!("Return URL: {}", &return_url);
 

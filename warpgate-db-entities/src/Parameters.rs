@@ -9,11 +9,13 @@ pub struct Model {
     pub id: Uuid,
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<i64>,
-
     #[sea_orm(column_type = "Text")]
     pub ca_certificate_pem: String,
     #[sea_orm(column_type = "Text")]
     pub ca_private_key_pem: String,
+    pub ssh_client_auth_publickey: bool,
+    pub ssh_client_auth_password: bool,
+    pub ssh_client_auth_keyboard_interactive: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -32,6 +34,9 @@ impl Entity {
                     rate_limit_bytes_per_second: Set(None),
                     ca_certificate_pem: Set("".into()),
                     ca_private_key_pem: Set("".into()),
+                    ssh_client_auth_publickey: Set(true),
+                    ssh_client_auth_password: Set(true),
+                    ssh_client_auth_keyboard_interactive: Set(true),
                 }
                 .insert(db)
                 .await

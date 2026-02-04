@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.19.1-33-gfd126cae-modified"
+    "version": "v0.19.1-44-gca1755f9-modified"
   },
   "servers": [
     {
@@ -1346,6 +1346,9 @@
           },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },

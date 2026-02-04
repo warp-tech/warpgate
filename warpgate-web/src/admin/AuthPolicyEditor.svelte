@@ -59,7 +59,7 @@ let activeTips: string[] = $derived.by(() => {
 })
 
 const validCredentials = $derived.by(() => {
-    let vc = new SvelteSet(existingCredentials.map(x => x.kind as CredentialKind))
+    const vc = new SvelteSet(existingCredentials.map(x => x.kind as CredentialKind))
     vc.add(CredentialKind.WebUserApproval)
     return vc
 })

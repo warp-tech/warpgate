@@ -110,6 +110,9 @@ pub struct TargetMySqlOptions {
 
     #[serde(default)]
     pub tls: Tls,
+
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -131,6 +134,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default = "_default_postgres_idle_timeout_str")]
     pub idle_timeout: Option<String>,
+
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
