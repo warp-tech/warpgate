@@ -73,13 +73,15 @@ governor = { version = "0.10.0", default-features = false, features = ["std", "q
 rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
 x509-parser = "0.17.0"
 uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.13", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
-    "rustls-tls-native-roots-no-provider",
+    "rustls-no-provider",
     "stream",
     "gzip",
 ], default-features = false }
 regex = { version = "1.6", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
+reqwest-websocket = "0.6.0"
 
 [profile.release]
 lto = true

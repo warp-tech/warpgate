@@ -19,6 +19,7 @@ lazy_static = { version = "1.4", default-features = false }
 md5 = { version = "0.7", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
@@ -35,3 +36,5 @@ warpgate-common = { version = "*", path = "../warpgate-common", default-features
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+tokio-tungstenite.workspace = true
+reqwest-websocket.workspace = true

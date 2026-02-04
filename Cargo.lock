@@ -6672,6 +6672,7 @@ dependencies = [
  "md5",
  "poem",
  "poem-openapi",
+ "regex",
  "reqwest 0.13.1",
  "reqwest-websocket",
  "rustls",

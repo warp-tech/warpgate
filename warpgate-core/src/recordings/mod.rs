@@ -84,7 +84,9 @@ impl SessionRecordings {
             return Err(Error::Disabled);
         }
 
+        let name = sanitize_name(&name)?;
         let path = self.path_for(id, &name);
+
         tokio::fs::create_dir_all(&path.parent().ok_or(Error::InvalidPath)?).await?;
 
         let model = {
@@ -132,7 +134,7 @@ impl SessionRecordings {
         live.get(id).map(|sender| sender.subscribe())
     }
 
-    pub async fn remove<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> Result<()> {
+    pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
         let path = self.path_for(session_id, name);
         tokio::fs::remove_file(&path).await?;
         if let Some(parent) = path.parent() {
@@ -151,4 +153,21 @@ impl SessionRecordings {
     pub fn path_for<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> PathBuf {
         self.path.join(session_id.to_string()).join(&name)
     }
+}
+
+fn sanitize_name(name: &str) -> Result<String> {
+    if name.is_empty() || name.contains('\0') {
+        return Err(Error::InvalidPath);
+    }
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c == '/' || c == '\\' || c.is_control() {
+            continue;
+        }
+        out.push(c);
+    }
+    if out.is_empty() || out == "." || out == ".." {
+        return Err(Error::InvalidPath);
+    }
+    Ok(out)
 }

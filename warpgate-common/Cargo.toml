@@ -29,6 +29,8 @@ rand_chacha.workspace = true
 rand_core.workspace = true
 rand.workspace = true
 rcgen.workspace = true
+reqwest.workspace = true
+reqwest-websocket.workspace = true
 russh.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
@@ -40,6 +42,7 @@ serde.workspace = true
 thiserror.workspace = true
 tokio-rustls.workspace = true
 tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
 tokio.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing-core = { version = "0.1", default-features = false }

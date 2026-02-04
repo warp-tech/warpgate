@@ -5,6 +5,7 @@ use poem_openapi::ApiResponse;
 use uuid::Uuid;
 use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
+use warpgate_tls::RustlsSetupError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum WarpgateError {
@@ -52,6 +53,10 @@ pub enum WarpgateError {
     SessionEnd,
     #[error("rcgen: {0}")]
     RcGen(#[from] rcgen::Error),
+    #[error("rustls setup: {0}")]
+    TlsSetup(#[from] RustlsSetupError),
+    #[error("reqwest: {0}")]
+    Reqwest(#[from] reqwest::Error),
 }
 
 impl ResponseError for WarpgateError {

@@ -6,19 +6,19 @@ use anyhow::{Context, Result};
 use cookie::Cookie;
 use data_encoding::BASE64;
 use delegate::delegate;
-use futures::{SinkExt, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::{HeaderValue, Uri};
 use once_cell::sync::Lazy;
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::web::Data;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::tungstenite::Utf8Bytes;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
+use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
 use warpgate_core::logging::http::{get_client_ip, log_request_result};
 use warpgate_core::Services;
@@ -489,78 +489,25 @@ async fn proxy_ws_inner(
 
     let mut response = ws
         .on_upgrade(|socket| async move {
-            let (mut client_sink, mut client_source) = client.split();
-
-            let (mut server_sink, mut server_source) = socket.split();
+            let (client_sink, client_source) = client.split();
+            let (server_sink, server_source) = socket.split();
 
             if let Err(error) = {
-                let server_to_client = tokio::spawn(async move {
-                    while let Some(msg) = server_source.next().await {
-                        tracing::debug!("Server: {:?}", msg);
-                        match msg? {
-                            Message::Binary(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Binary(data.into()))
-                                    .await?;
-                            }
-                            Message::Text(text) => {
-                                client_sink
-                                    .send(tungstenite::Message::Text(text.into()))
-                                    .await?;
-                            }
-                            Message::Ping(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Ping(data.into()))
-                                    .await?;
-                            }
-                            Message::Pong(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Pong(data.into()))
-                                    .await?;
-                            }
-                            Message::Close(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Close(data.map(|data| {
-                                        tungstenite::protocol::CloseFrame {
-                                            code: u16::from(data.0).into(),
-                                            reason: Utf8Bytes::from(data.1),
-                                        }
-                                    })))
-                                    .await?;
-                            }
-                        }
-                    }
-                    Ok::<_, anyhow::Error>(())
-                });
+                let server_to_client =
+                    tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
+                        Box::pin(async {
+                            tracing::debug!("Server: {:?}", msg);
+                            anyhow::Ok(msg)
+                        })
+                    }));
 
-                let client_to_server = tokio::spawn(async move {
-                    while let Some(msg) = client_source.next().await {
-                        tracing::debug!("Client: {:?}", msg);
-                        match msg? {
-                            tungstenite::Message::Binary(data) => {
-                                server_sink.send(Message::Binary(data.to_vec())).await?;
-                            }
-                            tungstenite::Message::Text(text) => {
-                                server_sink.send(Message::Text(text.to_string())).await?;
-                            }
-                            tungstenite::Message::Ping(data) => {
-                                server_sink.send(Message::Ping(data.to_vec())).await?;
-                            }
-                            tungstenite::Message::Pong(data) => {
-                                server_sink.send(Message::Pong(data.to_vec())).await?;
-                            }
-                            tungstenite::Message::Close(data) => {
-                                server_sink
-                                    .send(Message::Close(data.map(|data| {
-                                        (u16::from(data.code).into(), data.reason.to_string())
-                                    })))
-                                    .await?;
-                            }
-                            tungstenite::Message::Frame(_) => unreachable!(),
-                        }
-                    }
-                    Ok::<_, anyhow::Error>(())
-                });
+                let client_to_server =
+                    tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
+                        Box::pin(async {
+                            tracing::debug!("Client: {:?}", msg);
+                            anyhow::Ok(msg)
+                        })
+                    }));
 
                 server_to_client.await??;
                 client_to_server.await??;
