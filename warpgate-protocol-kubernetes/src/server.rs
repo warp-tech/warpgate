@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use base64::{self, Engine as _};
 use bytes::Bytes;
 use chrono::Utc;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use poem::listener::{Acceptor, Listener};
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, LocalAddr, Path, RemoteAddr};
@@ -230,7 +230,6 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     };
 
     // Create TLS configuration with client certificate verification
-
     let tls_config = ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
@@ -240,7 +239,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     .with_cert_resolver(Arc::new(SingleCertResolver::new(
         certificate_and_key.clone(),
     )));
-    // Create our custom certificate-capturing acceptor
+
     let tcp_acceptor = address.poem_listener().await?.into_acceptor().await?;
     let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
 
@@ -254,10 +253,12 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
 fn deduce_exec_recording_name(target_url: &Url) -> String {
     let path = target_url.path();
-    let exec_url_regex = Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/exec$").unwrap();
+    let exec_url_regex = Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
     let timestamp = Utc::now().format("%Y%m%d%H%M%S");
     if let Some(captures) = exec_url_regex.captures(path) {
+        let namespace = captures.get(1).map_or("unknown", |m| m.as_str());
         let pod_name = captures.get(2).map_or("unknown", |m| m.as_str());
+        let operation = captures.get(3).map_or("unknown", |m| m.as_str());
         let query = target_url.query().unwrap_or_default();
         let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
         let command = parsed_query
@@ -268,7 +269,7 @@ fn deduce_exec_recording_name(target_url: &Url) -> String {
             .get("container")
             .cloned()
             .unwrap_or("unknown".into());
-        return format!("exec {pod_name} {container} {command} {timestamp}");
+        return format!("exec {namespace} {pod_name} {container} {operation} {command} {timestamp}");
     }
     "exec-unknown".to_string()
 }
@@ -661,16 +662,38 @@ async fn _handle_request_inner(
         "Received response from upstream Kubernetes API"
     );
 
-    let response_body = response
-        .bytes()
-        .await
-        .map_err(|e| {
-            poem::Error::from_string(
-                format!("Failed to read response: {}", e),
-                poem::http::StatusCode::BAD_GATEWAY,
+    let (response_body, body_for_recording) = {
+        // k8s uses streaming chunked responses for watch API
+        let transfer_encoding = response_headers
+            .get(poem::http::header::TRANSFER_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_lowercase();
+
+        if transfer_encoding == "chunked" {
+            (
+                Body::from_bytes_stream(
+                    response
+                        .bytes_stream()
+                        .map_err(|e| std::io::Error::other(e)),
+                ),
+                None,
             )
-        })
-        .map_err(WarpgateError::other)?;
+        } else {
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|e| {
+                    poem::Error::from_string(
+                        format!("Failed to read response: {}", e),
+                        poem::http::StatusCode::BAD_GATEWAY,
+                    )
+                })
+                .map_err(WarpgateError::other)?;
+
+            (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
+        }
+    };
 
     // Record the response
     if let Some(ref mut recorder) = recorder_opt {
@@ -681,7 +704,7 @@ async fn _handle_request_inner(
                 headers,
                 &body_bytes,
                 status.as_u16(),
-                &response_body,
+                body_for_recording.unwrap_or_default().as_ref(),
             )
             .await
         {
@@ -700,7 +723,7 @@ async fn _handle_request_inner(
         }
     }
 
-    Ok(poem_response.body(response_body.to_vec()))
+    Ok(poem_response.body(response_body))
 }
 
 async fn authenticate_and_get_target(
