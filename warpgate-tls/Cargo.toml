@@ -6,7 +6,7 @@ version = "0.20.0"
 
 [dependencies]
 once_cell = { version = "1.17", default-features = false }
-poem = { version = "3.1", features = ["rustls"], default-features = false }
+poem.workspace = true
 poem-openapi.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true

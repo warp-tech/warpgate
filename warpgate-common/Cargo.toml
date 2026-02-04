@@ -23,7 +23,7 @@ governor.workspace = true
 humantime-serde = { version = "1.1", default-features = false }
 once_cell = { version = "1.17", default-features = false }
 password-hash.workspace = true
-poem = { version = "3.1", features = ["rustls"], default-features = false }
+poem.workspace = true
 poem-openapi.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true

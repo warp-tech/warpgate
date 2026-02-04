@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use poem::web::websocket::Message;
