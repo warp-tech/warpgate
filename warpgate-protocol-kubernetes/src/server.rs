@@ -486,7 +486,8 @@ async fn _handle_websocket_request_inner(
         .headers()
         .get("sec-websocket-protocol")
         .and_then(|h| h.to_str().ok())
-        .context("missing Sec-Websocket-Protocol request header")?.to_string();
+        .context("missing Sec-Websocket-Protocol request header")?
+        .to_string();
 
     return Ok(ws
         .protocols(vec![
@@ -902,7 +903,7 @@ fn create_authenticated_client(
     Ok(client_builder)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 enum SessionRecordingMetadata {
     #[serde(rename = "kubernetes-api")]

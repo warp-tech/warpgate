@@ -73,7 +73,7 @@ pub enum ChannelOperation {
     Signal(Sig),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum SshRecordingMetadata {
     #[serde(rename = "ssh-shell")]
