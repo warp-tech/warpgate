@@ -48,7 +48,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b
+      - uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429
 
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
