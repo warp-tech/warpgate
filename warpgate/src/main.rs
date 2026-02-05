@@ -1,7 +1,6 @@
 mod commands;
 mod config;
 mod logging;
-mod protocols;
 
 use std::path::PathBuf;
 
@@ -102,11 +101,6 @@ pub(crate) enum Commands {
     },
     /// Perform basic config checks
     Check,
-    /// Test the connection to a target host
-    TestTarget {
-        #[clap(action=ArgAction::Set)]
-        target_name: String,
-    },
     /// Create a new user
     CreateUser {
         #[clap(action=ArgAction::Set)]
@@ -148,9 +142,6 @@ async fn _main() -> Result<()> {
             crate::commands::run::command(&params, *enable_admin_token).await
         }
         Commands::Check => crate::commands::check::command(&params).await,
-        Commands::TestTarget { target_name } => {
-            crate::commands::test_target::command(&params, target_name).await
-        }
         Commands::CreateUser {
             username,
             password: explicit_password,

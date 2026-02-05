@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
 use anyhow::Result;
-use warpgate_common::{ListenEndpoint, ProtocolName, Target};
-use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_core::{ProtocolServer, Services};
 
 mod correlator;
 pub mod recording;
@@ -28,12 +28,6 @@ impl KubernetesProtocolServer {
 impl ProtocolServer for KubernetesProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         run_server(self.services, address).await
-    }
-
-    async fn test_target(&self, _target: Target) -> Result<(), TargetTestError> {
-        Err(TargetTestError::Misconfigured(
-            "Testing Kubernetes targets is not implemented yet".into(),
-        ))
     }
 
     fn name(&self) -> &'static str {

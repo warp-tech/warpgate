@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use client::{ConnectionOptions, PostgresClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
@@ -18,8 +17,8 @@ use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
 use tracing::*;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions};
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use warpgate_common::ListenEndpoint;
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
@@ -131,22 +130,6 @@ impl ProtocolServer for PostgresProtocolServer {
                 Ok::<(), anyhow::Error>(())
             });
         }
-    }
-
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Postgres(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not a PostgreSQL target".to_owned(),
-            ));
-        };
-        let mut conn_options = ConnectionOptions::default();
-        conn_options
-            .parameters
-            .insert("database".into(), "postgres".into());
-        PostgresClient::connect(&options, conn_options)
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
-        Ok(())
     }
 
     fn name(&self) -> &'static str {

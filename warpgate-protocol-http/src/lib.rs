@@ -18,7 +18,7 @@ use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession, Session};
+use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -26,11 +26,11 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{GlobalParams, ListenEndpoint, Target, TargetOptions, WarpgateConfig};
+use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
 use warpgate_core::logging::http::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::{
     IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
@@ -292,21 +292,6 @@ impl ProtocolServer for HTTPProtocolServer {
             .run(app)
             .await?;
 
-        Ok(())
-    }
-
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Http(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not an HTTP target".to_owned(),
-            ));
-        };
-
-        let mut request = poem::Request::builder().uri_str("http://host/").finish();
-        request.extensions_mut().insert(Session::default());
-        crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 

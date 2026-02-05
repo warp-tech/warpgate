@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex};
+use tokio::sync::Mutex;
 use url::Url;
 use warpgate_common::SessionId;
 use warpgate_core::recordings::{Recorder, RecordingWriter, SessionRecordings, TerminalRecorder};

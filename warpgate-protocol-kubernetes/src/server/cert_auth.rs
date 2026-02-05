@@ -150,8 +150,6 @@ fn extract_peer_certificates<T>(tls_stream: &TlsStream<T>) -> Option<Vec<u8>> {
     None
 }
 
-
-
 /// Certificate data extracted from client TLS connection
 #[derive(Debug, Clone)]
 pub struct ClientCertificate {
