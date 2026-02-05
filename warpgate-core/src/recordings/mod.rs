@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -86,7 +87,7 @@ impl SessionRecordings {
     ) -> Result<T>
     where
         T: Recorder,
-        M: Serialize,
+        M: Serialize + Debug,
     {
         if !self.config.enable {
             return Err(Error::Disabled);
@@ -111,7 +112,7 @@ impl SessionRecordings {
             match existing {
                 Some(e) => e,
                 None => {
-                    info!(%name, path=?path, "Recording session {}", id);
+                    info!(%name, ?metadata, path=?path, "Recording session {}", id);
                     use sea_orm::ActiveValue::Set;
                     let values = Recording::ActiveModel {
                         id: Set(Uuid::new_v4()),

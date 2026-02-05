@@ -413,21 +413,6 @@ async fn _handle_websocket_request_inner(
             .http1_only()
             .build()?;
 
-    let client_response = client
-        .get(full_url.clone())
-        .upgrade()
-        .protocols(vec!["v5.channel.k8s.io"])
-        .send()
-        .await
-        .context("sending websocket request to Kubernetes API")?;
-
-    let client_socket = client_response
-        .into_websocket()
-        .await
-        .context("negotiating websocket connection with Kubernetes")?;
-
-    let (client_sink, client_source) = client_socket.split();
-
     let (recorder_tx, mut recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
     {
         let enabled = {
@@ -497,9 +482,36 @@ async fn _handle_websocket_request_inner(
         }
     };
 
+    let ws_protocol = req
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|h| h.to_str().ok())
+        .context("missing Sec-Websocket-Protocol request header")?.to_string();
+
     return Ok(ws
-        .protocols(vec!["v5.channel.k8s.io"])
+        .protocols(vec![
+            "channel.k8s.io",
+            "v2.channel.k8s.io",
+            "v3.channel.k8s.io",
+            "v4.channel.k8s.io",
+            "v5.channel.k8s.io",
+        ])
         .on_upgrade(|socket| async move {
+            let client_response = client
+                .get(full_url.clone())
+                .upgrade()
+                .protocols(vec![ws_protocol])
+                .send()
+                .await
+                .context("sending websocket request to Kubernetes API")?;
+
+            let client_socket = client_response
+                .into_websocket()
+                .await
+                .context("negotiating websocket connection with Kubernetes")?;
+
+            let (client_sink, client_source) = client_socket.split();
+
             let (server_sink, server_source) = socket.split();
             let server_to_client = {
                 let recorder_tx = recorder_tx.clone();
