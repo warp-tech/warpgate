@@ -16,7 +16,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(recording::Entity)
-                    .add_column(ColumnDef::new(Alias::new("metadata")).text().default("null"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("metadata"))
+                            .text()
+                            .default("null"),
+                    )
                     .to_owned(),
             )
             .await
