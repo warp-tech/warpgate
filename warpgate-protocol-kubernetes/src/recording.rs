@@ -1,8 +1,16 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use poem_openapi::Object;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use warpgate_core::recordings::{Recorder, RecordingWriter};
+use tokio::sync::{Mutex};
+use url::Url;
+use warpgate_common::SessionId;
+use warpgate_core::recordings::{Recorder, RecordingWriter, SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Recording::RecordingKind;
 
 #[derive(Debug, Object)]
@@ -91,4 +99,91 @@ impl Recorder for KubernetesRecorder {
     fn new(writer: RecordingWriter) -> Self {
         KubernetesRecorder { writer }
     }
+}
+
+// ----------
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type")]
+pub enum SessionRecordingMetadata {
+    #[serde(rename = "kubernetes-api")]
+    Api,
+    #[serde(rename = "kubernetes-exec")]
+    Exec {
+        namespace: String,
+        pod: String,
+        container: String,
+        command: String,
+    },
+    #[serde(rename = "kubernetes-attach")]
+    Attach {
+        namespace: String,
+        pod: String,
+        container: String,
+    },
+}
+
+pub async fn start_recording_api(
+    session_id: &SessionId,
+    recordings: &Arc<Mutex<SessionRecordings>>,
+) -> anyhow::Result<KubernetesRecorder> {
+    let mut recordings = recordings.lock().await;
+    Ok(recordings
+        .start::<KubernetesRecorder, _>(
+            session_id,
+            Some("api".into()),
+            SessionRecordingMetadata::Api,
+        )
+        .await
+        .context("starting recording")?)
+}
+
+pub async fn start_recording_exec(
+    session_id: &SessionId,
+    recordings: &Arc<Mutex<SessionRecordings>>,
+    metadata: Option<SessionRecordingMetadata>,
+) -> anyhow::Result<TerminalRecorder> {
+    let mut recordings = recordings.lock().await;
+    recordings
+        .start::<TerminalRecorder, _>(session_id, None, metadata)
+        .await
+        .context("starting recording")
+}
+
+pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
+    let path = target_url.path();
+    let exec_url_regex =
+        Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
+    if let Some(captures) = exec_url_regex.captures(path) {
+        let namespace = captures.get(1).map_or("unknown", |m| m.as_str()).into();
+        let pod = captures.get(2).map_or("unknown", |m| m.as_str()).into();
+        let operation = captures.get(3).map_or("unknown", |m| m.as_str());
+        let query = target_url.query().unwrap_or_default();
+        let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
+        let command = parsed_query
+            .get("command")
+            .cloned()
+            .unwrap_or("unknown".into())
+            .into();
+        let container = parsed_query
+            .get("container")
+            .cloned()
+            .unwrap_or("unknown".into())
+            .into();
+        return match operation {
+            "exec" => Some(SessionRecordingMetadata::Exec {
+                namespace,
+                pod,
+                container,
+                command,
+            }),
+            "attach" => Some(SessionRecordingMetadata::Attach {
+                namespace,
+                pod,
+                container,
+            }),
+            _ => None,
+        };
+    }
+    None
 }

@@ -13,8 +13,6 @@ chrono = { version = "0.4", default-features = false, features = ["serde"] }
 dashmap = { version = "6.0", default-features = false }
 futures.workspace = true
 http = { version = "1.0", default-features = false }
-k8s-openapi.workspace = true
-kube.workspace = true
 lazy_static = { version = "1.4", default-features = false }
 md5 = { version = "0.7", default-features = false }
 poem.workspace = true
