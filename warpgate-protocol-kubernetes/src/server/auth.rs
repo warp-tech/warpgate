@@ -3,15 +3,16 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use base64;
 use poem::Request;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::Mutex;
 use tracing::*;
+use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetKubernetesOptions, TargetOptions, User};
 use warpgate_core::{ConfigProvider, Services, State};
-use warpgate_db_entities::CertificateCredential;
+use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
-use crate::server::cert_auth::RequestCertificateExt;
+use crate::server::client_certs::RequestCertificateExt;
 
 pub async fn authenticate_and_get_target(
     req: &Request,
@@ -179,12 +180,23 @@ pub async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
 ) -> anyhow::Result<Option<AuthStateUserInfo>> {
-    // TODO check revocation lists
-
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der)?;
 
     let db = services.db.lock().await;
+
+    // Check if certificate is revoked (by serial number)
+    let cert = deserialize_certificate(&cert_pem)?;
+    let serial_b64 = serialize_certificate_serial(&cert);
+    if CertificateRevocation::Entity::find()
+        .filter(CertificateRevocation::Column::SerialNumberBase64.eq(&serial_b64))
+        .one(&*db)
+        .await?
+        .is_some()
+    {
+        warn!(serial = %serial_b64, "Client certificate is revoked");
+        return Ok(None);
+    }
 
     // Find all certificate credentials and match against the provided certificate
     let cert_credentials = CertificateCredential::Entity::find()

@@ -12,14 +12,14 @@ use warpgate_tls::{
 };
 
 use crate::correlator::RequestCorrelator;
-use crate::server::cert_auth::{AcceptAnyClientCert, CertificateCapturingAcceptor};
+use crate::server::client_certs::{AcceptAnyClientCert, CertificateCapturingAcceptor};
 use crate::server::handlers::handle_api_request;
 
 mod auth;
-mod cert_auth;
+mod client_certs;
 mod handlers;
 
-use cert_auth::CertificateExtractorMiddleware;
+use client_certs::CertificateExtractorMiddleware;
 
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
     let state = services.state.clone();

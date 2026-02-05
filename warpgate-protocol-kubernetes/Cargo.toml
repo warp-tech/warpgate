@@ -34,5 +34,6 @@ warpgate-common = { version = "*", path = "../warpgate-common", default-features
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
 tokio-tungstenite.workspace = true
 reqwest-websocket.workspace = true
