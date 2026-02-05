@@ -27,6 +27,8 @@ pub struct Model {
     pub ended: Option<DateTime<Utc>>,
     pub session_id: Uuid,
     pub kind: RecordingKind,
+    #[sea_orm(column_type = "Text")]
+    pub metadata: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

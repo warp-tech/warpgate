@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-44-gca1755f9-modified"
+    "version": "v0.20.0-37-g94ecc95e-modified"
   },
   "servers": [
     {
@@ -4039,7 +4039,8 @@
           "name",
           "started",
           "session_id",
-          "kind"
+          "kind",
+          "metadata"
         ],
         "properties": {
           "id": {
@@ -4063,6 +4064,9 @@
           },
           "kind": {
             "$ref": "#/components/schemas/RecordingKind"
+          },
+          "metadata": {
+            "type": "string"
           }
         }
       },

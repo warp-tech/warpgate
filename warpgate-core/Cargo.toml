@@ -10,7 +10,7 @@ warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
 warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
 
-anyhow = { version = "1.0", features = ["std"] }
+anyhow.workspace = true
 argon2 = "0.5"
 async-trait = "0.1"
 bytes.workspace = true

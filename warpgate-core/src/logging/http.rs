@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::fmt::Display;
 use std::net::ToSocketAddrs;
 
 use poem::http::{Method, StatusCode, Uri};
@@ -77,7 +77,12 @@ pub fn log_request_result(
     }
 }
 
-pub fn log_request_error<E: Error>(method: &Method, url: &Uri, client_ip: Option<&str>, error: E) {
+pub fn log_request_error<E: Display>(
+    method: &Method,
+    url: &Uri,
+    client_ip: Option<&str>,
+    error: &E,
+) {
     let client_ip = client_ip.unwrap_or("<unknown>");
     error!(%method, %url, %error, %client_ip, "Request failed");
 }

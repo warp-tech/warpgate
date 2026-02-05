@@ -16,6 +16,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
+    import { recordingMetadataToFieldSet, recordingTypeLabel } from 'common/recordings'
 
     interface Props {
         params: { id: string }
@@ -126,14 +127,25 @@
         <h3 class="mt-4">Recordings</h3>
         <div class="list-group list-group-flush">
             {#each recordings as recording (recording.id)}
+                {@const metadata = JSON.parse(recording.metadata)}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/recordings/{recording.id}"
                     use:link>
-                    <div class="main">
+                    <div class="main gap-1">
                         <strong>
-                            {recording.name}
+                            {recordingTypeLabel(recording)}
+                            {#if !metadata}
+                                : {recording.name}
+                            {/if}
                         </strong>
+                        {#if metadata}
+                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
+                                <div>
+                                    <span class="text-muted">{item[0]}:</span> {item[1]}
+                                </div>
+                            {/each}
+                        {/if}
                         <small class="meta ms-auto">
                             {timeAgo(recording.started)}
                         </small>

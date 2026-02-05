@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use serde::Serialize;
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
@@ -76,15 +77,22 @@ impl SessionRecordings {
         })
     }
 
-    pub async fn start<T>(&mut self, id: &SessionId, name: String) -> Result<T>
+    /// Starting a recording with the same name again will append to it
+    pub async fn start<T, M>(
+        &mut self,
+        id: &SessionId,
+        name: Option<String>,
+        metadata: M,
+    ) -> Result<T>
     where
         T: Recorder,
+        M: Serialize,
     {
         if !self.config.enable {
             return Err(Error::Disabled);
         }
 
-        let name = sanitize_name(&name)?;
+        let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
         let path = self.path_for(id, &name);
 
         tokio::fs::create_dir_all(&path.parent().ok_or(Error::InvalidPath)?).await?;
@@ -111,6 +119,7 @@ impl SessionRecordings {
                         session_id: Set(*id),
                         name: Set(name.clone()),
                         kind: Set(T::kind()),
+                        metadata: Set(serde_json::to_string(&metadata)?),
                         ..Default::default()
                     };
                     values.insert(&*db).await.map_err(Error::Database)?
@@ -153,21 +162,4 @@ impl SessionRecordings {
     pub fn path_for<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> PathBuf {
         self.path.join(session_id.to_string()).join(&name)
     }
-}
-
-fn sanitize_name(name: &str) -> Result<String> {
-    if name.is_empty() || name.contains('\0') {
-        return Err(Error::InvalidPath);
-    }
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        if c == '/' || c == '\\' || c.is_control() {
-            continue;
-        }
-        out.push(c);
-    }
-    if out.is_empty() || out == "." || out == ".." {
-        return Err(Error::InvalidPath);
-    }
-    Ok(out)
 }

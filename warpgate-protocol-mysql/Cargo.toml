@@ -10,7 +10,7 @@ warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = fal
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols", default-features = false }
-anyhow = { version = "1.0", features = ["std"], default-features = false }
+anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 futures.workspace = true
 tokio.workspace = true

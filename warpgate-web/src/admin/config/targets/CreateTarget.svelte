@@ -1,16 +1,20 @@
 <script lang="ts">
     import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
-    import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import RadioButton from 'common/RadioButton.svelte'
     import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
 
+    interface Props {
+        params: { kind: string };
+    }
+
+    let { params }: Props = $props()
+
     let error: string|null = $state(null)
     let name = $state('')
-    let type: TargetKind = $state(TargetKind.Ssh)
     let groups: TargetGroup[] = $state([])
     let selectedGroupId: string | undefined = $state()
 
@@ -18,7 +22,7 @@
         try {
             const options: TargetOptions|undefined = {
                 Ssh: {
-                    kind: 'Ssh' as const,
+                    kind: TargetKind.Ssh,
                     host: '192.168.0.1',
                     port: 22,
                     username: 'root',
@@ -27,7 +31,7 @@
                     },
                 },
                 Http: {
-                    kind: 'Http' as const,
+                    kind: TargetKind.Http,
                     url: 'http://192.168.0.1',
                     tls: {
                         mode: TlsMode.Preferred,
@@ -35,7 +39,7 @@
                     },
                 },
                 MySql: {
-                    kind: 'MySql' as const,
+                    kind: TargetKind.MySql,
                     host: '192.168.0.1',
                     port: 3306,
                     tls: {
@@ -46,7 +50,7 @@
                     password: '',
                 },
                 Postgres: {
-                    kind: 'Postgres' as const,
+                    kind: TargetKind.Postgres,
                     host: '192.168.0.1',
                     port: 5432,
                     tls: {
@@ -57,7 +61,7 @@
                     password: '',
                 },
                 Kubernetes: {
-                    kind: 'Kubernetes' as const,
+                    kind: TargetKind.Kubernetes,
                     clusterUrl: 'https://kubernetes.example.com:6443',
                     namespace: 'default',
                     tls: {
@@ -71,7 +75,7 @@
                     },
                 },
                 WebAdmin: null as any,
-            }[type]
+            }[params.kind]
             if (!options) {
                 return
             }
@@ -95,14 +99,6 @@
             error = await stringifyError(err)
         }
     })
-
-    const kinds: { name: string, value: TargetKind }[] = [
-        { name: 'SSH', value: TargetKind.Ssh },
-        { name: 'HTTP', value: TargetKind.Http },
-        { name: 'MySQL', value: TargetKind.MySql },
-        { name: 'PostgreSQL', value: TargetKind.Postgres },
-        { name: 'Kubernetes', value: TargetKind.Kubernetes },
-    ]
 </script>
 
 <div class="container-max-md">
@@ -121,18 +117,6 @@
         }}>
             <!-- Defualt button for key handling -->
             <Button class="d-none" type="submit"></Button>
-
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-            <label class="mb-2">Type</label>
-            <ButtonGroup class="w-100 mb-3">
-                {#each kinds as kind (kind.value)}
-                    <RadioButton
-                        label={kind.name}
-                        value={kind.value}
-                        bind:group={type}
-                    />
-                {/each}
-            </ButtonGroup>
 
             <FormGroup floating label="Name">
                 <input class="form-control" required bind:value={name} />

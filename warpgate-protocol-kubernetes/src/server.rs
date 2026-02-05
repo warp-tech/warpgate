@@ -3,22 +3,18 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use base64::{self, Engine as _};
-use bytes::Bytes;
-use chrono::Utc;
 use futures::{StreamExt, TryStreamExt};
 use poem::listener::{Acceptor, Listener};
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, LocalAddr, Path, RemoteAddr};
-use poem::{
-    get, handler, Addr, Body, Endpoint, EndpointExt, IntoResponse, Request, Response, Route, Server,
-};
+use poem::{handler, Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, Server};
 use regex::Regex;
 use reqwest_websocket::Upgrade;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::tungstenite;
@@ -27,14 +23,12 @@ use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::{
-    ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions, User, WarpgateError,
+    ListenEndpoint, SessionId, Target, TargetKubernetesOptions, TargetOptions, User,
 };
 use warpgate_core::logging::http::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_core::recordings::{
-    SessionRecordings, TerminalRecorder, TerminalRecordingItem, TerminalRecordingStreamId,
-};
+use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{AuthStateStore, ConfigProvider, Services, State};
 use warpgate_db_entities::CertificateCredential;
 use warpgate_tls::{
@@ -251,27 +245,42 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     Ok(())
 }
 
-fn deduce_exec_recording_name(target_url: &Url) -> String {
+fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
     let path = target_url.path();
-    let exec_url_regex = Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
-    let timestamp = Utc::now().format("%Y%m%d%H%M%S");
+    let exec_url_regex =
+        Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
     if let Some(captures) = exec_url_regex.captures(path) {
-        let namespace = captures.get(1).map_or("unknown", |m| m.as_str());
-        let pod_name = captures.get(2).map_or("unknown", |m| m.as_str());
+        let namespace = captures.get(1).map_or("unknown", |m| m.as_str()).into();
+        let pod = captures.get(2).map_or("unknown", |m| m.as_str()).into();
         let operation = captures.get(3).map_or("unknown", |m| m.as_str());
         let query = target_url.query().unwrap_or_default();
         let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
         let command = parsed_query
             .get("command")
             .cloned()
-            .unwrap_or("unknown".into());
+            .unwrap_or("unknown".into())
+            .into();
         let container = parsed_query
             .get("container")
             .cloned()
-            .unwrap_or("unknown".into());
-        return format!("exec {namespace} {pod_name} {container} {operation} {command} {timestamp}");
+            .unwrap_or("unknown".into())
+            .into();
+        return match operation {
+            "exec" => Some(SessionRecordingMetadata::Exec {
+                namespace,
+                pod,
+                container,
+                command,
+            }),
+            "attach" => Some(SessionRecordingMetadata::Attach {
+                namespace,
+                pod,
+                container,
+            }),
+            _ => None,
+        };
     }
-    "exec-unknown".to_string()
+    None
 }
 
 fn construct_target_url(
@@ -296,7 +305,7 @@ async fn handle_api_request(
     ws: Option<WebSocket>,
     req: &Request,
     Path((target_name, path)): Path<(String, String)>,
-    body: Option<Body>,
+    body: Body,
     state: Data<&Arc<Mutex<State>>>,
     _auth_state_store: Data<&Arc<Mutex<AuthStateStore>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
@@ -351,7 +360,7 @@ async fn handle_api_request(
         } else {
             _handle_request_inner(
                 req,
-                body.unwrap(), //TODO
+                body,
                 k8s_options,
                 &path,
                 user_info,
@@ -391,7 +400,7 @@ async fn _handle_websocket_request_inner(
     session_id: SessionId,
     services: &Services,
     recordings: &Arc<Mutex<SessionRecordings>>,
-) -> Result<impl IntoResponse, WarpgateError> {
+) -> anyhow::Result<impl IntoResponse> {
     let mut full_url = construct_target_url(req, path, k8s_options)?;
     if full_url.scheme() == "https" {
         let _ = full_url.set_scheme("wss");
@@ -407,15 +416,15 @@ async fn _handle_websocket_request_inner(
     let client_response = client
         .get(full_url.clone())
         .upgrade()
-        .protocols(vec!["v5.channel.k8s.io"]) // TODO copy from req?
+        .protocols(vec!["v5.channel.k8s.io"])
         .send()
         .await
-        .map_err(WarpgateError::other)?;
+        .context("sending websocket request to Kubernetes API")?;
 
     let client_socket = client_response
         .into_websocket()
         .await
-        .map_err(WarpgateError::other)?;
+        .context("negotiating websocket connection with Kubernetes")?;
 
     let (client_sink, client_source) = client_socket.split();
 
@@ -429,7 +438,7 @@ async fn _handle_websocket_request_inner(
             match start_recording_exec(
                 &session_id,
                 recordings,
-                deduce_exec_recording_name(&full_url),
+                deduce_exec_recording_metadata(&full_url),
             )
             .await
             {
@@ -537,10 +546,11 @@ async fn _handle_request_inner(
     session_id: SessionId,
     services: &Services,
     recordings: &Arc<Mutex<SessionRecordings>>,
-) -> Result<Response, WarpgateError> {
+) -> anyhow::Result<Response> {
     let client =
         create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
-            .build()?;
+            .build()
+            .context("building reqwest client")?;
 
     debug!(
         "Target Kubernetes options: cluster_url={}, auth={:?}",
@@ -553,7 +563,8 @@ async fn _handle_request_inner(
 
     let method = req.method().as_str();
     // Construct the full URL to the Kubernetes API server (without target prefix)
-    let full_url = construct_target_url(req, path, k8s_options)?;
+    let full_url =
+        construct_target_url(req, path, k8s_options).context("constructing target URL")?;
 
     // Extract headers
     let mut headers = HashMap::new();
@@ -564,7 +575,7 @@ async fn _handle_request_inner(
     }
 
     // Get request body
-    let body_bytes = body.into_bytes().await.map_err(WarpgateError::other)?;
+    let body_bytes = body.into_bytes().await.context("reading request body")?;
 
     // Record the request if recording is enabled
     let mut recorder_opt = {
@@ -587,7 +598,7 @@ async fn _handle_request_inner(
 
     // Forward request to Kubernetes API
     let mut request_builder = client.request(
-        http::Method::from_bytes(method.as_bytes()).map_err(WarpgateError::other)?,
+        http::Method::from_bytes(method.as_bytes()).context("request method")?,
         full_url.clone(),
     );
 
@@ -637,19 +648,15 @@ async fn _handle_request_inner(
     let response = request_builder
         .send()
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             warn!(
                 method = method,
                 url = %full_url,
                 error = %e,
                 "Kubernetes API request failed"
             );
-            poem::Error::from_string(
-                format!("Kubernetes API error: {}", e),
-                poem::http::StatusCode::BAD_GATEWAY,
-            )
         })
-        .map_err(WarpgateError::other)?;
+        .context("sending request to Kubernetes API")?;
 
     let status = response.status();
     let response_headers = response.headers().clone();
@@ -683,13 +690,7 @@ async fn _handle_request_inner(
             let bytes = response
                 .bytes()
                 .await
-                .map_err(|e| {
-                    poem::Error::from_string(
-                        format!("Failed to read response: {}", e),
-                        poem::http::StatusCode::BAD_GATEWAY,
-                    )
-                })
-                .map_err(WarpgateError::other)?;
+                .context("reading kubernetes response")?;
 
             (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
         }
@@ -731,7 +732,7 @@ async fn authenticate_and_get_target(
     target_name: &str,
     _state: &Arc<Mutex<State>>,
     services: &Services,
-) -> Result<(AuthStateUserInfo, Target), poem::Error> {
+) -> poem::Result<(AuthStateUserInfo, Target)> {
     use RequestCertificateExt; // Import the trait for certificate extraction
 
     // Check for Bearer token authentication (API tokens)
@@ -741,12 +742,10 @@ async fn authenticate_and_get_target(
                 let mut config_provider = services.config_provider.lock().await;
                 if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
                     // Look up the specific target by name from the URL
-                    let targets = config_provider.list_targets().await.map_err(|e| {
-                        poem::Error::from_string(
-                            format!("Failed to list targets: {}", e),
-                            poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        )
-                    })?;
+                    let targets = config_provider
+                        .list_targets()
+                        .await
+                        .context("listing targets")?;
 
                     // Find the target with the specified name
                     for target in targets {
@@ -786,12 +785,10 @@ async fn authenticate_and_get_target(
             Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
                 let mut config_provider = services.config_provider.lock().await;
-                let targets = config_provider.list_targets().await.map_err(|e| {
-                    poem::Error::from_string(
-                        format!("Failed to list targets: {}", e),
-                        poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    )
-                })?;
+                let targets = config_provider
+                    .list_targets()
+                    .await
+                    .context("listing targets")?;
 
                 // Find the target with the specified name
                 for target in targets {
@@ -836,17 +833,11 @@ async fn authenticate_and_get_target(
     ))
 }
 
-// struct RequestConfig {
-//     tls_verify: bool,
-//     headers: HashMap<String, String>,
-//     identity_pem: Option<String>,
-// }
-
 fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
     _auth_user: &Option<String>,
     _services: &Services,
-) -> Result<reqwest::ClientBuilder, WarpgateError> {
+) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
         server_url = ?k8s_options.cluster_url,
         auth_kind = ?k8s_options.auth,
@@ -870,7 +861,7 @@ fn create_authenticated_client(
                     "Bearer {}",
                     auth.token.expose_secret()
                 ))
-                .map_err(WarpgateError::other)?,
+                .context("setting Authorization header")?,
             );
             client_builder = client_builder.default_headers(headers);
         }
@@ -891,16 +882,7 @@ fn create_authenticated_client(
 
             info!("Configuring Kubernetes client with mTLS (certificate auth)");
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
-                .map_err(|e| {
-                    poem::Error::from_string(
-                        format!(
-                            "Invalid client certificate/key for Kubernetes upstream: {}",
-                            e
-                        ),
-                        poem::http::StatusCode::BAD_REQUEST,
-                    )
-                })
-                .map_err(WarpgateError::other)?;
+                .context("Invalid client certificate/key for Kubernetes upstream")?;
             client_builder = client_builder.identity(identity);
         }
     }
@@ -908,44 +890,58 @@ fn create_authenticated_client(
     Ok(client_builder)
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum SessionRecordingMetadata {
+    #[serde(rename = "kubernetes-api")]
+    Api,
+    #[serde(rename = "kubernetes-exec")]
+    Exec {
+        namespace: String,
+        pod: String,
+        container: String,
+        command: String,
+    },
+    #[serde(rename = "kubernetes-attach")]
+    Attach {
+        namespace: String,
+        pod: String,
+        container: String,
+    },
+}
+
 async fn start_recording_api(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
-) -> Result<KubernetesRecorder, poem::Error> {
+) -> anyhow::Result<KubernetesRecorder> {
     let mut recordings = recordings.lock().await;
-    recordings
-        .start::<KubernetesRecorder>(session_id, "kubernetes-api".to_string())
+    Ok(recordings
+        .start::<KubernetesRecorder, _>(
+            session_id,
+            Some("api".into()),
+            SessionRecordingMetadata::Api,
+        )
         .await
-        .map_err(|e| {
-            poem::Error::from_string(
-                format!("Recording error: {}", e),
-                poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        })
+        .context("starting recording")?)
 }
 
 async fn start_recording_exec(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
-    name: String,
-) -> Result<TerminalRecorder, poem::Error> {
+    metadata: Option<SessionRecordingMetadata>,
+) -> anyhow::Result<TerminalRecorder> {
     let mut recordings = recordings.lock().await;
     recordings
-        .start::<TerminalRecorder>(session_id, name)
+        .start::<TerminalRecorder, _>(session_id, None, metadata)
         .await
-        .map_err(|e| {
-            poem::Error::from_string(
-                format!("Recording error: {}", e),
-                poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        })
+        .context("starting recording")
 }
 
 // Helper function to validate client certificate against database
 async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> Result<Option<AuthStateUserInfo>, anyhow::Error> {
+) -> anyhow::Result<Option<AuthStateUserInfo>> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der)?;
 

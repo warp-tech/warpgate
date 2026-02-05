@@ -6,7 +6,7 @@ version = "0.20.0"
 
 [dependencies]
 ansi_term = { version = "0.12", default-features = false }
-anyhow = { version = "1.0", features = ["backtrace"], default-features = false }
+anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true
 clap = { version = "4.0", features = ["derive", "env"], default-features = false }

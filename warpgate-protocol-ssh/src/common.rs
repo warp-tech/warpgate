@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use bytes::Bytes;
 use russh::{ChannelId, Pty, Sig};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub struct PtyRequest {
@@ -70,4 +71,21 @@ pub enum ChannelOperation {
     Close,
     Eof,
     Signal(Sig),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SshRecordingMetadata {
+    #[serde(rename = "ssh-shell")]
+    Shell { channel: usize },
+    #[serde(rename = "ssh-exec")]
+    Exec { channel: usize },
+    #[serde(rename = "ssh-direct-tcpip")]
+    DirectTcpIp { host: String, port: u16 },
+    #[serde(rename = "ssh-direct-socket")]
+    DirectSocket { path: String },
+    #[serde(rename = "ssh-forwarded-tcpip")]
+    ForwardedTcpIp { host: String, port: u16 },
+    #[serde(rename = "ssh-forwarded-socket")]
+    ForwardedSocket { path: String },
 }

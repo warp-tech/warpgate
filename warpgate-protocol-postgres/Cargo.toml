@@ -8,7 +8,7 @@ version = "0.20.0"
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-anyhow = { version = "1.0", features = ["std"], default-features = false }
+anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 tokio.workspace = true
 tracing.workspace = true

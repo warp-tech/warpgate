@@ -250,7 +250,7 @@
                     <textarea class="form-control" rows="8" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
                 </FormGroup>
                 <FormGroup floating label="Client Private Key">
-                    <textarea class="form-control" rows="8" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                    <textarea class="form-control" rows="8" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
                 </FormGroup>
             {/if}
 

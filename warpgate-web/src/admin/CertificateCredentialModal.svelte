@@ -138,7 +138,7 @@
                 <p>Certificate has been issued</p>
             </div>
             <Alert color="warning" fade={false} class="mb-3">
-                You must download the private key and the certificate now - you won't be possible to access them later.
+                You must download the private key and the certificate now - you won't be able to access them later.
             </Alert>
         {:else}
             <FormGroup floating label="Certificate label">

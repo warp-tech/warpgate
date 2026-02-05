@@ -9,7 +9,7 @@ name = "config-schema"
 path = "src/config_schema.rs"
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false }
+anyhow.workspace = true
 clap = { version = "4.0", features = ["derive", "std"], default-features = false }
 argon2 = { version = "0.5", default-features = false }
 async-trait = { version = "0.1", default-features = false }

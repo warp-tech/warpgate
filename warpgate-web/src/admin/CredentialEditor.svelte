@@ -8,8 +8,9 @@
 </script>
 
 <script lang="ts">
-    import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues } from 'admin/lib/api'
+    import { faCertificate, faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues, type ExistingCertificateCredential } from 'admin/lib/api'
+    import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
@@ -54,13 +55,15 @@
     ]
 
     // Get effective possible credentials for a protocol, considering global SSH auth settings
-    function getEffectivePossibleCredentials(protocolId: string): Set<CredentialKind> {
+    function getEffectivePossibleCredentials(protocolId: string): SvelteSet<CredentialKind> {
         const base = possibleCredentials[protocolId]
-        if (!base) return new Set()
+        if (!base) {
+            return new SvelteSet()
+        }
 
         // For SSH, filter based on global auth method settings
         if (protocolId === 'ssh' && globalParameters) {
-            const filtered = new Set<CredentialKind>()
+            const filtered = new SvelteSet<CredentialKind>()
             for (const kind of base) {
                 // PublicKey requires publickey auth enabled
                 if (kind === CredentialKind.PublicKey && !globalParameters.sshClientAuthPublickey) {
@@ -79,7 +82,7 @@
             return filtered
         }
 
-        return base
+        return new SvelteSet(base)
     }
 
     async function load () {
@@ -133,7 +136,14 @@
     }
 
     async function deleteCredential (credential: ExistingCredential) {
+        if (credential.kind === CredentialKind.Certificate) {
+            if (!confirm('Permanently revoke certificate? This cannot be undone.')) {
+                return
+            }
+        }
+
         credentials = credentials.filter(c => c !== credential)
+
         if (credential.kind === CredentialKind.Password) {
             await api.deletePasswordCredential({
                 id: credential.id,
@@ -153,12 +163,10 @@
             })
         }
         if (credential.kind === CredentialKind.Certificate) {
-            if (confirm('Permanently revoke certificate?')) {
-                await api.revokeCertificateCredential({
-                    id: credential.id,
-                    userId,
-                })
-            }
+            await api.revokeCertificateCredential({
+                id: credential.id,
+                userId,
+            })
         }
         if (credential.kind === CredentialKind.Totp) {
             await api.deleteOtpCredential({
@@ -278,13 +286,6 @@
         })
 
         return response
-    }
-
-    function assertDefined<T>(value: T|undefined): T {
-        if (value === undefined) {
-            throw new Error('Value is undefined')
-        }
-        return value
     }
 </script>
 
