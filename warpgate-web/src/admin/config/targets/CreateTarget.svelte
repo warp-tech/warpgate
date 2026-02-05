@@ -119,7 +119,7 @@
             <Button class="d-none" type="submit"></Button>
 
             <FormGroup floating label="Name">
-                <input class="form-control" required bind:value={name} />
+                <input class="form-control" autofocus required bind:value={name} />
             </FormGroup>
 
             {#if groups.length > 0}
