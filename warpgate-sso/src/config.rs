@@ -43,6 +43,10 @@ pub struct SsoProviderConfig {
     pub return_domain_whitelist: Option<Vec<String>>,
     #[serde(default)]
     pub auto_create_users: bool,
+    /// Default credential policy for auto-created users.
+    /// Keys: "http", "ssh", "mysql", "postgres"
+    /// Values: list of credential kinds e.g. ["Sso"], ["WebUserApproval"], []
+    pub default_credential_policy: Option<serde_json::Value>,
 }
 
 impl SsoProviderConfig {
