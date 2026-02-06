@@ -1,5 +1,6 @@
 mod config;
 mod error;
+pub(crate) mod google_groups;
 mod request;
 mod response;
 mod sso;

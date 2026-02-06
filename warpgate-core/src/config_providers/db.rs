@@ -573,11 +573,14 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         for role_name in managed_role_names.into_iter() {
-            let role = entities::Role::Entity::find()
+            let Some(role) = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
                 .one(&*db)
                 .await?
-                .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
+            else {
+                warn!("SSO role mapping references non-existent role {role_name:?}, skipping");
+                continue;
+            };
 
             let assignment = entities::UserRoleAssignment::Entity::find()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
