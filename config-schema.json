@@ -253,6 +253,20 @@
         }
       }
     },
+    "RoleMapping": {
+      "description": "A role mapping value that accepts either a single role or a list of roles.\n In YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "SniCertificateConfig": {
       "type": "object",
       "properties": {
@@ -331,11 +345,42 @@
               "type": "string",
               "const": "google"
             },
+            "admin_email": {
+              "description": "A Google Workspace admin email for domain-wide delegation",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "client_id": {
               "type": "string"
             },
             "client_secret": {
               "type": "string"
+            },
+            "role_mappings": {
+              "description": "Maps Google group email addresses to Warpgate role names.\n Use \"*\" as a key to set a default role for any group not explicitly mapped.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
+            "service_account_email": {
+              "description": "Service account email for Google Directory API group lookups",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service_account_key": {
+              "description": "PEM private key from the service account JSON key file",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -427,7 +472,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "type": "string"
+                "$ref": "#/$defs/RoleMapping"
               }
             },
             "scopes": {

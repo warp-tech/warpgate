@@ -260,20 +260,38 @@ impl Api {
             // and names won't be remapped
             let managed_role_names = mappings
                 .as_ref()
-                .map(|m| m.iter().map(|x| x.1.clone()).collect::<Vec<_>>());
+                .map(|m| {
+                    m.iter()
+                        .flat_map(|(_, v)| v.roles())
+                        .collect::<Vec<_>>()
+                });
 
-            let active_role_names: Vec<_> = remote_groups
-                .iter()
-                .filter_map({
-                    |r| {
-                        if let Some(ref mappings) = mappings {
-                            mappings.get(r).cloned()
-                        } else {
-                            Some(r.clone())
-                        }
+            let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
+                // Apply wildcard "*" mapping if user has any groups
+                let mut roles: Vec<String> = if !remote_groups.is_empty() {
+                    mappings
+                        .get("*")
+                        .map(|v| v.roles())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                // Apply specific group mappings
+                for group in &remote_groups {
+                    if let Some(mapping) = mappings.get(group) {
+                        roles.extend(mapping.roles());
                     }
-                })
-                .collect();
+                }
+
+                roles
+            } else {
+                // No mappings configured, pass through group names as-is
+                remote_groups
+            };
+
+            active_role_names.sort();
+            active_role_names.dedup();
 
             debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
             cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
