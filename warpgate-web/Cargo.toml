@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-web"
-version = "0.20.1"
+version = "0.20.2"
 
 [dependencies]
 serde.workspace = true
