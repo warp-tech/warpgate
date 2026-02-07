@@ -39,23 +39,6 @@ const DIRECTORY_SCOPE: &str = "https://www.googleapis.com/auth/admin.directory.g
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DIRECTORY_GROUPS_URL: &str = "https://admin.googleapis.com/admin/directory/v1/groups";
 
-/// Resolves a config value that may be an environment variable reference.
-/// Values starting with `$` are treated as env var references:
-///   - `$VAR_NAME` or `${VAR_NAME}` will read from the named env var.
-///   - All other values are returned as-is.
-fn resolve_env_var(value: &str) -> Result<String, SsoError> {
-    if let Some(var_name) = value.strip_prefix('$') {
-        let var_name = var_name.trim_start_matches('{').trim_end_matches('}');
-        std::env::var(var_name).map_err(|_| {
-            SsoError::ConfigError(format!(
-                "Environment variable {var_name} not set (referenced in Google SSO config)"
-            ))
-        })
-    } else {
-        Ok(value.to_string())
-    }
-}
-
 /// If the config is a Google provider with service account fields configured,
 /// fetches the user's group memberships from the Google Directory API.
 /// Returns `Ok(None)` if not a Google provider or service account is not configured.
@@ -73,10 +56,6 @@ pub async fn fetch_groups_if_configured(
         return Ok(None);
     };
 
-    let sa_email = resolve_env_var(sa_email)?;
-    let sa_key = resolve_env_var(sa_key)?;
-    let admin_email = resolve_env_var(admin_email)?;
-
     let Some(user_email) = user_email else {
         warn!("Google group sync configured but user email not available from OIDC claims");
         return Ok(None);
@@ -85,7 +64,7 @@ pub async fn fetch_groups_if_configured(
     debug!("Fetching Google groups for {user_email}");
 
     let http_client = reqwest::ClientBuilder::new().build()?;
-    let access_token = get_access_token(&http_client, &sa_email, &sa_key, &admin_email).await?;
+    let access_token = get_access_token(&http_client, sa_email, sa_key, admin_email).await?;
     let groups = fetch_user_groups(&http_client, &access_token, user_email).await?;
 
     debug!("Google groups for {user_email}: {groups:?}");
