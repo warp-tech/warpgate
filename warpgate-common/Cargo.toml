@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-common"
-version = "0.20.0"
+version = "0.20.2"
 
 [[bin]]
 name = "config-schema"
