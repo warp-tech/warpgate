@@ -39,8 +39,12 @@ const DIRECTORY_SCOPE: &str = "https://www.googleapis.com/auth/admin.directory.g
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DIRECTORY_GROUPS_URL: &str = "https://admin.googleapis.com/admin/directory/v1/groups";
 
-/// If the config is a Google provider with service account fields configured,
-/// fetches the user's group memberships from the Google Directory API.
+/// Fetches the user's Google Workspace group memberships via the Directory API.
+///
+/// Requires `service_account_email`, `service_account_key`, and `admin_email`
+/// to be configured on the Google SSO provider. These values should be
+/// resolved by the deployment environment before Warpgate reads the config.
+///
 /// Returns `Ok(None)` if not a Google provider or service account is not configured.
 pub async fn fetch_groups_if_configured(
     config: &SsoInternalProviderConfig,
