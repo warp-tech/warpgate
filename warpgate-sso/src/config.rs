@@ -45,7 +45,7 @@ pub struct SsoProviderConfig {
     pub auto_create_users: bool,
     /// Default credential policy for auto-created users.
     /// Keys: "http", "ssh", "mysql", "postgres"
-    /// Values: list of credential kinds e.g. ["Sso"], ["WebUserApproval"], []
+    /// Values: list of credential kinds e.g. ["sso"], ["web"], []
     pub default_credential_policy: Option<serde_json::Value>,
 }
 

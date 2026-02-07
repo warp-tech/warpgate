@@ -503,6 +503,9 @@
           "type": "boolean",
           "default": false
         },
+        "default_credential_policy": {
+          "description": "Default credential policy for auto-created users.\n Keys: \"http\", \"ssh\", \"mysql\", \"postgres\"\n Values: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+        },
         "label": {
           "type": [
             "string",
