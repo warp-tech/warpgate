@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential } from 'gateway/lib/api'
+    import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential, type ExistingCertificateCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
+    import { faCertificate, faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
+    import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
@@ -15,6 +16,7 @@
     let creds: CredentialsState | undefined = $state()
 
     let creatingPublicKeyCredential = $state(false)
+    let issuingCertificateCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
 
@@ -56,6 +58,24 @@
     async function deleteOtp (credential: ExistingOtpCredential) {
         creds!.otp = creds!.otp.filter(c => c.id !== credential.id)
         await api.deleteMyOtp(credential)
+    }
+
+    async function issueCertificate (label: string, publicKeyPem: string) {
+        const response = await api.issueMyCertificate({
+            issueCertificateCredentialRequest: {
+                label,
+                publicKeyPem,
+            },
+        })
+        creds!.certificates.push(response.credential)
+        return response
+    }
+
+    async function deleteCertificate (credential: ExistingCertificateCredential) {
+        if (confirm('Permanently revoke certificate?')) {
+            creds!.certificates = creds!.certificates.filter(c => c.id !== credential.id)
+            await api.revokeMyCertificate(credential)
+        }
     }
 </script>
 
@@ -191,6 +211,45 @@
         </Alert>
     {/if}
 
+    <div class="d-flex align-items-center mt-4 mb-2">
+        <h4 class="m-0">Certificates</h4>
+        <span class="ms-auto"></span>
+        <Button color="link" onclick={e => {
+            issuingCertificateCredential = true
+            e.preventDefault()
+        }}>Issue certificate</Button>
+    </div>
+
+    <div class="list-group list-group-flush mb-3">
+        {#each creds.certificates as credential (credential.id)}
+        <div class="list-group-item credential">
+            <Fa fw icon={faCertificate} />
+            <div class="main ms-3 abbreviate">
+                <div class="label">{credential.label}</div>
+                <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
+            </div>
+            <span class="ms-auto"></span>
+            <CredentialUsedStateBadge credential={credential} />
+            <Button
+            color="link"
+                class="ms-2"
+                onclick={e => {
+                    deleteCertificate(credential)
+                    e.preventDefault()
+                }}
+            >
+                Delete
+            </Button>
+        </div>
+        {/each}
+    </div>
+
+    {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
+        <Alert color="warning">
+            Your credential policy requires using a certificate for authentication. Without one, you won't be able to log in.
+        </Alert>
+    {/if}
+
     {#if creds.sso.length > 0}
     <div class="d-flex align-items-center mt-4 mb-2">
         <h4 class="m-0">Single sign-on</h4>
@@ -230,6 +289,17 @@
     bind:isOpen={creatingOtpCredential}
     username={$serverInfo!.username!}
     create={createOtp}
+/>
+{/if}
+
+{#if issuingCertificateCredential}
+<CertificateCredentialModal
+    bind:isOpen={issuingCertificateCredential}
+    save={issueCertificate}
+    username={$serverInfo!.username!}
+    onClose={() => {
+        issuingCertificateCredential = false
+    }}
 />
 {/if}
 

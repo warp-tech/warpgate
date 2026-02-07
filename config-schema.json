@@ -27,6 +27,17 @@
         "trust_x_forwarded_headers": false
       }
     },
+    "kubernetes": {
+      "$ref": "#/$defs/KubernetesConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:8443",
+        "session_max_age": "30m"
+      }
+    },
     "log": {
       "$ref": "#/$defs/LogConfig",
       "default": {
@@ -145,6 +156,41 @@
         "trust_x_forwarded_headers": {
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "KubernetesConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:8443"
+        },
+        "session_max_age": {
+          "type": "string",
+          "default": "30m"
         }
       }
     },

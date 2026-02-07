@@ -101,13 +101,22 @@ impl RateLimiterRegistry {
         &mut self,
         state: &mut SessionState,
     ) -> Result<(), WarpgateError> {
-        // TODO figure something out so that handles do not get lost if update_rate_limiters fails for whatever reason
-        let mut handles = std::mem::take(&mut state.rate_limiter_handles);
-        for handle in handles.iter_mut() {
-            self.update_rate_limiters(state, handle).await?;
+        async fn inner(
+            this: &mut RateLimiterRegistry,
+            state: &mut SessionState,
+            handles: &mut [RateLimiterStackHandle],
+        ) -> Result<(), WarpgateError> {
+            for handle in handles.iter_mut() {
+                this.update_rate_limiters(state, handle).await?;
+            }
+            Ok(())
         }
+
+        let mut handles = std::mem::take(&mut state.rate_limiter_handles);
+        // Defer result handling so that we can put back the handles
+        let result = inner(self, state, &mut handles).await;
         state.rate_limiter_handles = handles;
-        Ok(())
+        result
     }
 
     pub async fn update_rate_limiters(
