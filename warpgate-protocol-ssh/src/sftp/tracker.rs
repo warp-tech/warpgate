@@ -78,7 +78,7 @@ impl FileTransferTracker {
         self.active_transfers.remove(handle).map(|transfer| {
             let hash = transfer.hasher.map(|h| {
                 let result = h.finalize();
-                format!("sha256:{:x}", result)
+                format!("sha256:{result:x}")
             });
 
             TransferComplete {
