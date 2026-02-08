@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type UserRoleHistoryEntry } from 'admin/lib/api'
+    import { api, type UserRoleHistoryEntry, type PaginatedResponseUserRoleHistoryEntry } from 'admin/lib/api'
     import { Modal, ModalBody, ModalFooter, Button } from '@sveltestrap/sveltestrap'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -17,7 +17,8 @@
     let history: UserRoleHistoryEntry[] = $state([])
 
     async function loadHistory() {
-        history = await api.getUserRoleHistory({ id: userId, roleId })
+        const response: PaginatedResponseUserRoleHistoryEntry = await api.getUserRoleHistory({ id: userId, roleId })
+        history = response.items
         return history
     }
 
@@ -51,9 +52,12 @@
         }
     }
 
-    function formatDate(dateStr: string | null | undefined): string {
+    function formatDate(dateStr: string | Date | null | undefined): string {
         if (!dateStr) {
             return 'Never'
+        }
+        if (dateStr instanceof Date) {
+            return dateStr.toLocaleString()
         }
         return new Date(dateStr).toLocaleString()
     }

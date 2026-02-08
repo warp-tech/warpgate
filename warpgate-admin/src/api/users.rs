@@ -13,11 +13,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
+use warpgate_common::api::RequestAuthorization;
 use warpgate_common::{User as UserConfig, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{Role, User, UserRoleAssignment, UserRoleHistory};
 
 use super::AnySecurityScheme;
+use crate::api::pagination::{PaginatedResponse, PaginationParams};
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -445,7 +447,7 @@ enum UpdateUserRoleExpiryResponse {
 #[derive(ApiResponse)]
 enum GetUserRoleHistoryResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<UserRoleHistoryEntry>>),
+    Ok(Json<PaginatedResponse<UserRoleHistoryEntry>>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -458,6 +460,31 @@ fn is_assignment_expired(assignment: &UserRoleAssignment::Model) -> bool {
         expires_at <= Utc::now()
     } else {
         false
+    }
+}
+
+/// Helper to get the actor ID from request authorization
+async fn get_actor_id(
+    db: &DatabaseConnection,
+    auth: &RequestAuthorization,
+) -> Result<Option<Uuid>, WarpgateError> {
+    match auth {
+        RequestAuthorization::Session(s) => {
+            let username = s.username();
+            let user = User::Entity::find()
+                .filter(User::Column::Username.eq(username))
+                .one(db)
+                .await?;
+            Ok(user.map(|u| u.id))
+        }
+        RequestAuthorization::UserToken { username } => {
+            let user = User::Entity::find()
+                .filter(User::Column::Username.eq(username))
+                .one(db)
+                .await?;
+            Ok(user.map(|u| u.id))
+        }
+        RequestAuthorization::AdminToken => Ok(None),
     }
 }
 
@@ -605,9 +632,11 @@ impl RolesApi {
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         body: Json<AddUserRoleRequest>,
+        auth: Data<&RequestAuthorization>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
+        let actor_id = get_actor_id(&*db, auth.0).await?;
 
         // Check if assignment already exists (including revoked ones)
         let existing = UserRoleAssignment::Entity::find()
@@ -636,7 +665,7 @@ impl RolesApi {
             user_id: Set(id.0),
             role_id: Set(role_id.0),
             granted_at: Set(Some(now)), // Option for SQLite compat, but always set
-            granted_by: Set(None),      // TODO: Get from auth context
+            granted_by: Set(actor_id),
             expires_at: Set(body.expires_at),
             revoked_at: Set(None),
             revoked_by: Set(None),
@@ -654,14 +683,14 @@ impl RolesApi {
             expires_at: body.expires_at,
             old_expires_at: None,
             new_expires_at: None,
-            actor_id: None, // TODO: Get from auth context
-            actor_username: None,
+            actor_id,
+            actor_username: auth.0.username().cloned(),
         };
 
-        create_history_entry(&db, id.0, role_id.0, "granted", None, details).await?;
+        create_history_entry(&*db, id.0, role_id.0, "granted", actor_id, details).await?;
 
         Ok(AddUserRoleResponse::Created(Json(
-            build_assignment_response(&db, &assignment, &role).await?,
+            build_assignment_response(&*db, &assignment, &role).await?,
         )))
     }
 
@@ -676,9 +705,11 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        auth: Data<&RequestAuthorization>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
+        let actor_id = get_actor_id(&*db, auth.0).await?;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
@@ -701,7 +732,7 @@ impl RolesApi {
         let now = Utc::now();
         let mut model: UserRoleAssignment::ActiveModel = assignment.clone().into();
         model.revoked_at = Set(Some(now));
-        model.revoked_by = Set(None); // TODO: Get from auth context
+        model.revoked_by = Set(actor_id);
         model.update(&*db).await?;
 
         // Create history entry
@@ -713,11 +744,11 @@ impl RolesApi {
             expires_at: assignment.expires_at,
             old_expires_at: None,
             new_expires_at: None,
-            actor_id: None,
-            actor_username: None,
+            actor_id,
+            actor_username: auth.0.username().cloned(),
         };
 
-        create_history_entry(&db, id.0, role_id.0, "revoked", None, details).await?;
+        create_history_entry(&*db, id.0, role_id.0, "revoked", actor_id, details).await?;
 
         Ok(DeleteUserRoleResponse::Deleted)
     }
@@ -734,9 +765,11 @@ impl RolesApi {
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         body: Json<UpdateUserRoleExpiryRequest>,
+        auth: Data<&RequestAuthorization>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserRoleExpiryResponse, WarpgateError> {
         let db = db.lock().await;
+        let actor_id = get_actor_id(&*db, auth.0).await?;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserRoleExpiryResponse::NotFound);
@@ -760,6 +793,9 @@ impl RolesApi {
         // Update expiry
         let mut model: UserRoleAssignment::ActiveModel = assignment.into();
         model.expires_at = Set(body.expires_at);
+        // If we are renewing an expired role, clear revoked_at
+        model.revoked_at = Set(None);
+        model.revoked_by = Set(None);
         let updated = model.update(&*db).await?;
 
         // Create history entry
@@ -771,14 +807,14 @@ impl RolesApi {
             expires_at: body.expires_at,
             old_expires_at,
             new_expires_at: body.expires_at,
-            actor_id: None,
-            actor_username: None,
+            actor_id,
+            actor_username: auth.0.username().cloned(),
         };
 
-        create_history_entry(&db, id.0, role_id.0, "expiry_changed", None, details).await?;
+        create_history_entry(&*db, id.0, role_id.0, "expiry_changed", actor_id, details).await?;
 
         Ok(UpdateUserRoleExpiryResponse::Ok(Json(
-            build_assignment_response(&db, &updated, &role).await?,
+            build_assignment_response(&*db, &updated, &role).await?,
         )))
     }
 
@@ -793,9 +829,11 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        auth: Data<&RequestAuthorization>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserRoleExpiryResponse, WarpgateError> {
         let db = db.lock().await;
+        let actor_id = get_actor_id(&*db, auth.0).await?;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserRoleExpiryResponse::NotFound);
@@ -819,6 +857,8 @@ impl RolesApi {
         // Remove expiry
         let mut model: UserRoleAssignment::ActiveModel = assignment.into();
         model.expires_at = Set(None);
+        model.revoked_at = Set(None);
+        model.revoked_by = Set(None);
         let updated = model.update(&*db).await?;
 
         // Create history entry
@@ -830,14 +870,14 @@ impl RolesApi {
             expires_at: None,
             old_expires_at,
             new_expires_at: None,
-            actor_id: None,
-            actor_username: None,
+            actor_id,
+            actor_username: auth.0.username().cloned(),
         };
 
-        create_history_entry(&db, id.0, role_id.0, "expiry_changed", None, details).await?;
+        create_history_entry(&*db, id.0, role_id.0, "expiry_removed", actor_id, details).await?;
 
         Ok(UpdateUserRoleExpiryResponse::Ok(Json(
-            build_assignment_response(&db, &updated, &role).await?,
+            build_assignment_response(&*db, &updated, &role).await?,
         )))
     }
 
@@ -852,6 +892,8 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        offset: Query<Option<u64>>,
+        limit: Query<Option<u64>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRoleHistoryResponse, WarpgateError> {
         let db = db.lock().await;
@@ -869,50 +911,47 @@ impl RolesApi {
             return Ok(GetUserRoleHistoryResponse::NotFound);
         };
 
-        let history = UserRoleHistory::Entity::find()
+        let q = UserRoleHistory::Entity::find()
             .filter(UserRoleHistory::Column::UserId.eq(id.0))
             .filter(UserRoleHistory::Column::RoleId.eq(role_id.0))
-            .order_by_desc(UserRoleHistory::Column::OccurredAt)
-            .all(&*db)
-            .await?;
+            .order_by_desc(UserRoleHistory::Column::OccurredAt);
 
-        let mut results = Vec::new();
-        for entry in history {
-            let actor_username = if let Some(actor_id) = entry.actor_id {
-                User::Entity::find_by_id(actor_id)
-                    .one(&*db)
-                    .await?
-                    .map(|u| u.username)
-            } else {
-                None
-            };
+        let response = PaginatedResponse::new(
+            q,
+            PaginationParams {
+                offset: *offset,
+                limit: *limit,
+            },
+            &*db,
+            |entry| {
+                let details: UserRoleHistoryDetails = serde_json::from_value(entry.details.clone())
+                    .unwrap_or_else(|_| UserRoleHistoryDetails {
+                        role_id: entry.role_id,
+                        role_name: String::new(),
+                        user_id: entry.user_id,
+                        user_username: String::new(),
+                        expires_at: None,
+                        old_expires_at: None,
+                        new_expires_at: None,
+                        actor_id: entry.actor_id,
+                        actor_username: None,
+                    });
 
-            let details: UserRoleHistoryDetails = serde_json::from_value(entry.details.clone())
-                .unwrap_or_else(|_| UserRoleHistoryDetails {
-                    role_id: entry.role_id,
-                    role_name: String::new(),
+                UserRoleHistoryEntry {
+                    id: entry.id,
                     user_id: entry.user_id,
-                    user_username: String::new(),
-                    expires_at: None,
-                    old_expires_at: None,
-                    new_expires_at: None,
+                    role_id: entry.role_id,
+                    action: entry.action,
+                    occurred_at: entry.occurred_at,
                     actor_id: entry.actor_id,
-                    actor_username: None,
-                });
+                    actor_username: details.actor_username.clone(),
+                    details,
+                }
+            },
+        )
+        .await?;
 
-            results.push(UserRoleHistoryEntry {
-                id: entry.id,
-                user_id: entry.user_id,
-                role_id: entry.role_id,
-                action: entry.action,
-                occurred_at: entry.occurred_at,
-                actor_id: entry.actor_id,
-                actor_username,
-                details,
-            });
-        }
-
-        Ok(GetUserRoleHistoryResponse::Ok(Json(results)))
+        Ok(GetUserRoleHistoryResponse::Ok(Json(response)))
     }
 
     /// Get all role history for a user
@@ -925,6 +964,8 @@ impl RolesApi {
         &self,
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
+        offset: Query<Option<u64>>,
+        limit: Query<Option<u64>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRoleHistoryResponse, WarpgateError> {
         let db = db.lock().await;
@@ -934,48 +975,45 @@ impl RolesApi {
             return Ok(GetUserRoleHistoryResponse::NotFound);
         }
 
-        let history = UserRoleHistory::Entity::find()
+        let q = UserRoleHistory::Entity::find()
             .filter(UserRoleHistory::Column::UserId.eq(id.0))
-            .order_by_desc(UserRoleHistory::Column::OccurredAt)
-            .all(&*db)
-            .await?;
+            .order_by_desc(UserRoleHistory::Column::OccurredAt);
 
-        let mut results = Vec::new();
-        for entry in history {
-            let actor_username = if let Some(actor_id) = entry.actor_id {
-                User::Entity::find_by_id(actor_id)
-                    .one(&*db)
-                    .await?
-                    .map(|u| u.username)
-            } else {
-                None
-            };
+        let response = PaginatedResponse::new(
+            q,
+            PaginationParams {
+                offset: *offset,
+                limit: *limit,
+            },
+            &*db,
+            |entry| {
+                let details: UserRoleHistoryDetails = serde_json::from_value(entry.details.clone())
+                    .unwrap_or_else(|_| UserRoleHistoryDetails {
+                        role_id: entry.role_id,
+                        role_name: String::new(),
+                        user_id: entry.user_id,
+                        user_username: String::new(),
+                        expires_at: None,
+                        old_expires_at: None,
+                        new_expires_at: None,
+                        actor_id: entry.actor_id,
+                        actor_username: None,
+                    });
 
-            let details: UserRoleHistoryDetails = serde_json::from_value(entry.details.clone())
-                .unwrap_or_else(|_| UserRoleHistoryDetails {
-                    role_id: entry.role_id,
-                    role_name: String::new(),
+                UserRoleHistoryEntry {
+                    id: entry.id,
                     user_id: entry.user_id,
-                    user_username: String::new(),
-                    expires_at: None,
-                    old_expires_at: None,
-                    new_expires_at: None,
+                    role_id: entry.role_id,
+                    action: entry.action,
+                    occurred_at: entry.occurred_at,
                     actor_id: entry.actor_id,
-                    actor_username: None,
-                });
+                    actor_username: details.actor_username.clone(),
+                    details,
+                }
+            },
+        )
+        .await?;
 
-            results.push(UserRoleHistoryEntry {
-                id: entry.id,
-                user_id: entry.user_id,
-                role_id: entry.role_id,
-                action: entry.action,
-                occurred_at: entry.occurred_at,
-                actor_id: entry.actor_id,
-                actor_username,
-                details,
-            });
-        }
-
-        Ok(GetUserRoleHistoryResponse::Ok(Json(results)))
+        Ok(GetUserRoleHistoryResponse::Ok(Json(response)))
     }
 }

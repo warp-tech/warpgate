@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { api, type Role, type User, type UserRoleAssignmentResponse, type UserRoleHistoryEntry } from 'admin/lib/api'
+    import { api, type Role, type User, type UserRoleAssignmentResponse, type UserRoleHistoryEntry, type SessionSnapshot } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
-    import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
+    import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter, Collapse, Card, CardBody } from '@sveltestrap/sveltestrap'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -11,7 +11,7 @@
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import Fa from 'svelte-fa'
-    import { faCaretDown, faLink, faUnlink, faClock } from '@fortawesome/free-solid-svg-icons'
+    import { faCaretDown, faLink, faUnlink, faClock, faUser, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons'
     import RelativeDate from '../RelativeDate.svelte'
 
     interface Props {
@@ -51,7 +51,7 @@
         const preset = expiryPresets.find(p => p.value === presetValue)
         if (preset?.ms) {
             const newDate = new Date(Date.now() + preset.ms)
-            expiryDate = newDate.toISOString().slice(0, 16)
+            expiryDate = toLocalISO(newDate)
         }
     }
 
@@ -64,9 +64,6 @@
         allRoles = await api.getRoles()
         userRoles = await api.getUserRoles(user)
         roleIsAllowed = Object.fromEntries(userRoles.map(r => [r.roleId, true]))
-
-        // Load role history
-        await loadAllRoleHistory()
     }
 
     async function update () {
@@ -75,6 +72,7 @@
                 id: params.id,
                 userDataRequest: user!,
             })
+            await loadAllRoleHistory()
             error = null
         } catch (err) {
             error = await stringifyError(err)
@@ -102,6 +100,7 @@
             })
             userRoles = userRoles.filter(r => r.roleId !== role.id)
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
+            await loadAllRoleHistory()
         } else if (expiredAssignment) {
             // Re-enable expired role by removing the expiry (makes it permanent)
             await api.removeUserRoleExpiry({
@@ -120,9 +119,19 @@
         }
     }
 
+    function toLocalISO(date: Date): string {
+        const pad = (n: number) => n.toString().padStart(2, '0')
+        const year = date.getFullYear()
+        const month = pad(date.getMonth() + 1)
+        const day = pad(date.getDate())
+        const hours = pad(date.getHours())
+        const minutes = pad(date.getMinutes())
+        return `${year}-${month}-${day}T${hours}:${minutes}`
+    }
+
     function openExpiryModal(roleAssignment: UserRoleAssignmentResponse) {
         editingRole = roleAssignment
-        expiryDate = roleAssignment.expiresAt ? new Date(roleAssignment.expiresAt).toISOString().slice(0, 16) : null
+        expiryDate = roleAssignment.expiresAt ? toLocalISO(new Date(roleAssignment.expiresAt)) : null
         selectedPreset = 'custom'
         showExpiryModal = true
     }
@@ -153,6 +162,7 @@
             }
             showExpiryModal = false
             await init()
+            await loadAllRoleHistory()
             error = null
         } catch (err) {
             error = await stringifyError(err)
@@ -169,6 +179,7 @@
         })
         showExpiryModal = false
         await init()
+        await loadAllRoleHistory()
     }
 
     function getExpiryStatus(assignment: UserRoleAssignmentResponse): { text: string, 'class': string } {
@@ -210,68 +221,159 @@
 
     // Role history
     let roleHistory: UserRoleHistoryEntry[] = $state([])
-    let historyLimit = $state(10)
+    let historyOffset = $state(0)
+    let historyPageSize = 50
+    let hasMoreHistory = $state(true)
+    let roleHistoryLoaded = $state(false)
 
-    async function loadAllRoleHistory() {
+    async function loadAllRoleHistory(loadMore = false) {
         if (!user) {
             return []
         }
 
-        const allHistory: UserRoleHistoryEntry[] = []
-        for (const roleAssignment of userRoles) {
-            try {
-                const history = await api.getUserRoleHistory({
-                    id: user.id,
-                    roleId: roleAssignment.roleId,
-                })
-                allHistory.push(...history)
-            } catch {
-                // Ignore errors for individual role history
-            }
+        if (!loadMore) {
+            historyOffset = 0
+            roleHistory = []
         }
 
-        // Sort by date descending
-        roleHistory = allHistory.sort((a, b) =>
-            new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
-        )
+        try {
+            const response = await api.getUserAllRoleHistory({
+                id: user.id,
+                offset: historyOffset,
+                limit: historyPageSize,
+            })
+
+            if (loadMore) {
+                roleHistory = [...roleHistory, ...response.items]
+            } else {
+                roleHistory = response.items
+            }
+
+            hasMoreHistory = roleHistory.length < response.total
+            historyOffset += response.items.length
+            roleHistoryLoaded = true
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+
         return roleHistory
     }
 
-    function getActionLabel(action: string): string {
-        switch (action) {
-            case 'granted':
-                return 'Role granted'
-            case 'revoked':
-                return 'Role revoked'
-            case 'expiry_changed':
-                return 'Expiry updated'
-            case 'expiry_removed':
-                return 'Expiry removed'
-            default:
-                return action
+    // Session history
+    let sessionHistory: SessionSnapshot[] = $state([])
+    let sessionOffset = $state(0)
+    let sessionPageSize = 50
+    let hasMoreSessions = $state(true)
+    let sessionHistoryLoaded = $state(false)
+
+    // Collapsible states
+    let roleHistoryCollapsed = $state(true)
+    let sessionHistoryCollapsed = $state(true)
+
+    async function loadSessionHistory(loadMore = false) {
+        if (!user) {
+            return []
+        }
+
+        if (!loadMore) {
+            sessionOffset = 0
+            sessionHistory = []
+        }
+
+        try {
+            const response = await api.getSessions({
+                username: user.username,
+                offset: sessionOffset,
+                limit: sessionPageSize,
+            })
+
+            if (loadMore) {
+                sessionHistory = [...sessionHistory, ...response.items]
+            } else {
+                sessionHistory = response.items
+            }
+
+            hasMoreSessions = sessionHistory.length < response.total
+            sessionOffset += response.items.length
+            sessionHistoryLoaded = true
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+
+        return sessionHistory
+    }
+
+    function getSessionProtocolIcon(protocol: string) {
+        if (protocol === 'ssh') {
+            return faTerminal
+        }
+        if (protocol === 'http' || protocol === 'https') {
+            return faGlobe
+        }
+        if (protocol === 'mysql') {
+            return faDatabase
+        }
+        if (protocol === 'postgres') {
+            return faDatabase
+        }
+        return faHistory
+    }
+
+    function formatSessionDuration(started: Date, ended?: Date | null): string {
+        const start = new Date(started).getTime()
+        const end = ended ? new Date(ended).getTime() : Date.now()
+        const durationMs = end - start
+
+        const seconds = Math.floor(durationMs / 1000)
+        const minutes = Math.floor(seconds / 60)
+        const hours = Math.floor(minutes / 60)
+
+        if (hours > 0) {
+            return `${hours}h ${minutes % 60}m`
+        } else if (minutes > 0) {
+            return `${minutes}m ${seconds % 60}s`
+        } else {
+            return `${seconds}s`
         }
     }
 
-    function getActionColor(action: string): string {
-        switch (action) {
-            case 'granted':
-                return 'success'
-            case 'revoked':
-                return 'danger'
-            case 'expiry_changed':
-                return 'warning'
-            case 'expiry_removed':
-                return 'info'
-            default:
-                return 'secondary'
+    function getActionDisplayLabel(action: string): string {
+        if (action === 'granted') {
+            return 'Role granted'
         }
+        if (action === 'revoked') {
+            return 'Role revoked'
+        }
+        if (action === 'expiry_changed') {
+            return 'Expiry updated'
+        }
+        if (action === 'expiry_removed') {
+            return 'Expiry removed'
+        }
+        return action
     }
 
-    function formatHistoryDate(date: Date | null | undefined): string {
+    function getActionDisplayColor(action: string): string {
+        if (action === 'granted') {
+            return 'success'
+        }
+        if (action === 'revoked') {
+            return 'danger'
+        }
+        if (action === 'expiry_changed') {
+            return 'warning'
+        }
+        if (action === 'expiry_removed') {
+            return 'info'
+        }
+        return 'secondary'
+    }
+
+    function formatHistoryDate(date: Date | string | null | undefined): string {
         if (!date) {
             return 'Permanent'
         }
-        return date.toLocaleString()
+        return new Date(date).toLocaleString()
     }
 
     async function unlinkFromLdap () {
@@ -393,7 +495,9 @@
                 {/each}
             </div>
 
-            <h4 class="mt-4">Traffic</h4>
+            <hr class="mt-4 mb-4" />
+
+            <h4 class="mb-3">Traffic</h4>
             <FormGroup class="mb-5">
                 <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
                 <RateLimitInput
@@ -402,58 +506,159 @@
                 />
             </FormGroup>
 
-            <!-- Role History Section -->
-            <h4 class="mt-4">Role History</h4>
-            {#if roleHistory.length === 0}
-                <p class="text-muted">No role history entries yet.</p>
-            {:else}
-                <div class="list-group list-group-flush mb-3">
-                    {#each roleHistory.slice(0, historyLimit) as entry (entry.id)}
-                        <div class="list-group-item">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <span class="badge bg-{getActionColor(entry.action)} me-2">
-                                        {getActionLabel(entry.action)}
-                                    </span>
-                                    <strong>{allRoles.find(r => r.id === entry.roleId)?.name || 'Unknown role'}</strong>
-                                </div>
-                                <small class="text-muted" title={entry.occurredAt.toLocaleString()}>
-                                    <RelativeDate date={entry.occurredAt} />
-                                </small>
+            <!-- Role Assignment History Section -->
+            <Card class="mb-4">
+                <button
+                    type="button"
+                    class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
+                    style="cursor: pointer"
+                    onclick={() => roleHistoryCollapsed = !roleHistoryCollapsed}
+                    aria-expanded={!roleHistoryCollapsed}
+                    aria-controls="role-history-collapse"
+                >
+                    <h4 class="mb-0">Role Assignment History</h4>
+                    <Fa icon={roleHistoryCollapsed ? faChevronDown : faChevronUp} />
+                </button>
+                <Collapse isOpen={!roleHistoryCollapsed}>
+                    <CardBody>
+                        {#if !roleHistoryLoaded}
+                            <AsyncButton
+                                outline
+                                color="secondary"
+                                click={() => loadAllRoleHistory()}
+                            >
+                                Load history
+                            </AsyncButton>
+                        {:else if roleHistory.length === 0}
+                            <div class="text-muted small">No history found for this user.</div>
+                        {:else}
+                            <div class="list-group list-group-flush mb-3">
+                                {#each roleHistory as entry (entry.id)}
+                                    <div class="list-group-item py-2 px-0 border-0">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong>{entry.details.roleName}</strong>
+                                            <span class="badge bg-{getActionDisplayColor(entry.action)}">
+                                                {getActionDisplayLabel(entry.action)}
+                                            </span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center mt-1">
+                                            <div class="text-muted small d-flex align-items-center">
+                                                <Fa icon={faUser} fw class="me-1" />
+                                                <span>
+                                                    {entry.actorUsername || 'System'} changed:
+                                                    {#if entry.action === 'expiry_changed'}
+                                                        {formatHistoryDate(entry.details.oldExpiresAt)} &rarr; {formatHistoryDate(entry.details.newExpiresAt)}
+                                                    {:else if entry.details.expiresAt}
+                                                        {formatHistoryDate(entry.details.expiresAt)}
+                                                    {:else}
+                                                        Permanent
+                                                    {/if}
+                                                </span>
+                                            </div>
+                                            <div class="text-muted small">{new Date(entry.occurredAt).toLocaleString()}</div>
+                                        </div>
+                                    </div>
+                                {/each}
                             </div>
 
-                            {#if entry.actorUsername}
-                                <small class="text-muted d-block mt-1">by {entry.actorUsername}</small>
-                            {/if}
-
-                            {#if entry.details}
-                                <div class="mt-1 small text-muted">
-                                    {#if entry.action === 'expiry_changed'}
-                                        {#if entry.details.oldExpiresAt}
-                                            Previous: {formatHistoryDate(entry.details.oldExpiresAt)}
-                                        {/if}
-                                        &rarr; {formatHistoryDate(entry.details.newExpiresAt)}
-                                    {:else if entry.action === 'granted' && entry.details.expiresAt}
-                                        Expires: {formatHistoryDate(entry.details.expiresAt)}
-                                    {/if}
+                            {#if hasMoreHistory}
+                                <div class="d-grid mt-2">
+                                    <AsyncButton
+                                        outline
+                                        color="secondary"
+                                        click={() => loadAllRoleHistory(true)}
+                                    >
+                                        Load more
+                                    </AsyncButton>
                                 </div>
                             {/if}
-                        </div>
-                    {/each}
-                </div>
-                {#if roleHistory.length > historyLimit}
-                    <div class="text-center mb-3">
-                        <Button
-                            outline
-                            color="secondary"
-                            size="sm"
-                            on:click={() => { historyLimit += 10 }}
-                        >
-                            Load more ({roleHistory.length - historyLimit} remaining)
-                        </Button>
-                    </div>
-                {/if}
-            {/if}
+                        {/if}
+                    </CardBody>
+                </Collapse>
+            </Card>
+
+            <!-- Connection History Section -->
+            <Card class="mb-4">
+                <button
+                    type="button"
+                    class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
+                    style="cursor: pointer"
+                    onclick={() => sessionHistoryCollapsed = !sessionHistoryCollapsed}
+                    aria-expanded={!sessionHistoryCollapsed}
+                    aria-controls="session-history-collapse"
+                >
+                    <h4 class="mb-0">Connection History</h4>
+                    <Fa icon={sessionHistoryCollapsed ? faChevronDown : faChevronUp} />
+                </button>
+                <Collapse isOpen={!sessionHistoryCollapsed}>
+                    <CardBody>
+                        {#if !sessionHistoryLoaded}
+                            <AsyncButton
+                                outline
+                                color="secondary"
+                                click={() => loadSessionHistory()}
+                            >
+                                Load connections
+                            </AsyncButton>
+                        {:else if sessionHistory.length === 0}
+                            <div class="text-muted small">No connection history found for this user.</div>
+                        {:else}
+                            <div class="list-group list-group-flush mb-3">
+                                {#each sessionHistory as session (session.id)}
+                                    <div class="list-group-item py-3">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <div class="d-flex align-items-center gap-2">
+                                                <Fa icon={getSessionProtocolIcon(session.protocol)} class="text-muted" />
+                                                <div>
+                                                    <strong class="text-capitalize">{session.protocol}</strong>
+                                                    {#if session.target?.name}
+                                                        <span class="text-muted ms-2">&rarr; {session.target.name}</span>
+                                                    {/if}
+                                                </div>
+                                            </div>
+                                            <div class="text-end">
+                                                {#if session.ended}
+                                                    <span class="badge bg-secondary">Ended</span>
+                                                {:else}
+                                                    <span class="badge bg-success">Active</span>
+                                                {/if}
+                                            </div>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center mt-2">
+                                            <div class="text-muted small">
+                                                <div>Started: {new Date(session.started).toLocaleString()}</div>
+                                                {#if session.ended}
+                                                    <div>Ended: {new Date(session.ended).toLocaleString()}</div>
+                                                    <div>Duration: {formatSessionDuration(session.started, session.ended)}</div>
+                                                {:else}
+                                                    <div>Duration: {formatSessionDuration(session.started)}</div>
+                                                {/if}
+                                            </div>
+                                            {#if session.ticketId}
+                                                <div class="text-muted small">
+                                                    <span class="badge bg-info">Ticket</span>
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    </div>
+                                {/each}
+                            </div>
+
+                            {#if hasMoreSessions}
+                                <div class="d-grid mt-2">
+                                    <AsyncButton
+                                        outline
+                                        color="secondary"
+                                        click={() => loadSessionHistory(true)}
+                                    >
+                                        Load more
+                                    </AsyncButton>
+                                </div>
+                            {/if}
+                        {/if}
+                    </CardBody>
+                </Collapse>
+            </Card>
         {/if}
     </Loadable>
 
@@ -558,5 +763,3 @@
         </div>
     </ModalFooter>
 </Modal>
-
-
