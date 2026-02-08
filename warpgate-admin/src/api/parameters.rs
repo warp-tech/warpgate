@@ -21,6 +21,10 @@ struct ParameterValues {
     pub ssh_client_auth_keyboard_interactive: bool,
     /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
     pub file_transfer_hash_threshold_bytes: Option<i64>,
+    /// SFTP permission enforcement mode: "strict" or "permissive"
+    /// - strict: Shell/exec/forwarding blocked when SFTP restrictions are active
+    /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
+    pub sftp_permission_mode: String,
 }
 
 #[derive(Serialize, Object)]
@@ -32,6 +36,10 @@ struct ParameterUpdate {
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
     pub file_transfer_hash_threshold_bytes: Option<i64>,
+    /// SFTP permission enforcement mode: "strict" or "permissive"
+    /// - strict: Shell/exec/forwarding blocked when SFTP restrictions are active
+    /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
+    pub sftp_permission_mode: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -64,6 +72,7 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             file_transfer_hash_threshold_bytes: parameters.file_transfer_hash_threshold_bytes,
+            sftp_permission_mode: parameters.sftp_permission_mode,
         })))
     }
 
@@ -91,6 +100,17 @@ impl Api {
             .map_or(NotSet, Set);
         parameters.file_transfer_hash_threshold_bytes =
             Set(body.file_transfer_hash_threshold_bytes);
+
+        // Validate and set sftp_permission_mode if provided
+        if let Some(ref mode) = body.sftp_permission_mode {
+            if mode != "strict" && mode != "permissive" {
+                return Err(anyhow::anyhow!(
+                    "sftp_permission_mode must be 'strict' or 'permissive'"
+                )
+                .into());
+            }
+            parameters.sftp_permission_mode = Set(mode.clone());
+        }
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

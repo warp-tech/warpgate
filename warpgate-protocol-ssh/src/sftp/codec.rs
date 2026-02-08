@@ -71,6 +71,11 @@ pub fn packet_to_operation(packet: &Packet) -> Option<SftpFileOperation> {
             link_path: symlink.linkpath.clone(),
             target_path: symlink.targetpath.clone(),
         }),
+        Packet::Extended(ext) => Some(SftpFileOperation::Extended {
+            request_id: ext.id,
+            request_name: ext.request.clone(),
+        }),
+        // Init, Version, Lstat, Stat, Fstat, Opendir, Readdir, Realpath, Readlink — read-only metadata, safe to forward
         _ => None,
     }
 }
@@ -118,7 +123,7 @@ fn status_code_to_u32(status: StatusCode) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use russh_sftp::protocol::{Open, OpenFlags};
+    use russh_sftp::protocol::{Extended, Open, OpenFlags};
 
     #[test]
     fn test_packet_to_operation_open() {
@@ -143,6 +148,50 @@ mod tests {
                 assert_eq!(path, "/tmp/test.txt");
                 assert!(is_upload);
                 assert!(!is_download);
+            }
+            _ => panic!("Wrong operation type"),
+        }
+    }
+
+    #[test]
+    fn test_packet_to_operation_extended() {
+        let packet = Packet::Extended(Extended {
+            id: 42,
+            request: "posix-rename@openssh.com".to_string(),
+            data: vec![],
+        });
+
+        let operation = packet_to_operation(&packet);
+        assert!(operation.is_some());
+        match operation.unwrap() {
+            SftpFileOperation::Extended {
+                request_id,
+                request_name,
+            } => {
+                assert_eq!(request_id, 42);
+                assert_eq!(request_name, "posix-rename@openssh.com");
+            }
+            _ => panic!("Wrong operation type"),
+        }
+    }
+
+    #[test]
+    fn test_packet_to_operation_extended_statvfs() {
+        let packet = Packet::Extended(Extended {
+            id: 1,
+            request: "statvfs@openssh.com".to_string(),
+            data: vec![],
+        });
+
+        let operation = packet_to_operation(&packet);
+        assert!(operation.is_some());
+        match operation.unwrap() {
+            SftpFileOperation::Extended {
+                request_id,
+                request_name,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(request_name, "statvfs@openssh.com");
             }
             _ => panic!("Wrong operation type"),
         }

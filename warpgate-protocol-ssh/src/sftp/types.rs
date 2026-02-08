@@ -57,6 +57,11 @@ pub enum SftpFileOperation {
         link_path: String,
         target_path: String,
     },
+    /// SSH_FXP_EXTENDED - vendor-specific operation
+    Extended {
+        request_id: u32,
+        request_name: String,
+    },
 }
 
 /// File transfer direction

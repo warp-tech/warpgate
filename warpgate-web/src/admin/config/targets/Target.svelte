@@ -14,6 +14,7 @@
     import TargetSshOptions from './ssh/Options.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
 
+
     interface Props {
         params: { id: string };
     }
@@ -22,9 +23,9 @@
     interface FileTransferPermission {
         allowFileUpload: boolean | null
         allowFileDownload: boolean | null
-        allowedPaths: string[] | null
-        blockedExtensions: string[] | null
-        maxFileSize: number | null
+        allowedPaths?: string[] | null
+        blockedExtensions?: string[] | null
+        maxFileSize?: number | null
     }
 
     let { params }: Props = $props()
@@ -38,8 +39,73 @@
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
     let expandedFileTransfer: Record<string, boolean> = $state({})
+    let expandedAdvanced: Record<string, boolean> = $state({})
+    let sftpPermissionMode: string = $state('strict')
+
+    // UI state for advanced fields per role
+    let allowedPathsText: Record<string, string> = $state({})
+    let blockedExtensionsText: Record<string, string> = $state({})
+    let maxFileSizeValue: Record<string, number | string> = $state({})
+    let maxFileSizeUnit: Record<string, string> = $state({})
+
+    // Convert between API format and UI format
+    function pathsToText(paths: string[] | undefined | null): string {
+        return paths?.join('\n') ?? ''
+    }
+    function textToPaths(text: string): string[] | undefined {
+        const paths = text.split('\n').map(p => p.trim()).filter(p => p.length > 0)
+        return paths.length > 0 ? paths : undefined
+    }
+    function extensionsToText(exts: string[] | undefined | null): string {
+        return exts?.join(', ') ?? ''
+    }
+    function textToExtensions(text: string): string[] | undefined {
+        const exts = text.split(',').map(e => e.trim()).filter(e => e.length > 0)
+        return exts.length > 0 ? exts : undefined
+    }
+    function bytesToDisplay(bytes: number | undefined | null): { value: number | string, unit: string } {
+        if (bytes === undefined || bytes === null) {
+            return { value: '', unit: 'mb' }
+        }
+        if (bytes >= 1024 * 1024 * 1024) {
+            return { value: Math.round(bytes / (1024 * 1024 * 1024)), unit: 'gb' }
+        }
+        if (bytes >= 1024 * 1024) {
+            return { value: Math.round(bytes / (1024 * 1024)), unit: 'mb' }
+        }
+        if (bytes >= 1024) {
+            return { value: Math.round(bytes / 1024), unit: 'kb' }
+        }
+        return { value: bytes, unit: 'bytes' }
+    }
+    function displayToBytes(value: number | string, unit: string): number | undefined {
+        if (value === '' || value === undefined || value === null) {
+            return undefined
+        }
+        const num = typeof value === 'string' ? parseFloat(value) : value
+        if (isNaN(num)) {
+            return undefined
+        }
+        switch (unit) {
+            case 'gb': return Math.round(num * 1024 * 1024 * 1024)
+            case 'mb': return Math.round(num * 1024 * 1024)
+            case 'kb': return Math.round(num * 1024)
+            default: return Math.round(num)
+        }
+    }
+
+    async function loadSftpPermissionMode() {
+        try {
+            const parameters = await api.getParameters({})
+            sftpPermissionMode = parameters.sftpPermissionMode
+        } catch {
+            // Fallback to strict if we can't load
+            sftpPermissionMode = 'strict'
+        }
+    }
 
     async function init () {
+        await loadSftpPermissionMode();
         [target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
@@ -65,9 +131,9 @@
             roleDefaults = { ...roleDefaults, [roleId]: {
                 allowFileUpload: true,
                 allowFileDownload: true,
-                allowedPaths: null,
-                blockedExtensions: null,
-                maxFileSize: null,
+                allowedPaths: undefined,
+                blockedExtensions: undefined,
+                maxFileSize: undefined,
             } }
         }
     }
@@ -127,17 +193,32 @@
                 id: target!.id,
                 roleId: roleId,
             })
-            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
+            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: {
+                ...perm,
+                allowFileUpload: perm.allowFileUpload ?? null,
+                allowFileDownload: perm.allowFileDownload ?? null,
+            } }
+            // Populate UI state for advanced fields
+            syncAdvancedFieldsFromPerm(roleId, perm)
         } catch {
             // Assignment may not have permissions yet - use null (inherit)
             fileTransferPermissions = { ...fileTransferPermissions, [roleId]: {
                 allowFileUpload: null,
                 allowFileDownload: null,
-                allowedPaths: null,
-                blockedExtensions: null,
-                maxFileSize: null,
+                allowedPaths: undefined,
+                blockedExtensions: undefined,
+                maxFileSize: undefined,
             } }
+            syncAdvancedFieldsFromPerm(roleId, { allowedPaths: undefined, blockedExtensions: undefined, maxFileSize: undefined })
         }
+    }
+
+    function syncAdvancedFieldsFromPerm(roleId: string, perm: { allowedPaths?: string[] | null, blockedExtensions?: string[] | null, maxFileSize?: number | null }) {
+        allowedPathsText = { ...allowedPathsText, [roleId]: pathsToText(perm.allowedPaths) }
+        blockedExtensionsText = { ...blockedExtensionsText, [roleId]: extensionsToText(perm.blockedExtensions) }
+        const size = bytesToDisplay(perm.maxFileSize)
+        maxFileSizeValue = { ...maxFileSizeValue, [roleId]: size.value }
+        maxFileSizeUnit = { ...maxFileSizeUnit, [roleId]: size.unit }
     }
 
     async function loadAllFileTransferPermissions () {
@@ -146,13 +227,13 @@
         }
     }
 
-    async function updateFileTransferPermission (roleId: string, field: keyof FileTransferPermission, value: boolean | null) {
+    async function updateFileTransferPermission (roleId: string, field: keyof FileTransferPermission, value: boolean | null | string[] | number | undefined) {
         const current = fileTransferPermissions[roleId] || {
             allowFileUpload: null,
             allowFileDownload: null,
-            allowedPaths: null,
-            blockedExtensions: null,
-            maxFileSize: null,
+            allowedPaths: undefined,
+            blockedExtensions: undefined,
+            maxFileSize: undefined,
         }
 
         const updated = { ...current, [field]: value }
@@ -161,9 +242,21 @@
             const perm = await api.updateTargetRoleFileTransferPermission({
                 id: target!.id,
                 roleId: roleId,
-                fileTransferPermissionData: updated,
+                fileTransferPermissionData: {
+                    allowFileUpload: updated.allowFileUpload ?? undefined,
+                    allowFileDownload: updated.allowFileDownload ?? undefined,
+                    allowedPaths: updated.allowedPaths ?? undefined,
+                    blockedExtensions: updated.blockedExtensions ?? undefined,
+                    maxFileSize: updated.maxFileSize ?? undefined,
+                },
             })
-            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: perm }
+            fileTransferPermissions = { ...fileTransferPermissions, [roleId]: {
+                ...perm,
+                allowFileUpload: perm.allowFileUpload ?? null,
+                allowFileDownload: perm.allowFileDownload ?? null,
+            } }
+            // Sync UI state from response
+            syncAdvancedFieldsFromPerm(roleId, perm)
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -180,6 +273,77 @@
     function setPermissionState(roleId: string, field: 'allowFileUpload' | 'allowFileDownload', state: 'inherit' | 'allow' | 'deny') {
         const value = state === 'inherit' ? null : state === 'allow'
         updateFileTransferPermission(roleId, field, value)
+    }
+
+    // 3-state helpers for advanced fields: 'inherit' | 'set' | 'clear'
+    function getAdvancedState(roleId: string, field: 'allowedPaths' | 'blockedExtensions' | 'maxFileSize'): 'inherit' | 'set' {
+        const value = fileTransferPermissions[roleId]?.[field]
+        if (value === null || value === undefined) {
+            return 'inherit'
+        }
+        return 'set'
+    }
+
+    function getInheritedAdvancedValue(roleId: string, field: 'allowedPaths' | 'blockedExtensions' | 'maxFileSize'): string {
+        const defaults = roleDefaults[roleId]
+        if (!defaults) {
+            return 'none'
+        }
+        if (field === 'allowedPaths') {
+            return defaults.allowedPaths?.join(', ') || 'all paths'
+        }
+        if (field === 'blockedExtensions') {
+            return defaults.blockedExtensions?.join(', ') || 'none'
+        }
+        if (field === 'maxFileSize') {
+            if (!defaults.maxFileSize) {
+                return 'no limit'
+            }
+            const d = bytesToDisplay(defaults.maxFileSize)
+            return `${d.value} ${d.unit.toUpperCase()}`
+        }
+        return 'none'
+    }
+
+    async function updateAdvancedField(roleId: string, field: 'allowedPaths' | 'blockedExtensions' | 'maxFileSize') {
+        if (field === 'allowedPaths') {
+            const paths = textToPaths(allowedPathsText[roleId] ?? '')
+            await updateFileTransferPermission(roleId, 'allowedPaths', paths)
+        } else if (field === 'blockedExtensions') {
+            const exts = textToExtensions(blockedExtensionsText[roleId] ?? '')
+            await updateFileTransferPermission(roleId, 'blockedExtensions', exts)
+        } else if (field === 'maxFileSize') {
+            const bytes = displayToBytes(maxFileSizeValue[roleId] ?? '', maxFileSizeUnit[roleId] ?? 'mb')
+            await updateFileTransferPermission(roleId, 'maxFileSize', bytes)
+        }
+    }
+
+    async function clearAdvancedField(roleId: string, field: 'allowedPaths' | 'blockedExtensions' | 'maxFileSize') {
+        if (field === 'allowedPaths') {
+            allowedPathsText = { ...allowedPathsText, [roleId]: '' }
+        } else if (field === 'blockedExtensions') {
+            blockedExtensionsText = { ...blockedExtensionsText, [roleId]: '' }
+        } else if (field === 'maxFileSize') {
+            maxFileSizeValue = { ...maxFileSizeValue, [roleId]: '' }
+            maxFileSizeUnit = { ...maxFileSizeUnit, [roleId]: 'mb' }
+        }
+        await updateFileTransferPermission(roleId, field, undefined)
+    }
+
+    function hasAnyRestrictions(): boolean {
+        for (const roleId of Object.keys(fileTransferPermissions)) {
+            const perm = fileTransferPermissions[roleId]
+            const defaults = roleDefaults[roleId]
+
+            // Calculate effective permission (considering inheritance)
+            const effectiveUpload = perm?.allowFileUpload ?? defaults?.allowFileUpload ?? true
+            const effectiveDownload = perm?.allowFileDownload ?? defaults?.allowFileDownload ?? true
+
+            if (!effectiveUpload || !effectiveDownload) {
+                return true
+            }
+        }
+        return false
     }
 </script>
 
@@ -436,6 +600,114 @@
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            <!-- Advanced Restrictions Toggle -->
+                                            <button
+                                                type="button"
+                                                class="btn btn-link btn-sm text-muted p-0 mt-2 text-decoration-none"
+                                                onclick={() => { expandedAdvanced[role.id] = !expandedAdvanced[role.id] }}
+                                            >
+                                                {expandedAdvanced[role.id] ? '▼' : '▶'} Advanced Restrictions
+                                            </button>
+
+                                            {#if expandedAdvanced[role.id]}
+                                                <div class="mt-2 pt-2 border-top">
+                                                    <!-- Allowed Paths -->
+                                                    <div class="mb-2">
+                                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                                            <label for="allowedPaths-{role.id}" class="form-label mb-0 small">Allowed Paths</label>
+                                                            {#if getAdvancedState(role.id, 'allowedPaths') === 'inherit'}
+                                                                <span class="badge bg-secondary">Inherit: {getInheritedAdvancedValue(role.id, 'allowedPaths')}</span>
+                                                            {:else}
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn btn-outline-secondary btn-sm py-0 px-1"
+                                                                    style="font-size: 0.7rem;"
+                                                                    onclick={() => clearAdvancedField(role.id, 'allowedPaths')}
+                                                                >Reset to inherit</button>
+                                                            {/if}
+                                                        </div>
+                                                        <textarea
+                                                            id="allowedPaths-{role.id}"
+                                                            class="form-control form-control-sm"
+                                                            rows="2"
+                                                            placeholder={getAdvancedState(role.id, 'allowedPaths') === 'inherit' ? `Inherited: ${getInheritedAdvancedValue(role.id, 'allowedPaths')}` : '/home/user/*\n/uploads/**'}
+                                                            bind:value={allowedPathsText[role.id]}
+                                                            onchange={() => updateAdvancedField(role.id, 'allowedPaths')}
+                                                        ></textarea>
+                                                        <small class="text-muted">One path per line. Glob patterns supported. Leave empty to inherit.</small>
+                                                    </div>
+
+                                                    <!-- Blocked Extensions -->
+                                                    <div class="mb-2">
+                                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                                            <label for="blockedExtensions-{role.id}" class="form-label mb-0 small">Blocked Extensions</label>
+                                                            {#if getAdvancedState(role.id, 'blockedExtensions') === 'inherit'}
+                                                                <span class="badge bg-secondary">Inherit: {getInheritedAdvancedValue(role.id, 'blockedExtensions')}</span>
+                                                            {:else}
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn btn-outline-secondary btn-sm py-0 px-1"
+                                                                    style="font-size: 0.7rem;"
+                                                                    onclick={() => clearAdvancedField(role.id, 'blockedExtensions')}
+                                                                >Reset to inherit</button>
+                                                            {/if}
+                                                        </div>
+                                                        <input
+                                                            type="text"
+                                                            id="blockedExtensions-{role.id}"
+                                                            class="form-control form-control-sm"
+                                                            placeholder={getAdvancedState(role.id, 'blockedExtensions') === 'inherit' ? `Inherited: ${getInheritedAdvancedValue(role.id, 'blockedExtensions')}` : '.exe, .sh, .bat'}
+                                                            bind:value={blockedExtensionsText[role.id]}
+                                                            onchange={() => updateAdvancedField(role.id, 'blockedExtensions')}
+                                                        />
+                                                        <small class="text-muted">Comma-separated extensions. Leave empty to inherit.</small>
+                                                    </div>
+
+                                                    <!-- Max File Size -->
+                                                    <div class="mb-2">
+                                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                                            <label for="maxFileSize-{role.id}" class="form-label mb-0 small">Max File Size</label>
+                                                            {#if getAdvancedState(role.id, 'maxFileSize') === 'inherit'}
+                                                                <span class="badge bg-secondary">Inherit: {getInheritedAdvancedValue(role.id, 'maxFileSize')}</span>
+                                                            {:else}
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn btn-outline-secondary btn-sm py-0 px-1"
+                                                                    style="font-size: 0.7rem;"
+                                                                    onclick={() => clearAdvancedField(role.id, 'maxFileSize')}
+                                                                >Reset to inherit</button>
+                                                            {/if}
+                                                        </div>
+                                                        <div class="row g-1">
+                                                            <div class="col-8">
+                                                                <input
+                                                                    type="number"
+                                                                    id="maxFileSize-{role.id}"
+                                                                    class="form-control form-control-sm"
+                                                                    min="0"
+                                                                    placeholder={getAdvancedState(role.id, 'maxFileSize') === 'inherit' ? `Inherited: ${getInheritedAdvancedValue(role.id, 'maxFileSize')}` : 'No limit'}
+                                                                    bind:value={maxFileSizeValue[role.id]}
+                                                                    onchange={() => updateAdvancedField(role.id, 'maxFileSize')}
+                                                                />
+                                                            </div>
+                                                            <div class="col-4">
+                                                                <select
+                                                                    class="form-select form-select-sm"
+                                                                    bind:value={maxFileSizeUnit[role.id]}
+                                                                    onchange={() => updateAdvancedField(role.id, 'maxFileSize')}
+                                                                >
+                                                                    <option value="bytes">Bytes</option>
+                                                                    <option value="kb">KB</option>
+                                                                    <option value="mb">MB</option>
+                                                                    <option value="gb">GB</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <small class="text-muted">Leave empty to inherit from role.</small>
+                                                    </div>
+                                                </div>
+                                            {/if}
                                         </div>
                                     {/if}
                                 </div>
@@ -445,6 +717,14 @@
                 </div>
             {/snippet}
         </Loadable>
+
+        {#if target?.options.kind === 'Ssh' && sftpPermissionMode === 'permissive' && hasAnyRestrictions()}
+            <Alert color="warning">
+                <strong>Bypass possible:</strong> SFTP restrictions are active for some roles but the instance is in <strong>permissive mode</strong>.
+                Users can bypass SFTP restrictions via shell or SCP.
+                <a href="#/config/parameters">Change to strict mode</a> to block shell/exec when SFTP restrictions apply.
+            </Alert>
+        {/if}
 
         <h4 class="mt-4">Advanced</h4>
         {#if target.options.kind === 'Postgres'}

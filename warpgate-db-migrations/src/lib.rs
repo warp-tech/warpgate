@@ -35,6 +35,9 @@ mod m00030_add_recording_metadata;
 mod m00031_file_transfer_permissions;
 mod m00032_file_transfer_config;
 mod m00033_user_role_expiry_history;
+mod m00034_role_file_transfer_defaults;
+mod m00035_target_role_nullable_overrides;
+mod m00036_sftp_permission_mode;
 
 pub struct Migrator;
 
@@ -75,6 +78,9 @@ impl MigratorTrait for Migrator {
             Box::new(m00031_file_transfer_permissions::Migration),
             Box::new(m00032_file_transfer_config::Migration),
             Box::new(m00033_user_role_expiry_history::Migration),
+            Box::new(m00034_role_file_transfer_defaults::Migration),
+            Box::new(m00035_target_role_nullable_overrides::Migration),
+            Box::new(m00036_sftp_permission_mode::Migration),
         ]
     }
 }

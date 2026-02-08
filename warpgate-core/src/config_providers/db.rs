@@ -578,6 +578,10 @@ impl ConfigProvider for DatabaseConfigProvider {
     ) -> Result<super::FileTransferPermission, WarpgateError> {
         let db = self.db.lock().await;
 
+        // Get sftp_permission_mode from parameters
+        let parameters = entities::Parameters::Entity::get(&db).await?;
+        let is_strict_mode = parameters.sftp_permission_mode == "strict";
+
         // Get user's role IDs
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Column::Username.eq(username))
@@ -634,6 +638,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .blocked_extensions
                     .and_then(|v| serde_json::from_value(v).ok()),
                 max_file_size: role.max_file_size,
+                shell_blocked: false, // Will be calculated at the end
             };
 
             // 2. Apply target-role overrides (NULL = inherit from role)
@@ -687,6 +692,12 @@ impl ConfigProvider for DatabaseConfigProvider {
                 result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
             }
         }
+
+        // Determine if shell/exec should be blocked based on:
+        // - sftp_permission_mode is "strict" AND
+        // - Any SFTP restriction exists (upload or download is blocked)
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        result.shell_blocked = is_strict_mode && has_sftp_restrictions;
 
         Ok(result)
     }
@@ -846,6 +857,8 @@ mod tests {
         assert!(perm.allowed_paths.is_none());
         assert!(perm.blocked_extensions.is_none());
         assert!(perm.max_file_size.is_none());
+        // Default: shell_blocked is true (strict mode with restrictions)
+        assert!(perm.shell_blocked);
     }
 
     #[test]
@@ -943,5 +956,97 @@ mod tests {
         }
         // Only .exe should remain (blocked by both roles)
         assert_eq!(result.blocked_extensions, Some(vec![".exe".to_string()]));
+    }
+
+    // --- shell_blocked resolution tests ---
+
+    #[test]
+    fn test_shell_blocked_strict_mode_upload_blocked() {
+        // strict mode + upload blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + upload blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_download_blocked() {
+        // strict mode + download blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + download blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_both_blocked() {
+        // strict mode + both blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + both blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_neither_blocked() {
+        // strict mode + neither blocked => shell_blocked = false
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "strict + no restrictions => shell allowed");
+    }
+
+    #[test]
+    fn test_shell_blocked_permissive_mode_with_restrictions() {
+        // permissive mode + restrictions => shell_blocked = false
+        let is_strict_mode = false;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "permissive + restrictions => shell allowed");
+    }
+
+    #[test]
+    fn test_shell_blocked_permissive_mode_no_restrictions() {
+        // permissive mode + no restrictions => shell_blocked = false
+        let is_strict_mode = false;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "permissive + no restrictions => shell allowed");
     }
 }

@@ -19,6 +19,11 @@ pub struct Model {
     /// Hash threshold for file transfers in bytes (files larger than this won't be hashed)
     /// Default: 10MB (10485760 bytes)
     pub file_transfer_hash_threshold_bytes: Option<i64>,
+    /// SFTP permission enforcement mode: "strict" or "permissive"
+    /// - strict: Shell/exec/forwarding blocked when SFTP restrictions are active
+    /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
+    #[sea_orm(default_value = "strict")]
+    pub sftp_permission_mode: String,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -41,6 +46,7 @@ impl Entity {
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
                     file_transfer_hash_threshold_bytes: Set(Some(10485760)), // 10MB default
+                    sftp_permission_mode: Set("strict".to_string()),
                 }
                 .insert(db)
                 .await

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "63b360f-modified"
+    "version": "v0.20.2-21-g551ce57-modified"
   },
   "servers": [
     {
@@ -50,6 +50,16 @@
             "name": "logged_in_only",
             "schema": {
               "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
             },
             "in": "query",
             "required": false,
@@ -2296,6 +2306,28 @@
             "required": true,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -2304,10 +2336,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserRoleHistoryEntry"
-                  }
+                  "$ref": "#/components/schemas/PaginatedResponse_UserRoleHistoryEntry"
                 }
               }
             }
@@ -2341,6 +2370,28 @@
             "required": true,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -2349,10 +2400,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserRoleHistoryEntry"
-                  }
+                  "$ref": "#/components/schemas/PaginatedResponse_UserRoleHistoryEntry"
                 }
               }
             }
@@ -3822,11 +3870,11 @@
         "properties": {
           "allow_file_upload": {
             "type": "boolean",
-            "description": "Allow file uploads via SCP/SFTP (null = inherit from role)"
+            "description": "Allow file uploads via SFTP (null = inherit from role)"
           },
           "allow_file_download": {
             "type": "boolean",
-            "description": "Allow file downloads via SCP/SFTP (null = inherit from role)"
+            "description": "Allow file downloads via SFTP (null = inherit from role)"
           },
           "allowed_paths": {
             "type": "array",
@@ -4113,6 +4161,31 @@
           }
         }
       },
+      "PaginatedResponse_UserRoleHistoryEntry": {
+        "type": "object",
+        "title": "PaginatedResponse_UserRoleHistoryEntry",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRoleHistoryEntry"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
@@ -4127,10 +4200,23 @@
             "type": "integer",
             "format": "uint32"
           },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
+          },
           "file_transfer_hash_threshold_bytes": {
             "type": "integer",
             "format": "int64",
             "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+          },
+          "sftp_permission_mode": {
+            "type": "string",
+            "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
           }
         }
       },
@@ -4138,7 +4224,11 @@
         "type": "object",
         "title": "ParameterValues",
         "required": [
-          "allow_own_credential_management"
+          "allow_own_credential_management",
+          "ssh_client_auth_publickey",
+          "ssh_client_auth_password",
+          "ssh_client_auth_keyboard_interactive",
+          "sftp_permission_mode"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4148,10 +4238,23 @@
             "type": "integer",
             "format": "uint32"
           },
+          "ssh_client_auth_publickey": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_password": {
+            "type": "boolean"
+          },
+          "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
+          },
           "file_transfer_hash_threshold_bytes": {
             "type": "integer",
             "format": "int64",
             "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+          },
+          "sftp_permission_mode": {
+            "type": "string",
+            "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
           }
         }
       },
@@ -4619,6 +4722,9 @@
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
+          },
+          "default_database_name": {
+            "type": "string"
           }
         }
       },
@@ -4789,6 +4895,9 @@
             "$ref": "#/components/schemas/Tls"
           },
           "idle_timeout": {
+            "type": "string"
+          },
+          "default_database_name": {
             "type": "string"
           }
         }
