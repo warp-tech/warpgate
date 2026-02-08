@@ -339,9 +339,9 @@ enum DeleteTargetRoleResponse {
 /// Request/response for file transfer permissions with inheritance support
 #[derive(Object, Clone, Debug)]
 struct FileTransferPermissionData {
-    /// Allow file uploads via SCP/SFTP (null = inherit from role)
+    /// Allow file uploads via SFTP (null = inherit from role)
     allow_file_upload: Option<bool>,
-    /// Allow file downloads via SCP/SFTP (null = inherit from role)
+    /// Allow file downloads via SFTP (null = inherit from role)
     allow_file_download: Option<bool>,
     /// Allowed paths (null = inherit from role)
     allowed_paths: Option<Vec<String>>,

@@ -15,12 +15,12 @@ use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
 /// File transfer permission settings for a user-target combination.
-/// Used to control SCP/SFTP access and track transfer metadata.
+/// Used to control SFTP access and track transfer metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileTransferPermission {
-    /// Whether file uploads (SCP -t / SFTP write) are allowed
+    /// Whether file uploads (SFTP write) are allowed
     pub upload_allowed: bool,
-    /// Whether file downloads (SCP -f / SFTP read) are allowed
+    /// Whether file downloads (SFTP read) are allowed
     pub download_allowed: bool,
     /// Allowed paths (None = all paths allowed)
     pub allowed_paths: Option<Vec<String>>,
@@ -28,6 +28,9 @@ pub struct FileTransferPermission {
     pub blocked_extensions: Option<Vec<String>>,
     /// Maximum file size in bytes (None = no limit)
     pub max_file_size: Option<i64>,
+    /// Whether shell/exec/forwarding should be blocked based on instance-wide sftp_permission_mode.
+    /// True when mode is "strict" AND this target has SFTP restrictions (upload or download blocked).
+    pub shell_blocked: bool,
 }
 
 impl Default for FileTransferPermission {
@@ -38,6 +41,8 @@ impl Default for FileTransferPermission {
             allowed_paths: None,
             blocked_extensions: None,
             max_file_size: None,
+            // Default to blocking shell in strict mode when SFTP is restricted
+            shell_blocked: true,
         }
     }
 }

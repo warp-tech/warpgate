@@ -11,9 +11,9 @@ pub struct Model {
     pub id: i32,
     pub target_id: Uuid,
     pub role_id: Uuid,
-    /// Allow file uploads via SCP/SFTP (null = inherit from role)
+    /// Allow file uploads via SFTP (null = inherit from role)
     pub allow_file_upload: Option<bool>,
-    /// Allow file downloads via SCP/SFTP (null = inherit from role)
+    /// Allow file downloads via SFTP (null = inherit from role)
     pub allow_file_download: Option<bool>,
     /// Allowed paths (JSON array of path patterns, null = inherit from role)
     #[sea_orm(column_type = "JsonBinary", nullable)]
