@@ -1,23 +1,27 @@
 <script lang="ts">
     import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
-    import { Button, ButtonGroup, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { TargetKind } from 'gateway/lib/api'
-    import RadioButton from 'common/RadioButton.svelte'
     import { onMount } from 'svelte'
+    import { TargetKind } from 'gateway/lib/api'
+
+    interface Props {
+        params: { kind: string };
+    }
+
+    let { params }: Props = $props()
 
     let error: string|null = $state(null)
     let name = $state('')
-    let type: TargetKind = $state(TargetKind.Ssh)
     let groups: TargetGroup[] = $state([])
     let selectedGroupId: string | undefined = $state()
 
     async function create () {
         try {
             const options: TargetOptions|undefined = {
-                [TargetKind.Ssh]: {
+                Ssh: {
                     kind: TargetKind.Ssh,
                     host: '192.168.0.1',
                     port: 22,
@@ -26,7 +30,7 @@
                         kind: 'PublicKey' as const,
                     },
                 },
-                [TargetKind.Http]: {
+                Http: {
                     kind: TargetKind.Http,
                     url: 'http://192.168.0.1',
                     tls: {
@@ -34,7 +38,7 @@
                         verify: true,
                     },
                 },
-                [TargetKind.MySql]: {
+                MySql: {
                     kind: TargetKind.MySql,
                     host: '192.168.0.1',
                     port: 3306,
@@ -45,7 +49,7 @@
                     username: 'root',
                     password: '',
                 },
-                [TargetKind.Postgres]: {
+                Postgres: {
                     kind: TargetKind.Postgres,
                     host: '192.168.0.1',
                     port: 5432,
@@ -56,8 +60,22 @@
                     username: 'postgres',
                     password: '',
                 },
-                [TargetKind.WebAdmin]: null as any,
-            }[type]
+                Kubernetes: {
+                    kind: TargetKind.Kubernetes,
+                    clusterUrl: 'https://kubernetes.example.com:6443',
+                    namespace: 'default',
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    auth: {
+                        kind: 'Certificate' as const,
+                        certificate: '',
+                        privateKey: '',
+                    },
+                },
+                WebAdmin: null as any,
+            }[params.kind]
             if (!options) {
                 return
             }
@@ -81,13 +99,6 @@
             error = await stringifyError(err)
         }
     })
-
-    const kinds: { name: string, value: TargetKind }[] = [
-        { name: 'SSH', value: TargetKind.Ssh },
-        { name: 'HTTP', value: TargetKind.Http },
-        { name: 'MySQL', value: TargetKind.MySql },
-        { name: 'PostgreSQL', value: TargetKind.Postgres },
-    ]
 </script>
 
 <div class="container-max-md">
@@ -107,20 +118,8 @@
             <!-- Defualt button for key handling -->
             <Button class="d-none" type="submit"></Button>
 
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-            <label class="mb-2">Type</label>
-            <ButtonGroup class="w-100 mb-3">
-                {#each kinds as kind (kind.value)}
-                    <RadioButton
-                        label={kind.name}
-                        value={kind.value}
-                        bind:group={type}
-                    />
-                {/each}
-            </ButtonGroup>
-
             <FormGroup floating label="Name">
-                <input class="form-control" required bind:value={name} />
+                <input class="form-control" autofocus required bind:value={name} />
             </FormGroup>
 
             {#if groups.length > 0}

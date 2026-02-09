@@ -6,4 +6,3 @@ pub mod healthcheck;
 pub mod recover_access;
 pub mod run;
 pub mod setup;
-pub mod test_target;

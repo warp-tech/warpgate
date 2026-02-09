@@ -12,6 +12,8 @@ pub enum RecordingKind {
     Terminal,
     #[sea_orm(string_value = "traffic")]
     Traffic,
+    #[sea_orm(string_value = "kubernetes")]
+    Kubernetes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -25,6 +27,8 @@ pub struct Model {
     pub ended: Option<DateTime<Utc>>,
     pub session_id: Uuid,
     pub kind: RecordingKind,
+    #[sea_orm(column_type = "Text")]
+    pub metadata: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

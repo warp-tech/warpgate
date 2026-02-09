@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
@@ -9,7 +10,7 @@ use poem::{handler, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -18,6 +19,9 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
+use warpgate_protocol_kubernetes::recording::{
+    KubernetesRecordingItem, KubernetesRecordingItemApiObject,
+};
 
 use super::AnySecurityScheme;
 
@@ -31,6 +35,11 @@ enum GetRecordingResponse {
     NotFound,
 }
 
+#[derive(ApiResponse)]
+enum GetKubernetesRecordingResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<KubernetesRecordingItemApiObject>>),
+}
 #[OpenApi]
 impl Api {
     #[oai(
@@ -56,6 +65,50 @@ impl Api {
             None => Ok(GetRecordingResponse::NotFound),
         }
     }
+
+    #[oai(
+        path = "/recordings/:id/kubernetes",
+        method = "get",
+        operation_id = "get_kubernetes_recording"
+    )]
+    async fn api_get_recording_kubernetes(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+        id: Path<Uuid>,
+    ) -> poem::Result<GetKubernetesRecordingResponse> {
+        let db = db.lock().await;
+
+        let recording = Recording::Entity::find_by_id(id.0)
+            .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
+            .one(&*db)
+            .await
+            .map_err(InternalServerError)?;
+
+        let Some(recording) = recording else {
+            return Err(NotFoundError.into());
+        };
+
+        let path = {
+            recordings
+                .lock()
+                .await
+                .path_for(&recording.session_id, &recording.name)
+        };
+
+        let file = File::open(&path).await.map_err(InternalServerError)?;
+        let reader = BufReader::new(file);
+        let mut lines = reader.lines();
+        let mut content = Vec::new();
+
+        while let Some(line) = lines.next_line().await.context("reading recording")? {
+            let item: KubernetesRecordingItem =
+                serde_json::from_str(&line).context("deserializing recording item")?;
+            content.push(KubernetesRecordingItemApiObject::from(item));
+        }
+
+        Ok(GetKubernetesRecordingResponse::Ok(Json(content)))
+    }
 }
 
 #[handler]
@@ -67,6 +120,7 @@ pub async fn api_get_recording_cast(
     let db = db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
+        .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
         .one(&*db)
         .await
         .map_err(InternalServerError)?;
@@ -74,10 +128,6 @@ pub async fn api_get_recording_cast(
     let Some(recording) = recording else {
         return Err(NotFoundError.into());
     };
-
-    if recording.kind != RecordingKind::Terminal {
-        return Err(NotFoundError.into());
-    }
 
     let path = {
         recordings
@@ -126,6 +176,7 @@ pub async fn api_get_recording_tcpdump(
     let db = db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
+        .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))
         .one(&*db)
         .await
         .map_err(InternalServerError)?;
@@ -133,10 +184,6 @@ pub async fn api_get_recording_tcpdump(
     let Some(recording) = recording else {
         return Err(NotFoundError.into());
     };
-
-    if recording.kind != RecordingKind::Traffic {
-        return Err(NotFoundError.into());
-    }
 
     let path = {
         recordings

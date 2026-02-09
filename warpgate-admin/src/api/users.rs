@@ -110,6 +110,7 @@ impl ListApi {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum GetUserResponse {
     #[oai(status = 200)]
     Ok(Json<UserConfig>),
@@ -118,6 +119,7 @@ enum GetUserResponse {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum UpdateUserResponse {
     #[oai(status = 200)]
     Ok(Json<UserConfig>),

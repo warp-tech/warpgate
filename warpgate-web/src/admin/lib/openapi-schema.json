@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.19.1-30-g35acb1d6-modified"
+    "version": "v0.20.0-37-g94ecc95e-modified"
   },
   "servers": [
     {
@@ -251,6 +251,39 @@
           }
         ],
         "operationId": "get_recording"
+      }
+    },
+    "/recordings/{id}/kubernetes": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KubernetesRecordingItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_kubernetes_recording"
       }
     },
     "/roles": {
@@ -3028,6 +3061,198 @@
         ],
         "operationId": "check_ssh_host_key"
       }
+    },
+    "/users/{user_id}/credentials/certificates": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingCertificateCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_certificate_credentials"
+      },
+      "post": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueCertificateCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedCertificateCredential"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "issue_certificate_credential"
+      }
+    },
+    "/users/{user_id}/credentials/certificates/{id}": {
+      "patch": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCertificateCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingCertificateCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_certificate_credential"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "revoke_certificate_credential"
+      }
     }
   },
   "components": {
@@ -3228,10 +3453,40 @@
         "enum": [
           "Password",
           "PublicKey",
+          "Certificate",
           "Totp",
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "ExistingCertificateCredential": {
+        "type": "object",
+        "title": "ExistingCertificateCredential",
+        "required": [
+          "id",
+          "label",
+          "fingerprint"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        }
       },
       "ExistingOtpCredential": {
         "type": "object",
@@ -3348,6 +3603,157 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "IssueCertificateCredentialRequest": {
+        "type": "object",
+        "title": "IssueCertificateCredentialRequest",
+        "required": [
+          "label",
+          "public_key_pem"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "public_key_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "IssuedCertificateCredential": {
+        "type": "object",
+        "title": "IssuedCertificateCredential",
+        "required": [
+          "credential",
+          "certificate_pem"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ExistingCertificateCredential"
+          },
+          "certificate_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "KubernetesRecordingItem": {
+        "type": "object",
+        "title": "KubernetesRecordingItem",
+        "required": [
+          "timestamp",
+          "request_method",
+          "request_path",
+          "request_body",
+          "response_body"
+        ],
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_method": {
+            "type": "string"
+          },
+          "request_path": {
+            "type": "string"
+          },
+          "request_body": {},
+          "response_status": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "response_body": {}
+        }
+      },
+      "KubernetesTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetTokenAuth"
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Token": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetTokenAuth",
+            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+          }
+        }
+      },
+      "KubernetesTargetAuth_KubernetesTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetCertificateAuth"
+          }
+        ]
+      },
+      "KubernetesTargetAuth_KubernetesTargetTokenAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Token"
+                ],
+                "example": "Token"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetTokenAuth"
+          }
+        ]
+      },
+      "KubernetesTargetCertificateAuth": {
+        "type": "object",
+        "title": "KubernetesTargetCertificateAuth",
+        "required": [
+          "certificate",
+          "private_key"
+        ],
+        "properties": {
+          "certificate": {
+            "type": "string"
+          },
+          "private_key": {
+            "type": "string"
+          }
+        }
+      },
+      "KubernetesTargetTokenAuth": {
+        "type": "object",
+        "title": "KubernetesTargetTokenAuth",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
           }
         }
       },
@@ -3633,7 +4039,8 @@
           "name",
           "started",
           "session_id",
-          "kind"
+          "kind",
+          "metadata"
         ],
         "properties": {
           "id": {
@@ -3657,6 +4064,9 @@
           },
           "kind": {
             "$ref": "#/components/schemas/RecordingKind"
+          },
+          "metadata": {
+            "type": "string"
           }
         }
       },
@@ -3664,7 +4074,8 @@
         "type": "string",
         "enum": [
           "Terminal",
-          "Traffic"
+          "Traffic",
+          "Kubernetes"
         ]
       },
       "Role": {
@@ -3997,6 +4408,30 @@
           }
         }
       },
+      "TargetKubernetesOptions": {
+        "type": "object",
+        "title": "TargetKubernetesOptions",
+        "required": [
+          "cluster_url",
+          "namespace",
+          "tls",
+          "auth"
+        ],
+        "properties": {
+          "cluster_url": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/KubernetesTargetAuth"
+          }
+        }
+      },
       "TargetMySqlOptions": {
         "type": "object",
         "title": "TargetMySqlOptions",
@@ -4038,6 +4473,9 @@
             "$ref": "#/components/schemas/TargetOptions_TargetHTTPOptions"
           },
           {
+            "$ref": "#/components/schemas/TargetOptions_TargetKubernetesOptions"
+          },
+          {
             "$ref": "#/components/schemas/TargetOptions_TargetMySqlOptions"
           },
           {
@@ -4052,6 +4490,7 @@
           "mapping": {
             "Ssh": "#/components/schemas/TargetOptions_TargetSSHOptions",
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
+            "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
             "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
@@ -4077,6 +4516,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetHTTPOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetKubernetesOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Kubernetes"
+                ],
+                "example": "Kubernetes"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetKubernetesOptions"
           }
         ]
       },
@@ -4367,6 +4828,18 @@
           "Required"
         ]
       },
+      "UpdateCertificateCredential": {
+        "type": "object",
+        "title": "UpdateCertificateCredential",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "UpdateLdapServerRequest": {
         "type": "object",
         "title": "UpdateLdapServerRequest",
@@ -4489,6 +4962,12 @@
         "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "kubernetes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

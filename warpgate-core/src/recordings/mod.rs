@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use serde::Serialize;
 use tokio::sync::{broadcast, Mutex};
 use tracing::*;
 use uuid::Uuid;
@@ -15,7 +17,7 @@ mod traffic;
 mod writer;
 pub use terminal::*;
 pub use traffic::*;
-use writer::RecordingWriter;
+pub use writer::RecordingWriter;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -76,31 +78,54 @@ impl SessionRecordings {
         })
     }
 
-    pub async fn start<T>(&mut self, id: &SessionId, name: String) -> Result<T>
+    /// Starting a recording with the same name again will append to it
+    pub async fn start<T, M>(
+        &mut self,
+        id: &SessionId,
+        name: Option<String>,
+        metadata: M,
+    ) -> Result<T>
     where
         T: Recorder,
+        M: Serialize + Debug,
     {
         if !self.config.enable {
             return Err(Error::Disabled);
         }
 
+        let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
         let path = self.path_for(id, &name);
+
         tokio::fs::create_dir_all(&path.parent().ok_or(Error::InvalidPath)?).await?;
-        info!(%name, path=?path, "Recording session {}", id);
 
         let model = {
-            use sea_orm::ActiveValue::Set;
-            let values = Recording::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                started: Set(chrono::Utc::now()),
-                session_id: Set(*id),
-                name: Set(name),
-                kind: Set(T::kind()),
-                ..Default::default()
-            };
-
             let db = self.db.lock().await;
-            values.insert(&*db).await.map_err(Error::Database)?
+            let existing = Recording::Entity::find()
+                .filter(
+                    Recording::Column::SessionId
+                        .eq(*id)
+                        .and(Recording::Column::Name.eq(name.clone()))
+                        .and(Recording::Column::Kind.eq(T::kind())),
+                )
+                .one(&*db)
+                .await?;
+            match existing {
+                Some(e) => e,
+                None => {
+                    info!(%name, ?metadata, path=?path, "Recording session {}", id);
+                    use sea_orm::ActiveValue::Set;
+                    let values = Recording::ActiveModel {
+                        id: Set(Uuid::new_v4()),
+                        started: Set(chrono::Utc::now()),
+                        session_id: Set(*id),
+                        name: Set(name.clone()),
+                        kind: Set(T::kind()),
+                        metadata: Set(serde_json::to_string(&metadata)?),
+                        ..Default::default()
+                    };
+                    values.insert(&*db).await.map_err(Error::Database)?
+                }
+            }
         };
 
         let writer = RecordingWriter::new(
@@ -119,7 +144,7 @@ impl SessionRecordings {
         live.get(id).map(|sender| sender.subscribe())
     }
 
-    pub async fn remove<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> Result<()> {
+    pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
         let path = self.path_for(session_id, name);
         tokio::fs::remove_file(&path).await?;
         if let Some(parent) = path.parent() {

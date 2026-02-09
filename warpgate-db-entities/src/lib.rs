@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
 pub mod ApiToken;
+pub mod CertificateCredential;
+pub mod CertificateRevocation;
 pub mod KnownHost;
 pub mod LdapServer;
 pub mod LogEntry;

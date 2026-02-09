@@ -118,6 +118,11 @@ impl From<AuthResult> for ApiAuthState {
                     Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
                     Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
                     Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,
+                    Some(CredentialKind::Certificate) => {
+                        // Certificate authentication is not supported for HTTP protocol
+                        // This credential type is primarily for Kubernetes
+                        ApiAuthState::Failed
+                    }
                     None => ApiAuthState::Failed,
                 }
             }

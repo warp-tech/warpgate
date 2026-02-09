@@ -53,7 +53,7 @@ spec:
                   key: {{ (split "/" $val)._1 }}
           {{- end }}
           {{- end }}
-          command: 
+          command:
             - /bin/sh
             - -c
             - |
@@ -80,10 +80,9 @@ spec:
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
                   {{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }} {{- end }}
+                  {{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}
                   {{- if .Values.setup.databaseUrl }} --database-url "{{ .Values.setup.databaseUrl }}" {{- end }}
                   {{- if .Values.setup.recordSessions }} --record-sessions {{- end }}
-
-                  {{/*{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }} {{- end }}*/}}
 
                 {{- if .Values.setup.disableIpV6 }}
                 sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml
@@ -131,9 +130,9 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: 
+          command:
             - warpgate
-            - -c 
+            - -c
             - /data/warpgate.yaml
             - run
           ports:

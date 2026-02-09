@@ -70,10 +70,7 @@ impl PendingWait {
                     }
                     Err(e) => {
                         self.state = PendingWaitState::Empty(0);
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            e.to_string(),
-                        )));
+                        return Poll::Ready(Err(io::Error::other(e.to_string())));
                     }
                 };
             };

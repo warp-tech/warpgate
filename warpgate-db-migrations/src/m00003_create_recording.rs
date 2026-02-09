@@ -14,6 +14,8 @@ pub mod recording {
         Terminal,
         #[sea_orm(string_value = "traffic")]
         Traffic,
+        #[sea_orm(string_value = "kubernetes")]
+        Kubernetes,
     }
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]

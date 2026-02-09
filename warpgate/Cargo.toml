@@ -6,7 +6,7 @@ version = "0.20.2"
 
 [dependencies]
 ansi_term = { version = "0.12", default-features = false }
-anyhow = { version = "1.0", features = ["backtrace"], default-features = false }
+anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true
 clap = { version = "4.0", features = ["derive", "env"], default-features = false }
@@ -36,12 +36,14 @@ tracing-subscriber = { version = "0.3", features = [
 uuid = { version = "1.3", default-features = false }
 warpgate-admin = { version = "*", path = "../warpgate-admin" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-ca = { version = "*", path = "../warpgate-ca" }
 warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
 warpgate-protocol-http = { version = "*", path = "../warpgate-protocol-http" }
 warpgate-protocol-mysql = { version = "*", path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { version = "*", path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
+warpgate-protocol-kubernetes = { version = "*", path = "../warpgate-protocol-kubernetes" }
 warpgate-tls = { version = "*", path = "../warpgate-tls" }
 schemars.workspace = true
 

@@ -12,6 +12,7 @@ members = [
     "warpgate-database-protocols",
     "warpgate-ldap",
     "warpgate-protocol-http",
+    "warpgate-protocol-kubernetes",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-ssh",
@@ -22,6 +23,7 @@ default-members = ["warpgate"]
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
 bytes = { version = "1.4", default-features = false }
 data-encoding = { version = "2.3", default-features = false, features = ["alloc", "std"] }
 serde = { version = "1.0", features = ["derive"], default-features = false }
@@ -46,6 +48,7 @@ poem = { version = "3.1", features = [
     "embed",
     "server",
 ], default-features = false }
+hex = { version = "0.4", default-features = false }
 poem-openapi = { version = "5.1", features = [
     "stoplight-elements",
     "chrono",
@@ -67,15 +70,17 @@ dialoguer = { version = "0.11", default-features = false, features = ["editor", 
 tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
 governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
 rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
-x509-parser = { version = "0.17.0", default-features = false }
+x509-parser = "0.17.0"
 uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.13", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
-    "rustls-tls-native-roots-no-provider",
+    "rustls-no-provider",
     "stream",
     "gzip",
 ], default-features = false }
 regex = { version = "1.6", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
+reqwest-websocket = "0.6.0"
 
 [profile.release]
 lto = true

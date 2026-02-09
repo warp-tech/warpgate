@@ -20,6 +20,7 @@ pub struct PortsInfo {
     http: Option<u16>,
     mysql: Option<u16>,
     postgres: Option<u16>,
+    kubernetes: Option<u16>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -143,12 +144,18 @@ impl Api {
                     } else {
                         None
                     },
+                    kubernetes: if config.store.kubernetes.enable {
+                        Some(config.store.kubernetes.external_port())
+                    } else {
+                        None
+                    },
                 },
                 None => PortsInfo {
                     ssh: None,
                     http: None,
                     mysql: None,
                     postgres: None,
+                    kubernetes: None,
                 },
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,

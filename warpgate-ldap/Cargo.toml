@@ -5,7 +5,7 @@ name = "warpgate-ldap"
 version = "0.20.2"
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false, features = ["std"] }
+anyhow.workspace = true
 ldap3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
