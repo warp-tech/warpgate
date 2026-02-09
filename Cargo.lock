@@ -232,7 +232,7 @@ dependencies = [
  "nom",
  "num-traits",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
@@ -631,9 +631,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.11.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cbc"
@@ -2586,7 +2586,7 @@ dependencies = [
  "percent-encoding",
  "rustls",
  "rustls-native-certs",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -2966,9 +2966,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
+checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
 
 [[package]]
 name = "num-integer"
@@ -3356,7 +3356,7 @@ dependencies = [
  "rand 0.9.2",
  "rust_decimal",
  "rustls-pki-types",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -3517,7 +3517,7 @@ dependencies = [
  "smallvec",
  "sync_wrapper",
  "tempfile",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-rustls",
@@ -3563,7 +3563,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "serde_yaml",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -3583,7 +3583,7 @@ dependencies = [
  "quote",
  "regex",
  "syn 2.0.114",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4259,7 +4259,7 @@ dependencies = [
  "flurry",
  "log",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
 ]
@@ -4565,7 +4565,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "strum",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
  "tracing",
  "url",
@@ -4656,7 +4656,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5002,7 +5002,7 @@ checksum = "297f631f50729c8c99b84667867963997ec0b50f32b2a7dbcab828ef0541e8bb"
 dependencies = [
  "num-bigint",
  "num-traits",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
@@ -5127,7 +5127,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -5212,7 +5212,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "uuid",
  "whoami",
@@ -5251,7 +5251,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "uuid",
  "whoami",
@@ -5277,7 +5277,7 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "sqlx-core",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "url",
  "uuid",
@@ -5435,11 +5435,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.17",
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -5455,9 +5455,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5475,9 +5475,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.44"
+version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e7d9e3bb61134e77bde20dd4825b97c010155709965fedf0f49bb138e52a9d"
+checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
@@ -5485,22 +5485,22 @@ dependencies = [
  "num-conv",
  "num_threads",
  "powerfmt",
- "serde",
+ "serde_core",
  "time-core",
  "time-macros",
 ]
 
 [[package]]
 name = "time-core"
-version = "0.1.6"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40868e7c1d2f0b8d73e4a8c7f0ff63af4f6d19be117e90bd73eb1d62cf831c6b"
+checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
 name = "time-macros"
-version = "0.2.24"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30cfb0125f12d9c277f35663a0a33f8c30190f4e4574868a330595412d34ebf3"
+checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
@@ -5878,7 +5878,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "sha1 0.10.6",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "utf-8",
 ]
 
@@ -5895,7 +5895,7 @@ dependencies = [
  "log",
  "rand 0.9.2",
  "sha1 0.10.6",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "utf-8",
 ]
 
@@ -6140,7 +6140,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
@@ -6183,7 +6183,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -6228,7 +6228,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "totp-rs",
  "tracing",
@@ -6253,7 +6253,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "memchr",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -6300,7 +6300,7 @@ dependencies = [
  "poem-openapi",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
@@ -6357,7 +6357,7 @@ dependencies = [
  "rand 0.8.5",
  "rustls",
  "sha1 0.10.6",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -6384,7 +6384,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "socket2 0.5.10",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -6412,7 +6412,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
@@ -6436,7 +6436,7 @@ dependencies = [
  "schemars 0.9.0",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -6454,7 +6454,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -6469,7 +6469,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7061,7 +7061,7 @@ dependencies = [
  "nom",
  "oid-registry 0.8.1",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
@@ -7078,7 +7078,7 @@ dependencies = [
  "nom",
  "oid-registry 0.8.1",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
