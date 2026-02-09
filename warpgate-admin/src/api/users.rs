@@ -640,13 +640,13 @@ impl RolesApi {
         db: Data<&Arc<Mutex<DatabaseConnection>>>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
-        body: Json<AddUserRoleRequest>,
+        body: Json<Option<AddUserRoleRequest>>,
         auth: Data<&RequestAuthorization>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
         let actor_id = get_actor_id(&*db, auth.0).await?;
-        let expires_at = body.expires_at;
+        let expires_at = body.0.and_then(|b| b.expires_at);
 
         // Check if assignment already exists (including revoked ones)
         let existing = UserRoleAssignment::Entity::find()
