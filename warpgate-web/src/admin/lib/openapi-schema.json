@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.2-21-g551ce57-modified"
+    "version": "v0.20.2-25-ga9eb2b7-modified"
   },
   "servers": [
     {
@@ -5229,47 +5229,55 @@
       "UserRoleAssignmentResponse": {
         "type": "object",
         "title": "UserRoleAssignmentResponse",
-        "description": "Response containing user role assignment with expiry info",
+        "description": "Response containing user role assignment with expiry info.\nExtends the upstream `Role` response shape (`id`, `name`, `description`)\nwith assignment-specific fields for expiry and audit tracking.",
         "required": [
-          "user_id",
-          "role_id",
-          "role_name",
+          "id",
+          "name",
+          "description",
           "granted_at",
           "is_expired",
           "is_active"
         ],
         "properties": {
-          "user_id": {
+          "id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Role ID"
           },
-          "role_id": {
+          "name": {
             "type": "string",
-            "format": "uuid"
+            "description": "Role name"
           },
-          "role_name": {
-            "type": "string"
+          "description": {
+            "type": "string",
+            "description": "Role description"
           },
           "granted_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the role was granted"
           },
           "granted_by": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "ID of the user who granted this role"
           },
           "granted_by_username": {
-            "type": "string"
+            "type": "string",
+            "description": "Username of the user who granted this role"
           },
           "expires_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When this role assignment expires (null = permanent)"
           },
           "is_expired": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether this assignment has expired"
           },
           "is_active": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether this assignment is currently active (not expired, not revoked)"
           }
         }
       },
