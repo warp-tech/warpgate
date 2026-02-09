@@ -5,7 +5,7 @@
   "properties": {
     "database_url": {
       "type": "string",
-      "default": "sqlite:data/db"
+      "default": "sqlite:/data/warpgate.db"
     },
     "external_host": {
       "type": [
