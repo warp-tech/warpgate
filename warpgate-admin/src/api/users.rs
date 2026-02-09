@@ -346,17 +346,28 @@ impl DetailApi {
 
 // ========== User Role Assignment DTOs ==========
 
-/// Response containing user role assignment with expiry info
+/// Response containing user role assignment with expiry info.
+/// Extends the upstream `Role` response shape (`id`, `name`, `description`)
+/// with assignment-specific fields for expiry and audit tracking.
 #[derive(Object, Serialize, Deserialize, Clone, Debug)]
 struct UserRoleAssignmentResponse {
-    user_id: Uuid,
-    role_id: Uuid,
-    role_name: String,
+    /// Role ID
+    id: Uuid,
+    /// Role name
+    name: String,
+    /// Role description
+    description: String,
+    /// When the role was granted
     granted_at: DateTime<Utc>,
+    /// ID of the user who granted this role
     granted_by: Option<Uuid>,
+    /// Username of the user who granted this role
     granted_by_username: Option<String>,
+    /// When this role assignment expires (null = permanent)
     expires_at: Option<DateTime<Utc>>,
+    /// Whether this assignment has expired
     is_expired: bool,
+    /// Whether this assignment is currently active (not expired, not revoked)
     is_active: bool,
 }
 
@@ -532,11 +543,9 @@ async fn build_assignment_response(
     };
 
     Ok(UserRoleAssignmentResponse {
-        user_id: assignment.user_id,
-        role_id: assignment.role_id,
-        role_name: role.name.clone(),
-        // granted_at is nullable in DB for SQLite compat, but always set by app
-        // Use current time as fallback for legacy data (shouldn't happen after migration)
+        id: role.id,
+        name: role.name.clone(),
+        description: role.description.clone(),
         granted_at: assignment.granted_at.unwrap_or_else(Utc::now),
         granted_by: assignment.granted_by,
         granted_by_username,
@@ -637,6 +646,7 @@ impl RolesApi {
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         let db = db.lock().await;
         let actor_id = get_actor_id(&*db, auth.0).await?;
+        let expires_at = body.expires_at;
 
         // Check if assignment already exists (including revoked ones)
         let existing = UserRoleAssignment::Entity::find()
@@ -666,7 +676,7 @@ impl RolesApi {
             role_id: Set(role_id.0),
             granted_at: Set(Some(now)), // Option for SQLite compat, but always set
             granted_by: Set(actor_id),
-            expires_at: Set(body.expires_at),
+            expires_at: Set(expires_at),
             revoked_at: Set(None),
             revoked_by: Set(None),
             ..Default::default()
@@ -680,7 +690,7 @@ impl RolesApi {
             role_name: role.name.clone(),
             user_id: id.0,
             user_username: user.username.clone(),
-            expires_at: body.expires_at,
+            expires_at,
             old_expires_at: None,
             new_expires_at: None,
             actor_id,
