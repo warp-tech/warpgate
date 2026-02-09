@@ -11,8 +11,9 @@
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import Fa from 'svelte-fa'
-    import { faCaretDown, faLink, faUnlink, faClock, faUser, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons'
+    import { faCaretDown, faLink, faUnlink, faClock, faUser, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp, faRedo } from '@fortawesome/free-solid-svg-icons'
     import RelativeDate from '../RelativeDate.svelte'
+    import { onMount, onDestroy } from 'svelte'
 
     interface Props {
         params: { id: string };
@@ -31,6 +32,22 @@
     let editingRole: UserRoleAssignmentResponse | null = $state(null)
     let expiryDate: string | null = $state(null)
     let selectedPreset: string = $state('custom')
+    let isNewAssignment = $state(false)
+    let pendingRole: Role | null = $state(null)
+
+    // Live countdown tick
+    let _tick = $state(0)
+    let _tickInterval: ReturnType<typeof setInterval> | null = null
+
+    onMount(() => {
+        _tickInterval = setInterval(() => { _tick++ }, 60_000)
+    })
+
+    onDestroy(() => {
+        if (_tickInterval) {
+            clearInterval(_tickInterval)
+        }
+    })
 
     // Quick expiry preset options
     const expiryPresets = [
@@ -41,6 +58,7 @@
         { label: '1 day', value: '1d', ms: 24 * 60 * 60 * 1000 },
         { label: '3 days', value: '3d', ms: 3 * 24 * 60 * 60 * 1000 },
         { label: '7 days', value: '7d', ms: 7 * 24 * 60 * 60 * 1000 },
+        { label: '30 days', value: '30d', ms: 30 * 24 * 60 * 60 * 1000 },
     ]
 
     function applyPreset(presetValue: string) {
@@ -93,7 +111,10 @@
         const expiredAssignment = userRoles.find(r => r.id === role.id && r.isExpired)
 
         if (activeAssignment) {
-            // Remove active role (soft delete - sets revoked_at)
+            // Confirm before revoking
+            if (!confirm(`Revoke role "${role.name}" from this user?`)) {
+                return
+            }
             await api.deleteUserRole({
                 id: user!.id,
                 roleId: role.id,
@@ -102,20 +123,11 @@
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
             await loadAllRoleHistory()
         } else if (expiredAssignment) {
-            // Re-enable expired role by removing the expiry (makes it permanent)
-            await api.removeUserRoleExpiry({
-                id: user!.id,
-                roleId: role.id,
-            })
-            await init()
+            // Re-enable expired role - show expiry modal to let user choose duration
+            openExpiryModalForReEnable(expiredAssignment)
         } else {
-            // Add new role
-            await api.addUserRole({
-                id: user!.id,
-                roleId: role.id,
-                addUserRoleRequest: {},
-            })
-            await init()
+            // New assignment - show expiry modal to let user optionally set duration
+            openExpiryModalForNewAssignment(role)
         }
     }
 
@@ -129,37 +141,84 @@
         return `${year}-${month}-${day}T${hours}:${minutes}`
     }
 
+    function nowLocalISO(): string {
+        return toLocalISO(new Date())
+    }
+
     function openExpiryModal(roleAssignment: UserRoleAssignmentResponse) {
         editingRole = roleAssignment
         expiryDate = roleAssignment.expiresAt ? toLocalISO(new Date(roleAssignment.expiresAt)) : null
         selectedPreset = 'custom'
+        isNewAssignment = false
+        pendingRole = null
+        showExpiryModal = true
+    }
+
+    function openExpiryModalForNewAssignment(role: Role) {
+        editingRole = null
+        pendingRole = role
+        expiryDate = null
+        selectedPreset = 'custom'
+        isNewAssignment = true
+        showExpiryModal = true
+    }
+
+    function openExpiryModalForReEnable(assignment: UserRoleAssignmentResponse) {
+        editingRole = assignment
+        expiryDate = null
+        selectedPreset = 'custom'
+        isNewAssignment = true
+        pendingRole = null
         showExpiryModal = true
     }
 
     async function saveExpiry() {
-        if (!editingRole) {
-            return
-        }
-
         try {
             const expiresAt = expiryDate ? new Date(expiryDate) : undefined
 
-            if (expiresAt) {
-                // Updating existing role expiry
-                await api.updateUserRoleExpiry({
-                    id: user!.id,
-                    roleId: editingRole.id,
-                    updateUserRoleExpiryRequest: {
-                        expiresAt,
-                    },
-                })
-            } else {
-                // Removing expiry (making permanent)
-                await api.removeUserRoleExpiry({
-                    id: user!.id,
-                    roleId: editingRole.id,
-                })
+            // Validate: expiry must be in the future
+            if (expiresAt && expiresAt.getTime() <= Date.now()) {
+                error = 'Expiry date must be in the future.'
+                return
             }
+
+            if (isNewAssignment && pendingRole) {
+                // Creating a new assignment with optional expiry
+                await api.addUserRole({
+                    id: user!.id,
+                    roleId: pendingRole.id,
+                    addUserRoleRequest: { expiresAt },
+                })
+            } else if (isNewAssignment && editingRole) {
+                // Re-enabling an expired assignment
+                if (expiresAt) {
+                    await api.updateUserRoleExpiry({
+                        id: user!.id,
+                        roleId: editingRole.id,
+                        updateUserRoleExpiryRequest: { expiresAt },
+                    })
+                } else {
+                    await api.removeUserRoleExpiry({
+                        id: user!.id,
+                        roleId: editingRole.id,
+                    })
+                }
+            } else if (editingRole) {
+                // Editing expiry on an existing active assignment
+                if (expiresAt) {
+                    await api.updateUserRoleExpiry({
+                        id: user!.id,
+                        roleId: editingRole.id,
+                        updateUserRoleExpiryRequest: { expiresAt },
+                    })
+                } else {
+                    await api.removeUserRoleExpiry({
+                        id: user!.id,
+                        roleId: editingRole.id,
+                    })
+                }
+            }
+
             showExpiryModal = false
             await init()
             await loadAllRoleHistory()
@@ -169,20 +228,10 @@
         }
     }
 
-    async function removeExpiry() {
-        if (!editingRole) {
-            return
-        }
-        await api.removeUserRoleExpiry({
-            id: user!.id,
-            roleId: editingRole.id,
-        })
-        showExpiryModal = false
-        await init()
-        await loadAllRoleHistory()
-    }
-
     function getExpiryStatus(assignment: UserRoleAssignmentResponse): { text: string, 'class': string } {
+        // Reference _tick to make this reactive to the interval
+        void _tick
+
         if (assignment.isExpired) {
             return { text: 'Expired', 'class': 'text-danger' }
         }
@@ -269,6 +318,24 @@
     // Collapsible states
     let roleHistoryCollapsed = $state(true)
     let sessionHistoryCollapsed = $state(true)
+
+    // Auto-load history when expanding
+    let _prevRoleHistoryCollapsed = true
+    let _prevSessionHistoryCollapsed = true
+
+    $effect(() => {
+        if (!roleHistoryCollapsed && _prevRoleHistoryCollapsed && !roleHistoryLoaded) {
+            loadAllRoleHistory()
+        }
+        _prevRoleHistoryCollapsed = roleHistoryCollapsed
+    })
+
+    $effect(() => {
+        if (!sessionHistoryCollapsed && _prevSessionHistoryCollapsed && !sessionHistoryLoaded) {
+            loadSessionHistory()
+        }
+        _prevSessionHistoryCollapsed = sessionHistoryCollapsed
+    })
 
     async function loadSessionHistory(loadMore = false) {
         if (!user) {
@@ -450,26 +517,41 @@
             <h4 class="mt-4">User roles</h4>
             <div class="list-group list-group-flush mb-3">
                 {#each allRoles as role (role.id)}
-                    {@const roleAssignment = userRoles.find(ur => ur.id === role.id && !ur.isExpired)}
-                    {@const isAssigned = !!roleAssignment}
-                    <div class="list-group-item d-flex align-items-center justify-content-between">
+                    {@const activeAssignment = userRoles.find(ur => ur.id === role.id && !ur.isExpired)}
+                    {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
+                    {@const isActive = !!activeAssignment}
+                    {@const isExpired = !!expiredAssignment && !isActive}
+                    {@const assignment = activeAssignment ?? expiredAssignment}
+                    {@const status = assignment ? getExpiryStatus(assignment) : null}
+                    <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
                         <div class="d-flex align-items-center gap-3">
                             <Input
                                 id="role-{role.id}"
                                 class="mb-0"
                                 type="switch"
                                 on:change={() => toggleRole(role)}
-                                checked={isAssigned} />
+                                checked={isActive} />
                             <div>
-                                <div>{role.name}</div>
-                                {#if isAssigned && roleAssignment}
-                                    <div class="d-flex gap-2 align-items-center">
-                                        <small class={getExpiryStatus(roleAssignment).class}>
-                                            {getExpiryStatus(roleAssignment).text}
+                                <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
+                                {#if isActive && activeAssignment}
+                                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                                        <small class={status?.class ?? ''}>
+                                            {status?.text ?? ''}
                                         </small>
-                                        {#if roleAssignment.grantedAt}
-                                            <small class="text-muted" title={new Date(roleAssignment.grantedAt).toLocaleString()}>
-                                                &bull; <RelativeDate date={new Date(roleAssignment.grantedAt)} />
+                                        {#if activeAssignment.grantedAt}
+                                            <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
+                                                &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
+                                            </small>
+                                        {/if}
+                                    </div>
+                                {:else if isExpired && expiredAssignment}
+                                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                                        <small class="text-danger">
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
+                                        </small>
+                                        {#if expiredAssignment.expiresAt}
+                                            <small class="text-muted">
+                                                {new Date(expiredAssignment.expiresAt).toLocaleDateString()}
                                             </small>
                                         {/if}
                                     </div>
@@ -478,19 +560,31 @@
                                 {/if}
                             </div>
                         </div>
-                        {#if isAssigned}
-                            <div class="d-flex gap-2">
+                        <div class="d-flex gap-2">
+                            {#if isActive && activeAssignment}
                                 <Button
                                     size="sm"
                                     outline
                                     color="secondary"
-                                    on:click={() => openExpiryModal(roleAssignment)}
+                                    on:click={() => openExpiryModal(activeAssignment)}
                                     title="Edit expiry"
                                 >
-                                    <Fa icon={faClock} />
+                                    <Fa icon={faClock} class="me-1" />
+                                    Expiry
                                 </Button>
-                            </div>
-                        {/if}
+                            {:else if isExpired}
+                                <Button
+                                    size="sm"
+                                    outline
+                                    color="success"
+                                    on:click={() => toggleRole(role)}
+                                    title="Re-enable this role"
+                                >
+                                    <Fa icon={faRedo} class="me-1" />
+                                    Re-enable
+                                </Button>
+                            {/if}
+                        </div>
                     </div>
                 {/each}
             </div>
@@ -522,13 +616,7 @@
                 <Collapse isOpen={!roleHistoryCollapsed}>
                     <CardBody>
                         {#if !roleHistoryLoaded}
-                            <AsyncButton
-                                outline
-                                color="secondary"
-                                click={() => loadAllRoleHistory()}
-                            >
-                                Load history
-                            </AsyncButton>
+                            <div class="text-center py-3 text-muted small">Loading history...</div>
                         {:else if roleHistory.length === 0}
                             <div class="text-muted small">No history found for this user.</div>
                         {:else}
@@ -593,13 +681,7 @@
                 <Collapse isOpen={!sessionHistoryCollapsed}>
                     <CardBody>
                         {#if !sessionHistoryLoaded}
-                            <AsyncButton
-                                outline
-                                color="secondary"
-                                click={() => loadSessionHistory()}
-                            >
-                                Load connections
-                            </AsyncButton>
+                            <div class="text-center py-3 text-muted small">Loading connections...</div>
                         {:else if sessionHistory.length === 0}
                             <div class="text-muted small">No connection history found for this user.</div>
                         {:else}
@@ -684,10 +766,40 @@
 <!-- Expiry Modal -->
 <Modal isOpen={showExpiryModal} toggle={() => showExpiryModal = false}>
     <ModalHeader toggle={() => showExpiryModal = false}>
-        Set Expiry for {editingRole?.name}
+        {#if isNewAssignment}
+            Assign role: {pendingRole?.name ?? editingRole?.name}
+        {:else}
+            Edit expiry: {editingRole?.name}
+        {/if}
     </ModalHeader>
     <ModalBody>
-        {#if editingRole}
+        {#if isNewAssignment}
+            <p class="text-muted small mb-3">
+                Set an optional expiry for this role assignment, or leave as permanent.
+            </p>
+        {/if}
+
+        <!-- No expiry toggle (shown first for clarity) -->
+        <div class="form-check form-switch mb-3">
+            <input
+                class="form-check-input"
+                type="checkbox"
+                id="no-expiry"
+                checked={expiryDate === null}
+                onchange={(e) => {
+                    if ((e.target as HTMLInputElement).checked) {
+                        expiryDate = null
+                        selectedPreset = 'custom'
+                    } else {
+                        // Default to 7 days when unchecking "permanent"
+                        applyPreset('7d')
+                    }
+                }}
+            />
+            <label class="form-check-label" for="no-expiry">Permanent (no expiry)</label>
+        </div>
+
+        {#if expiryDate !== null}
             <!-- Quick expiry presets -->
             <FormGroup floating label="Quick expiry">
                 <Input
@@ -706,60 +818,31 @@
                 <Input
                     type="datetime-local"
                     bind:value={expiryDate}
+                    min={nowLocalISO()}
                     on:input={() => { selectedPreset = 'custom' }}
                 />
             </FormGroup>
+        {/if}
 
-            <!-- No expiry toggle -->
-            <div class="form-check form-switch mb-3">
-                <input
-                    class="form-check-input"
-                    type="checkbox"
-                    id="no-expiry"
-                    checked={expiryDate === null}
-                    onchange={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                            expiryDate = null
-                            selectedPreset = 'custom'
-                        }
-                    }}
-                />
-                <label class="form-check-label" for="no-expiry">No expiry (permanent)</label>
-            </div>
-
-            {#if error}
-                <Alert color="danger" dismissible on:dismiss={() => error = null}>
-                    {error}
-                </Alert>
-            {/if}
+        {#if error}
+            <Alert color="danger" dismissible on:dismiss={() => error = null}>
+                {error}
+            </Alert>
         {/if}
     </ModalBody>
-    <ModalFooter class="d-flex justify-content-between">
-        <div>
-            {#if editingRole?.expiresAt}
-                <Button
-                    outline
-                    color="danger"
-                    on:click={removeExpiry}
-                >
-                    Make Permanent
-                </Button>
-            {/if}
-        </div>
-        <div class="d-flex gap-2">
-            <Button
-                outline
-                color="secondary"
-                on:click={() => showExpiryModal = false}
-            >
-                Cancel
-            </Button>
-            <AsyncButton
-                color="primary"
-                click={saveExpiry}
-            >
-                Save
-            </AsyncButton>
-        </div>
+    <ModalFooter>
+        <Button
+            outline
+            color="secondary"
+            on:click={() => showExpiryModal = false}
+        >
+            Cancel
+        </Button>
+        <AsyncButton
+            color="primary"
+            click={saveExpiry}
+        >
+            {isNewAssignment ? 'Assign role' : 'Save'}
+        </AsyncButton>
     </ModalFooter>
 </Modal>
