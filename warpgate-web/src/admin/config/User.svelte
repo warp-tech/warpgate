@@ -63,7 +63,7 @@
 
         allRoles = await api.getRoles()
         userRoles = await api.getUserRoles(user)
-        roleIsAllowed = Object.fromEntries(userRoles.map(r => [r.roleId, true]))
+        roleIsAllowed = Object.fromEntries(userRoles.map(r => [r.id, true]))
     }
 
     async function update () {
@@ -88,9 +88,9 @@
 
     async function toggleRole (role: Role) {
         // Check if there's an active (non-expired) assignment
-        const activeAssignment = userRoles.find(r => r.roleId === role.id && !r.isExpired)
+        const activeAssignment = userRoles.find(r => r.id === role.id && !r.isExpired)
         // Check if there's an expired assignment
-        const expiredAssignment = userRoles.find(r => r.roleId === role.id && r.isExpired)
+        const expiredAssignment = userRoles.find(r => r.id === role.id && r.isExpired)
 
         if (activeAssignment) {
             // Remove active role (soft delete - sets revoked_at)
@@ -98,7 +98,7 @@
                 id: user!.id,
                 roleId: role.id,
             })
-            userRoles = userRoles.filter(r => r.roleId !== role.id)
+            userRoles = userRoles.filter(r => r.id !== role.id)
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
             await loadAllRoleHistory()
         } else if (expiredAssignment) {
@@ -148,7 +148,7 @@
                 // Updating existing role expiry
                 await api.updateUserRoleExpiry({
                     id: user!.id,
-                    roleId: editingRole.roleId,
+                    roleId: editingRole.id,
                     updateUserRoleExpiryRequest: {
                         expiresAt,
                     },
@@ -157,7 +157,7 @@
                 // Removing expiry (making permanent)
                 await api.removeUserRoleExpiry({
                     id: user!.id,
-                    roleId: editingRole.roleId,
+                    roleId: editingRole.id,
                 })
             }
             showExpiryModal = false
@@ -175,7 +175,7 @@
         }
         await api.removeUserRoleExpiry({
             id: user!.id,
-            roleId: editingRole.roleId,
+            roleId: editingRole.id,
         })
         showExpiryModal = false
         await init()
@@ -450,7 +450,7 @@
             <h4 class="mt-4">User roles</h4>
             <div class="list-group list-group-flush mb-3">
                 {#each allRoles as role (role.id)}
-                    {@const roleAssignment = userRoles.find(ur => ur.roleId === role.id && !ur.isExpired)}
+                    {@const roleAssignment = userRoles.find(ur => ur.id === role.id && !ur.isExpired)}
                     {@const isAssigned = !!roleAssignment}
                     <div class="list-group-item d-flex align-items-center justify-content-between">
                         <div class="d-flex align-items-center gap-3">
@@ -684,7 +684,7 @@
 <!-- Expiry Modal -->
 <Modal isOpen={showExpiryModal} toggle={() => showExpiryModal = false}>
     <ModalHeader toggle={() => showExpiryModal = false}>
-        Set Expiry for {editingRole?.roleName}
+        Set Expiry for {editingRole?.name}
     </ModalHeader>
     <ModalBody>
         {#if editingRole}
