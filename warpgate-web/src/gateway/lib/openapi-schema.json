@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.20.2-32-gcc6309c-modified"
+    "version": "v0.20.2-37-g1ceec45"
   },
   "servers": [
     {
@@ -636,6 +636,65 @@
         "operationId": "delete_my_otp"
       }
     },
+    "/profile/credentials/certificates": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueCertificateCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedCertificateCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "issue_my_certificate"
+      }
+    },
+    "/profile/credentials/certificates/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "revoke_my_certificate"
+      }
+    },
     "/profile/api-tokens": {
       "get": {
         "responses": {
@@ -794,6 +853,7 @@
         "enum": [
           "Password",
           "PublicKey",
+          "Certificate",
           "Totp",
           "Sso",
           "WebUserApproval"
@@ -806,6 +866,7 @@
           "password",
           "otp",
           "public_keys",
+          "certificates",
           "sso",
           "credential_policy",
           "ldap_linked"
@@ -824,6 +885,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+            }
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingCertificateCredential"
             }
           },
           "sso": {
@@ -864,6 +931,35 @@
           "expiry": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "ExistingCertificateCredential": {
+        "type": "object",
+        "title": "ExistingCertificateCredential",
+        "required": [
+          "id",
+          "label",
+          "fingerprint"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fingerprint": {
+            "type": "string"
           }
         }
       },
@@ -992,6 +1088,38 @@
           }
         }
       },
+      "IssueCertificateCredentialRequest": {
+        "type": "object",
+        "title": "IssueCertificateCredentialRequest",
+        "required": [
+          "label",
+          "public_key_pem"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "public_key_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "IssuedCertificateCredential": {
+        "type": "object",
+        "title": "IssuedCertificateCredential",
+        "required": [
+          "credential",
+          "certificate_pem"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ExistingCertificateCredential"
+          },
+          "certificate_pem": {
+            "type": "string"
+          }
+        }
+      },
       "LoginFailureResponse": {
         "type": "object",
         "title": "LoginFailureResponse",
@@ -1108,6 +1236,10 @@
           "postgres": {
             "type": "integer",
             "format": "uint16"
+          },
+          "kubernetes": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -1184,6 +1316,7 @@
         "type": "string",
         "enum": [
           "Http",
+          "Kubernetes",
           "MySql",
           "Ssh",
           "Postgres",
@@ -1240,6 +1373,12 @@
         "title": "UserRequireCredentialsPolicy",
         "properties": {
           "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "kubernetes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
