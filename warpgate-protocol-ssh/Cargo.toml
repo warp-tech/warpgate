@@ -16,7 +16,6 @@ ed25519-dalek = { version = "2.0.0", default-features = false } # pin due to bui
 futures.workspace = true
 russh.workspace = true
 russh-sftp = "2.1"
-serde.workspace = true
 sea-orm.workspace = true
 serde = { version = "1.0", features = ["derive"], default-features = false }
 sha2 = { version = "0.10", default-features = false }
