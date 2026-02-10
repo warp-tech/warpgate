@@ -20,15 +20,6 @@ import pytest
 
 from .api_client import admin_client, sdk
 from .conftest import WarpgateProcess
-from .util import wait_port
-
-
-@pytest.fixture(scope="session")
-def expiry_ssh_port(processes, wg_c_ed25519_pubkey):
-    """Shared SSH server for role expiry tests."""
-    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
-    wait_port(port)
-    return port
 
 
 def setup_user_and_target(
@@ -107,11 +98,11 @@ class TestRoleExpiryAccess:
 
     def test_grant_role_with_future_expiry_allows_access(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """A role granted with a future expiry should allow access."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -135,11 +126,11 @@ class TestRoleExpiryAccess:
 
     def test_expired_role_denies_access(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """A role that has already expired should deny SSH access."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -168,11 +159,11 @@ class TestRoleExpiryAccess:
 
     def test_reenable_expired_role_restores_access(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Re-enabling an expired role by updating expiry should restore SSH access."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -218,11 +209,11 @@ class TestRoleExpiryAccess:
 
     def test_remove_expiry_makes_permanent(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Removing expiry from a role should make it permanent."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -259,11 +250,11 @@ class TestRoleRevocation:
 
     def test_revoked_role_denies_access(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """A revoked (soft-deleted) role should deny SSH access."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -285,11 +276,11 @@ class TestRoleRevocation:
 
     def test_reactivate_revoked_role_via_update_expiry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Updating expiry on a revoked role should re-activate it (clears revoked_at)."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -320,11 +311,11 @@ class TestRoleRevocation:
 
     def test_reactivate_revoked_role_via_remove_expiry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Removing expiry on a revoked role should re-activate it permanently."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -351,11 +342,11 @@ class TestRoleHistory:
 
     def test_grant_creates_history_entry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Granting a role should create a 'granted' history entry."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -368,11 +359,11 @@ class TestRoleHistory:
 
     def test_revoke_creates_history_entry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Revoking a role should create a 'revoked' history entry."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -386,11 +377,11 @@ class TestRoleHistory:
 
     def test_expiry_change_creates_history_entry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Updating expiry should create an 'expiry_changed' history entry."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -408,11 +399,11 @@ class TestRoleHistory:
 
     def test_expiry_removal_creates_history_entry(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Removing expiry should create an 'expiry_removed' history entry."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -432,11 +423,11 @@ class TestRoleHistory:
 
     def test_full_history_lifecycle(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Full lifecycle: grant → change expiry → revoke → re-enable."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -479,11 +470,11 @@ class TestRoleAssignmentAPI:
 
     def test_get_user_roles_returns_all_states(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """get_user_roles should return all assignments including expired and revoked."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -532,11 +523,11 @@ class TestRoleAssignmentAPI:
 
     def test_add_role_with_expiry_409_on_duplicate(
         self,
-        expiry_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Adding a role that already exists (even revoked) should return 409."""
-        user, ssh_target, role = setup_user_and_target(expiry_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:

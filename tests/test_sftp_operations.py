@@ -23,15 +23,6 @@ import pytest
 
 from .api_client import admin_client, sdk
 from .conftest import WarpgateProcess
-from .util import wait_port
-
-
-@pytest.fixture(scope="session")
-def sftp_ops_ssh_port(processes, wg_c_ed25519_pubkey):
-    """Shared SSH server for SFTP operations tests."""
-    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
-    wait_port(port)
-    return port
 
 
 def setup_user_and_target(
@@ -171,11 +162,11 @@ class TestSftpRemove:
 
     def test_remove_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """File removal should succeed when upload (write) permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -221,11 +212,11 @@ class TestSftpRemove:
 
     def test_remove_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """File removal should be blocked when upload (write) permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
 
@@ -285,11 +276,11 @@ class TestSftpRename:
 
     def test_rename_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """File rename should succeed when upload permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -336,11 +327,11 @@ class TestSftpRename:
 
     def test_rename_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """File rename should be blocked when upload permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
 
@@ -398,7 +389,7 @@ class TestSftpRename:
 
     def test_rename_blocked_by_allowed_paths(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Rename should be blocked if destination path violates allowed_paths.
@@ -407,7 +398,7 @@ class TestSftpRename:
         posix-rename@openssh.com extended), which triggers path checking
         on both source and destination.
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -445,11 +436,11 @@ class TestSftpMkdir:
 
     def test_mkdir_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """mkdir should succeed when upload permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -468,11 +459,11 @@ class TestSftpMkdir:
 
     def test_mkdir_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """mkdir should be blocked when upload permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -495,11 +486,11 @@ class TestSftpRmdir:
 
     def test_rmdir_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """rmdir should succeed when upload permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -525,11 +516,11 @@ class TestSftpRmdir:
 
     def test_rmdir_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """rmdir should be blocked when upload permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
 
@@ -587,11 +578,11 @@ class TestSftpSetstat:
 
     def test_chmod_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """chmod (setstat) should succeed when upload permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -636,11 +627,11 @@ class TestSftpSetstat:
 
     def test_chmod_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """chmod (setstat) should be blocked when upload permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
 
@@ -700,11 +691,11 @@ class TestSftpSymlink:
 
     def test_symlink_allowed_when_upload_permitted(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """symlink should succeed when upload permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -754,11 +745,11 @@ class TestSftpSymlink:
 
     def test_symlink_blocked_when_upload_denied(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """symlink should be blocked when upload permission is denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -786,11 +777,11 @@ class TestMaxFileSize:
 
     def test_upload_within_size_limit_succeeds(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload within max_file_size should succeed."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         # Set max_file_size to 1MB
@@ -839,11 +830,11 @@ class TestMaxFileSize:
 
     def test_upload_exceeding_size_limit_blocked(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload exceeding max_file_size should be blocked."""
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         # Set max_file_size to 1KB
@@ -901,7 +892,7 @@ class TestSftpExtendedPackets:
 
     def test_statvfs_allowed_with_restrictions(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """statvfs (safe extension) should work even with SFTP restrictions.
@@ -909,7 +900,7 @@ class TestSftpExtendedPackets:
         Uses paramiko to issue a statvfs call which sends an SSH_FXP_EXTENDED
         with request_name 'statvfs@openssh.com'.
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -945,13 +936,13 @@ class TestSftpExtendedPackets:
 
     def test_readdir_and_stat_allowed_with_restrictions(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Read-only metadata ops (readdir, stat) should work even when both
         upload and download are denied, since they are not mutating operations.
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
         set_file_transfer_permission(
@@ -986,14 +977,14 @@ class TestStrictModeStreamlocal:
 
     def test_strict_mode_unix_socket_forwarding_blocked(
         self,
-        sftp_ops_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Unix socket forwarding should be blocked in strict mode with SFTP restrictions.
 
         Uses -L with a Unix socket path to trigger direct-streamlocal channel.
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ops_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "strict")
         set_file_transfer_permission(

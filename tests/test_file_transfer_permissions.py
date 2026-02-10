@@ -26,14 +26,6 @@ from .conftest import ProcessManager, WarpgateProcess
 from .util import wait_port
 
 
-@pytest.fixture(scope="session")
-def sftp_ssh_port(processes, wg_c_ed25519_pubkey):
-    """Shared SSH server for file transfer permission tests."""
-    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
-    wait_port(port)
-    return port
-
-
 def set_sftp_permission_mode(wg: WarpgateProcess, mode: str):
     """Set instance-wide SFTP permission mode (strict or permissive)."""
     url = f"https://localhost:{wg.http_port}"
@@ -166,7 +158,7 @@ class TestFileTransferPermissions:
 
     def test_default_permissions_allow_transfer(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """By default, file transfers should be allowed (backward compat).
@@ -176,7 +168,7 @@ class TestFileTransferPermissions:
         - Role defaults are True for both upload and download
         - Effective permission is True (inherited from role)
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Get default permissions
         perm = get_file_transfer_permission(shared_wg, ssh_target.id, role.id)
@@ -189,11 +181,11 @@ class TestFileTransferPermissions:
 
     def test_sftp_download_allowed(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """SFTP download should work when download permission is granted."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Ensure download is allowed
         set_file_transfer_permission(
@@ -235,14 +227,14 @@ class TestFileTransferPermissions:
 
     def test_sftp_download_blocked_when_upload_only(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """SFTP download should be blocked when only upload is permitted (fine-grained blocking).
 
         Note: Uses scp command which internally uses SFTP protocol (OpenSSH 9.0+).
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Only allow upload - download should be blocked at operation level
         set_file_transfer_permission(
@@ -285,14 +277,14 @@ class TestFileTransferPermissions:
 
     def test_sftp_upload_blocked_when_download_only(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """SFTP upload should be blocked when only download is permitted (fine-grained blocking).
 
         Note: Uses scp command which internally uses SFTP protocol (OpenSSH 9.0+).
         """
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Only allow download - upload should be blocked at operation level
         set_file_transfer_permission(
@@ -338,11 +330,11 @@ class TestFileTransferPermissions:
 
     def test_api_get_file_transfer_permission(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Test GET endpoint for file transfer permissions."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         perm = get_file_transfer_permission(shared_wg, ssh_target.id, role.id)
 
@@ -354,11 +346,11 @@ class TestFileTransferPermissions:
 
     def test_api_update_file_transfer_permission(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Test PUT endpoint for file transfer permissions."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Update permissions
         updated = set_file_transfer_permission(
@@ -385,11 +377,11 @@ class TestFileTransferPermissions:
 
     def test_multi_role_permissive_model(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Test permissive model: if any role grants permission, transfer is allowed."""
-        ssh_port = sftp_ssh_port
+        ssh_port = shared_ssh_port
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
@@ -902,11 +894,11 @@ class TestStrictMode:
 
     def test_strict_mode_shell_blocked_when_sftp_restricted(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Shell access should be blocked when SFTP is restricted and mode is strict."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode
         set_sftp_permission_mode(shared_wg, "strict")
@@ -953,11 +945,11 @@ class TestStrictMode:
 
     def test_strict_mode_shell_allowed_when_no_sftp_restriction(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Shell access should work when no SFTP restrictions exist, even in strict mode."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode
         set_sftp_permission_mode(shared_wg, "strict")
@@ -1003,11 +995,11 @@ class TestStrictMode:
 
     def test_strict_mode_sftp_still_works(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """SFTP should still work in strict mode (it's shell that's blocked, not SFTP)."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode with download restriction
         set_sftp_permission_mode(shared_wg, "strict")
@@ -1054,11 +1046,11 @@ class TestStrictMode:
 
     def test_strict_mode_port_forwarding_blocked(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Port forwarding should be blocked when SFTP is restricted and mode is strict."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode with SFTP restriction
         set_sftp_permission_mode(shared_wg, "strict")
@@ -1122,11 +1114,11 @@ class TestPermissiveMode:
 
     def test_permissive_mode_shell_allowed_with_sftp_restriction(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Shell access should work in permissive mode even with SFTP restrictions."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set permissive mode
         set_sftp_permission_mode(shared_wg, "permissive")
@@ -1172,11 +1164,11 @@ class TestPermissiveMode:
 
     def test_permissive_mode_sftp_still_enforced(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """SFTP restrictions should still be enforced in permissive mode."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set permissive mode
         set_sftp_permission_mode(shared_wg, "permissive")
@@ -1229,11 +1221,11 @@ class TestAdvancedRestrictions:
 
     def test_allowed_paths_upload_permitted(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload to a path matching allowed_paths should succeed."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set allowed_paths to /tmp/*
         set_file_transfer_permission(
@@ -1279,11 +1271,11 @@ class TestAdvancedRestrictions:
 
     def test_allowed_paths_upload_blocked(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload to a path NOT matching allowed_paths should be blocked."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set allowed_paths to only /uploads/* (not /tmp)
         set_file_transfer_permission(
@@ -1329,11 +1321,11 @@ class TestAdvancedRestrictions:
 
     def test_blocked_extensions_upload_denied(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload of file with blocked extension should be denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Block .exe and .sh extensions
         set_file_transfer_permission(
@@ -1381,11 +1373,11 @@ class TestAdvancedRestrictions:
 
     def test_blocked_extensions_allowed_extension_permitted(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Upload of file with non-blocked extension should succeed."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Block only .exe extension
         set_file_transfer_permission(
@@ -1433,11 +1425,11 @@ class TestAdvancedRestrictions:
 
     def test_blocked_extensions_case_insensitive(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Extension blocking should be case-insensitive."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Block .exe (lowercase)
         set_file_transfer_permission(
@@ -1491,11 +1483,11 @@ class TestRoleLevelDefaults:
 
     def test_role_defaults_inherited_by_target(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Target-role should inherit file transfer settings from role defaults."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set role defaults to block uploads
         set_role_file_transfer_defaults(
@@ -1543,11 +1535,11 @@ class TestRoleLevelDefaults:
 
     def test_target_role_override_takes_precedence(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Target-role explicit override should take precedence over role defaults."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set role defaults to block uploads
         set_role_file_transfer_defaults(
@@ -1605,11 +1597,11 @@ class TestStrictModeExec:
 
     def test_strict_mode_exec_blocked(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Exec requests should be blocked when SFTP is restricted and mode is strict."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode
         set_sftp_permission_mode(shared_wg, "strict")
@@ -1655,11 +1647,11 @@ class TestStrictModeExec:
 
     def test_strict_mode_remote_forwarding_blocked(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Remote port forwarding (-R) should be blocked in strict mode with SFTP restrictions."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set strict mode with SFTP restriction
         set_sftp_permission_mode(shared_wg, "strict")
@@ -1714,11 +1706,11 @@ class TestAdvancedRestrictionsExtended:
 
     def test_allowed_paths_download_permitted(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Download from a path matching allowed_paths should succeed."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set permissive mode so shell works (we need exec to create the file)
         set_sftp_permission_mode(shared_wg, "permissive")
@@ -1790,11 +1782,11 @@ class TestAdvancedRestrictionsExtended:
 
     def test_allowed_paths_download_blocked(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Download from a path NOT matching allowed_paths should be denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set permissive mode so shell works (we need exec to create the file)
         set_sftp_permission_mode(shared_wg, "permissive")
@@ -1866,11 +1858,11 @@ class TestAdvancedRestrictionsExtended:
 
     def test_blocked_extensions_download_denied(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Download of file with blocked extension should be denied."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         # Set permissive mode so shell works
         set_sftp_permission_mode(shared_wg, "permissive")
@@ -1942,11 +1934,11 @@ class TestAdvancedRestrictionsExtended:
 
     def test_target_role_clear_blocked_extensions(
         self,
-        sftp_ssh_port,
+        shared_ssh_port,
         shared_wg: WarpgateProcess,
     ):
         """Target-role can clear role's blocked_extensions by setting empty list."""
-        user, ssh_target, role = setup_user_and_target(sftp_ssh_port, shared_wg)
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
 
         set_sftp_permission_mode(shared_wg, "permissive")
 
