@@ -31,11 +31,5 @@ dhat-heap.json
 cdx.xml
 *.cdx.xml
 
-# Development environment files
-AGENTS.md
-mise.toml
-.github/workflows/opencode.yml
-*.log
-thoughts/
-docker/data/
-docker/*.sample.yaml
+# Test environment
+docker-test/data-test/
