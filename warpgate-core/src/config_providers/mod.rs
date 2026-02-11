@@ -33,7 +33,8 @@ pub struct FileTransferPermission {
     /// OR when any matching role has file_transfer_only enabled.
     pub shell_blocked: bool,
     /// Per-role flag: when true, blocks shell/exec/forwarding regardless of sftp_permission_mode.
-    /// Uses ANY-true semantics across roles (if any matching role has it, it's enforced).
+    /// Uses ALL-true semantics across roles: only enforced if ALL matching roles set it.
+    /// Consistent with Warpgate's additive RBAC model where roles only grant, never deny.
     pub file_transfer_only: bool,
 }
 

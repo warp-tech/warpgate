@@ -612,7 +612,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                 .await?;
 
         // Permissive model: if ANY matching role allows, grant permission
+        // Consistent with Warpgate's additive RBAC: roles only grant, never deny.
+        // See thoughts/research/2026-02-11_multi_role_permission_merge_research.md
         let mut result = super::FileTransferPermission::default();
+        let mut file_transfer_only_votes: Option<bool> = None;
 
         for target_role in target_role_assignments {
             if !user_role_ids.contains(&target_role.role_id) {
@@ -696,16 +699,22 @@ impl ConfigProvider for DatabaseConfigProvider {
                 result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
             }
 
-            // file_transfer_only: ANY-true semantics (if any role says file_transfer_only, enforce it)
-            result.file_transfer_only |= perm.file_transfer_only;
+            // file_transfer_only: ALL-true semantics (only enforce if ALL matching roles agree).
+            // Consistent with Warpgate's permissive model: one role without the flag
+            // restores shell access, same as one role granting upload restores upload.
+            file_transfer_only_votes = Some(
+                file_transfer_only_votes.unwrap_or(true) && perm.file_transfer_only,
+            );
         }
+
+        result.file_transfer_only = file_transfer_only_votes.unwrap_or(false);
 
         // Determine if shell/exec should be blocked based on:
         // - sftp_permission_mode is "strict" AND any SFTP restriction exists, OR
-        // - Any matching role has file_transfer_only enabled
+        // - ALL matching roles have file_transfer_only enabled
         let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
-        result.shell_blocked =
-            (is_strict_mode && has_sftp_restrictions) || result.file_transfer_only;
+        result.shell_blocked = (is_strict_mode && has_sftp_restrictions)
+            || result.file_transfer_only;
 
         Ok(result)
     }
