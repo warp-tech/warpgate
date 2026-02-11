@@ -62,7 +62,7 @@ jobs:
       - name: Build Docker image without pushing
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         id: build-no-push
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@601a80b39c9405e50806ae38af30926f9d957c47
         with:
           file: docker/Dockerfile
           context: .
@@ -74,7 +74,7 @@ jobs:
       - name: Build and push Docker image
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         id: build
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@601a80b39c9405e50806ae38af30926f9d957c47
         with:
           file: docker/Dockerfile
           context: .
