@@ -9,8 +9,46 @@ pub fn try_parse_packet(data: &[u8]) -> Option<Packet> {
     }
 
     let mut bytes = Bytes::copy_from_slice(data);
-    bytes.advance(4); // Skip SSH length field (4 bytes)
+    bytes.advance(4); // Skip SFTP length field (4 bytes)
     Packet::try_from(&mut bytes).ok()
+}
+
+/// Parse all complete SFTP packets from a reassembly buffer.
+/// Consumes parsed bytes from `buf`, leaving any incomplete trailing data.
+/// Returns a Vec of successfully parsed packets.
+pub fn parse_all_packets(buf: &mut Vec<u8>) -> Vec<Packet> {
+    let mut packets = Vec::new();
+    loop {
+        if buf.len() < 4 {
+            break;
+        }
+        // Read the 4-byte SFTP packet length (big-endian)
+        let pkt_len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+        let total_len = 4 + pkt_len; // length field + payload
+        if buf.len() < total_len {
+            break; // Incomplete packet, wait for more data
+        }
+        // Peek at packet type byte (first byte after the 4-byte length)
+        let pkt_type = if pkt_len > 0 { buf[4] } else { 0 };
+        // Try to parse this single packet
+        let mut bytes = Bytes::copy_from_slice(&buf[4..total_len]);
+        match Packet::try_from(&mut bytes) {
+            Ok(packet) => {
+                packets.push(packet);
+            }
+            Err(e) => {
+                tracing::debug!(
+                    packet_type = pkt_type,
+                    packet_len = pkt_len,
+                    error = %e,
+                    "SFTP packet parse failed, skipping"
+                );
+            }
+        }
+        // Consume the bytes regardless of parse success
+        buf.drain(..total_len);
+    }
+    packets
 }
 
 pub fn packet_to_operation(packet: &Packet) -> Option<SftpFileOperation> {
@@ -100,6 +138,30 @@ pub fn packet_to_response(packet: &Packet) -> Option<SftpResponse> {
 
 pub fn build_denial_response(request_id: u32, message: &str) -> Vec<u8> {
     let packet = Packet::status(request_id, StatusCode::PermissionDenied, message, "en");
+    match Bytes::try_from(packet) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Build an SFTP Close packet (to close a file handle on the server).
+pub fn build_close_packet(request_id: u32, handle: &str) -> Vec<u8> {
+    let packet = Packet::Close(russh_sftp::protocol::Close {
+        id: request_id,
+        handle: handle.to_string(),
+    });
+    match Bytes::try_from(packet) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Build an SFTP Remove packet (to delete a file on the server).
+pub fn build_remove_packet(request_id: u32, path: &str) -> Vec<u8> {
+    let packet = Packet::Remove(russh_sftp::protocol::Remove {
+        id: request_id,
+        filename: path.to_string(),
+    });
     match Bytes::try_from(packet) {
         Ok(bytes) => bytes.to_vec(),
         Err(_) => Vec::new(),

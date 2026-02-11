@@ -639,6 +639,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .and_then(|v| serde_json::from_value(v).ok()),
                 max_file_size: role.max_file_size,
                 shell_blocked: false, // Will be calculated at the end
+                file_transfer_only: role.file_transfer_only,
             };
 
             // 2. Apply target-role overrides (NULL = inherit from role)
@@ -661,6 +662,9 @@ impl ConfigProvider for DatabaseConfigProvider {
             }
             if target_role.max_file_size.is_some() {
                 perm.max_file_size = target_role.max_file_size;
+            }
+            if let Some(fto) = target_role.file_transfer_only {
+                perm.file_transfer_only = fto;
             }
 
             // 3. Merge permissively with result
@@ -691,13 +695,17 @@ impl ConfigProvider for DatabaseConfigProvider {
             if let Some(size) = perm.max_file_size {
                 result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
             }
+
+            // file_transfer_only: ANY-true semantics (if any role says file_transfer_only, enforce it)
+            result.file_transfer_only |= perm.file_transfer_only;
         }
 
         // Determine if shell/exec should be blocked based on:
-        // - sftp_permission_mode is "strict" AND
-        // - Any SFTP restriction exists (upload or download is blocked)
+        // - sftp_permission_mode is "strict" AND any SFTP restriction exists, OR
+        // - Any matching role has file_transfer_only enabled
         let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
-        result.shell_blocked = is_strict_mode && has_sftp_restrictions;
+        result.shell_blocked =
+            (is_strict_mode && has_sftp_restrictions) || result.file_transfer_only;
 
         Ok(result)
     }

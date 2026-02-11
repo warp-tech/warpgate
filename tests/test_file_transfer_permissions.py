@@ -55,6 +55,7 @@ def set_role_file_transfer_defaults(
     allowed_paths=None,
     blocked_extensions=None,
     max_file_size=None,
+    file_transfer_only: bool = False,
 ):
     """Set file transfer defaults for a role."""
     url = f"https://localhost:{wg.http_port}"
@@ -67,6 +68,7 @@ def set_role_file_transfer_defaults(
                 allowed_paths=allowed_paths,
                 blocked_extensions=blocked_extensions,
                 max_file_size=max_file_size,
+                file_transfer_only=file_transfer_only,
             ),
         )
 
@@ -125,6 +127,7 @@ def set_file_transfer_permission(
     allowed_paths=None,
     blocked_extensions=None,
     max_file_size=None,
+    file_transfer_only=None,
 ):
     """Set file transfer permissions for a target-role assignment."""
     url = f"https://localhost:{wg.http_port}"
@@ -138,6 +141,7 @@ def set_file_transfer_permission(
                 allowed_paths=allowed_paths,
                 blocked_extensions=blocked_extensions,
                 max_file_size=max_file_size,
+                file_transfer_only=file_transfer_only,
             ),
         )
 
@@ -941,7 +945,7 @@ class TestStrictMode:
         assert result.returncode != 0, "Shell should be blocked in strict mode"
         # Check for the expected error message
         stderr = result.stderr.decode()
-        assert "SFTP-only mode" in stderr or result.returncode != 0
+        assert "Access Denied" in stderr or "blocked by security policy" in stderr
 
     def test_strict_mode_shell_allowed_when_no_sftp_restriction(
         self,
@@ -1995,3 +1999,363 @@ class TestAdvancedRestrictionsExtended:
             assert result.returncode == 0, (
                 f"Upload of .sh should succeed when target-role clears blocked extensions: {result.stderr.decode()}"
             )
+
+
+class TestFileTransferOnly:
+    """Tests for the file_transfer_only role flag.
+
+    When file_transfer_only is enabled on a role, the user can ONLY use SFTP.
+    Shell, exec, and port forwarding are blocked regardless of sftp_permission_mode.
+    """
+
+    def test_file_transfer_only_blocks_exec(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Exec should be blocked when role has file_transfer_only=True."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        # Use permissive mode — file_transfer_only should still block exec
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        # Set role to file_transfer_only
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=True,
+        )
+
+        # Attempt exec command - should be blocked
+        result = subprocess.run(
+            [
+                "ssh",
+                "-p",
+                str(shared_wg.ssh_port),
+                "-o",
+                f"User={user.username}:{ssh_target.name}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "IdentityFile=ssh-keys/id_ed25519",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "StrictHostKeychecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "localhost",
+                "whoami",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        assert result.returncode != 0, (
+            "Exec should be blocked when file_transfer_only is enabled"
+        )
+        stderr = result.stderr.decode()
+        assert "file_transfer_only is enabled" in stderr, (
+            f"Expected 'file_transfer_only is enabled' in stderr, got: {stderr}"
+        )
+
+    def test_file_transfer_only_blocks_shell(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Shell should be blocked when role has file_transfer_only=True."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=True,
+        )
+
+        # Attempt shell access (no command = interactive shell)
+        # Use -T to disable pseudo-tty so SSH doesn't hang
+        result = subprocess.run(
+            [
+                "ssh",
+                "-T",
+                "-p",
+                str(shared_wg.ssh_port),
+                "-o",
+                f"User={user.username}:{ssh_target.name}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "IdentityFile=ssh-keys/id_ed25519",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "StrictHostKeychecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "localhost",
+            ],
+            capture_output=True,
+            timeout=10,
+            input=b"",  # Send EOF immediately to close stdin
+        )
+
+        assert result.returncode != 0, (
+            "Shell should be blocked when file_transfer_only is enabled"
+        )
+        stderr = result.stderr.decode()
+        assert "file_transfer_only is enabled" in stderr, (
+            f"Expected 'file_transfer_only is enabled' in stderr, got: {stderr}"
+        )
+
+    def test_file_transfer_only_allows_sftp(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """SFTP should still work when file_transfer_only is enabled."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=True,
+        )
+
+        # SFTP upload should work
+        with tempfile.NamedTemporaryFile(delete=False, mode="w") as tmpfile:
+            tmpfile.write("file_transfer_only upload test")
+            tmpfile.flush()
+
+            result = subprocess.run(
+                [
+                    "scp",
+                    "-P",
+                    str(shared_wg.ssh_port),
+                    "-o",
+                    f"User={user.username}:{ssh_target.name}",
+                    "-o",
+                    "IdentitiesOnly=yes",
+                    "-o",
+                    "IdentityFile=ssh-keys/id_ed25519",
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    "-o",
+                    "StrictHostKeychecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    tmpfile.name,
+                    "localhost:/tmp/",
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+
+            assert result.returncode == 0, (
+                f"SFTP upload should work with file_transfer_only: {result.stderr.decode()}"
+            )
+
+        # SFTP download should also work
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                [
+                    "sftp",
+                    "-P",
+                    str(shared_wg.ssh_port),
+                    "-o",
+                    f"User={user.username}:{ssh_target.name}",
+                    "-o",
+                    "IdentitiesOnly=yes",
+                    "-o",
+                    "IdentityFile=ssh-keys/id_ed25519",
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    "-o",
+                    "StrictHostKeychecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "localhost:/etc/passwd",
+                    tmpdir,
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+
+            assert result.returncode == 0, (
+                f"SFTP download should work with file_transfer_only: {result.stderr.decode()}"
+            )
+
+    def test_file_transfer_only_blocks_port_forwarding(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Port forwarding should be blocked when file_transfer_only is enabled."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=True,
+        )
+
+        # Attempt local port forwarding - should be blocked
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-p",
+                    str(shared_wg.ssh_port),
+                    "-o",
+                    f"User={user.username}:{ssh_target.name}",
+                    "-o",
+                    "IdentitiesOnly=yes",
+                    "-o",
+                    "IdentityFile=ssh-keys/id_ed25519",
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    "-o",
+                    "StrictHostKeychecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ExitOnForwardFailure=yes",
+                    "-L",
+                    "12347:localhost:22",
+                    "-N",
+                    "localhost",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            assert result.returncode != 0, (
+                "Port forwarding should be blocked with file_transfer_only"
+            )
+        except subprocess.TimeoutExpired:
+            # Timeout means the forwarding channel was never established
+            pass
+
+    def test_file_transfer_only_false_allows_exec(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Exec should work when file_transfer_only=False (regression test)."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        # Permissive mode, file_transfer_only=False, full access
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=False,
+        )
+
+        # Exec should work
+        result = subprocess.run(
+            [
+                "ssh",
+                "-p",
+                str(shared_wg.ssh_port),
+                "-o",
+                f"User={user.username}:{ssh_target.name}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "IdentityFile=ssh-keys/id_ed25519",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "StrictHostKeychecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "localhost",
+                "echo hello",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0, (
+            f"Exec should work with file_transfer_only=False: {result.stderr.decode()}"
+        )
+        assert b"hello" in result.stdout
+
+    def test_file_transfer_only_target_role_override(
+        self,
+        shared_ssh_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Target-role override of file_transfer_only should take precedence over role default."""
+        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
+
+        set_sftp_permission_mode(shared_wg, "permissive")
+
+        # Role default: file_transfer_only=False (exec allowed)
+        set_role_file_transfer_defaults(
+            shared_wg,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=False,
+        )
+
+        # Target-role override: file_transfer_only=True (exec blocked for this target)
+        set_file_transfer_permission(
+            shared_wg,
+            ssh_target.id,
+            role.id,
+            allow_upload=True,
+            allow_download=True,
+            file_transfer_only=True,
+        )
+
+        # Exec should be blocked (target-role override wins)
+        result = subprocess.run(
+            [
+                "ssh",
+                "-p",
+                str(shared_wg.ssh_port),
+                "-o",
+                f"User={user.username}:{ssh_target.name}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "IdentityFile=ssh-keys/id_ed25519",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "StrictHostKeychecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "localhost",
+                "whoami",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        assert result.returncode != 0, (
+            "Exec should be blocked when target-role overrides file_transfer_only=True"
+        )
+        stderr = result.stderr.decode()
+        assert "file_transfer_only is enabled" in stderr, (
+            f"Expected 'file_transfer_only is enabled' in stderr, got: {stderr}"
+        )

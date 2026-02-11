@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.2-37-g1ceec45"
+    "version": "v0.20.2-42-g00f02af-modified"
   },
   "servers": [
     {
@@ -4149,6 +4149,10 @@
             "type": "integer",
             "format": "int64",
             "description": "Maximum file size in bytes (null = inherit from role)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "File transfer only mode (null = inherit from role)"
           }
         }
       },
@@ -4719,7 +4723,8 @@
           "name",
           "description",
           "allow_file_upload",
-          "allow_file_download"
+          "allow_file_download",
+          "file_transfer_only"
         ],
         "properties": {
           "id": {
@@ -4758,6 +4763,10 @@
             "type": "integer",
             "format": "int64",
             "description": "Default maximum file size in bytes (null = no limit)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "When true, users with this role can ONLY use SFTP file transfers.\nShell, exec, and port forwarding are blocked regardless of sftp_permission_mode."
           }
         }
       },
@@ -4811,6 +4820,11 @@
             "type": "integer",
             "format": "int64",
             "description": "Default maximum file size in bytes (null = no limit)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "When true, users with this role can ONLY use SFTP. Shell/exec/forwarding are blocked.",
+            "default": false
           }
         }
       },

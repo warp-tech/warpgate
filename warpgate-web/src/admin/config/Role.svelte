@@ -104,6 +104,7 @@
                 allowedPaths: undefined,
                 blockedExtensions: undefined,
                 maxFileSize: undefined,
+                fileTransferOnly: false,
             }
         }
         // Populate UI state from loaded defaults
@@ -209,6 +210,30 @@
         {#if fileTransferDefaults}
             <div class="card mb-3">
                 <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input
+                            class="form-check-input"
+                            type="checkbox"
+                            id="fileTransferOnly"
+                            bind:checked={fileTransferDefaults.fileTransferOnly}
+                            disabled={disabled}
+                            onchange={updateFileTransferDefaults}
+                        />
+                        <label class="form-check-label" for="fileTransferOnly">
+                            <strong>File transfer only</strong>
+                            <small class="d-block text-muted">
+                                Block shell, exec, and port forwarding. Only SFTP is allowed.
+                            </small>
+                        </label>
+                    </div>
+
+                    {#if fileTransferDefaults.fileTransferOnly}
+                        <Alert color="info">
+                            Shell, exec, and port forwarding are blocked for this role regardless of the instance-wide permission mode.
+                            Only SFTP file transfers are permitted.
+                        </Alert>
+                    {/if}
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-check form-switch mb-2">

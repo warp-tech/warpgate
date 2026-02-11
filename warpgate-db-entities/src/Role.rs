@@ -28,6 +28,10 @@ pub struct Model {
     pub blocked_extensions: Option<serde_json::Value>,
     /// Default maximum file size in bytes (null = no limit)
     pub max_file_size: Option<i64>,
+    /// When true, users with this role can ONLY use SFTP file transfers.
+    /// Shell, exec, and port forwarding are blocked regardless of sftp_permission_mode.
+    #[sea_orm(default_value = false)]
+    pub file_transfer_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -70,6 +74,7 @@ impl From<Model> for Role {
                 .blocked_extensions
                 .and_then(|v| serde_json::from_value(v).ok()),
             max_file_size: model.max_file_size,
+            file_transfer_only: model.file_transfer_only,
         }
     }
 }

@@ -190,6 +190,10 @@ pub struct Role {
     /// Default maximum file size in bytes (null = no limit)
     #[serde(default)]
     pub max_file_size: Option<i64>,
+    /// When true, users with this role can ONLY use SFTP file transfers.
+    /// Shell, exec, and port forwarding are blocked regardless of sftp_permission_mode.
+    #[serde(default)]
+    pub file_transfer_only: bool,
 }
 
 fn default_true() -> bool {

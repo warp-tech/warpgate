@@ -29,8 +29,12 @@ pub struct FileTransferPermission {
     /// Maximum file size in bytes (None = no limit)
     pub max_file_size: Option<i64>,
     /// Whether shell/exec/forwarding should be blocked based on instance-wide sftp_permission_mode.
-    /// True when mode is "strict" AND this target has SFTP restrictions (upload or download blocked).
+    /// True when mode is "strict" AND this target has SFTP restrictions (upload or download blocked),
+    /// OR when any matching role has file_transfer_only enabled.
     pub shell_blocked: bool,
+    /// Per-role flag: when true, blocks shell/exec/forwarding regardless of sftp_permission_mode.
+    /// Uses ANY-true semantics across roles (if any matching role has it, it's enforced).
+    pub file_transfer_only: bool,
 }
 
 impl Default for FileTransferPermission {
@@ -43,6 +47,7 @@ impl Default for FileTransferPermission {
             max_file_size: None,
             // Default to blocking shell in strict mode when SFTP is restricted
             shell_blocked: true,
+            file_transfer_only: false,
         }
     }
 }

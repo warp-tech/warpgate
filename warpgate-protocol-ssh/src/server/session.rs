@@ -43,8 +43,9 @@ use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::sftp::{
-    build_denial_response, packet_to_operation, packet_to_response, FileTransferTracker,
-    SftpFileOperation, SftpResponse, TransferComplete, TransferDirection,
+    build_close_packet, build_denial_response, build_remove_packet, packet_to_operation,
+    packet_to_response, FileTransferTracker, SftpFileOperation, SftpResponse, TransferComplete,
+    TransferDirection,
 };
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
@@ -86,6 +87,16 @@ struct PendingOpen {
     direction: TransferDirection,
 }
 
+/// Result of SFTP access control check
+enum SftpCheckResult {
+    /// Buffer has incomplete packet — don't forward anything yet
+    Pending,
+    /// All parsed packets are allowed — forward these raw bytes to the target
+    Allowed(Vec<u8>),
+    /// An operation was denied — send this error response to the client
+    Denied(u32, String),
+}
+
 /// SFTP channel state for tracking file transfers
 struct SftpChannelState {
     /// Pending OPEN requests: request_id -> (path, direction)
@@ -94,6 +105,16 @@ struct SftpChannelState {
     pending_reads: HashMap<u32, Vec<u8>>,
     /// File transfer tracker for hash calculation
     tracker: FileTransferTracker,
+    /// Reassembly buffer for client -> server SFTP packets (for parsing)
+    client_buf: Vec<u8>,
+    /// Raw bytes waiting to be forwarded (mirrors client_buf, drained when packets are allowed)
+    pending_forward: Vec<u8>,
+    /// Reassembly buffer for server -> client SFTP packets
+    server_buf: Vec<u8>,
+    /// Handles that have been denied (suppress repeated log entries)
+    denied_handles: HashSet<Vec<u8>>,
+    /// Partial files to clean up on the server: (path, handle_string)
+    pending_cleanup: Vec<(String, String)>,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -520,22 +541,30 @@ impl ServerSession {
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
                 let channel_id = self.map_channel(&server_channel_id)?;
 
-                // Check if shell access is blocked (strict SFTP mode + SFTP restrictions active)
-                if self.is_shell_blocked().await {
-                    warn!(
-                        %channel_id,
-                        "Shell access denied: target is in SFTP-only mode"
+                // Check if shell access is blocked
+                if let Some(reason) = self.shell_block_reason().await {
+                    info!(
+                        event_type = "access_control",
+                        action = "shell",
+                        status = "denied",
+                        denied_reason = %reason,
+                        "Shell access denied"
                     );
-                    // Send an informative message to the user before denying
-                    if let Some(session) = self.session_handle.clone() {
-                        let msg = "Shell access is disabled for this target (SFTP-only mode)\r\n";
-                        self.channel_writer.write(
-                            session,
-                            server_channel_id.0,
-                            CryptoVec::from_slice(msg.as_bytes()),
+                    // Accept the channel so we can send the Warpgate banner, then close
+                    let _ = reply.send(true);
+                    if let Some(ref mut session) = self.session_handle {
+                        let banner = format!(
+                            "\r\n\x1b[97;41m ✗ Access Denied \x1b[0m {reason}\r\n\r\n\
+                             Only SFTP file transfers are permitted. Use an SFTP client to connect.\r\n\r\n"
                         );
+                        let _ = session.extended_data(
+                            server_channel_id.0,
+                            1, // SSH_EXTENDED_DATA_STDERR
+                            CryptoVec::from_slice(banner.as_bytes()),
+                        ).await;
+                        let _ = session.exit_status_request(server_channel_id.0, 1).await;
+                        let _ = session.close(server_channel_id.0).await;
                     }
-                    let _ = reply.send(false);
                     return Ok(());
                 }
 
@@ -613,27 +642,56 @@ impl ServerSession {
                 let _ = reply.send(());
             }
 
-            ServerHandlerEvent::ExecRequest(channel, data, reply) => {
-                match self._channel_exec_request(channel, data).await {
-                    Ok(()) => {
-                        let _ = reply.send(true);
+            ServerHandlerEvent::ExecRequest(server_channel_id, data, reply) => {
+                // Check if exec access is blocked
+                if let Some(reason) = self.shell_block_reason().await {
+                    info!(
+                        event_type = "access_control",
+                        action = "exec",
+                        status = "denied",
+                        denied_reason = %reason,
+                        "Command execution denied"
+                    );
+                    // Accept the channel so we can send stderr, then close with error exit status
+                    let _ = reply.send(true);
+                    if let Some(ref mut session) = self.session_handle {
+                        let msg = format!(
+                            "\x1b[97;41m ✗ Access Denied \x1b[0m {reason}\r\n\
+                             Only SFTP file transfers are permitted.\r\n"
+                        );
+                        let _ = session.extended_data(
+                            server_channel_id.0,
+                            1, // SSH_EXTENDED_DATA_STDERR
+                            CryptoVec::from_slice(msg.as_bytes()),
+                        ).await;
+                        let _ = session.exit_status_request(server_channel_id.0, 1).await;
+                        let _ = session.close(server_channel_id.0).await;
                     }
-                    Err(e) => {
-                        // Send error message to client via stderr before failing
-                        warn!(channel=?channel, error=%e, "Exec request denied");
-                        let _ = reply.send(false);
+                } else {
+                    match self._channel_exec_request(server_channel_id, data).await {
+                        Ok(()) => {
+                            let _ = reply.send(true);
+                        }
+                        Err(e) => {
+                            warn!(channel=?server_channel_id, error=%e, "Exec request denied");
+                            let _ = reply.send(false);
+                        }
                     }
                 }
             }
 
             ServerHandlerEvent::ChannelOpenDirectTcpIp(channel, params, reply) => {
-                // Check if port forwarding is blocked (strict SFTP mode + SFTP restrictions active)
-                if self.is_shell_blocked().await {
-                    warn!(
+                // Check if port forwarding is blocked
+                if let Some(reason) = self.shell_block_reason().await {
+                    info!(
+                        event_type = "access_control",
+                        action = "direct_tcpip",
                         %channel,
-                        host=%params.host_to_connect,
-                        port=%params.port_to_connect,
-                        "Direct TCP/IP denied: target is in SFTP-only mode"
+                        status = "denied",
+                        denied_reason = %reason,
+                        target_host = %params.host_to_connect,
+                        target_port = %params.port_to_connect,
+                        "Direct TCP/IP forwarding denied"
                     );
                     let _ = reply.send(false);
                 } else {
@@ -642,12 +700,16 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ChannelOpenDirectStreamlocal(channel, path, reply) => {
-                // Check if port forwarding is blocked (strict SFTP mode + SFTP restrictions active)
-                if self.is_shell_blocked().await {
-                    warn!(
+                // Check if port forwarding is blocked
+                if let Some(reason) = self.shell_block_reason().await {
+                    info!(
+                        event_type = "access_control",
+                        action = "direct_streamlocal",
                         %channel,
-                        %path,
-                        "Direct streamlocal denied: target is in SFTP-only mode"
+                        status = "denied",
+                        denied_reason = %reason,
+                        socket_path = %path,
+                        "Unix socket forwarding denied"
                     );
                     let _ = reply.send(false);
                 } else {
@@ -666,12 +728,16 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::TcpIpForward(address, port, reply) => {
-                // Check if port forwarding is blocked (strict SFTP mode + SFTP restrictions active)
-                if self.is_shell_blocked().await {
-                    warn!(
-                        %address,
-                        %port,
-                        "TCP/IP forwarding denied: target is in SFTP-only mode"
+                // Check if port forwarding is blocked
+                if let Some(reason) = self.shell_block_reason().await {
+                    info!(
+                        event_type = "access_control",
+                        action = "tcpip_forward",
+                        status = "denied",
+                        denied_reason = %reason,
+                        listen_address = %address,
+                        listen_port = %port,
+                        "Reverse port forwarding denied"
                     );
                     let _ = reply.send(false);
                 } else {
@@ -1253,15 +1319,6 @@ impl ServerSession {
     ) -> Result<()> {
         let channel_id = self.map_channel(&server_channel_id)?;
 
-        // Check if exec access is blocked (strict SFTP mode + SFTP restrictions active)
-        if self.is_shell_blocked().await {
-            warn!(
-                %channel_id,
-                "Exec request denied: target is in SFTP-only mode"
-            );
-            anyhow::bail!("Command execution is disabled for this target (SFTP-only mode)");
-        }
-
         match std::str::from_utf8(&data) {
             Err(e) => {
                 error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
@@ -1395,6 +1452,11 @@ impl ServerSession {
                     pending_opens: HashMap::new(),
                     pending_reads: HashMap::new(),
                     tracker: FileTransferTracker::new(self.hash_threshold),
+                    client_buf: Vec::new(),
+                    pending_forward: Vec::new(),
+                    server_buf: Vec::new(),
+                    denied_handles: HashSet::new(),
+                    pending_cleanup: Vec::new(),
                 },
             );
             // Load permissions for later enforcement
@@ -1467,17 +1529,30 @@ impl ServerSession {
     }
 
     /// Check if shell/exec access should be blocked based on instance-wide SFTP permission mode.
-    /// Returns true when:
-    /// - Instance sftp_permission_mode is "strict" AND
-    /// - The current user-target combination has SFTP restrictions (upload or download blocked)
-    async fn is_shell_blocked(&mut self) -> bool {
+    /// Returns the reason why shell/exec/forwarding is blocked, or None if allowed.
+    ///
+    /// Blocked when:
+    /// - Role has `file_transfer_only` enabled (SFTP-only access), OR
+    /// - Instance `sftp_permission_mode` is "strict" AND the user-target has SFTP restrictions
+    async fn shell_block_reason(&mut self) -> Option<String> {
         // Ensure permissions are loaded
         if self.file_transfer_permission.is_none() {
             self.load_file_transfer_permission().await;
         }
-        self.file_transfer_permission
-            .as_ref()
-            .is_some_and(|p| p.shell_blocked)
+        let perm = self.file_transfer_permission.as_ref()?;
+        if !perm.shell_blocked {
+            return None;
+        }
+        let target_name = self.get_target_name();
+        if perm.file_transfer_only {
+            Some(format!(
+                "Your role only allows file transfers on target '{target_name}' (file_transfer_only is enabled)"
+            ))
+        } else {
+            Some(format!(
+                "Target '{target_name}' restricts file transfers — shell, exec, and forwarding are blocked by security policy"
+            ))
+        }
     }
 
     /// Get the current target name for error messages
@@ -1502,35 +1577,102 @@ impl ServerSession {
         }
     }
 
-    /// Check SFTP operation and return request_id and denial message if blocked.
-    /// Also tracks file transfers for logging and hash calculation.
+    /// Check SFTP operation against access control policy.
     ///
-    /// Returns Some((request_id, message)) if the operation should be blocked,
-    /// None if the operation is allowed.
-    fn check_sftp_operation(&mut self, channel_id: Uuid, data: &[u8]) -> Option<(u32, String)> {
-        // Parse the SFTP packet using russh-sftp
-        let operation = packet_to_operation(&crate::sftp::try_parse_packet(data)?)?;
+    /// Uses a reassembly buffer to handle SFTP packets that span multiple SSH
+    /// data messages, or multiple SFTP packets concatenated in a single message.
+    ///
+    /// Data is NOT forwarded to the target until complete SFTP packets are parsed
+    /// and verified against the access control policy. This prevents partial
+    /// writes from reaching the target before size/permission checks can run.
+    ///
+    /// Returns:
+    ///  - `SftpCheckResult::Pending` if the buffer has an incomplete packet (don't forward yet)
+    ///  - `SftpCheckResult::Allowed(bytes)` with the raw bytes to forward to the target
+    ///  - `SftpCheckResult::Denied(request_id, message)` if an operation is blocked
+    fn check_sftp_operation(&mut self, channel_id: Uuid, data: &[u8]) -> SftpCheckResult {
+        // Append incoming data to both the parse buffer and the forward buffer
+        if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            state.client_buf.extend_from_slice(data);
+            state.pending_forward.extend_from_slice(data);
+        } else {
+            // Not an SFTP channel state — shouldn't happen, but forward data as-is
+            return SftpCheckResult::Allowed(data.to_vec());
+        }
 
-        // Get permissions (should already be loaded)
-        let permission = self.file_transfer_permission.clone()?;
+        // Parse all complete packets from the buffer
+        let (packets, consumed) = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            let before_len = state.client_buf.len();
+            let pkts = crate::sftp::parse_all_packets(&mut state.client_buf);
+            let consumed = before_len - state.client_buf.len();
+            (pkts, consumed)
+        } else {
+            return SftpCheckResult::Allowed(data.to_vec());
+        };
+
+        if packets.is_empty() {
+            // No complete packets yet — buffer is accumulating, hold data
+            return SftpCheckResult::Pending;
+        }
+
+        // Drain the consumed raw bytes from pending_forward for forwarding
+        let forward_bytes = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            state.pending_forward.drain(..consumed).collect::<Vec<u8>>()
+        } else {
+            return SftpCheckResult::Allowed(data.to_vec());
+        };
+
+        // Check permissions — if none configured, allow everything
+        let permission = match self.file_transfer_permission.clone() {
+            Some(p) => p,
+            None => return SftpCheckResult::Allowed(forward_bytes),
+        };
+
+        // Process each parsed packet, return denial for the first blocked one
+        for packet in &packets {
+            let Some(operation) = packet_to_operation(packet) else {
+                continue; // Read-only metadata packet, safe to forward
+            };
+            if let Some((request_id, msg)) = self.check_sftp_operation_inner(channel_id, &operation, &permission) {
+                // Clear both buffers on denial to avoid stale data
+                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                    state.client_buf.clear();
+                    state.pending_forward.clear();
+                }
+                return SftpCheckResult::Denied(request_id, msg);
+            }
+        }
+
+        // All packets allowed — forward the consumed bytes to the target
+        SftpCheckResult::Allowed(forward_bytes)
+    }
+
+    /// Inner check for a single parsed SFTP operation.
+    /// Returns Some((request_id, message)) if blocked, None if allowed.
+    fn check_sftp_operation_inner(
+        &mut self,
+        channel_id: Uuid,
+        operation: &SftpFileOperation,
+        permission: &FileTransferPermission,
+    ) -> Option<(u32, String)> {
 
         match operation {
             SftpFileOperation::Open {
-                ref request_id,
+                request_id,
                 ref path,
                 is_upload,
                 is_download,
                 ..
             } => {
                 // Determine transfer direction
-                let direction = if is_upload {
+                let direction = if *is_upload {
                     TransferDirection::Upload
                 } else {
                     TransferDirection::Download
                 };
 
                 // Check basic upload/download permission
-                if is_upload && !permission.upload_allowed {
+                if *is_upload && !permission.upload_allowed {
                     let msg = self.build_permission_message("file upload", Some(path.as_str()));
                     self.log_transfer_denied(
                         "sftp",
@@ -1540,7 +1682,7 @@ impl ServerSession {
                     );
                     return Some((*request_id, msg));
                 }
-                if is_download && !permission.download_allowed {
+                if *is_download && !permission.download_allowed {
                     let msg = self.build_permission_message("file download", Some(path.as_str()));
                     self.log_transfer_denied(
                         "sftp",
@@ -1572,11 +1714,19 @@ impl ServerSession {
                 self.log_transfer_started("sftp", direction, path.as_str());
             }
             SftpFileOperation::Write {
-                ref request_id,
+                request_id,
                 ref handle,
                 ref data,
                 ..
             } => {
+                // If this handle was already denied, silently reject without logging
+                if let Some(state) = self.sftp_channel_state.get(&channel_id) {
+                    if state.denied_handles.contains(handle) {
+                        let msg = self.build_permission_message("file size limit exceeded", None);
+                        return Some((*request_id, msg));
+                    }
+                }
+
                 if !permission.upload_allowed {
                     let msg = self.build_permission_message("file write", None);
                     self.log_transfer_denied(
@@ -1597,6 +1747,7 @@ impl ServerSession {
                             let new_total = current_bytes + data.len() as u64;
                             if new_total > max_size as u64 {
                                 let path_str = _path.to_string();
+                                let handle_str = String::from_utf8_lossy(handle).to_string();
                                 let reason = format!(
                                     "file size {new_total} exceeds limit {max_size}"
                                 );
@@ -1610,6 +1761,11 @@ impl ServerSession {
                                     Some(&path_str),
                                     &reason,
                                 );
+                                // Mark handle as denied + queue server-side cleanup
+                                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                                    state.denied_handles.insert(handle.clone());
+                                    state.pending_cleanup.push((path_str, handle_str));
+                                }
                                 return Some((*request_id, msg));
                             }
                         }
@@ -1623,7 +1779,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Read {
-                ref request_id,
+                request_id,
                 ref handle,
                 ..
             } => {
@@ -1643,7 +1799,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Remove {
-                ref request_id,
+                request_id,
                 ref path,
             } => {
                 if !permission.upload_allowed {
@@ -1668,7 +1824,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Rename {
-                ref request_id,
+                request_id,
                 ref old_path,
                 ref new_path,
                 ..
@@ -1706,7 +1862,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Mkdir {
-                ref request_id,
+                request_id,
                 ref path,
             } => {
                 if !permission.upload_allowed {
@@ -1731,7 +1887,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Rmdir {
-                ref request_id,
+                request_id,
                 ref path,
             } => {
                 if !permission.upload_allowed {
@@ -1756,7 +1912,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Setstat {
-                ref request_id,
+                request_id,
                 ref path,
             } => {
                 if !permission.upload_allowed {
@@ -1781,7 +1937,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Symlink {
-                ref request_id,
+                request_id,
                 ref link_path,
                 ref target_path,
                 ..
@@ -1818,7 +1974,7 @@ impl ServerSession {
                 }
             }
             SftpFileOperation::Extended {
-                ref request_id,
+                request_id,
                 ref request_name,
             } => {
                 // Allowlist of known-safe read-only extensions
@@ -1885,44 +2041,98 @@ impl ServerSession {
         None // Operation allowed
     }
 
-    /// Handle SFTP response from server (for tracking file handles and download data)
+    /// Handle SFTP response from server (for tracking file handles and download data).
+    ///
+    /// Uses a reassembly buffer to handle SFTP packets that span multiple SSH
+    /// data messages, or multiple SFTP packets concatenated in a single message.
     fn handle_sftp_response(&mut self, channel_id: Uuid, data: &[u8]) {
-        let Some(packet) = crate::sftp::try_parse_packet(data) else {
+        // Append incoming data to the server reassembly buffer
+        if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            state.server_buf.extend_from_slice(data);
+        } else {
             return;
-        };
-        let Some(response) = packet_to_response(&packet) else {
+        }
+
+        // Parse all complete packets from the buffer
+        let packets = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            crate::sftp::parse_all_packets(&mut state.server_buf)
+        } else {
             return;
         };
 
-        match response {
-            SftpResponse::Handle { request_id, handle } => {
-                // Got a file handle - associate it with the pending open
-                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
-                    if let Some(pending) = state.pending_opens.remove(&request_id) {
-                        // Register the file with the tracker
-                        state
-                            .tracker
-                            .file_opened(handle, pending.path, pending.direction);
+        // Process each parsed response packet
+        for packet in &packets {
+            let Some(response) = packet_to_response(packet) else {
+                continue;
+            };
+
+            match response {
+                SftpResponse::Handle { request_id, handle } => {
+                    // Got a file handle - associate it with the pending open
+                    if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                        if let Some(pending) = state.pending_opens.remove(&request_id) {
+                            state
+                                .tracker
+                                .file_opened(handle, pending.path, pending.direction);
+                        }
                     }
                 }
-            }
-            SftpResponse::Data {
-                request_id,
-                data: file_data,
-            } => {
-                // Download data from server - track for hash calculation
-                // Look up which handle this data belongs to via the pending_reads mapping
-                if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
-                    if let Some(handle) = state.pending_reads.remove(&request_id) {
-                        // Track download data for this handle
-                        state.tracker.data_transferred(&handle, &file_data);
+                SftpResponse::Data {
+                    request_id,
+                    data: file_data,
+                } => {
+                    // Download data from server - track for hash calculation
+                    // Look up which handle this data belongs to via the pending_reads mapping
+                    if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+                        if let Some(handle) = state.pending_reads.remove(&request_id) {
+                            // Track download data for this handle
+                            state.tracker.data_transferred(&handle, &file_data);
+                        }
                     }
                 }
+                SftpResponse::Status { .. } => {
+                    // Status response - could indicate success/failure of operations
+                    // Not needed for basic tracking
+                }
             }
-            SftpResponse::Status { .. } => {
-                // Status response - could indicate success/failure of operations
-                // Not needed for basic tracking
+        }
+    }
+
+    /// Send Close + Remove to the server to delete partial files after a size-limit denial.
+    fn cleanup_denied_transfers(&mut self, channel_id: Uuid) {
+        let cleanups = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+            std::mem::take(&mut state.pending_cleanup)
+        } else {
+            return;
+        };
+
+        // Use a synthetic request_id range that won't collide with client IDs
+        let mut cleanup_id: u32 = 0xFFFF_0000;
+        for (path, handle_str) in cleanups {
+            // Close the file handle on the server
+            let close_pkt = build_close_packet(cleanup_id, &handle_str);
+            if !close_pkt.is_empty() {
+                let _ = self.send_command(RCCommand::Channel(
+                    channel_id,
+                    ChannelOperation::Data(Bytes::from(close_pkt)),
+                ));
             }
+            cleanup_id = cleanup_id.wrapping_add(1);
+
+            // Remove the partial file on the server
+            let remove_pkt = build_remove_packet(cleanup_id, &path);
+            if !remove_pkt.is_empty() {
+                let _ = self.send_command(RCCommand::Channel(
+                    channel_id,
+                    ChannelOperation::Data(Bytes::from(remove_pkt)),
+                ));
+                info!(
+                    event_type = "file_transfer",
+                    remote_path = %path,
+                    "Removed partial file from target after size limit denial"
+                );
+            }
+            cleanup_id = cleanup_id.wrapping_add(1);
         }
     }
 
@@ -2082,13 +2292,30 @@ impl ServerSession {
 
         // Check if this is an SFTP channel and inspect packets for access control
         if self.sftp_channels.contains(&channel_id) {
-            if let Some((blocked_request_id, message)) =
-                self.check_sftp_operation(channel_id, &data)
-            {
-                // Send permission denied response to client with detailed message
-                self.send_sftp_permission_denied(server_channel_id, blocked_request_id, &message)
-                    .await?;
-                return Ok(()); // Don't forward to target
+            match self.check_sftp_operation(channel_id, &data) {
+                SftpCheckResult::Pending => {
+                    // Incomplete SFTP packet — hold data, don't forward yet
+                    return Ok(());
+                }
+                SftpCheckResult::Denied(request_id, message) => {
+                    // Send permission denied response to client
+                    self.send_sftp_permission_denied(server_channel_id, request_id, &message)
+                        .await?;
+                    // Clean up partial files on the server (Close handle + Remove file)
+                    self.cleanup_denied_transfers(channel_id);
+                    return Ok(()); // Don't forward to target
+                }
+                SftpCheckResult::Allowed(forward_data) => {
+                    // Forward the verified SFTP data to the target
+                    let forward = Bytes::from(forward_data);
+                    if !forward.is_empty() {
+                        let _ = self.send_command(RCCommand::Channel(
+                            channel_id,
+                            ChannelOperation::Data(forward),
+                        ));
+                    }
+                    return Ok(());
+                }
             }
         }
 

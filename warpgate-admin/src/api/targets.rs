@@ -349,6 +349,8 @@ struct FileTransferPermissionData {
     blocked_extensions: Option<Vec<String>>,
     /// Maximum file size in bytes (null = inherit from role)
     max_file_size: Option<i64>,
+    /// File transfer only mode (null = inherit from role)
+    file_transfer_only: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -518,6 +520,7 @@ impl RolesApi {
                 allowed_paths,
                 blocked_extensions,
                 max_file_size: assignment.max_file_size,
+                file_transfer_only: assignment.file_transfer_only,
             },
         )))
     }
@@ -561,6 +564,7 @@ impl RolesApi {
             .as_ref()
             .and_then(|v| serde_json::to_value(v).ok()));
         model.max_file_size = Set(body.max_file_size);
+        model.file_transfer_only = Set(body.file_transfer_only);
 
         let updated = model.update(&*db).await.map_err(WarpgateError::from)?;
 
@@ -581,6 +585,7 @@ impl RolesApi {
                 allowed_paths,
                 blocked_extensions,
                 max_file_size: updated.max_file_size,
+                file_transfer_only: updated.file_transfer_only,
             },
         )))
     }

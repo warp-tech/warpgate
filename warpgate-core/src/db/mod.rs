@@ -108,6 +108,7 @@ pub async fn populate_db(
                 allowed_paths: Set(None),
                 blocked_extensions: Set(None),
                 max_file_size: Set(None),
+                file_transfer_only: Set(false),
             };
             values.insert(&*db).await.map_err(WarpgateError::from)?
         }

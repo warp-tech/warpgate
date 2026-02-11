@@ -91,6 +91,7 @@ impl ListApi {
             allowed_paths: Set(None),
             blocked_extensions: Set(None),
             max_file_size: Set(None),
+            file_transfer_only: Set(false),
         };
 
         let role = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -281,6 +282,10 @@ struct RoleFileTransferDefaults {
     blocked_extensions: Option<Vec<String>>,
     /// Default maximum file size in bytes (null = no limit)
     max_file_size: Option<i64>,
+    /// When true, users with this role can ONLY use SFTP. Shell/exec/forwarding are blocked.
+    #[oai(default)]
+    #[serde(default)]
+    file_transfer_only: bool,
 }
 
 #[derive(ApiResponse)]
@@ -340,6 +345,7 @@ impl FileTransferApi {
                 allowed_paths,
                 blocked_extensions,
                 max_file_size: role.max_file_size,
+                file_transfer_only: role.file_transfer_only,
             },
         )))
     }
@@ -379,6 +385,7 @@ impl FileTransferApi {
             .as_ref()
             .and_then(|v| serde_json::to_value(v).ok()));
         model.max_file_size = Set(body.max_file_size);
+        model.file_transfer_only = Set(body.file_transfer_only);
 
         let updated = model.update(&*db).await?;
 
@@ -399,6 +406,7 @@ impl FileTransferApi {
                 allowed_paths,
                 blocked_extensions,
                 max_file_size: updated.max_file_size,
+                file_transfer_only: updated.file_transfer_only,
             },
         )))
     }

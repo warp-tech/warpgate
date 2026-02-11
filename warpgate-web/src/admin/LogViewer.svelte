@@ -175,6 +175,12 @@ onDestroy(() => {
                                         <span class="completed">completed</span>
                                     {/if}
                                 </span>
+                            {:else if item.values?.event_type === 'access_control'}
+                                <span class="access-control-event">
+                                    <span class="badge badge-denied">BLOCKED</span>
+                                    <span class="action">{item.values.action ?? 'unknown'}</span>
+                                    <span class="denied-reason">{item.values.denied_reason ?? item.text}</span>
+                                </span>
                             {:else}
                                 <span class="text">
                                     {item.text}
@@ -264,6 +270,32 @@ onDestroy(() => {
 
             .value {
                 font-style: italic;
+            }
+
+            .access-control-event {
+                display: flex;
+                align-items: center;
+                gap: 0.5em;
+
+                .badge-denied {
+                    font-size: 0.65rem;
+                    padding: 0.2em 0.4em;
+                    border-radius: 3px;
+                    font-weight: 600;
+                    background-color: #dc3545;
+                    color: white;
+                }
+
+                .action {
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    color: #dc3545;
+                    font-size: 0.85em;
+                }
+
+                .denied-reason {
+                    opacity: 0.85;
+                }
             }
 
             .file-transfer-event {

@@ -23,6 +23,8 @@ pub struct Model {
     pub blocked_extensions: Option<serde_json::Value>,
     /// Maximum file size in bytes (null = inherit from role)
     pub max_file_size: Option<i64>,
+    /// File transfer only mode (null = inherit from role, true/false = override)
+    pub file_transfer_only: Option<bool>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
