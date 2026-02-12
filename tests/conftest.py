@@ -48,6 +48,7 @@ class WarpgateProcess:
     ssh_port: int
     mysql_port: int
     postgres_port: int
+    kubernetes_port: int
 
 
 class ProcessManager:
@@ -83,7 +84,7 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config=''):
+    def start_ssh_server(self, trusted_keys=[], extra_config=""):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
@@ -178,6 +179,110 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
+    def start_k3s(self):
+        """Start a k3s server in Docker and return (port, token, container_name).
+
+        This will run a privileged k3s container, wait for the API to be ready,
+        create a ServiceAccount, and obtain a bearer token for it.
+        """
+        port = alloc_port()
+        container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
+        image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.27.4-k3s1")
+
+        # Start container (runs in foreground so we can stop it via ProcessManager.stop)
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--privileged",
+                "-p",
+                f"{port}:6443",
+                image,
+                "server",
+                "--disable",
+                "traefik",
+            ]
+        )
+
+        def wait_k3s():
+            # Wait until kube-apiserver is responding
+            while True:
+                try:
+                    subprocess.check_call(
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "kubectl",
+                            "get",
+                            "nodes",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_k3s, "k3s API is not ready", timeout=self.timeout * 5)
+
+        # Create service account
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "serviceaccount",
+                "test-sa",
+                "-n",
+                "default",
+            ]
+        )
+
+        # Assign cluster admin role
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "clusterrolebinding",
+                "test-sa-binding",
+                "--clusterrole=cluster-admin",
+                "--serviceaccount=default:test-sa",
+            ]
+        )
+
+        token = (
+            subprocess.check_output(
+                [
+                    "docker",
+                    "exec",
+                    container_name,
+                    "kubectl",
+                    "create",
+                    "token",
+                    "test-sa",
+                    "-n",
+                    "default",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+
+        print(token)
+
+        logging.debug(f"k3s {container_name} is up on port {port}")
+        return {"port": port, "token": token, "container_name": container_name}
+
     def start_wg(
         self,
         config="",
@@ -242,6 +347,7 @@ class ProcessManager:
             )
 
         if not share_with:
+            kubernetes_port = alloc_port()
             p = run(
                 [
                     "unattended-setup",
@@ -253,6 +359,8 @@ class ProcessManager:
                     str(mysql_port),
                     "--postgres-port",
                     str(postgres_port),
+                    "--kubernetes-port",
+                    str(kubernetes_port),
                     "--data-path",
                     data_dir,
                     "--external-host",
@@ -279,6 +387,13 @@ class ProcessManager:
             http_port=http_port,
             mysql_port=mysql_port,
             postgres_port=postgres_port,
+            kubernetes_port=kubernetes_port
+            if not share_with
+            else (
+                share_with.kubernetes_port
+                if hasattr(share_with, "kubernetes_port")
+                else None
+            ),
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -362,6 +477,9 @@ def shared_wg(processes: ProcessManager):
     wg = processes.start_wg()
     wait_port(wg.http_port, for_process=wg.process, recv=False)
     wait_port(wg.ssh_port, for_process=wg.process)
+    # Wait for Kubernetes listen port if configured
+    if getattr(wg, "kubernetes_port", None):
+        wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
     yield wg
 
 
