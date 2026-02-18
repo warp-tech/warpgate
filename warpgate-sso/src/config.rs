@@ -9,6 +9,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::SsoError;
 
+/// A role mapping value that accepts either a single role or a list of roles.
+/// In YAML config: `"group": "role"` or `"group": ["role1", "role2"]`
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RoleMapping {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl RoleMapping {
+    pub fn roles(&self) -> Vec<String> {
+        match self {
+            RoleMapping::Single(s) => vec![s.clone()],
+            RoleMapping::Multiple(v) => v.clone(),
+        }
+    }
+}
+
 #[allow(clippy::unwrap_used)]
 pub static GOOGLE_ISSUER_URL: Lazy<IssuerUrl> =
     Lazy::new(|| IssuerUrl::new("https://accounts.google.com".to_string()).unwrap());
@@ -25,6 +43,10 @@ pub struct SsoProviderConfig {
     pub return_domain_whitelist: Option<Vec<String>>,
     #[serde(default)]
     pub auto_create_users: bool,
+    /// Default credential policy for auto-created users.
+    /// Keys: "http", "ssh", "mysql", "postgres"
+    /// Values: list of credential kinds e.g. ["sso"], ["web"], []
+    pub default_credential_policy: Option<serde_json::Value>,
 }
 
 impl SsoProviderConfig {
@@ -44,6 +66,15 @@ pub enum SsoInternalProviderConfig {
         client_id: ClientId,
         #[schemars(with = "String")]
         client_secret: ClientSecret,
+        /// Service account email for Google Directory API group lookups
+        service_account_email: Option<String>,
+        /// PEM private key from the service account JSON key file
+        service_account_key: Option<String>,
+        /// A Google Workspace admin email for domain-wide delegation
+        admin_email: Option<String>,
+        /// Maps Google group email addresses to Warpgate role names.
+        /// Use "*" as a key to set a default role for any group not explicitly mapped.
+        role_mappings: Option<HashMap<String, RoleMapping>>,
     },
     #[serde(rename = "apple")]
     Apple {
@@ -71,7 +102,7 @@ pub enum SsoInternalProviderConfig {
         #[schemars(with = "String")]
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
-        role_mappings: Option<HashMap<String, String>>,
+        role_mappings: Option<HashMap<String, RoleMapping>>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -223,10 +254,11 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn role_mappings(&self) -> Option<HashMap<String, String>> {
+    pub fn role_mappings(&self) -> Option<HashMap<String, RoleMapping>> {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
+            SsoInternalProviderConfig::Google { role_mappings, .. }
+            | SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
             _ => None,
         }
     }
