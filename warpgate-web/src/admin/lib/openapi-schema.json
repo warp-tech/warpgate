@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.0-37-g94ecc95e-modified"
+    "version": "v0.20.2-7-g1cce72fe-modified"
   },
   "servers": [
     {
@@ -4413,15 +4413,11 @@
         "title": "TargetKubernetesOptions",
         "required": [
           "cluster_url",
-          "namespace",
           "tls",
           "auth"
         ],
         "properties": {
           "cluster_url": {
-            "type": "string"
-          },
-          "namespace": {
             "type": "string"
           },
           "tls": {

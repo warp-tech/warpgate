@@ -147,9 +147,6 @@ pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
     pub cluster_url: String,
 
-    #[serde(default = "_default_empty_string")]
-    pub namespace: String,
-
     #[serde(default)]
     pub tls: Tls,
 
