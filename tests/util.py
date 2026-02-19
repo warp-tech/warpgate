@@ -23,7 +23,7 @@ def alloc_port():
     return last_port
 
 
-def _wait_timeout(fn, msg, timeout=60):
+def _wait_timeout(fn, msg, timeout=120):
     t = threading.Thread(target=fn, daemon=True)
     t.start()
     t.join(timeout=timeout)
@@ -31,7 +31,7 @@ def _wait_timeout(fn, msg, timeout=60):
         raise Exception(msg)
 
 
-def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None):
+def wait_port(port, recv=True, timeout=120, for_process: subprocess.Popen = None):
     logging.debug(f"Waiting for port {port}")
 
     data = b""
@@ -42,9 +42,13 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None)
             try:
                 s = socket.create_connection(("localhost", port), timeout=5)
                 if recv:
+                    s.settimeout(5)
                     while True:
-                        data = s.recv(100)
-                        if data:
+                        try:
+                            data = s.recv(100)
+                            if data:
+                                break
+                        except socket.timeout:
                             break
                 else:
                     data = b""

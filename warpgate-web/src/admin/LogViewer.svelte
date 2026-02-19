@@ -94,6 +94,16 @@ function stringifyDate (date: Date) {
     return date.toLocaleString()
 }
 
+function formatBytes (bytes: number): string {
+    if (bytes === 0) {
+        return '0 B'
+    }
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
 loadOlder().catch(async e => {
     error = await stringifyError(e)
 })
@@ -147,14 +157,40 @@ onDestroy(() => {
                             </td>
                         {/if}
                         <td class="content">
-                            <span class="text">
-                                {item.text}
-                            </span>
+                            {#if item.values?.event_type === 'file_transfer'}
+                                <span class="file-transfer-event {item.values.status}">
+                                    <span class="badge {item.values.status === 'denied' ? 'badge-danger' : 'badge-info'}">
+                                        {item.values.protocol?.toUpperCase() ?? 'FILE'}
+                                    </span>
+                                    <span class="direction">
+                                        {item.values.direction?.toLowerCase() === 'upload' ? '\u2191' : '\u2193'}
+                                    </span>
+                                    <span class="path">{item.values.remote_path ?? ''}</span>
+                                    {#if item.values.file_size}
+                                        <span class="size">({formatBytes(item.values.file_size)})</span>
+                                    {/if}
+                                    {#if item.values.status === 'denied'}
+                                        <span class="denied-reason">DENIED: {item.values.denied_reason ?? 'permission'}</span>
+                                    {:else if item.values.status === 'completed'}
+                                        <span class="completed">completed</span>
+                                    {/if}
+                                </span>
+                            {:else if item.values?.event_type === 'access_control'}
+                                <span class="access-control-event">
+                                    <span class="badge badge-denied">BLOCKED</span>
+                                    <span class="action">{item.values.action ?? 'unknown'}</span>
+                                    <span class="denied-reason">{item.values.denied_reason ?? item.text}</span>
+                                </span>
+                            {:else}
+                                <span class="text">
+                                    {item.text}
+                                </span>
 
-                            {#each Object.entries(item.values ?? {}) as pair (pair[0])}
-                                <span class="key">{pair[0]}:</span>
-                                <span class="value">{pair[1]}</span>
-                            {/each}
+                                {#each Object.entries(item.values ?? {}) as pair (pair[0])}
+                                    <span class="key">{pair[0]}:</span>
+                                    <span class="value">{pair[1]}</span>
+                                {/each}
+                            {/if}
                         </td>
                     </tr>
                 {/each}
@@ -234,6 +270,86 @@ onDestroy(() => {
 
             .value {
                 font-style: italic;
+            }
+
+            .access-control-event {
+                display: flex;
+                align-items: center;
+                gap: 0.5em;
+
+                .badge-denied {
+                    font-size: 0.65rem;
+                    padding: 0.2em 0.4em;
+                    border-radius: 3px;
+                    font-weight: 600;
+                    background-color: #dc3545;
+                    color: white;
+                }
+
+                .action {
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    color: #dc3545;
+                    font-size: 0.85em;
+                }
+
+                .denied-reason {
+                    opacity: 0.85;
+                }
+            }
+
+            .file-transfer-event {
+                display: flex;
+                align-items: center;
+                gap: 0.5em;
+
+                .badge {
+                    font-size: 0.65rem;
+                    padding: 0.2em 0.4em;
+                    border-radius: 3px;
+                    font-weight: 600;
+                }
+
+                .badge-info {
+                    background-color: #17a2b8;
+                    color: white;
+                }
+
+                .badge-danger {
+                    background-color: #dc3545;
+                    color: white;
+                }
+
+                .direction {
+                    font-weight: bold;
+                    font-size: 1.1em;
+                }
+
+                .path {
+                    font-weight: 500;
+                }
+
+                .size {
+                    opacity: 0.7;
+                    font-size: 0.9em;
+                }
+
+                .denied-reason {
+                    color: #dc3545;
+                    font-weight: 600;
+                }
+
+                .completed {
+                    color: #28a745;
+                    font-size: 0.85em;
+                }
+
+                &.denied {
+                    .path {
+                        text-decoration: line-through;
+                        opacity: 0.7;
+                    }
+                }
             }
         }
     }

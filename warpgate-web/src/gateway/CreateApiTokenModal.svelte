@@ -16,12 +16,22 @@
         create: (label: string, expiry: Date) => void
     }
 
+    function toLocalISO(date: Date): string {
+        const pad = (n: number) => n.toString().padStart(2, '0')
+        const year = date.getFullYear()
+        const month = pad(date.getMonth() + 1)
+        const day = pad(date.getDate())
+        const hours = pad(date.getHours())
+        const minutes = pad(date.getMinutes())
+        return `${year}-${month}-${day}T${hours}:${minutes}`
+    }
+
     let {
         isOpen = $bindable(true),
         create,
     }: Props = $props()
     let label = $state('')
-    let expiry = $state(new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString())
+    let expiry = $state(toLocalISO(new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)))
     let field: HTMLInputElement|undefined = $state()
     let validated = $state(false)
 

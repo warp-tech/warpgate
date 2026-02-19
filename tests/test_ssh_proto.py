@@ -52,7 +52,7 @@ def setup_user_and_target(
                 openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
             ),
         )
-        api.add_user_role(user.id, role.id)
+        api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
         ssh_target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
