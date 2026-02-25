@@ -43,11 +43,12 @@ jobs:
         run: |
           make all
 
-      - name: Install deps
+      - name: Install deps and kubectl
         working-directory: tests
         run: |
           sudo apt update
-          sudo apt install -y gnome-keyring
+          sudo apt install -y gnome-keyring kubectl
+          kubectl version --client
           pip3 install keyring==24 poetry==1.8.3
           poetry install
 

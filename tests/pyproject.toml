@@ -17,6 +17,7 @@ websocket-client = "^1.3.3"
 PyYAML = "^6.0.2"
 openapi-client = { path = "./api_sdk", develop = true }
 aiohttp = "^3.11.18"
+cryptography = "^38"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^5.0.2"
