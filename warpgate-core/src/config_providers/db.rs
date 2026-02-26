@@ -120,6 +120,7 @@ impl DatabaseConfigProvider {
         db: &DatabaseConnection,
         credential: UserSsoCredential,
         preferred_username: String,
+        default_credential_policy: Option<serde_json::Value>,
     ) -> Result<Option<String>, WarpgateError> {
         // Check for LDAP servers with auto-linking enabled
         let ldap_servers: Vec<entities::LdapServer::Model> = entities::LdapServer::Entity::find()
@@ -170,9 +171,10 @@ impl DatabaseConfigProvider {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
             description: Set("".into()),
-            credential_policy: Set(serde_json::to_value(
-                UserRequireCredentialsPolicy::default(),
-            )?),
+            credential_policy: Set(default_credential_policy
+                .unwrap_or_else(|| serde_json::to_value(
+                    UserRequireCredentialsPolicy::default(),
+                ).unwrap_or_default())),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
@@ -378,6 +380,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                         provider: Some(client_provider.clone()),
                     },
                     preferred_username,
+                    sso_config.default_credential_policy.clone(),
                 )
                 .await;
         }
@@ -573,11 +576,14 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         for role_name in managed_role_names.into_iter() {
-            let role = entities::Role::Entity::find()
+            let Some(role) = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
                 .one(&*db)
                 .await?
-                .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
+            else {
+                warn!("SSO role mapping references non-existent role {role_name:?}, skipping");
+                continue;
+            };
 
             let assignment = entities::UserRoleAssignment::Entity::find()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
