@@ -48,7 +48,23 @@ class K3sInstance:
     container_name: str
     client_cert: str
     client_key: str
-    kubectl: callable
+
+    def kubectl(self, cmd_args, input=None, check=True):
+        ret = subprocess.run(
+            ["docker", "exec", "-i", self.container_name, "kubectl", *cmd_args],
+            input=input,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check:
+            try:
+                ret.check_returncode()
+            except subprocess.CalledProcessError as e:
+                logging.error(
+                    f"kubectl command failed: {' '.join(cmd_args)}\nstdout: {e.stdout.decode()}\nstderr: {e.stderr.decode()}"
+                )
+                raise
+        return ret
 
 
 @dataclass
@@ -197,9 +213,8 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
-    def start_k3s(self):
-        """Start a k3s server in Docker and return (port, token, container_name).
-
+    def start_k3s(self) -> K3sInstance:
+        """
         Runs a privileged k3s container, waits for the API to be ready,
         creates a ServiceAccount and clusterrolebinding, then uses
         `kubectl create token` to fetch the bearer token. Assumes a modern
@@ -209,7 +224,6 @@ class ProcessManager:
         container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
         image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.27.4-k3s1")
 
-        # Start container (runs in foreground so we can stop it via ProcessManager.stop)
         self.start(
             [
                 "docker",
@@ -306,24 +320,6 @@ class ProcessManager:
             ]
         )
 
-        # helper so callers don't have to repeatedly type the docker exec boilerplate
-        def kubectl_in_container(cmd_args, input=None, check=True):
-            ret = subprocess.run(
-                ["docker", "exec", "-i", container_name, "kubectl", *cmd_args],
-                input=input,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if check:
-                try:
-                    ret.check_returncode()
-                except subprocess.CalledProcessError as e:
-                    logging.error(
-                        f"kubectl command failed: {' '.join(cmd_args)}\nstdout: {e.stdout.decode()}\nstderr: {e.stderr.decode()}"
-                    )
-                    raise
-            return ret
-
         token = (
             subprocess.check_output(
                 [
@@ -403,9 +399,7 @@ class ProcessManager:
         )
 
         # after approving the CSR the certificate may take a moment to
-        # appear in the resource status. ``_wait_timeout`` only invokes the
-        # given function once, so the helper itself must loop until a value is
-        # returned.
+        # appear in the resource status
         def fetch_cert() -> str:
             while True:
                 cert = subprocess.check_output(
@@ -431,15 +425,12 @@ class ProcessManager:
             "k3s did not sign CSR",
             timeout=self.timeout,
         )
-        # _wait_timeout runs fetch_cert in a thread and waits; fetch_cert returns
-        # the certificate when available, but the thread target result isn't
-        # accessible, so call it again synchronously to grab the value.
+
         client_cert = fetch_cert()
+
         logging.debug("retrieved signed client certificate from k3s")
 
-        # grant the user represented by the certificate full privileges so
-        # that warpgate can perform cluster-admin operations when it connects
-        # upstream.  the cert subject is "system:masters" so bind that user.
+        # the cert subject is "system:masters" so bind that user.
         subprocess.check_call(
             [
                 "docker",
@@ -461,7 +452,6 @@ class ProcessManager:
             container_name=container_name,
             client_cert=client_cert,
             client_key=client_key,
-            kubectl=kubectl_in_container,
         )
 
     def start_wg(
@@ -480,11 +470,14 @@ class ProcessManager:
             mysql_port = share_with.mysql_port
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
+            kubernetes_port = share_with.kubernetes_port
         else:
             ssh_port = alloc_port()
             http_port = alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            kubernetes_port = alloc_port()
+
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
@@ -528,7 +521,6 @@ class ProcessManager:
             )
 
         if not share_with:
-            kubernetes_port = alloc_port()
             p = run(
                 [
                     "unattended-setup",
@@ -569,12 +561,6 @@ class ProcessManager:
             mysql_port=mysql_port,
             postgres_port=postgres_port,
             kubernetes_port=kubernetes_port
-            if not share_with
-            else (
-                share_with.kubernetes_port
-                if hasattr(share_with, "kubernetes_port")
-                else None
-            ),
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):

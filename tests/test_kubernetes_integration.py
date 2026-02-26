@@ -17,17 +17,13 @@ def run_kubectl(args):
     return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-pytestmark = pytest.mark.usefixtures("report_generation")
-
-
-@pytest.mark.skipif(shutil.which("kubectl") is None, reason="kubectl is not available")
 class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_through_warpgate(
         self, processes, shared_wg: WarpgateProcess
     ):
         # start k3s and obtain a service-account token
-        k3s: K3sInstance = processes.start_k3s()
+        k3s = processes.start_k3s()
         k3s_port = k3s.port
         k3s_token = k3s.token
 
@@ -85,7 +81,6 @@ class TestKubernetesIntegration:
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
                             cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            namespace="default",
                             tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
                             auth=sdk.KubernetesTargetAuth(
                                 sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
@@ -136,13 +131,13 @@ class TestKubernetesIntegration:
             "default",
         ]
         p = run_kubectl(token_cmd)
-        assert p.returncode == 0, f"token positive failed: {p.stderr!r}"
+        assert p.returncode == 0, f"should accept the correct token: {p.stderr!r}"
 
         # negative token case
         bad_cmd = token_cmd.copy()
         bad_cmd[bad_cmd.index(user_token)] = user_token + "x"
         p = run_kubectl(bad_cmd)
-        assert p.returncode != 0, "token target accepted invalid token"
+        assert p.returncode != 0, "should not accept an invalid token"
 
         # positive client-certificate auth to Warpgate (user→wg)
         cert_file = processes.ctx.tmpdir / f"k8s-cert-{uuid.uuid4()}.pem"
@@ -169,7 +164,7 @@ class TestKubernetesIntegration:
             "default",
         ]
         p = run_kubectl(cert_cmd)
-        assert p.returncode == 0, f"cert-to-wg positive failed: {p.stderr!r}"
+        assert p.returncode == 0, f"should accept the valid certificate: {p.stderr!r}"
 
         # negative cert to Warpgate (wrong key)
         wrong_key = processes.ctx.tmpdir / f"k8s-wrong-{uuid.uuid4()}.pem"
@@ -184,7 +179,7 @@ class TestKubernetesIntegration:
         bad_cert_cmd = cert_cmd.copy()
         bad_cert_cmd[bad_cert_cmd.index(str(key_file))] = str(wrong_key)
         p = run_kubectl(bad_cert_cmd)
-        assert p.returncode != 0, "warpgate accepted invalid client cert"
+        assert p.returncode != 0, "should not accept an unknown certificate"
 
     @pytest.mark.asyncio
     async def test_mtls_upstream_and_token_user(
@@ -197,7 +192,9 @@ class TestKubernetesIntegration:
         mtls_cert = k3s.client_cert
         mtls_key = k3s.client_key
         # sanity‑check the values we got from start_k3s -- they must look like PEM
-        assert mtls_cert and "BEGIN CERTIFICATE" in mtls_cert, "upstream cert missing or invalid"
+        assert mtls_cert and "BEGIN CERTIFICATE" in mtls_cert, (
+            "upstream cert missing or invalid"
+        )
         assert mtls_key and "BEGIN" in mtls_key, "upstream key missing or invalid"
 
         url = f"https://localhost:{shared_wg.http_port}"
@@ -222,7 +219,6 @@ class TestKubernetesIntegration:
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
                             cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            namespace="default",
                             tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
                             auth=sdk.KubernetesTargetAuth(
                                 sdk.KubernetesTargetAuthKubernetesTargetCertificateAuth(
@@ -264,16 +260,18 @@ class TestKubernetesIntegration:
         kubeconf = processes.ctx.tmpdir / f"kubeconfig-{uuid.uuid4()}.yaml"
         kubeconf.write_text("apiVersion: v1\nkind: Config\n")
         # run from within container when talking to k3s directly
-        p = run_kubectl([
-            "kubectl",
-            "get",
-            "pods",
-            "--server",
-            server,
-            "--insecure-skip-tls-verify",
-            "--token",
-            user_token,
-            "-n",
-            "default",
-        ])
+        p = run_kubectl(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "--server",
+                server,
+                "--insecure-skip-tls-verify",
+                "--token",
+                user_token,
+                "-n",
+                "default",
+            ]
+        )
         assert p.returncode == 0, "mtls upstream token-user combo failed"
