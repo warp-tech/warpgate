@@ -36,7 +36,7 @@ class TestHTTPUserAuthOTP:
                     ),
                 ),
             )
-            api.add_user_role(user.id, role.id)
+            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
             echo_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
@@ -115,7 +115,7 @@ class TestHTTPUserAuthOTP:
                     ),
                 ),
             )
-            api.add_user_role(user.id, role.id)
+            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
             echo_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",

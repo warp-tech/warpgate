@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input, FormText } from '@sveltestrap/sveltestrap'
     import { api, type ParameterValues } from 'admin/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -104,6 +104,34 @@
             Controls which authentication methods are offered to SSH clients.
             Disabling password authentication can help prevent brute-force attacks.
         </InfoBox>
+
+        <h4 class="mt-4">SFTP permission enforcement</h4>
+        <FormGroup>
+            <label for="sftpPermissionMode" class="mb-2">Enforcement mode</label>
+            <Input
+                id="sftpPermissionMode"
+                type="select"
+                value={parameters.sftpPermissionMode}
+                on:change={(e) => {
+                    parameters!.sftpPermissionMode = e.currentTarget.value
+                    update()
+                }}
+            >
+                <option value="permissive">Permissive</option>
+                <option value="strict">Strict</option>
+            </Input>
+            <FormText class="mt-2">
+                {#if parameters.sftpPermissionMode === 'strict'}
+                    <strong>Strict mode:</strong> When a role's SFTP access is restricted to specific directories,
+                    shell access, command execution (exec), and port forwarding are blocked for that session.
+                    This prevents users from bypassing SFTP restrictions through shell commands.
+                {:else}
+                    <strong>Permissive mode:</strong> SFTP directory restrictions are enforced,
+                    but shell access, command execution, and port forwarding remain available.
+                    Users could potentially bypass SFTP restrictions if they have shell access.
+                {/if}
+            </FormText>
+        </FormGroup>
     {/if}
     </Loadable>
 </div>

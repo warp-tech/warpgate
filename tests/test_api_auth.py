@@ -58,7 +58,7 @@ class TestAPIAuth:
                 user.id, sdk.NewPasswordCredential(password="123")
             )
             admin_role = api.get_roles('warpgate:admin')[0]
-            api.add_user_role(user.id, admin_role.id)
+            api.add_user_role(user.id, admin_role.id, sdk.AddUserRoleRequest(expires_at=None))
 
         session = requests.Session()
         session.verify = False

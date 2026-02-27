@@ -29,6 +29,18 @@ pub struct DatabaseConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
 }
 
+fn is_user_role_active(assignment: &entities::UserRoleAssignment::Model) -> bool {
+    if assignment.revoked_at.is_some() {
+        return false;
+    }
+    if let Some(expires_at) = assignment.expires_at {
+        if expires_at <= Utc::now() {
+            return false;
+        }
+    }
+    true
+}
+
 impl DatabaseConfigProvider {
     pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
@@ -534,8 +546,19 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_roles: HashSet<String> = user_model
-            .find_related(entities::Role::Entity)
+        let user_assignments = entities::UserRoleAssignment::Entity::find()
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
+            .all(&*db)
+            .await?;
+
+        let user_role_ids: HashSet<Uuid> = user_assignments
+            .iter()
+            .filter(|a| is_user_role_active(a))
+            .map(|a| a.role_id)
+            .collect();
+
+        let user_roles: HashSet<String> = entities::Role::Entity::find()
+            .filter(entities::Role::Column::Id.is_in(user_role_ids))
             .all(&*db)
             .await?
             .into_iter()
@@ -546,6 +569,154 @@ impl ConfigProvider for DatabaseConfigProvider {
         let intersect = user_roles.intersection(&target_roles).count() > 0;
 
         Ok(intersect)
+    }
+
+    async fn authorize_target_file_transfer(
+        &mut self,
+        username: &str,
+        target: &warpgate_common::Target,
+    ) -> Result<super::FileTransferPermission, WarpgateError> {
+        let db = self.db.lock().await;
+
+        // Get sftp_permission_mode from parameters
+        let parameters = entities::Parameters::Entity::get(&db).await?;
+        let is_strict_mode = parameters.sftp_permission_mode == "strict";
+
+        // Get user's role IDs
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
+            error!("Selected user not found: {}", username);
+            return Ok(super::FileTransferPermission::default());
+        };
+
+        let user_assignments = entities::UserRoleAssignment::Entity::find()
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
+            .all(&*db)
+            .await?;
+
+        let user_role_ids: HashSet<uuid::Uuid> = user_assignments
+            .iter()
+            .filter(|a| is_user_role_active(a))
+            .map(|a| a.role_id)
+            .collect();
+
+        // Get target's role assignments with file transfer permissions
+        let target_role_assignments: Vec<entities::TargetRoleAssignment::Model> =
+            entities::TargetRoleAssignment::Entity::find()
+                .filter(entities::TargetRoleAssignment::Column::TargetId.eq(target.id))
+                .all(&*db)
+                .await?;
+
+        // Permissive model: if ANY matching role allows, grant permission
+        // Consistent with Warpgate's additive RBAC: roles only grant, never deny.
+        // See thoughts/research/2026-02-11_multi_role_permission_merge_research.md
+        let mut result = super::FileTransferPermission::default();
+        let mut file_transfer_only_votes: Option<bool> = None;
+
+        for target_role in target_role_assignments {
+            if !user_role_ids.contains(&target_role.role_id) {
+                continue;
+            }
+
+            // 1. Get role defaults
+            let Some(role) = entities::Role::Entity::find_by_id(target_role.role_id)
+                .one(&*db)
+                .await?
+            else {
+                continue;
+            };
+
+            // Start with role defaults
+            let mut perm = super::FileTransferPermission {
+                upload_allowed: role.allow_file_upload,
+                download_allowed: role.allow_file_download,
+                allowed_paths: role
+                    .allowed_paths
+                    .and_then(|v| serde_json::from_value(v).ok()),
+                blocked_extensions: role
+                    .blocked_extensions
+                    .and_then(|v| serde_json::from_value(v).ok()),
+                max_file_size: role.max_file_size,
+                shell_blocked: false, // Will be calculated at the end
+                file_transfer_only: role.file_transfer_only,
+            };
+
+            // 2. Apply target-role overrides (NULL = inherit from role)
+            if let Some(upload) = target_role.allow_file_upload {
+                perm.upload_allowed = upload;
+            }
+            if let Some(download) = target_role.allow_file_download {
+                perm.download_allowed = download;
+            }
+            // For other fields, explicit value overrides role default
+            if target_role.allowed_paths.is_some() {
+                perm.allowed_paths = target_role
+                    .allowed_paths
+                    .and_then(|v| serde_json::from_value(v).ok());
+            }
+            if target_role.blocked_extensions.is_some() {
+                perm.blocked_extensions = target_role
+                    .blocked_extensions
+                    .and_then(|v| serde_json::from_value(v).ok());
+            }
+            if target_role.max_file_size.is_some() {
+                perm.max_file_size = target_role.max_file_size;
+            }
+            if let Some(fto) = target_role.file_transfer_only {
+                perm.file_transfer_only = fto;
+            }
+
+            // 3. Merge permissively with result
+            // Permissive: any true grants access
+            result.upload_allowed |= perm.upload_allowed;
+            result.download_allowed |= perm.download_allowed;
+
+            // For restrictions, use most permissive (union paths, largest size limit)
+            if let Some(paths) = perm.allowed_paths {
+                match &mut result.allowed_paths {
+                    Some(existing) => existing.extend(paths),
+                    None => result.allowed_paths = Some(paths),
+                }
+            }
+
+            // Blocked extensions: intersection (only block if ALL roles block)
+            if let Some(extensions) = perm.blocked_extensions {
+                match &mut result.blocked_extensions {
+                    Some(existing) => {
+                        // Keep only extensions blocked by ALL roles
+                        existing.retain(|ext| extensions.contains(ext));
+                    }
+                    None => result.blocked_extensions = Some(extensions),
+                }
+            }
+
+            // Size limit: use largest (most permissive)
+            if let Some(size) = perm.max_file_size {
+                result.max_file_size = Some(result.max_file_size.map_or(size, |s| s.max(size)));
+            }
+
+            // file_transfer_only: ALL-true semantics (only enforce if ALL matching roles agree).
+            // Consistent with Warpgate's permissive model: one role without the flag
+            // restores shell access, same as one role granting upload restores upload.
+            file_transfer_only_votes = Some(
+                file_transfer_only_votes.unwrap_or(true) && perm.file_transfer_only,
+            );
+        }
+
+        result.file_transfer_only = file_transfer_only_votes.unwrap_or(false);
+
+        // Determine if shell/exec should be blocked based on:
+        // - sftp_permission_mode is "strict" AND any SFTP restriction exists, OR
+        // - ALL matching roles have file_transfer_only enabled
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        result.shell_blocked = (is_strict_mode && has_sftp_restrictions)
+            || result.file_transfer_only;
+
+        Ok(result)
     }
 
     async fn apply_sso_role_mappings(
@@ -598,7 +769,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await?;
+                    let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
+                    model.revoked_at = Set(Some(Utc::now()));
+                    model.revoked_by = Set(None);
+                    model.update(&*db).await?;
                 }
                 _ => (),
             }
@@ -684,5 +858,212 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         Ok(Some(user.try_into()?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn test_file_transfer_permission_default() {
+        let perm = super::super::FileTransferPermission::default();
+        assert!(!perm.upload_allowed);
+        assert!(!perm.download_allowed);
+        assert!(perm.allowed_paths.is_none());
+        assert!(perm.blocked_extensions.is_none());
+        assert!(perm.max_file_size.is_none());
+        // Default: shell_blocked is true (strict mode with restrictions)
+        assert!(perm.shell_blocked);
+    }
+
+    #[test]
+    fn test_file_transfer_permission_permissive_or_logic() {
+        // Test that the permissive model uses OR logic for upload/download
+        let mut result = super::super::FileTransferPermission::default();
+
+        // Simulate first role: upload allowed, download denied
+        result.upload_allowed |= true;
+        result.download_allowed |= false;
+
+        assert!(result.upload_allowed);
+        assert!(!result.download_allowed);
+
+        // Simulate second role: upload denied, download allowed
+        result.upload_allowed |= false;
+        result.download_allowed |= true;
+
+        // Both should now be allowed (permissive model)
+        assert!(result.upload_allowed);
+        assert!(result.download_allowed);
+    }
+
+    #[test]
+    fn test_file_transfer_permission_size_limit_most_permissive() {
+        // Test that the most permissive (largest) size limit is used
+        let mut result = super::super::FileTransferPermission::default();
+
+        // First role: 1MB limit
+        let size1 = 1_000_000i64;
+        result.max_file_size = Some(result.max_file_size.map_or(size1, |s| s.max(size1)));
+        assert_eq!(result.max_file_size, Some(1_000_000));
+
+        // Second role: 10MB limit (should override)
+        let size2 = 10_000_000i64;
+        result.max_file_size = Some(result.max_file_size.map_or(size2, |s| s.max(size2)));
+        assert_eq!(result.max_file_size, Some(10_000_000));
+
+        // Third role: 5MB limit (should NOT override, smaller)
+        let size3 = 5_000_000i64;
+        result.max_file_size = Some(result.max_file_size.map_or(size3, |s| s.max(size3)));
+        assert_eq!(result.max_file_size, Some(10_000_000));
+    }
+
+    #[test]
+    fn test_file_transfer_permission_allowed_paths_union() {
+        // Test that allowed paths are unioned (most permissive)
+        let mut result = super::super::FileTransferPermission::default();
+
+        // First role: /home allowed
+        let paths1 = vec!["/home".to_string()];
+        match &mut result.allowed_paths {
+            Some(existing) => existing.extend(paths1),
+            None => result.allowed_paths = Some(paths1),
+        }
+        assert_eq!(result.allowed_paths, Some(vec!["/home".to_string()]));
+
+        // Second role: /var and /tmp allowed
+        let paths2 = vec!["/var".to_string(), "/tmp".to_string()];
+        match &mut result.allowed_paths {
+            Some(existing) => existing.extend(paths2),
+            None => result.allowed_paths = Some(paths2),
+        }
+        assert_eq!(
+            result.allowed_paths,
+            Some(vec![
+                "/home".to_string(),
+                "/var".to_string(),
+                "/tmp".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_file_transfer_permission_blocked_extensions_intersection() {
+        // Test that blocked extensions are intersected (only block if ALL roles block)
+        let mut result = super::super::FileTransferPermission::default();
+
+        // First role: block .exe and .bat
+        let ext1 = vec![".exe".to_string(), ".bat".to_string()];
+        match &mut result.blocked_extensions {
+            Some(existing) => existing.retain(|ext| ext1.contains(ext)),
+            None => result.blocked_extensions = Some(ext1),
+        }
+        assert_eq!(
+            result.blocked_extensions,
+            Some(vec![".exe".to_string(), ".bat".to_string()])
+        );
+
+        // Second role: block .exe and .sh (not .bat)
+        let ext2 = vec![".exe".to_string(), ".sh".to_string()];
+        match &mut result.blocked_extensions {
+            Some(existing) => existing.retain(|ext| ext2.contains(ext)),
+            None => result.blocked_extensions = Some(ext2),
+        }
+        // Only .exe should remain (blocked by both roles)
+        assert_eq!(result.blocked_extensions, Some(vec![".exe".to_string()]));
+    }
+
+    // --- shell_blocked resolution tests ---
+
+    #[test]
+    fn test_shell_blocked_strict_mode_upload_blocked() {
+        // strict mode + upload blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + upload blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_download_blocked() {
+        // strict mode + download blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + download blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_both_blocked() {
+        // strict mode + both blocked => shell_blocked = true
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(shell_blocked, "strict + both blocked => shell blocked");
+    }
+
+    #[test]
+    fn test_shell_blocked_strict_mode_neither_blocked() {
+        // strict mode + neither blocked => shell_blocked = false
+        let is_strict_mode = true;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "strict + no restrictions => shell allowed");
+    }
+
+    #[test]
+    fn test_shell_blocked_permissive_mode_with_restrictions() {
+        // permissive mode + restrictions => shell_blocked = false
+        let is_strict_mode = false;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: false,
+            download_allowed: false,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "permissive + restrictions => shell allowed");
+    }
+
+    #[test]
+    fn test_shell_blocked_permissive_mode_no_restrictions() {
+        // permissive mode + no restrictions => shell_blocked = false
+        let is_strict_mode = false;
+        let result = super::super::FileTransferPermission {
+            upload_allowed: true,
+            download_allowed: true,
+            shell_blocked: false,
+            ..Default::default()
+        };
+        let has_sftp_restrictions = !result.upload_allowed || !result.download_allowed;
+        let shell_blocked = is_strict_mode && has_sftp_restrictions;
+        assert!(!shell_blocked, "permissive + no restrictions => shell allowed");
     }
 }

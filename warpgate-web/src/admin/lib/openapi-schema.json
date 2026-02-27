@@ -55,6 +55,16 @@
             "required": false,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -583,6 +593,101 @@
           }
         ],
         "operationId": "get_role_users"
+      }
+    },
+    "/role/{id}/file-transfer": {
+      "get": {
+        "summary": "Get file transfer defaults for a role",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleFileTransferDefaults"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_role_file_transfer_defaults"
+      },
+      "put": {
+        "summary": "Update file transfer defaults for a role",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleFileTransferDefaults"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleFileTransferDefaults"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_role_file_transfer_defaults"
       }
     },
     "/tickets": {
@@ -1265,6 +1370,120 @@
         "operationId": "delete_target_role"
       }
     },
+    "/targets/{id}/roles/{role_id}/file-transfer": {
+      "get": {
+        "summary": "Get file transfer permissions for a target-role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileTransferPermissionData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_target_role_file_transfer_permission"
+      },
+      "put": {
+        "summary": "Update file transfer permissions for a target-role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/FileTransferPermissionData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileTransferPermissionData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_target_role_file_transfer_permission"
+      }
+    },
     "/target-groups": {
       "get": {
         "responses": {
@@ -1780,6 +1999,7 @@
     },
     "/users/{id}/roles": {
       "get": {
+        "summary": "Get all role assignments for a user with expiry information",
         "parameters": [
           {
             "name": "id",
@@ -1801,7 +2021,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Role"
+                    "$ref": "#/components/schemas/UserRoleAssignmentResponse"
                   }
                 }
               }
@@ -1823,7 +2043,8 @@
       }
     },
     "/users/{id}/roles/{role_id}": {
-      "post": {
+      "get": {
+        "summary": "Get a single user role assignment with details",
         "parameters": [
           {
             "name": "id",
@@ -1849,8 +2070,76 @@
           }
         ],
         "responses": {
-          "201": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_role"
+      },
+      "post": {
+        "summary": "Add a role to a user with optional expiry",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserRoleRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
           },
           "409": {
             "description": ""
@@ -1867,6 +2156,7 @@
         "operationId": "add_user_role"
       },
       "delete": {
+        "summary": "Remove a role from a user (soft delete - sets revoked_at)",
         "parameters": [
           {
             "name": "id",
@@ -1908,6 +2198,259 @@
           }
         ],
         "operationId": "delete_user_role"
+      }
+    },
+    "/users/{id}/roles/{role_id}/expiry": {
+      "put": {
+        "summary": "Update expiry for a user role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleExpiryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_user_role_expiry"
+      },
+      "delete": {
+        "summary": "Remove expiry from a user role assignment (make permanent)",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "remove_user_role_expiry"
+      }
+    },
+    "/users/{id}/roles/{role_id}/history": {
+      "get": {
+        "summary": "Get history for a specific user role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_UserRoleHistoryEntry"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_role_history"
+      }
+    },
+    "/users/{id}/role-history": {
+      "get": {
+        "summary": "Get all role history for a user",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_UserRoleHistoryEntry"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_all_role_history"
       }
     },
     "/users/{user_id}/credentials/passwords": {
@@ -3282,6 +3825,18 @@
           }
         }
       },
+      "AddUserRoleRequest": {
+        "type": "object",
+        "title": "AddUserRoleRequest",
+        "description": "Request to add a user role with optional expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "default": null
+          }
+        }
+      },
       "BootstrapThemeColor": {
         "type": "string",
         "enum": [
@@ -3560,6 +4115,44 @@
           },
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "FileTransferPermissionData": {
+        "type": "object",
+        "title": "FileTransferPermissionData",
+        "description": "Request/response for file transfer permissions with inheritance support",
+        "properties": {
+          "allow_file_upload": {
+            "type": "boolean",
+            "description": "Allow file uploads via SFTP (null = inherit from role)"
+          },
+          "allow_file_download": {
+            "type": "boolean",
+            "description": "Allow file downloads via SFTP (null = inherit from role)"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "Allowed paths (null = inherit from role)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocked_extensions": {
+            "type": "array",
+            "description": "Blocked file extensions (null = inherit from role)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_file_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum file size in bytes (null = inherit from role)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "File transfer only mode (null = inherit from role)"
           }
         }
       },
@@ -3978,6 +4571,31 @@
           }
         }
       },
+      "PaginatedResponse_UserRoleHistoryEntry": {
+        "type": "object",
+        "title": "PaginatedResponse_UserRoleHistoryEntry",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRoleHistoryEntry"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
@@ -4000,6 +4618,15 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+          },
+          "file_transfer_hash_threshold_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+          },
+          "sftp_permission_mode": {
+            "type": "string",
+            "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
           }
         }
       },
@@ -4010,7 +4637,8 @@
           "allow_own_credential_management",
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
-          "ssh_client_auth_keyboard_interactive"
+          "ssh_client_auth_keyboard_interactive",
+          "sftp_permission_mode"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4028,6 +4656,15 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+          },
+          "file_transfer_hash_threshold_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hash threshold for file transfers in bytes (files larger than this won't be hashed)"
+          },
+          "sftp_permission_mode": {
+            "type": "string",
+            "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
           }
         }
       },
@@ -4084,7 +4721,10 @@
         "required": [
           "id",
           "name",
-          "description"
+          "description",
+          "allow_file_upload",
+          "allow_file_download",
+          "file_transfer_only"
         ],
         "properties": {
           "id": {
@@ -4096,6 +4736,37 @@
           },
           "description": {
             "type": "string"
+          },
+          "allow_file_upload": {
+            "type": "boolean",
+            "description": "Allow file uploads by default for targets with this role"
+          },
+          "allow_file_download": {
+            "type": "boolean",
+            "description": "Allow file downloads by default for targets with this role"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "Default allowed paths (list of path patterns, null = all paths allowed)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocked_extensions": {
+            "type": "array",
+            "description": "Default blocked file extensions (list, null = no extensions blocked)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_file_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Default maximum file size in bytes (null = no limit)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "When true, users with this role can ONLY use SFTP file transfers.\nShell, exec, and port forwarding are blocked regardless of sftp_permission_mode."
           }
         }
       },
@@ -4111,6 +4782,49 @@
           },
           "description": {
             "type": "string"
+          }
+        }
+      },
+      "RoleFileTransferDefaults": {
+        "type": "object",
+        "title": "RoleFileTransferDefaults",
+        "description": "Request/response for role file transfer defaults",
+        "required": [
+          "allow_file_upload",
+          "allow_file_download"
+        ],
+        "properties": {
+          "allow_file_upload": {
+            "type": "boolean",
+            "description": "Allow file uploads by default for targets with this role"
+          },
+          "allow_file_download": {
+            "type": "boolean",
+            "description": "Allow file downloads by default for targets with this role"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "Default allowed paths (null = all paths allowed)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocked_extensions": {
+            "type": "array",
+            "description": "Default blocked file extensions (null = no extensions blocked)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_file_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Default maximum file size in bytes (null = no limit)"
+          },
+          "file_transfer_only": {
+            "type": "boolean",
+            "description": "When true, users with this role can ONLY use SFTP. Shell/exec/forwarding are blocked.",
+            "default": false
           }
         }
       },
@@ -4899,6 +5613,18 @@
           }
         }
       },
+      "UpdateUserRoleExpiryRequest": {
+        "type": "object",
+        "title": "UpdateUserRoleExpiryRequest",
+        "description": "Request to update user role expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The new expiry timestamp, or null to remove expiry (make permanent)"
+          }
+        }
+      },
       "User": {
         "type": "object",
         "title": "User",
@@ -4986,6 +5712,151 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          }
+        }
+      },
+      "UserRoleAssignmentResponse": {
+        "type": "object",
+        "title": "UserRoleAssignmentResponse",
+        "description": "Response containing user role assignment with expiry info.\nExtends the upstream `Role` response shape (`id`, `name`, `description`)\nwith assignment-specific fields for expiry and audit tracking.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "granted_at",
+          "is_expired",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Role ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Role name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Role description"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the role was granted"
+          },
+          "granted_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the user who granted this role"
+          },
+          "granted_by_username": {
+            "type": "string",
+            "description": "Username of the user who granted this role"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this role assignment expires (null = permanent)"
+          },
+          "is_expired": {
+            "type": "boolean",
+            "description": "Whether this assignment has expired"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether this assignment is currently active (not expired, not revoked)"
+          }
+        }
+      },
+      "UserRoleHistoryDetails": {
+        "type": "object",
+        "title": "UserRoleHistoryDetails",
+        "description": "History entry details stored in the details JSON column",
+        "required": [
+          "role_id",
+          "role_name",
+          "user_id",
+          "user_username"
+        ],
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_username": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "old_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "new_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor_username": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRoleHistoryEntry": {
+        "type": "object",
+        "title": "UserRoleHistoryEntry",
+        "description": "Response entry for user role history",
+        "required": [
+          "id",
+          "user_id",
+          "role_id",
+          "action",
+          "occurred_at",
+          "details"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor_username": {
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/UserRoleHistoryDetails"
           }
         }
       }

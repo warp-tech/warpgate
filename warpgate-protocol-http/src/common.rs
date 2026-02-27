@@ -10,13 +10,14 @@ use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_core::{AuthStateStore, ConfigProvider, Services};
 use warpgate_sso::CoreIdToken;
 
 use crate::session::SessionStore;
+
+pub use warpgate_common::api::{AuthStateId, RequestAuthorization, SessionAuthorization};
 
 pub const PROTOCOL_NAME: ProtocolName = "HTTP";
 static TARGET_SESSION_KEY: &str = "target_name";
@@ -88,44 +89,6 @@ impl SessionExt for Session {
     fn set_sso_login_state(&self, state: SsoLoginState) {
         if let Ok(json) = serde_json::to_string(&state) {
             self.set(AUTH_SSO_LOGIN_STATE, json)
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum SessionAuthorization {
-    User(String),
-    Ticket {
-        username: String,
-        target_name: String,
-    },
-}
-
-impl SessionAuthorization {
-    pub fn username(&self) -> &String {
-        match self {
-            Self::User(username) => username,
-            Self::Ticket { username, .. } => username,
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum RequestAuthorization {
-    Session(SessionAuthorization),
-    UserToken { username: String },
-    AdminToken,
-}
-
-impl RequestAuthorization {
-    pub fn username(&self) -> Option<&String> {
-        match self {
-            Self::Session(auth) => Some(auth.username()),
-            Self::UserToken { username } => Some(username),
-            Self::AdminToken => None,
         }
     }
 }
