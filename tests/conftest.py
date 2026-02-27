@@ -10,6 +10,14 @@ import subprocess
 import tempfile
 import urllib3
 import uuid
+import base64
+
+# cryptography is used to generate client certificates/CSRs locally
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -34,6 +42,32 @@ class Context:
 
 
 @dataclass
+class K3sInstance:
+    port: int
+    token: str
+    container_name: str
+    client_cert: str
+    client_key: str
+
+    def kubectl(self, cmd_args, input=None, check=True):
+        ret = subprocess.run(
+            ["docker", "exec", "-i", self.container_name, "kubectl", *cmd_args],
+            input=input,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check:
+            try:
+                ret.check_returncode()
+            except subprocess.CalledProcessError as e:
+                logging.error(
+                    f"kubectl command failed: {' '.join(cmd_args)}\nstdout: {e.stdout.decode()}\nstderr: {e.stderr.decode()}"
+                )
+                raise
+        return ret
+
+
+@dataclass
 class Child:
     process: subprocess.Popen
     stop_signal: signal.Signals
@@ -48,6 +82,7 @@ class WarpgateProcess:
     ssh_port: int
     mysql_port: int
     postgres_port: int
+    kubernetes_port: int
 
 
 class ProcessManager:
@@ -178,6 +213,247 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
+    def start_k3s(self) -> K3sInstance:
+        """
+        Runs a privileged k3s container, waits for the API to be ready,
+        creates a ServiceAccount and clusterrolebinding, then uses
+        `kubectl create token` to fetch the bearer token. Assumes a modern
+        k8s version (no fallback logic needed).
+        """
+        port = alloc_port()
+        container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
+        image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.27.4-k3s1")
+
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--privileged",
+                "-p",
+                f"{port}:6443",
+                image,
+                "server",
+                "--disable",
+                "traefik",
+            ]
+        )
+
+        def wait_k3s():
+            # Wait until kube-apiserver is responding
+            while True:
+                try:
+                    subprocess.check_call(
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "kubectl",
+                            "get",
+                            "nodes",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_k3s, "k3s API is not ready", timeout=self.timeout * 5)
+
+        # k3s sometimes returns OK for `get nodes` before namespace controller
+        # has created the "default" namespace.  make sure it exists before we
+        # try to create objects inside it.
+        def wait_default_ns():
+            while True:
+                r = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "kubectl",
+                        "get",
+                        "namespace",
+                        "default",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if r.returncode:
+                    time.sleep(1)
+                else:
+                    break
+
+        _wait_timeout(
+            wait_default_ns, "default namespace is not ready", timeout=self.timeout * 5
+        )
+
+        # Create service account inside the container
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "serviceaccount",
+                "test-sa",
+                "-n",
+                "default",
+            ]
+        )
+
+        # Assign cluster admin role so our SA can do anything
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "clusterrolebinding",
+                "test-sa-binding",
+                "--clusterrole=cluster-admin",
+                "--serviceaccount=default:test-sa",
+            ]
+        )
+
+        token = (
+            subprocess.check_output(
+                [
+                    "docker",
+                    "exec",
+                    container_name,
+                    "kubectl",
+                    "create",
+                    "token",
+                    "test-sa",
+                    "-n",
+                    "default",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+
+        # generate a client key and CSR locally, then ask the k3s CA to sign it
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        csr = (
+            x509.CertificateSigningRequestBuilder()
+            .subject_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "system:masters")])
+            )
+            .sign(key, hashes.SHA256())
+        )
+        client_key = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM)
+
+        # create the CSR resource inside the cluster using kubectl
+        csr_name = "wg-client"
+        csr_yaml = dedent(
+            f"""
+            apiVersion: certificates.k8s.io/v1
+            kind: CertificateSigningRequest
+            metadata:
+              name: {csr_name}
+            spec:
+              groups:
+              - system:authenticated
+              - system:masters
+              request: {base64.b64encode(csr_pem).decode()}
+              signerName: kubernetes.io/kube-apiserver-client
+              usages:
+              - client auth
+            """
+        )
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                container_name,
+                "sh",
+                "-c",
+                "kubectl apply -f -",
+            ],
+            input=csr_yaml.encode(),
+            check=True,
+        )
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "certificate",
+                "approve",
+                csr_name,
+            ]
+        )
+
+        # after approving the CSR the certificate may take a moment to
+        # appear in the resource status
+        def fetch_cert() -> str:
+            while True:
+                cert = subprocess.check_output(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "sh",
+                        "-c",
+                        (
+                            f"kubectl get csr {csr_name} -o jsonpath='{{.status.certificate}}' "
+                            "| base64 -d"
+                        ),
+                    ]
+                ).decode()
+                if cert:
+                    return cert
+                time.sleep(0.1)
+
+        client_cert = ""
+        _wait_timeout(
+            fetch_cert,
+            "k3s did not sign CSR",
+            timeout=self.timeout,
+        )
+
+        client_cert = fetch_cert()
+
+        logging.debug("retrieved signed client certificate from k3s")
+
+        # the cert subject is "system:masters" so bind that user.
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "clusterrolebinding",
+                "wg-cert-binding",
+                "--clusterrole=cluster-admin",
+                "--user=system:masters",
+            ]
+        )
+
+        logging.debug(f"k3s {container_name} is up on port {port}")
+        return K3sInstance(
+            port=port,
+            token=token,
+            container_name=container_name,
+            client_cert=client_cert,
+            client_key=client_key,
+        )
+
     def start_wg(
         self,
         config="",
@@ -194,11 +470,14 @@ class ProcessManager:
             mysql_port = share_with.mysql_port
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
+            kubernetes_port = share_with.kubernetes_port
         else:
             ssh_port = alloc_port()
             http_port = alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            kubernetes_port = alloc_port()
+
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
@@ -253,6 +532,8 @@ class ProcessManager:
                     str(mysql_port),
                     "--postgres-port",
                     str(postgres_port),
+                    "--kubernetes-port",
+                    str(kubernetes_port),
                     "--data-path",
                     data_dir,
                     "--external-host",
@@ -279,6 +560,7 @@ class ProcessManager:
             http_port=http_port,
             mysql_port=mysql_port,
             postgres_port=postgres_port,
+            kubernetes_port=kubernetes_port
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -362,6 +644,7 @@ def shared_wg(processes: ProcessManager):
     wg = processes.start_wg()
     wait_port(wg.http_port, for_process=wg.process, recv=False)
     wait_port(wg.ssh_port, for_process=wg.process)
+    wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
     yield wg
 
 
