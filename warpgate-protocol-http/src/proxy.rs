@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -10,7 +9,6 @@ use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::{HeaderValue, Uri};
-use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::Data;
@@ -19,6 +17,9 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
+use warpgate_common::http_headers::{
+    DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
+};
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
 use warpgate_core::logging::http::{get_client_ip, log_request_result};
 use warpgate_core::Services;
@@ -80,26 +81,6 @@ impl SomeRequestBuilder for http::request::Builder {
         self.header(k, v)
     }
 }
-
-static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
-    #[allow(clippy::mutable_key_type)]
-    let mut s = HashSet::new();
-    s.insert(http::header::ACCEPT_ENCODING);
-    s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
-    s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
-    s.insert(http::header::SEC_WEBSOCKET_KEY);
-    s.insert(http::header::SEC_WEBSOCKET_VERSION);
-    s.insert(http::header::UPGRADE);
-    s.insert(http::header::HOST);
-    s.insert(http::header::CONNECTION);
-    s.insert(http::header::STRICT_TRANSPORT_SECURITY);
-    s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
-    s
-});
-
-static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
-static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;

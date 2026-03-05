@@ -165,7 +165,6 @@ pub fn create_authenticated_client(
                 pem_bundle.push('\n');
             }
 
-            info!("Configuring Kubernetes client with mTLS (certificate auth)");
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
                 .context("Invalid client certificate/key for Kubernetes upstream")?;
             client_builder = client_builder.identity(identity);
