@@ -336,6 +336,39 @@ enum DeleteTargetRoleResponse {
     NotFound,
 }
 
+/// Request/response for file transfer permissions with inheritance support
+#[derive(Object, Clone, Debug)]
+struct FileTransferPermissionData {
+    /// Allow file uploads via SFTP (null = inherit from role)
+    allow_file_upload: Option<bool>,
+    /// Allow file downloads via SFTP (null = inherit from role)
+    allow_file_download: Option<bool>,
+    /// Allowed paths (null = inherit from role)
+    allowed_paths: Option<Vec<String>>,
+    /// Blocked file extensions (null = inherit from role)
+    blocked_extensions: Option<Vec<String>>,
+    /// Maximum file size in bytes (null = inherit from role)
+    max_file_size: Option<i64>,
+    /// File transfer only mode (null = inherit from role)
+    file_transfer_only: Option<bool>,
+}
+
+#[derive(ApiResponse)]
+enum GetFileTransferPermissionResponse {
+    #[oai(status = 200)]
+    Ok(Json<FileTransferPermissionData>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum UpdateFileTransferPermissionResponse {
+    #[oai(status = 200)]
+    Ok(Json<FileTransferPermissionData>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
 pub struct RolesApi;
 
 #[OpenApi]
@@ -443,5 +476,117 @@ impl RolesApi {
         model.delete(&*db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteTargetRoleResponse::Deleted)
+    }
+
+    /// Get file transfer permissions for a target-role assignment
+    #[oai(
+        path = "/targets/:id/roles/:role_id/file-transfer",
+        method = "get",
+        operation_id = "get_target_role_file_transfer_permission"
+    )]
+    async fn api_get_target_role_file_transfer(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        role_id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetFileTransferPermissionResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(assignment) = TargetRoleAssignment::Entity::find()
+            .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
+            .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
+            .one(&*db)
+            .await
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(GetFileTransferPermissionResponse::NotFound);
+        };
+
+        let allowed_paths: Option<Vec<String>> = assignment
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let blocked_extensions: Option<Vec<String>> = assignment
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        Ok(GetFileTransferPermissionResponse::Ok(Json(
+            FileTransferPermissionData {
+                allow_file_upload: assignment.allow_file_upload,
+                allow_file_download: assignment.allow_file_download,
+                allowed_paths,
+                blocked_extensions,
+                max_file_size: assignment.max_file_size,
+                file_transfer_only: assignment.file_transfer_only,
+            },
+        )))
+    }
+
+    /// Update file transfer permissions for a target-role assignment
+    #[oai(
+        path = "/targets/:id/roles/:role_id/file-transfer",
+        method = "put",
+        operation_id = "update_target_role_file_transfer_permission"
+    )]
+    async fn api_update_target_role_file_transfer(
+        &self,
+        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        id: Path<Uuid>,
+        role_id: Path<Uuid>,
+        body: Json<FileTransferPermissionData>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UpdateFileTransferPermissionResponse, WarpgateError> {
+        let db = db.lock().await;
+
+        let Some(assignment) = TargetRoleAssignment::Entity::find()
+            .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
+            .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
+            .one(&*db)
+            .await
+            .map_err(WarpgateError::from)?
+        else {
+            return Ok(UpdateFileTransferPermissionResponse::NotFound);
+        };
+
+        let mut model: TargetRoleAssignment::ActiveModel = assignment.into();
+        // Nullable booleans for inheritance support
+        model.allow_file_upload = Set(body.allow_file_upload);
+        model.allow_file_download = Set(body.allow_file_download);
+        model.allowed_paths = Set(body
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::to_value(v).ok()));
+        model.blocked_extensions = Set(body
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::to_value(v).ok()));
+        model.max_file_size = Set(body.max_file_size);
+        model.file_transfer_only = Set(body.file_transfer_only);
+
+        let updated = model.update(&*db).await.map_err(WarpgateError::from)?;
+
+        let allowed_paths: Option<Vec<String>> = updated
+            .allowed_paths
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let blocked_extensions: Option<Vec<String>> = updated
+            .blocked_extensions
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        Ok(UpdateFileTransferPermissionResponse::Ok(Json(
+            FileTransferPermissionData {
+                allow_file_upload: updated.allow_file_upload,
+                allow_file_download: updated.allow_file_download,
+                allowed_paths,
+                blocked_extensions,
+                max_file_size: updated.max_file_size,
+                file_transfer_only: updated.file_transfer_only,
+            },
+        )))
     }
 }

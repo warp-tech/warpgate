@@ -4,6 +4,7 @@ Tests for SSH client authentication method configuration via Parameters API.
 These tests verify that SSH auth methods can be configured via the Parameters API
 and that the configuration actually affects SSH authentication behavior.
 """
+
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -25,9 +26,9 @@ class TestSSHClientAuthConfigAPI:
         with admin_client(url) as api:
             params = api.get_parameters()
             # Verify the new SSH auth fields exist and default to True
-            assert hasattr(params, 'ssh_client_auth_publickey')
-            assert hasattr(params, 'ssh_client_auth_password')
-            assert hasattr(params, 'ssh_client_auth_keyboard_interactive')
+            assert hasattr(params, "ssh_client_auth_publickey")
+            assert hasattr(params, "ssh_client_auth_password")
+            assert hasattr(params, "ssh_client_auth_keyboard_interactive")
             # Default values should be True
             assert params.ssh_client_auth_publickey is True
             assert params.ssh_client_auth_password is True
@@ -44,13 +45,15 @@ class TestSSHClientAuthConfigAPI:
             params = api.get_parameters()
 
             # Update to disable password auth
-            api.update_parameters(sdk.ParameterUpdate(
-                allow_own_credential_management=params.allow_own_credential_management,
-                rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
-                ssh_client_auth_publickey=True,
-                ssh_client_auth_password=False,
-                ssh_client_auth_keyboard_interactive=True,
-            ))
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    allow_own_credential_management=params.allow_own_credential_management,
+                    rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
+                    ssh_client_auth_publickey=True,
+                    ssh_client_auth_password=False,
+                    ssh_client_auth_keyboard_interactive=True,
+                )
+            )
 
             # Verify the update
             updated_params = api.get_parameters()
@@ -58,13 +61,15 @@ class TestSSHClientAuthConfigAPI:
             assert updated_params.ssh_client_auth_publickey is True
 
             # Restore original settings
-            api.update_parameters(sdk.ParameterUpdate(
-                allow_own_credential_management=params.allow_own_credential_management,
-                rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
-                ssh_client_auth_publickey=True,
-                ssh_client_auth_password=True,
-                ssh_client_auth_keyboard_interactive=True,
-            ))
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    allow_own_credential_management=params.allow_own_credential_management,
+                    rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
+                    ssh_client_auth_publickey=True,
+                    ssh_client_auth_password=True,
+                    ssh_client_auth_keyboard_interactive=True,
+                )
+            )
 
 
 class TestSSHClientAuthConfigE2E:
@@ -95,10 +100,10 @@ class TestSSHClientAuthConfigE2E:
             user.id,
             sdk.NewPublicKeyCredential(
                 label="Public Key",
-                openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
+                openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip(),
             ),
         )
-        api.add_user_role(user.id, role.id)
+        api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
         ssh_target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
@@ -109,9 +114,7 @@ class TestSSHClientAuthConfigE2E:
                         port=ssh_port,
                         username="root",
                         auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(
-                                kind="PublicKey"
-                            )
+                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
                         ),
                     )
                 ),
@@ -120,16 +123,20 @@ class TestSSHClientAuthConfigE2E:
         api.add_target_role(ssh_target.id, role.id)
         return user, ssh_target
 
-    def _update_ssh_auth_params(self, api, pubkey=True, password=True, keyboard_interactive=True):
+    def _update_ssh_auth_params(
+        self, api, pubkey=True, password=True, keyboard_interactive=True
+    ):
         """Helper to update SSH auth parameters."""
         params = api.get_parameters()
-        api.update_parameters(sdk.ParameterUpdate(
-            allow_own_credential_management=params.allow_own_credential_management,
-            rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
-            ssh_client_auth_publickey=pubkey,
-            ssh_client_auth_password=password,
-            ssh_client_auth_keyboard_interactive=keyboard_interactive,
-        ))
+        api.update_parameters(
+            sdk.ParameterUpdate(
+                allow_own_credential_management=params.allow_own_credential_management,
+                rate_limit_bytes_per_second=params.rate_limit_bytes_per_second,
+                ssh_client_auth_publickey=pubkey,
+                ssh_client_auth_password=password,
+                ssh_client_auth_keyboard_interactive=keyboard_interactive,
+            )
+        )
 
     def test_password_auth_disabled(
         self,
@@ -147,8 +154,12 @@ class TestSSHClientAuthConfigE2E:
 
         url = f"https://localhost:{wg.http_port}"
         with admin_client(url) as api:
-            user, ssh_target = self._setup_user_and_target(api, ssh_port, wg_c_ed25519_pubkey)
-            self._update_ssh_auth_params(api, pubkey=True, password=False, keyboard_interactive=False)
+            user, ssh_target = self._setup_user_and_target(
+                api, ssh_port, wg_c_ed25519_pubkey
+            )
+            self._update_ssh_auth_params(
+                api, pubkey=True, password=False, keyboard_interactive=False
+            )
 
         wg.process.terminate()
         wg.process.wait()
@@ -160,11 +171,16 @@ class TestSSHClientAuthConfigE2E:
         # Try password auth - should fail
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-i", "/dev/null",
-            "-o", "PreferredAuthentications=password",
-            "-o", "NumberOfPasswordPrompts=1",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-i",
+            "/dev/null",
+            "-o",
+            "PreferredAuthentications=password",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+            "ls",
+            "/bin/sh",
             password="testpass123",
         )
         ssh_client.communicate(timeout=timeout)
@@ -186,8 +202,12 @@ class TestSSHClientAuthConfigE2E:
 
         url = f"https://localhost:{wg.http_port}"
         with admin_client(url) as api:
-            user, ssh_target = self._setup_user_and_target(api, ssh_port, wg_c_ed25519_pubkey)
-            self._update_ssh_auth_params(api, pubkey=False, password=True, keyboard_interactive=False)
+            user, ssh_target = self._setup_user_and_target(
+                api, ssh_port, wg_c_ed25519_pubkey
+            )
+            self._update_ssh_auth_params(
+                api, pubkey=False, password=True, keyboard_interactive=False
+            )
 
         wg.process.terminate()
         wg.process.wait()
@@ -199,10 +219,14 @@ class TestSSHClientAuthConfigE2E:
         # Try pubkey auth - should fail
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-o", "IdentityFile=ssh-keys/id_ed25519",
-            "-o", "PreferredAuthentications=publickey",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-o",
+            "IdentityFile=ssh-keys/id_ed25519",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "ls",
+            "/bin/sh",
         )
         ssh_client.communicate(timeout=timeout)
         assert ssh_client.returncode != 0
@@ -223,8 +247,12 @@ class TestSSHClientAuthConfigE2E:
 
         url = f"https://localhost:{wg.http_port}"
         with admin_client(url) as api:
-            user, ssh_target = self._setup_user_and_target(api, ssh_port, wg_c_ed25519_pubkey)
-            self._update_ssh_auth_params(api, pubkey=True, password=False, keyboard_interactive=False)
+            user, ssh_target = self._setup_user_and_target(
+                api, ssh_port, wg_c_ed25519_pubkey
+            )
+            self._update_ssh_auth_params(
+                api, pubkey=True, password=False, keyboard_interactive=False
+            )
 
         wg.process.terminate()
         wg.process.wait()
@@ -236,10 +264,14 @@ class TestSSHClientAuthConfigE2E:
         # Try pubkey auth - should succeed
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-o", "IdentityFile=ssh-keys/id_ed25519",
-            "-o", "PreferredAuthentications=publickey",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-o",
+            "IdentityFile=ssh-keys/id_ed25519",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "ls",
+            "/bin/sh",
         )
         output, _ = ssh_client.communicate(timeout=timeout)
         assert output == b"/bin/sh\n"
@@ -261,8 +293,12 @@ class TestSSHClientAuthConfigE2E:
 
         url = f"https://localhost:{wg.http_port}"
         with admin_client(url) as api:
-            user, ssh_target = self._setup_user_and_target(api, ssh_port, wg_c_ed25519_pubkey)
-            self._update_ssh_auth_params(api, pubkey=False, password=True, keyboard_interactive=False)
+            user, ssh_target = self._setup_user_and_target(
+                api, ssh_port, wg_c_ed25519_pubkey
+            )
+            self._update_ssh_auth_params(
+                api, pubkey=False, password=True, keyboard_interactive=False
+            )
 
         wg.process.terminate()
         wg.process.wait()
@@ -274,10 +310,14 @@ class TestSSHClientAuthConfigE2E:
         # Try password auth - should succeed
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-i", "/dev/null",
-            "-o", "PreferredAuthentications=password",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-i",
+            "/dev/null",
+            "-o",
+            "PreferredAuthentications=password",
+            "ls",
+            "/bin/sh",
             password="testpass123",
         )
         output, _ = ssh_client.communicate(timeout=timeout)
@@ -300,8 +340,12 @@ class TestSSHClientAuthConfigE2E:
 
         url = f"https://localhost:{wg.http_port}"
         with admin_client(url) as api:
-            user, ssh_target = self._setup_user_and_target(api, ssh_port, wg_c_ed25519_pubkey)
-            self._update_ssh_auth_params(api, pubkey=True, password=True, keyboard_interactive=False)
+            user, ssh_target = self._setup_user_and_target(
+                api, ssh_port, wg_c_ed25519_pubkey
+            )
+            self._update_ssh_auth_params(
+                api, pubkey=True, password=True, keyboard_interactive=False
+            )
 
         wg.process.terminate()
         wg.process.wait()
@@ -313,10 +357,14 @@ class TestSSHClientAuthConfigE2E:
         # Pubkey should work
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-o", "IdentityFile=ssh-keys/id_ed25519",
-            "-o", "PreferredAuthentications=publickey",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-o",
+            "IdentityFile=ssh-keys/id_ed25519",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "ls",
+            "/bin/sh",
         )
         output, _ = ssh_client.communicate(timeout=timeout)
         assert output == b"/bin/sh\n"
@@ -325,10 +373,14 @@ class TestSSHClientAuthConfigE2E:
         # Password should also work
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
-            "-p", str(wg2.ssh_port),
-            "-i", "/dev/null",
-            "-o", "PreferredAuthentications=password",
-            "ls", "/bin/sh",
+            "-p",
+            str(wg2.ssh_port),
+            "-i",
+            "/dev/null",
+            "-o",
+            "PreferredAuthentications=password",
+            "ls",
+            "/bin/sh",
             password="testpass123",
         )
         output, _ = ssh_client.communicate(timeout=timeout)

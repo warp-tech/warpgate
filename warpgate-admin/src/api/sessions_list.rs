@@ -39,6 +39,7 @@ impl Api {
         limit: Query<Option<u64>>,
         active_only: Query<Option<bool>>,
         logged_in_only: Query<Option<bool>>,
+        username: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
@@ -51,6 +52,9 @@ impl Api {
         }
         if logged_in_only.unwrap_or(false) {
             q = q.filter(Session::Column::Username.is_not_null());
+        }
+        if let Some(username_filter) = username.as_ref() {
+            q = q.filter(Session::Column::Username.eq(username_filter.as_str()));
         }
 
         Ok(GetSessionsResponse::Ok(Json(

@@ -652,6 +652,18 @@ def shared_wg(processes: ProcessManager):
 
 
 @pytest.fixture(scope="session")
+def shared_ssh_port(processes, wg_c_ed25519_pubkey):
+    """Shared SSH server for tests that don't need their own instance.
+
+    Used by test_file_transfer_permissions, test_sftp_operations, and
+    test_role_expiry to avoid starting separate Docker containers.
+    """
+    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
+    wait_port(port)
+    return port
+
+
+@pytest.fixture(scope="session")
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / "ssh-keys/wg/client-ed25519.pub"
 

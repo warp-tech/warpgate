@@ -4,6 +4,7 @@ mod compat;
 mod keys;
 pub mod known_hosts;
 mod server;
+pub mod sftp;
 use std::fmt::Debug;
 
 use anyhow::Result;
