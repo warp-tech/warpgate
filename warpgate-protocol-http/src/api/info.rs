@@ -42,6 +42,7 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     ports: PortsInfo,
+    minimize_password_login: bool,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
@@ -119,6 +120,7 @@ impl Api {
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,
+            minimize_password_login: parameters.minimize_password_login,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
