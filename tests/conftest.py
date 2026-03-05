@@ -222,7 +222,7 @@ class ProcessManager:
         """
         port = alloc_port()
         container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
-        image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.27.4-k3s1")
+        image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.35.2-k3s1")
 
         self.start(
             [
