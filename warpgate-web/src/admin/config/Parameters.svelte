@@ -1,15 +1,19 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type ParameterValues } from 'admin/lib/api'
+    import { api as gatewayApi } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
 
     let parameters: ParameterValues | undefined = $state()
+    let hasSsoProviders = $state(false)
     const initPromise = init()
 
     async function init () {
         parameters = await api.getParameters({})
+        const ssoProviders = await gatewayApi.getSsoProviders()
+        hasSsoProviders = ssoProviders.length > 0
     }
 
     async function update() {
@@ -104,6 +108,28 @@
             Controls which authentication methods are offered to SSH clients.
             Disabling password authentication can help prevent brute-force attacks.
         </InfoBox>
+
+        {#if hasSsoProviders}
+        <h4 class="mt-4">Login</h4>
+        <label
+            for="minimizePasswordLogin"
+            class="d-flex align-items-center"
+        >
+            <Input
+                id="minimizePasswordLogin"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    parameters!.minimizePasswordLogin = !parameters!.minimizePasswordLogin
+                    update()
+                }}
+                checked={parameters.minimizePasswordLogin} />
+            <div>Minimize password login UI</div>
+        </label>
+        <InfoBox class="mt-3 mb-3">
+            When enabled, the username and password fields are hidden behind a link on the login page, with the focus on the SSO buttons.
+        </InfoBox>
+        {/if}
     {/if}
     </Loadable>
 </div>
