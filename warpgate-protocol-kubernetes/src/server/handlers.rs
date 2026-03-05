@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use futures::{StreamExt, TryStreamExt};
-use poem::web::websocket::WebSocket;
+use poem::web::websocket::{WebSocket, WebSocketStream};
 use poem::web::{Data, Path};
 use poem::{handler, Body, IntoResponse, Request, Response};
 use reqwest_websocket::Upgrade;
@@ -14,7 +14,8 @@ use tracing::*;
 use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions};
+use warpgate_common::http_headers::DONT_FORWARD_HEADERS;
+use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
 use warpgate_core::logging::http::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
@@ -111,6 +112,7 @@ pub async fn handle_api_request(
             )
             .await
             .map(IntoResponse::into_response)
+            .context("handling Kubernetes API request")
         };
 
         let client_ip = get_client_ip(req, Some(*services)).await;
@@ -141,7 +143,7 @@ async fn _handle_normal_request_inner(
     session_id: SessionId,
     services: &Services,
     recordings: &Arc<Mutex<SessionRecordings>>,
-) -> anyhow::Result<Response> {
+) -> Result<Response, WarpgateError> {
     let client =
         create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
             .build()
@@ -164,7 +166,21 @@ async fn _handle_normal_request_inner(
     // Extract headers
     let mut headers = HashMap::new();
     for (name, value) in req.headers() {
-        if let Ok(value_str) = value.to_str() {
+        // Still forward Accept-Encoding to allow for chunked encoding
+        if DONT_FORWARD_HEADERS.contains(name) && name != http::header::ACCEPT_ENCODING {
+            continue;
+        }
+        if let Ok(mut value_str) = value.to_str().map(|s| s.to_string()) {
+            if name == http::header::ACCEPT {
+                let values = value
+                    .to_str()
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| *s != "application/vnd.kubernetes.protobuf") // cannot parse protobuf yet
+                    .collect::<Vec<_>>();
+                value_str = values.join(", ");
+            }
             headers.insert(name.to_string(), value_str.to_string());
         }
     }
@@ -240,18 +256,7 @@ async fn _handle_normal_request_inner(
         "Sending request to upstream Kubernetes API"
     );
 
-    let response = request_builder
-        .send()
-        .await
-        .inspect_err(|e| {
-            warn!(
-                method = method,
-                url = %full_url,
-                error = %e,
-                "Kubernetes API request failed"
-            );
-        })
-        .context("sending request to Kubernetes API")?;
+    let response = request_builder.send().await?;
 
     let status = response.status();
     let response_headers = response.headers().clone();
@@ -272,7 +277,13 @@ async fn _handle_normal_request_inner(
             .unwrap_or_default()
             .to_lowercase();
 
-        if transfer_encoding == "chunked" {
+        let is_watch = req
+            .uri()
+            .query()
+            .map(|q| q.split('&').any(|p| p.starts_with("watch=true")))
+            .unwrap_or(false);
+
+        if transfer_encoding == "chunked" || is_watch {
             (
                 Body::from_bytes_stream(
                     response
@@ -418,6 +429,62 @@ async fn _handle_websocket_request_inner(
         .context("missing Sec-Websocket-Protocol request header")?
         .to_string();
 
+    let ws_handler_inner = async move |socket: WebSocketStream| {
+        let client_response = client
+            .get(full_url.clone())
+            .upgrade()
+            .protocols(vec![ws_protocol])
+            .send()
+            .await
+            .context("sending websocket request to Kubernetes API")?;
+
+        let status = client_response.status();
+        if status != http::StatusCode::SWITCHING_PROTOCOLS {
+            let client_response = client_response.into_inner();
+            let body = client_response.text().await?;
+            bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
+        }
+
+        let client_socket = client_response
+            .into_websocket()
+            .await
+            .context("negotiating websocket connection with Kubernetes")?;
+
+        let (client_sink, client_source) = client_socket.split();
+
+        let (server_sink, server_source) = socket.split();
+        let server_to_client = {
+            let recorder_tx = recorder_tx.clone();
+            tokio::spawn(pump_websocket(server_source, client_sink, move |msg| {
+                let recorder_tx = recorder_tx.clone();
+                async move {
+                    tracing::debug!("Server: {:?}", msg);
+                    if let tungstenite::Message::Binary(data) = &msg {
+                        let _ = recorder_tx.send(data.to_vec()).await;
+                    }
+                    anyhow::Ok(msg)
+                }
+            }))
+        };
+
+        let client_to_server =
+            tokio::spawn(pump_websocket(client_source, server_sink, move |msg| {
+                let recorder_tx = recorder_tx.clone();
+                async move {
+                    tracing::debug!("Client: {:?}", msg);
+                    if let tungstenite::Message::Binary(data) = &msg {
+                        let _ = recorder_tx.send(data.to_vec()).await;
+                    }
+                    anyhow::Ok(msg)
+                }
+            }));
+
+        server_to_client.await??;
+        client_to_server.await??;
+        debug!("Closing Websocket stream");
+        Ok::<(), anyhow::Error>(())
+    };
+
     return Ok(ws
         .protocols(vec![
             "channel.k8s.io",
@@ -427,52 +494,9 @@ async fn _handle_websocket_request_inner(
             "v5.channel.k8s.io",
         ])
         .on_upgrade(|socket| async move {
-            let client_response = client
-                .get(full_url.clone())
-                .upgrade()
-                .protocols(vec![ws_protocol])
-                .send()
-                .await
-                .context("sending websocket request to Kubernetes API")?;
-
-            let client_socket = client_response
-                .into_websocket()
-                .await
-                .context("negotiating websocket connection with Kubernetes")?;
-
-            let (client_sink, client_source) = client_socket.split();
-
-            let (server_sink, server_source) = socket.split();
-            let server_to_client = {
-                let recorder_tx = recorder_tx.clone();
-                tokio::spawn(pump_websocket(server_source, client_sink, move |msg| {
-                    let recorder_tx = recorder_tx.clone();
-                    async move {
-                        tracing::debug!("Server: {:?}", msg);
-                        if let tungstenite::Message::Binary(data) = &msg {
-                            let _ = recorder_tx.send(data.to_vec()).await;
-                        }
-                        anyhow::Ok(msg)
-                    }
-                }))
-            };
-
-            let client_to_server =
-                tokio::spawn(pump_websocket(client_source, server_sink, move |msg| {
-                    let recorder_tx = recorder_tx.clone();
-                    async move {
-                        tracing::debug!("Client: {:?}", msg);
-                        if let tungstenite::Message::Binary(data) = &msg {
-                            let _ = recorder_tx.send(data.to_vec()).await;
-                        }
-                        anyhow::Ok(msg)
-                    }
-                }));
-
-            server_to_client.await??;
-            client_to_server.await??;
-            debug!("Closing Websocket stream");
-
+            ws_handler_inner(socket).await.inspect_err(|e| {
+                error!("Websocket handling error: {e:?}");
+            })?;
             Ok::<(), anyhow::Error>(())
         })
         .into_response());
