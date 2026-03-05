@@ -120,7 +120,7 @@ impl Api {
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,
-            minimize_password_login: config.store.minimize_password_login,
+            minimize_password_login: parameters.minimize_password_login,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })

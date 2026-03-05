@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.2-7-g1cce72fe-modified"
+    "version": "v0.20.2-27-g52fb3b68-modified"
   },
   "servers": [
     {
@@ -4000,6 +4000,9 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+          },
+          "minimize_password_login": {
+            "type": "boolean"
           }
         }
       },
@@ -4010,7 +4013,8 @@
           "allow_own_credential_management",
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
-          "ssh_client_auth_keyboard_interactive"
+          "ssh_client_auth_keyboard_interactive",
+          "minimize_password_login"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4027,6 +4031,9 @@
             "type": "boolean"
           },
           "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
+          },
+          "minimize_password_login": {
             "type": "boolean"
           }
         }

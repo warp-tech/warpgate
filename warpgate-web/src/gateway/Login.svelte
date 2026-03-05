@@ -20,6 +20,7 @@
     let otpInput: HTMLInputElement|undefined = $state()
     let authState: ApiAuthState|undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
+    let showPasswordLogin = $state(false)
 
     const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
@@ -208,7 +209,8 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && !$serverInfo?.minimizePasswordLogin}
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
+            <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
             {@render localLoginForm()}
         {/if}
 
@@ -252,14 +254,19 @@
         </Loadable>
     {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && $serverInfo?.minimizePasswordLogin}
-        <div class="mt-3">
-            <details class="local-login-collapse">
-                <summary>Password login</summary>
-                <div class="mt-3">
-                    {@render localLoginForm()}
-                </div>
-            </details>
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
+        <div class="mt-3 text-center">
+            <!-- svelte-ignore a11y_invalid_attribute -->
+            <a
+                href="#"
+                class="password-login-link"
+                onclick={e => {
+                    e.preventDefault()
+                    showPasswordLogin = true
+                }}
+            >
+                Password login
+            </a>
         </div>
     {/if}
 
@@ -292,7 +299,5 @@
         }
     }
 
-    .local-login-collapse summary {
-        cursor: pointer;
-    }
+
 </style>
