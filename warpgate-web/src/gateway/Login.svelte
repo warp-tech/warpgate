@@ -7,7 +7,7 @@
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
     import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
-    import { reloadServerInfo } from 'gateway/lib/store'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -129,7 +129,48 @@
     }
 </script>
 
+{#snippet localLoginForm()}
+    <form autocomplete="on" onsubmit={e => {
+        login()
+        e.preventDefault()
+    }}>
+        <FormGroup floating label="Username">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+                bind:value={username}
+                name="username"
+                autocomplete="username"
+                disabled={busy}
+                class="form-control"
+                required
+                autofocus />
+        </FormGroup>
+
+        <FormGroup floating label="Password">
+            <input
+                bind:value={password}
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                disabled={busy}
+                required
+                class="form-control" />
+        </FormGroup>
+
+        <Button
+            class="d-flex align-items-center"
+            color="primary"
+            type="submit"
+            disabled={busy}
+        >
+            Login
+            <Fa class="ms-2" fw icon={faArrowRight} />
+        </Button>
+    </form>
+{/snippet}
+
 <Loadable promise={initPromise}>
+
     <div class="mt-5">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
@@ -167,44 +208,8 @@
                 </Button>
             </form>
         {/if}
-        {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed}
-        <form autocomplete="on" onsubmit={e => {
-            login()
-            e.preventDefault()
-        }}>
-            <FormGroup floating label="Username">
-                <!-- svelte-ignore a11y_autofocus -->
-                <input
-                    bind:value={username}
-                    name="username"
-                    autocomplete="username"
-                    disabled={busy}
-                    class="form-control"
-                    required
-                    autofocus />
-            </FormGroup>
-
-            <FormGroup floating label="Password">
-                <input
-                    bind:value={password}
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    disabled={busy}
-                    required
-                    class="form-control" />
-            </FormGroup>
-
-            <Button
-                class="d-flex align-items-center"
-                color="primary"
-                type="submit"
-                disabled={busy}
-            >
-                Login
-                <Fa class="ms-2" fw icon={faArrowRight} />
-            </Button>
-        </form>
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && !$serverInfo?.minimizePasswordLogin}
+            {@render localLoginForm()}
         {/if}
 
         <div class="mt-3"></div>
@@ -247,6 +252,17 @@
         </Loadable>
     {/if}
 
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && $serverInfo?.minimizePasswordLogin}
+        <div class="mt-3">
+            <details class="local-login-collapse">
+                <summary>Password login</summary>
+                <div class="mt-3">
+                    {@render localLoginForm()}
+                </div>
+            </details>
+        </div>
+    {/if}
+
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
         <button
             class="btn w-100 mt-3 btn-secondary"
@@ -274,5 +290,9 @@
             justify-content: center;
             text-wrap: nowrap;
         }
+    }
+
+    .local-login-collapse summary {
+        cursor: pointer;
     }
 </style>
