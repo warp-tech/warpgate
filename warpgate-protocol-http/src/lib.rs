@@ -3,7 +3,7 @@ mod catchall;
 mod common;
 mod error;
 mod middleware;
-mod proxy;
+pub mod proxy;
 mod session;
 mod session_handle;
 
