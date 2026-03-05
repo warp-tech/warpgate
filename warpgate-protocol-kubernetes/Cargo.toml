@@ -1,0 +1,39 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-protocol-kubernetes"
+version = "0.16.0"
+
+[dependencies]
+anyhow.workspace = true
+async-trait = { version = "0.1", default-features = false }
+base64 = { version = "0.22", default-features = false }
+bytes.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+dashmap = { version = "6.0", default-features = false }
+futures.workspace = true
+http = { version = "1.0", default-features = false }
+lazy_static = { version = "1.4", default-features = false }
+md5 = { version = "0.7", default-features = false }
+poem.workspace = true
+poem-openapi.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sea-orm.workspace = true
+secrecy = { version = "0.10", default-features = false }
+serde = { version = "1.0", features = ["derive"], default-features = false }
+serde_json = { version = "1.0", default-features = false }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false }
+tracing.workspace = true
+url = { version = "2.0", default-features = false }
+uuid.workspace = true
+warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
+tokio-tungstenite.workspace = true
+reqwest-websocket.workspace = true

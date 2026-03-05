@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
-use warpgate_common::{ListenEndpoint, Target};
+use warpgate_common::ListenEndpoint;
 
 mod handle;
 
@@ -27,8 +27,4 @@ pub enum TargetTestError {
 pub trait ProtocolServer {
     fn name(&self) -> &'static str;
     fn run(self, address: ListenEndpoint) -> impl Future<Output = Result<()>> + Send;
-    fn test_target(
-        &self,
-        target: Target,
-    ) -> impl Future<Output = Result<(), TargetTestError>> + Send;
 }

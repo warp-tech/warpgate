@@ -51,9 +51,7 @@ impl ImportApi {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&server)?;
-        let all_users = warpgate_ldap::list_users(&ldap_config)
-            .await
-            .map_err(|e| WarpgateError::from(e))?;
+        let all_users = warpgate_ldap::list_users(&ldap_config).await?;
         let mut imported = Vec::new();
         for dn in &body.dns {
             if let Some(user) = all_users.iter().find(|u| &u.dn == dn) {
@@ -515,7 +513,7 @@ impl DetailApi {
             model.bind_password = Set(password.expose_secret().clone());
         }
         model.user_filter = Set(body.user_filter.clone());
-        model.tls_mode = Set(String::from(body.tls_mode.clone()));
+        model.tls_mode = Set(String::from(body.tls_mode));
         model.tls_verify = Set(body.tls_verify);
         model.enabled = Set(body.enabled);
         model.auto_link_sso_users = Set(body.auto_link_sso_users);

@@ -14,6 +14,7 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
+#[derive(Clone)]
 pub struct WarpgateServerHandle {
     id: SessionId,
     db: Arc<Mutex<DatabaseConnection>>,
@@ -48,7 +49,6 @@ impl WarpgateServerHandle {
     }
 
     pub async fn set_user_info(&self, user_info: AuthStateUserInfo) -> Result<(), WarpgateError> {
-        // todo update rate limiters
         use sea_orm::ActiveValue::Set;
 
         {
@@ -76,7 +76,6 @@ impl WarpgateServerHandle {
     }
 
     pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
-        // todo update rate limiters
         use sea_orm::ActiveValue::Set;
         {
             let mut state = self.session_state.lock().await;

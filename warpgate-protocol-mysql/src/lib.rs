@@ -8,13 +8,12 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use client::{ConnectionOptions, MySqlClient};
 use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tracing::*;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions};
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use warpgate_common::ListenEndpoint;
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
@@ -118,18 +117,6 @@ impl ProtocolServer for MySQLProtocolServer {
         }
     }
 
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::MySql(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not a MySQL target".to_owned(),
-            ));
-        };
-        MySqlClient::connect(&options, ConnectionOptions::default())
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
-        Ok(())
-    }
-
     fn name(&self) -> &'static str {
         "MySQL"
     }
@@ -137,6 +124,6 @@ impl ProtocolServer for MySQLProtocolServer {
 
 impl Debug for MySQLProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MySQLProtocolServer")
+        f.debug_struct("MySQLProtocolServer").finish()
     }
 }

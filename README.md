@@ -144,6 +144,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="http://justinforlenza.dev"><img src="https://avatars.githubusercontent.com/u/11709872?v=4?s=100" width="100px;" alt="Justin"/><br /><sub><b>Justin</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=justinforlenza" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/liebermantodd"><img src="https://avatars.githubusercontent.com/u/12155811?v=4?s=100" width="100px;" alt="liebermantodd"/><br /><sub><b>liebermantodd</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=liebermantodd" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://p.foundation/"><img src="https://avatars.githubusercontent.com/u/80860929?v=4?s=100" width="100px;" alt="P Foundation"/><br /><sub><b>P Foundation</b></sub></a><br /><a href="#financial-pfoundation" title="Financial">💵</a></td>
+    </tr>
   </tbody>
 </table>
 

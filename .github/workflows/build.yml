@@ -37,6 +37,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
@@ -112,12 +113,6 @@ jobs:
           CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
 
-      - name: Attest build
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          subject-path: target/${{ matrix.target }}/release/warpgate
-
       - name: Generate Rust BOM
         run: |
           cargo cyclonedx --all-features
@@ -125,6 +120,13 @@ jobs:
 
       - name: Merge BOMs
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
+
+      - name: Attest build
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          subject-path: target/${{ matrix.target }}/release/warpgate
+          sbom-path: cdx.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50

@@ -43,7 +43,8 @@ use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, X11Request,
+    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
+    X11Request,
 };
 
 #[derive(Clone)]
@@ -78,15 +79,6 @@ struct CachedSuccessfulTicketAuth {
 pub enum TrafficRecorderKey {
     Tcp(String, u32),
     Socket(String),
-}
-
-impl TrafficRecorderKey {
-    pub fn to_name(&self) -> String {
-        match self {
-            TrafficRecorderKey::Tcp(addr, port) => format!("{addr}-{port}"),
-            TrafficRecorderKey::Socket(path) => path.clone().replace("/", "-"),
-        }
-    }
 }
 
 pub struct ServerSession {
@@ -503,7 +495,10 @@ impl ServerSession {
 
                 self.start_terminal_recording(
                     channel_id,
-                    format!("shell-channel-{}", server_channel_id.0),
+                    SshRecordingMetadata::Shell {
+                        // HACK russh ChannelId is opaque except via Display
+                        channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
+                    },
                 )
                 .await;
 
@@ -868,10 +863,13 @@ impl ServerSession {
                     let recorder = self
                         .traffic_recorder_for(
                             TrafficRecorderKey::Tcp(
-                                params.originator_address,
+                                params.originator_address.clone(),
                                 params.originator_port,
                             ),
-                            "forwarded-tcpip",
+                            SshRecordingMetadata::ForwardedTcpIp {
+                                host: params.originator_address,
+                                port: params.originator_port as u16,
+                            },
                         )
                         .await;
                     if let Some(recorder) = recorder {
@@ -902,7 +900,9 @@ impl ServerSession {
                     let recorder = self
                         .traffic_recorder_for(
                             TrafficRecorderKey::Socket(params.socket_path.clone()),
-                            "forwarded-streamlocal",
+                            SshRecordingMetadata::ForwardedSocket {
+                                path: params.socket_path.clone(),
+                            },
                         )
                         .await;
                     if let Some(recorder) = recorder {
@@ -1048,8 +1048,14 @@ impl ServerSession {
 
                 let recorder = self
                     .traffic_recorder_for(
-                        TrafficRecorderKey::Tcp(params.host_to_connect, params.port_to_connect),
-                        "direct-tcpip",
+                        TrafficRecorderKey::Tcp(
+                            params.host_to_connect.clone(),
+                            params.port_to_connect,
+                        ),
+                        SshRecordingMetadata::DirectTcpIp {
+                            host: params.host_to_connect,
+                            port: params.port_to_connect as u16,
+                        },
                     )
                     .await;
                 if let Some(recorder) = recorder {
@@ -1096,7 +1102,10 @@ impl ServerSession {
                 self.all_channels.push(uuid);
 
                 let recorder = self
-                    .traffic_recorder_for(TrafficRecorderKey::Socket(path.clone()), "direct-tcpip")
+                    .traffic_recorder_for(
+                        TrafficRecorderKey::Socket(path.clone()),
+                        SshRecordingMetadata::DirectSocket { path: path.clone() },
+                    )
                     .await;
                 if let Some(recorder) = recorder {
                     #[allow(clippy::unwrap_used)]
@@ -1161,19 +1170,25 @@ impl ServerSession {
             }
         }
 
-        self.start_terminal_recording(channel_id, format!("exec-channel-{}", server_channel_id.0))
-            .await;
+        self.start_terminal_recording(
+            channel_id,
+            SshRecordingMetadata::Exec {
+                // HACK russh ChannelId is opaque except via Display
+                channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
+            },
+        )
+        .await;
         Ok(())
     }
 
-    async fn start_terminal_recording(&mut self, channel_id: Uuid, name: String) {
+    async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
         let recorder = async {
             let mut recorder = self
                 .services
                 .recordings
                 .lock()
                 .await
-                .start::<TerminalRecorder>(&self.id, name)
+                .start::<TerminalRecorder, _>(&self.id, None, metadata)
                 .await?;
             if let Some(request) = self.channel_pty_size_map.get(&channel_id) {
                 recorder
@@ -1229,7 +1244,7 @@ impl ServerSession {
     async fn traffic_recorder_for(
         &mut self,
         key: TrafficRecorderKey,
-        tag: &str,
+        metadata: SshRecordingMetadata,
     ) -> Option<&mut TrafficRecorder> {
         if let Vacant(e) = self.traffic_recorders.entry(key.clone()) {
             match self
@@ -1237,7 +1252,7 @@ impl ServerSession {
                 .recordings
                 .lock()
                 .await
-                .start(&self.id, format!("{tag}-{}", key.to_name()))
+                .start(&self.id, None, metadata)
                 .await
             {
                 Ok(recorder) => {
@@ -1614,6 +1629,11 @@ impl ServerSession {
                 CredentialKind::WebUserApproval => MethodKind::KeyboardInteractive,
                 CredentialKind::PublicKey => MethodKind::PublicKey,
                 CredentialKind::Sso => MethodKind::KeyboardInteractive,
+                CredentialKind::Certificate => {
+                    // Certificate authentication is not supported for SSH protocol
+                    // This credential type is primarily for Kubernetes
+                    continue;
+                }
             };
             if self.allowed_auth_methods.contains(&method_kind) {
                 m.push(method_kind);

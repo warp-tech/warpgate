@@ -31,7 +31,11 @@ impl RecordingWriter {
         live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
         params: &GlobalParams,
     ) -> Result<Self> {
-        let file = File::create(&path).await?;
+        let file = File::options()
+            .append(true)
+            .create(true)
+            .open(&path)
+            .await?;
         if params.should_secure_files() {
             secure_file(&path)?;
         }

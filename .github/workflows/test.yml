@@ -47,7 +47,7 @@ jobs:
         working-directory: tests
         run: |
           sudo apt update
-          sudo apt install -y gnome-keyring
+          sudo apt install -y gnome-keyring kubectl
           pip3 install keyring==24 poetry==1.8.3
           poetry install
 

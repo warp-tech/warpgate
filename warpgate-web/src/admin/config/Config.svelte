@@ -4,8 +4,11 @@
     import Router from 'svelte-spa-router'
 
     const routes = {
+        '/targets/create/:kind': wrap({
+            asyncComponent: () => import('./targets/CreateTarget.svelte') as any,
+        }),
         '/targets/create': wrap({
-            asyncComponent: () => import('./CreateTarget.svelte') as any,
+            asyncComponent: () => import('./targets/ChooseTargetKind.svelte') as any,
         }),
         '/targets/:id': wrap({
             asyncComponent: () => import('./targets/Target.svelte') as any,

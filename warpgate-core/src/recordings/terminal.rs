@@ -27,6 +27,17 @@ pub enum TerminalRecordingStreamId {
     Error,
 }
 
+impl TerminalRecordingStreamId {
+    pub fn from_usual_fd_number(fd: u8) -> Option<Self> {
+        match fd {
+            0 => Some(TerminalRecordingStreamId::Input),
+            1 => Some(TerminalRecordingStreamId::Output),
+            2 => Some(TerminalRecordingStreamId::Error),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum TerminalRecordingItem {
