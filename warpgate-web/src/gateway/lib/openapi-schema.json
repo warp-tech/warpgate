@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.20.2-7-g1cce72fe-modified"
+    "version": "v0.20.2-27-g52fb3b68-modified"
   },
   "servers": [
     {
@@ -1050,6 +1050,7 @@
         "title": "Info",
         "required": [
           "ports",
+          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
@@ -1070,6 +1071,9 @@
           },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
+          },
+          "minimize_password_login": {
+            "type": "boolean"
           },
           "authorized_via_ticket": {
             "type": "boolean"
