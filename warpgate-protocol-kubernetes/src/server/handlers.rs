@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use poem::web::websocket::{WebSocket, WebSocketStream};
 use poem::web::{Data, Path};

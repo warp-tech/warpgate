@@ -46,7 +46,7 @@ pub async fn discover_metadata(
         .await
         .map_err(|e| {
             SsoError::Discovery(match e {
-                DiscoveryError::Request(inner) => format!("Request error: {inner}"),
+                DiscoveryError::Request(inner) => format!("Request error: {inner:?}"),
                 e => format!("{e}"),
             })
         })
