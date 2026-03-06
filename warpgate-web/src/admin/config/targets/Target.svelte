@@ -233,10 +233,6 @@
                 <input class="form-control" bind:value={target.options.clusterUrl} placeholder="https://kubernetes.example.com:6443" />
             </FormGroup>
 
-            <FormGroup floating label="Namespace">
-                <input class="form-control" bind:value={target.options.namespace} placeholder="default" />
-            </FormGroup>
-
             <h5 class="mt-3">Authentication</h5>
             <FormGroup floating label="Auth Type">
                 <select class="form-control" bind:value={target.options.auth.kind}>
