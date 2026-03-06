@@ -134,3 +134,14 @@ ingress:
     # kubernetes.io/tls-acme: "true"
   hosts: []
   tls: []
+
+# HTTPRoute configuration
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+  # - name: gateway-name
+  #   namespace: gateway-namespace
+  #   sectionName: gateway-section-name
+  hostnames: []
+  # - warpgate.example.com
