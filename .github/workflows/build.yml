@@ -126,7 +126,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: target/${{ matrix.target }}/release/warpgate
-          sbom-path: cdx.xml
 
       - name: Upload artifact
         uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
