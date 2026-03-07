@@ -4661,8 +4661,36 @@
           "idle_timeout": {
             "type": "string"
           },
+          "credential_mappings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostgresCredentialMapping"
+            }
+          },
           "default_database_name": {
             "type": "string"
+          }
+        }
+      },
+      "PostgresCredentialMapping": {
+        "type": "object",
+        "title": "PostgresCredentialMapping",
+        "required": [
+          "role",
+          "username"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "Warpgate role name to match"
+          },
+          "username": {
+            "type": "string",
+            "description": "PostgreSQL username to use when this role matches"
+          },
+          "password": {
+            "type": "string",
+            "description": "PostgreSQL password to use when this role matches"
           }
         }
       },
