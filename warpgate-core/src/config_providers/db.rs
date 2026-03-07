@@ -548,6 +548,33 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(intersect)
     }
 
+    async fn get_user_roles(
+        &mut self,
+        username: &str,
+    ) -> Result<Vec<String>, WarpgateError> {
+        let db = self.db.lock().await;
+
+        let user_model = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
+            .one(&*db)
+            .await?;
+
+        let Some(user_model) = user_model else {
+            return Err(WarpgateError::UserNotFound(username.into()));
+        };
+
+        let roles: Vec<String> = user_model
+            .find_related(entities::Role::Entity)
+            .all(&*db)
+            .await?
+            .into_iter()
+            .map(Into::<Role>::into)
+            .map(|x| x.name)
+            .collect();
+
+        Ok(roles)
+    }
+
     async fn apply_sso_role_mappings(
         &mut self,
         username: &str,

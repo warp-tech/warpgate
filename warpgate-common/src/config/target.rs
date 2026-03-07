@@ -116,6 +116,17 @@ pub struct TargetMySqlOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct PostgresCredentialMapping {
+    /// Warpgate role name to match
+    pub role: String,
+    /// PostgreSQL username to use when this role matches
+    pub username: String,
+    /// PostgreSQL password to use when this role matches
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetPostgresOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -134,6 +145,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default = "_default_postgres_idle_timeout_str")]
     pub idle_timeout: Option<String>,
+
+    #[serde(default)]
+    pub credential_mappings: Vec<PostgresCredentialMapping>,
 
     #[serde(default)]
     pub default_database_name: Option<String>,
