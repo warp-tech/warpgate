@@ -57,6 +57,11 @@ pub trait ConfigProvider {
         target: &str,
     ) -> Result<bool, WarpgateError>;
 
+    async fn get_user_roles(
+        &mut self,
+        username: &str,
+    ) -> Result<Vec<String>, WarpgateError>;
+
     async fn update_public_key_last_used(
         &self,
         credential: Option<AuthCredential>,

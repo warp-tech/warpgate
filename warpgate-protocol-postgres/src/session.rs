@@ -317,7 +317,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
-        let Some((target, postgres_options)) = target else {
+        let Some((target, mut postgres_options)) = target else {
             warn!("Selected target not found");
             self.send_error_response(
                 "0W001".into(),
@@ -326,6 +326,38 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             .await?;
             return Ok(());
         };
+
+        if !postgres_options.credential_mappings.is_empty() {
+            let user_roles = self
+                .services
+                .config_provider
+                .lock()
+                .await
+                .get_user_roles(&user_info.username)
+                .await
+                .map_err(PostgresError::other)?;
+
+            if let Some(mapping) = postgres_options
+                .credential_mappings
+                .iter()
+                .find(|m| user_roles.contains(&m.role))
+            {
+                info!(
+                    role = %mapping.role,
+                    db_user = %mapping.username,
+                    "Selected credential mapping for user {}",
+                    user_info.username
+                );
+                postgres_options.username = mapping.username.clone();
+                postgres_options.password = mapping.password.clone();
+            } else {
+                warn!(
+                    "No credential mapping matched for user {} (roles: {:?}), using default credentials",
+                    user_info.username,
+                    user_roles
+                );
+            }
+        }
 
         {
             let handle = self.server_handle.lock().await;

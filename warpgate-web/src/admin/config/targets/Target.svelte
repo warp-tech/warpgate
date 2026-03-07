@@ -300,6 +300,40 @@
                     How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
                 </small>
             </FormGroup>
+
+            <h5 class="mt-3">Credential Mappings</h5>
+            <small class="form-text text-muted mb-2 d-block">
+                Map Warpgate roles to different PostgreSQL credentials. First matching role wins. If no role matches, the default username/password above is used.
+            </small>
+
+            {#each target.options.credentialMappings ?? [] as mapping, i}
+                <div class="row mb-2 align-items-end">
+                    <div class="col-3">
+                        <FormGroup floating label="Role">
+                            <input class="form-control" bind:value={mapping.role} />
+                        </FormGroup>
+                    </div>
+                    <div class="col-3">
+                        <FormGroup floating label="DB Username">
+                            <input class="form-control" bind:value={mapping.username} />
+                        </FormGroup>
+                    </div>
+                    <div class="col-4">
+                        <FormGroup floating label="DB Password">
+                            <input class="form-control" type="password" autocomplete="off" bind:value={mapping.password} />
+                        </FormGroup>
+                    </div>
+                    <div class="col-2">
+                        <Button color="danger" size="sm" on:click={() => {
+                            target.options.credentialMappings = target.options.credentialMappings.filter((_, j) => j !== i)
+                        }}>Remove</Button>
+                    </div>
+                </div>
+            {/each}
+
+            <Button color="secondary" size="sm" class="mb-3" on:click={() => {
+                target.options.credentialMappings = [...(target.options.credentialMappings ?? []), { role: '', username: '', password: '' }]
+            }}>Add mapping</Button>
         {/if}
 
         {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
