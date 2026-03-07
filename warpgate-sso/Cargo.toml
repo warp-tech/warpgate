@@ -12,8 +12,8 @@ tracing.workspace = true
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "accept-string-booleans",
-    "rustls-tls"
 ] }
+reqwest_12.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 once_cell = { version = "1.17", default-features = false }

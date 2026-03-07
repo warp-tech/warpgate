@@ -78,6 +78,12 @@ reqwest = { version = "0.13", features = [
     "stream",
     "gzip",
 ], default-features = false }
+reqwest_12 = { package = "reqwest", version = "0.12", features = [
+    "http2",
+    "rustls-tls-native-roots-no-provider",
+    "stream",
+    "gzip",
+], default-features = false } # separate copy to control features on openidconnect->oauth2->reqwest
 regex = { version = "1.6", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
 reqwest-websocket = "0.6.0"
