@@ -150,6 +150,9 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {#if target.kind === TargetKind.Postgres}
                     PostgreSQL
                 {/if}
+                {#if target.kind === TargetKind.Kubernetes}
+                    Kubernetes
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
                 <Fa icon={faArrowRight} fw />
