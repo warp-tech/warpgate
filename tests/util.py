@@ -40,11 +40,11 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None,
                 s = socket.create_connection(("localhost", port), timeout=connect_timeout)
                 if recv:
                     s.settimeout(read_timeout)
-                    while True:
-                        if s.recv(100):
-                            break
+                    if not s.recv(100):
+                        raise Exception("Port is open but not responding")
                 s.close()
                 logging.debug(f"Port {port} is up")
+                return
             except socket.error:
                 if for_process:
                     try:
