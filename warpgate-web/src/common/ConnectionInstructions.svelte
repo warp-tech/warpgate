@@ -125,7 +125,7 @@
 
 {#if targetKind === TargetKind.Kubernetes}
 <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
-    <textarea class="form-control" readonly rows="20" style="font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
+    <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
     <CopyButton text={kubeconfig} />
 </FormGroup>
 

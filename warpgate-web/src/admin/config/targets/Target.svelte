@@ -243,10 +243,10 @@
 
             {#if target.options.auth.kind === 'Certificate'}
                 <FormGroup floating label="Client Certificate">
-                    <textarea class="form-control" rows="8" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                    <textarea class="form-control" style="height: 18rem;" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
                 </FormGroup>
                 <FormGroup floating label="Client Private Key">
-                    <textarea class="form-control" rows="8" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+                    <textarea class="form-control" style="height: 12rem;" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
                 </FormGroup>
             {/if}
 
