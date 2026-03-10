@@ -19,9 +19,33 @@ use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::SsoError;
 
+/// Deserialize a value that may be either a single string or a sequence of strings.
+///
+/// Some OIDC providers (e.g. oidc-mock) return a single claim value
+/// as a bare string rather than a one-element array.
+/// This deserializer accepts both forms.
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    Option::<StringOrVec>::deserialize(deserializer).map(|opt| {
+        opt.map(|sv| match sv {
+            StringOrVec::String(s) => vec![s],
+            StringOrVec::Vec(v) => v,
+        })
+    })
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateClaims {
-    // This uses the "warpgate_roles" claim from OIDC
+    #[serde(default, deserialize_with = "string_or_vec")]
     pub warpgate_roles: Option<Vec<String>>,
 }
 
