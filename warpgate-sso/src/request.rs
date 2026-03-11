@@ -1,7 +1,7 @@
 use openidconnect::url::Url;
 use openidconnect::{CsrfToken, Nonce, PkceCodeVerifier, RedirectUrl};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::{SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse};
 
@@ -29,7 +29,8 @@ impl SsoLoginRequest {
     }
 
     pub async fn verify_code(self, code: String) -> Result<SsoLoginResponse, SsoError> {
-        let result = SsoClient::new(self.config)?
+        let config = self.config;
+        let result = SsoClient::new(config.clone())?
             .finish_login(self.pkce_verifier, self.redirect_url, &self.nonce, code)
             .await?;
 
@@ -55,24 +56,40 @@ impl SsoLoginRequest {
                     .map(ToString::to_string)
             });
 
+        let name = get_claim!(name)
+            .and_then(|x| x.get(None))
+            .map(|x| x.as_str())
+            .map(ToString::to_string);
+
+        let email = get_claim!(email)
+            .map(|x| x.as_str())
+            .map(ToString::to_string);
+
+        let email_verified = get_claim!(email_verified);
+
+        // Get groups from warpgate_roles claim (works for Custom providers)
+        let mut groups = result
+            .userinfo_claims
+            .and_then(|x| x.additional_claims().warpgate_roles.clone());
+
+        // For Google provider with service account, fetch groups from Directory API
+        if groups.is_none() {
+            match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
+            {
+                Ok(Some(google_groups)) => groups = Some(google_groups),
+                Ok(None) => {}
+                Err(e) => {
+                    error!("Failed to fetch Google groups: {e}");
+                }
+            }
+        }
+
         Ok(SsoLoginResponse {
             preferred_username,
-
-            name: get_claim!(name)
-                .and_then(|x| x.get(None))
-                .map(|x| x.as_str())
-                .map(ToString::to_string),
-
-            email: get_claim!(email)
-                .map(|x| x.as_str())
-                .map(ToString::to_string),
-
-            email_verified: get_claim!(email_verified),
-
-            groups: result
-                .userinfo_claims
-                .and_then(|x| x.additional_claims().warpgate_roles.clone()),
-
+            name,
+            email,
+            email_verified,
+            groups,
             id_token: result.token.clone(),
         })
     }
