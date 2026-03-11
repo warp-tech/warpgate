@@ -54,7 +54,12 @@ function selectTarget (target: TargetSnapshot) {
     if (target.kind === TargetKind.WebAdmin) {
         loadURL('/@warpgate/admin')
     } else if (target.kind === TargetKind.Http) {
-        loadURL(`/?warpgate-target=${target.name}`)
+        if (target.externalHost) {
+            const port = location.port ? `:${location.port}` : ''
+            loadURL(`${location.protocol}//${target.externalHost}${port}`)
+        } else {
+            loadURL(`/?warpgate-target=${target.name}`)
+        }
     } else {
         selectedTarget = target
     }
@@ -117,7 +122,9 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 target.kind === TargetKind.WebAdmin
                     ? '/@warpgate/admin'
                     : target.kind === TargetKind.Http
-                        ? `/?warpgate-target=${target.name}`
+                        ? (target.externalHost
+                            ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
+                            : `/?warpgate-target=${target.name}`)
                         : '/@warpgate/admin'
             }
             onclick={e => {
