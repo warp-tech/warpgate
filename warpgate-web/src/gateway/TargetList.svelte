@@ -55,7 +55,8 @@ function selectTarget (target: TargetSnapshot) {
         loadURL('/@warpgate/admin')
     } else if (target.kind === TargetKind.Http) {
         if (target.externalHost) {
-            loadURL(`${location.protocol}//${target.externalHost}`)
+            const port = location.port ? `:${location.port}` : ''
+            loadURL(`${location.protocol}//${target.externalHost}${port}`)
         } else {
             loadURL(`/?warpgate-target=${target.name}`)
         }
@@ -122,7 +123,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     ? '/@warpgate/admin'
                     : target.kind === TargetKind.Http
                         ? (target.externalHost
-                            ? `${location.protocol}//${target.externalHost}`
+                            ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
                             : `/?warpgate-target=${target.name}`)
                         : '/@warpgate/admin'
             }
