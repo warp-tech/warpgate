@@ -15,15 +15,13 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::{Secret, WarpgateError};
+use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::{ConfigProvider, Services};
 
 use super::common::logout;
-use crate::common::{
-    authorize_session, endpoint_auth, get_auth_state_for_request, RequestAuthorization,
-    SessionAuthorization, SessionExt,
-};
+use crate::common::{authorize_session, endpoint_auth, get_auth_state_for_request, SessionExt};
 use crate::session::SessionStore;
-
 pub struct Api;
 
 #[derive(Object)]
@@ -138,9 +136,10 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
+        let services = &ctx.services;
         let mut auth_state_store = services.auth_state_store.lock().await;
         let state_arc = match get_auth_state_for_request(
             &body.username,
@@ -171,7 +170,7 @@ impl Api {
         match state.verify() {
             AuthResult::Accepted { user_info } => {
                 auth_state_store.complete(state.id()).await;
-                authorize_session(req, user_info).await?;
+                authorize_session(req, &ctx, user_info).await?;
                 Ok(LoginResponse::Success)
             }
             x => {
@@ -188,9 +187,10 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
+        let services = &ctx.services;
         let state_id = session.get_auth_state_id();
 
         let mut auth_state_store = services.auth_state_store.lock().await;
@@ -218,7 +218,7 @@ impl Api {
         match state.verify() {
             AuthResult::Accepted { user_info } => {
                 auth_state_store.complete(state.id()).await;
-                authorize_session(req, user_info).await?;
+                authorize_session(req, &ctx, user_info).await?;
                 Ok(LoginResponse::Success)
             }
             x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
@@ -245,8 +245,9 @@ impl Api {
     async fn api_default_auth_state(
         &self,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = &ctx.services;
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -254,7 +255,7 @@ impl Api {
         let Some(state_arc) = store.get(&state_id.0) else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -268,8 +269,9 @@ impl Api {
     async fn api_cancel_default_auth(
         &self,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = &ctx.services;
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -281,7 +283,7 @@ impl Api {
         store.complete(&state_id.0).await;
         session.clear_auth_state();
 
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -295,9 +297,10 @@ impl Api {
     )]
     async fn get_web_auth_requests(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         auth: Option<Data<&RequestAuthorization>>,
     ) -> poem::Result<AuthStateListResponse> {
+        let services = &ctx.services;
         let store = services.auth_state_store.lock().await;
 
         let Some(RequestAuthorization::Session(SessionAuthorization::User(username))) =
@@ -311,7 +314,7 @@ impl Api {
         let mut results = vec![];
 
         for state_arc in state_arcs {
-            results.push(serialize_auth_state_inner(state_arc, *services).await?)
+            results.push(serialize_auth_state_inner(state_arc, services).await?)
         }
 
         Ok(AuthStateListResponse::Ok(Json(results)))
@@ -325,15 +328,16 @@ impl Api {
     )]
     async fn api_auth_state(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = &ctx.services;
         let state_arc = get_auth_state(&id, &services, auth.map(|x| x.0)).await;
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -347,10 +351,11 @@ impl Api {
     )]
     async fn api_approve_auth(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = &ctx.services;
         let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -362,9 +367,10 @@ impl Api {
         };
 
         if let AuthResult::Accepted { .. } = auth_result {
-            services.auth_state_store.lock().await.complete(&id).await;
+            let mut store = services.auth_state_store.lock().await;
+            store.complete(&id).await;
         }
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -378,16 +384,17 @@ impl Api {
     )]
     async fn api_reject_auth(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         auth: Option<Data<&RequestAuthorization>>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = &ctx.services;
         let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
         services.auth_state_store.lock().await.complete(&id).await;
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -447,8 +454,9 @@ async fn serialize_auth_state_inner(
 pub async fn api_get_web_auth_requests_stream(
     ws: WebSocket,
     auth: Option<Data<&RequestAuthorization>>,
-    services: Data<&Services>,
+    ctx: Data<&AuthenticatedRequestContext>,
 ) -> anyhow::Result<impl IntoResponse> {
+    let services = &ctx.services;
     let auth_state_store = services.auth_state_store.clone();
 
     let username = match auth.map(|x| x.0.clone()) {

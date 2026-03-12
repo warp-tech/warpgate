@@ -476,6 +476,15 @@
                 "type": "string"
               }
             },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
             "scopes": {
               "type": "array",
               "items": {

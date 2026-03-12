@@ -1,0 +1,14 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-common-http"
+version = "0.20.2"
+
+[dependencies]
+warpgate-common = { path = "../warpgate-common" }
+warpgate-core = { path = "../warpgate-core" }
+poem.workspace = true
+poem-openapi.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true

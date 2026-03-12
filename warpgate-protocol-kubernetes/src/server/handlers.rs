@@ -16,11 +16,12 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::DONT_FORWARD_HEADERS;
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
-use warpgate_core::logging::http::{
+use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
-use warpgate_core::{Services, State};
+use warpgate_core::Services;
 
 use crate::correlator::RequestCorrelator;
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
@@ -49,10 +50,9 @@ pub async fn handle_api_request(
     req: &Request,
     Path((target_name, path)): Path<(String, String)>,
     body: Body,
-    state: Data<&Arc<Mutex<State>>>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
-    services: Data<&Services>,
+    ctx: Data<&AuthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
         target_name = target_name,
@@ -61,8 +61,7 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) =
-        authenticate_and_get_target(req, &target_name, &state, &services).await?;
+    let (user_info, target) = authenticate_and_get_target(req, &target_name, &ctx.services).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
@@ -82,7 +81,10 @@ pub async fn handle_api_request(
             handle.lock().await;
         handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
-        (handle.id(), span_for_request(req, Some(&*handle)).await?)
+        (
+            handle.id(),
+            span_for_request(req, &ctx.services, Some(&*handle)).await?,
+        )
     };
 
     async {
@@ -94,7 +96,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                *services,
+                &ctx.services,
                 *recordings,
             )
             .await
@@ -107,7 +109,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                *services,
+                &ctx.services,
                 *recordings,
             )
             .await
@@ -115,7 +117,7 @@ pub async fn handle_api_request(
             .context("handling Kubernetes API request")
         };
 
-        let client_ip = get_client_ip(req, Some(*services)).await;
+        let client_ip = get_client_ip(req, &ctx.services).await;
         let response = response.inspect_err(|e| {
             log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;

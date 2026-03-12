@@ -17,6 +17,7 @@ def _make_sso_provider_config(
     *,
     auto_create_users=False,
     role_mappings=None,
+    admin_role_mappings=None,
     extra_scopes=None,
 ):
     """Build an ``sso_providers`` entry for warpgate config."""
@@ -32,6 +33,8 @@ def _make_sso_provider_config(
     }
     if role_mappings is not None:
         provider["role_mappings"] = role_mappings
+    if admin_role_mappings is not None:
+        provider["admin_role_mappings"] = admin_role_mappings
     return {
         "name": "test-oidc",
         "label": "OIDC Test",
@@ -416,6 +419,10 @@ class TestHTTPUserAuthOIDC:
             assert "wg-viewer-role" in role_names
             assert "wg-unrelated-role" not in role_names
 
+        # verify no admin roles yet
+        admin_roles = api.get_user_admin_roles(user.id)
+        assert admin_roles == []
+
     def test_oidc_group_sync_without_mappings(
         self,
         echo_server_port,
@@ -490,6 +497,10 @@ class TestHTTPUserAuthOIDC:
 
             assert "direct-role-a" in role_names
             assert "direct-role-b" in role_names
+
+            # admin role import without mappings
+            admin_roles = api.get_user_admin_roles(user.id)
+            assert admin_roles == []
 
     def test_oidc_group_sync_removes_stale_roles(
         self,

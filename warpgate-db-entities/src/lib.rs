@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+pub mod AdminRole;
 pub mod ApiToken;
 pub mod CertificateCredential;
 pub mod CertificateRevocation;
@@ -19,4 +20,5 @@ pub mod TargetGroup;
 pub mod TargetRoleAssignment;
 pub mod Ticket;
 pub mod User;
+pub mod UserAdminRoleAssignment;
 pub mod UserRoleAssignment;

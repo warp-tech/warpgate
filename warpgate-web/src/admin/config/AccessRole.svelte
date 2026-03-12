@@ -8,6 +8,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
+    import { adminPermissions } from '../lib/store'
 
     interface Props {
         params: { id: string };
@@ -64,7 +65,7 @@
     async function remove () {
         if (confirm(`Delete role ${role!.name}?`)) {
             await api.deleteRole(role!)
-            replace('/config/roles')
+            replace('/config/access-roles')
         }
     }
 </script>
@@ -100,14 +101,14 @@
     <div class="d-flex">
         <AsyncButton
         color="primary"
-            disabled={disabled}
+            disabled={disabled || !$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
         >Update</AsyncButton>
 
         <AsyncButton
             class="ms-2"
-            disabled={disabled}
+            disabled={disabled || !$adminPermissions.accessRolesDelete}
             color="danger"
             click={remove}
         >Remove</AsyncButton>

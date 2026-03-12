@@ -5,7 +5,7 @@ use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
 use super::AnySecurityScheme;
@@ -49,10 +49,10 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let db = ctx.services.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -72,10 +72,11 @@ impl Api {
     )]
     async fn api_update_parameters(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<ParameterUpdate>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
+        let services = &ctx.services;
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 

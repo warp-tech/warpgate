@@ -5,6 +5,8 @@
     import { link } from 'svelte-spa-router'
     import EmptyState from 'common/EmptyState.svelte'
     import InfoBox from 'common/InfoBox.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import PermissionGate from 'admin/lib/PermissionGate.svelte'
 
     interface LdapServer {
         id: string
@@ -32,6 +34,7 @@
         <a
             class="btn btn-primary ms-auto"
             href="/config/ldap-servers/create"
+            class:disabled={!$adminPermissions.configEdit}
             use:link>
             Add LDAP Server
         </a>
@@ -41,27 +44,29 @@
         Currently, LDAP can only be used to import users and their SSH keys. Warpgate will automatically sync the public keys of Warpgate users that are linked to LDAP users.
     </InfoBox>
 
-    <ItemList load={getLdapServers} showSearch={true}>
-        {#snippet empty()}
-            <EmptyState
-                title="No LDAP servers configured"
-                hint="Connecting to LDAP lets you synchronize users' SSH keys from it"
-            />
-        {/snippet}
-        {#snippet item(server)}
-            <a
-                class="list-group-item list-group-item-action"
-                href="/config/ldap-servers/{server.id}"
-                use:link>
-                <strong class="me-auto">
-                    {server.name}
-                </strong>
-                {#if server.description}
-                    <small class="d-block text-muted">{server.description}</small>
-                {/if}
-            </a>
-        {/snippet}
-    </ItemList>
+    <PermissionGate perm="configEdit" message="You have no permission to manage LDAP servers.">
+        <ItemList load={getLdapServers} showSearch={true}>
+            {#snippet empty()}
+                <EmptyState
+                    title="No LDAP servers configured"
+                    hint="Connecting to LDAP lets you synchronize users' SSH keys from it"
+                />
+            {/snippet}
+            {#snippet item(server)}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/config/ldap-servers/{server.id}"
+                    use:link>
+                    <strong class="me-auto">
+                        {server.name}
+                    </strong>
+                    {#if server.description}
+                        <small class="d-block text-muted">{server.description}</small>
+                    {/if}
+                </a>
+            {/snippet}
+        </ItemList>
+    </PermissionGate>
 </div>
 
 <style lang="scss">

@@ -785,6 +785,28 @@ def shared_wg(processes: ProcessManager):
     yield wg
 
 
+# sometimes tests just want a pre‑configured API client for the admin
+# endpoint.  previously everyone called ``admin_client(url)`` directly;
+# a fixture lets us compute the URL from ``shared_wg`` once and removes
+# boilerplate from individual tests.
+from .api_client import admin_client as _admin_client_context
+
+@pytest.fixture
+
+def admin_client(shared_wg: WarpgateProcess):
+    """Yields a ``sdk.DefaultApi`` instance authenticated with the
+    built-in token and pointing at the running warpgate instance.
+
+    Usage::
+
+        def test_something(shared_wg, admin_client):
+            user = admin_client.create_user(...)
+    """
+    url = f"https://localhost:{shared_wg.http_port}"
+    with _admin_client_context(url) as api:
+        yield api
+
+
 # ----
 
 

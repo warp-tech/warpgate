@@ -8,6 +8,7 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
+    import { adminPermissions } from 'admin/lib/store'
 
     let error: string|undefined = $state()
     let tickets: Ticket[]|undefined = $state()
@@ -41,6 +42,7 @@
             <a
                 class="btn btn-primary ms-auto"
                 href="/config/tickets/create"
+                class:disabled={!$adminPermissions.ticketsCreate}
                 use:link>
                 Create a ticket
             </a>
@@ -80,10 +82,14 @@
                         <small class="text-muted me-4 ms-auto">
                             <RelativeDate date={ticket.created} />
                         </small>
-                        <Button color="link" onclick={e => {
-                            deleteTicket(ticket)
-                            e.preventDefault()
-                        }}>Delete</Button>
+                        <Button
+                            color="link"
+                            onclick={e => {
+                                deleteTicket(ticket)
+                                e.preventDefault()
+                            }}
+                            disabled={!$adminPermissions.ticketsDelete}
+                        >Delete</Button>
                     </div>
                 {/each}
             </div>

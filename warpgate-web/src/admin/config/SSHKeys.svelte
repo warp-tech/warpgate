@@ -4,6 +4,7 @@
     import CopyButton from 'common/CopyButton.svelte'
     import { stringifyError } from 'common/errors'
     import { Button } from '@sveltestrap/sveltestrap'
+    import { adminPermissions } from 'admin/lib/store'
 
     let error: string|undefined = $state()
     let knownHosts: SSHKnownHost[]|undefined = $state()
@@ -63,10 +64,15 @@
                         {host.host}:{host.port}
                     </strong>
 
-                    <Button class="ms-auto" color="link px-0" onclick={e => {
-                        e.preventDefault()
-                        deleteHost(host)
-                    }}>Delete</Button>
+                    <Button
+                        class="ms-auto"
+                        color="link px-0"
+                        onclick={e => {
+                            e.preventDefault()
+                            deleteHost(host)
+                        }}
+                        disabled={!$adminPermissions.configEdit}
+                    >Delete</Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>
