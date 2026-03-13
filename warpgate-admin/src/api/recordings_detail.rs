@@ -10,7 +10,7 @@ use poem::{handler, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -34,14 +34,6 @@ pub struct Api;
 enum GetRecordingResponse {
     #[oai(status = 200)]
     Ok(Json<Recording::Model>),
-    #[oai(status = 404)]
-    NotFound,
-}
-
-#[derive(ApiResponse)]
-enum DeleteRecordingResponse {
-    #[oai(status = 204)]
-    Deleted,
     #[oai(status = 404)]
     NotFound,
 }
