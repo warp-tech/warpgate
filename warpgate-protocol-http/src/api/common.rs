@@ -2,9 +2,9 @@ use poem::session::Session;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::info;
 use warpgate_common::WarpgateError;
+use warpgate_common_http::RequestAuthorization;
 use warpgate_db_entities as entities;
 
-use crate::common::RequestAuthorization;
 use crate::session::SessionStore;
 
 pub fn logout(session: &Session, session_middleware: &mut SessionStore) {

@@ -4,9 +4,10 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -31,11 +32,14 @@ impl Api {
     )]
     async fn api_ssh_get_own_keys(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
-        let config = services.config.lock().await;
-        let keys = warpgate_protocol_ssh::load_keys(&config, &services.global_params, "client")?;
+        require_admin_permission(&ctx, None).await?;
+
+        let config = ctx.services.config.lock().await;
+        let keys =
+            warpgate_protocol_ssh::load_keys(&config, &ctx.services.global_params, "client")?;
 
         let keys = keys
             .into_iter()

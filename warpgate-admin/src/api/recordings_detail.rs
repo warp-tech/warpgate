@@ -10,13 +10,15 @@ use poem::{handler, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::AdminPermission;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_protocol_kubernetes::recording::{
@@ -24,6 +26,7 @@ use warpgate_protocol_kubernetes::recording::{
 };
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -49,11 +52,13 @@ impl Api {
     )]
     async fn api_get_recording(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
@@ -73,11 +78,13 @@ impl Api {
     )]
     async fn api_get_recording_kubernetes(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
     ) -> poem::Result<GetKubernetesRecordingResponse> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+        let db = ctx.services.db.lock().await;
+        let recordings = ctx.services.recordings.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
@@ -89,12 +96,7 @@ impl Api {
             return Err(NotFoundError.into());
         };
 
-        let path = {
-            recordings
-                .lock()
-                .await
-                .path_for(&recording.session_id, &recording.name)
-        };
+        let path = recordings.path_for(&recording.session_id, &recording.name);
 
         let file = File::open(&path).await.map_err(InternalServerError)?;
         let reader = BufReader::new(file);
@@ -110,14 +112,15 @@ impl Api {
         Ok(GetKubernetesRecordingResponse::Ok(Json(content)))
     }
 }
-
 #[handler]
 pub async fn api_get_recording_cast(
-    db: Data<&Arc<Mutex<DatabaseConnection>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<String> {
-    let db = db.lock().await;
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services.db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
@@ -169,11 +172,13 @@ pub async fn api_get_recording_cast(
 
 #[handler]
 pub async fn api_get_recording_tcpdump(
-    db: Data<&Arc<Mutex<DatabaseConnection>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<Bytes> {
-    let db = db.lock().await;
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services.db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))

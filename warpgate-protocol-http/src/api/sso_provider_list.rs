@@ -12,7 +12,8 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_core::ConfigProvider;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
@@ -93,9 +94,9 @@ impl Api {
     )]
     async fn api_get_all_sso_providers(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
     ) -> Result<GetSsoProvidersResponse, WarpgateError> {
-        let mut providers = services.config.lock().await.store.sso_providers.clone();
+        let mut providers = ctx.services.config.lock().await.store.sso_providers.clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
@@ -119,11 +120,11 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         code: Query<Option<String>>,
     ) -> Result<Response<ReturnToSsoResponse>, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, services, &code)
+            .api_return_to_sso_get_common(req, session, ctx, &code)
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
 
@@ -139,11 +140,11 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         data: Form<ReturnToSsoFormData>,
     ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, services, &data.code)
+            .api_return_to_sso_get_common(req, session, ctx, &data.code)
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
         let serialized_url = serde_json::to_string(&url)?;
@@ -167,9 +168,11 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         code: &Option<String>,
     ) -> Result<Result<String, String>, WarpgateError> {
+        // pull services locally for convenience
+        let services = &ctx.services;
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
@@ -198,7 +201,7 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let providers_config = services.config.lock().await.store.sso_providers.clone();
+        let providers_config = ctx.services.config.lock().await.store.sso_providers.clone();
         let mut iter = providers_config.iter();
         let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
             return Ok(Err(format!("No provider matching {}", context.provider)));
@@ -246,7 +249,7 @@ impl Api {
 
         if let AuthResult::Accepted { user_info } = state.verify() {
             auth_state_store.complete(state.id()).await;
-            authorize_session(req, user_info).await?;
+            authorize_session(req, &ctx, user_info).await?;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token,
@@ -255,7 +258,7 @@ impl Api {
         }
 
         let mappings = provider_config.provider.role_mappings();
-        if let Some(remote_groups) = response.groups {
+        if let Some(remote_groups) = response.target_roles {
             // If mappings is not set, all groups are subject to sync
             // and names won't be remapped
             let managed_role_names = mappings
@@ -277,6 +280,33 @@ impl Api {
 
             debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
             cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
+                .await?;
+        }
+
+        // import admin roles from claim if present
+        if let Some(remote_admins) = response.admin_roles {
+            let admin_map = provider_config.provider.admin_role_mappings();
+
+            // compute managed list from keys of the mapping (or all role names if
+            // no mapping provided)
+            let managed_admin_names: Option<Vec<String>> =
+                admin_map.as_ref().map(|m| m.values().cloned().collect());
+
+            let active_admin_names: Vec<_> = remote_admins
+                .iter()
+                .filter_map({
+                    |r| {
+                        if let Some(ref mappings) = admin_map {
+                            mappings.get(r).cloned()
+                        } else {
+                            Some(r.clone())
+                        }
+                    }
+                })
+                .collect();
+
+            debug!("SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}");
+            cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)
                 .await?;
         }
 
@@ -304,14 +334,14 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> Result<StartSloResponse, WarpgateError> {
         let Some(state) = session.get_sso_login_state() else {
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
-        let config = services.config.lock().await;
+        let config = ctx.services.config.lock().await;
 
         let return_url = config.construct_external_url(Some(req), None)?;
         debug!("Return URL: {}", &return_url);

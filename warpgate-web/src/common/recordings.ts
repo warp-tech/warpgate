@@ -12,6 +12,8 @@ export type RecordingMetadata ={
     pod: string
     container: string
 } | {
+    type: 'kubernetes-api',
+} | {
     type: 'ssh-shell',
     channel: number
 } | {

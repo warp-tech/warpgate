@@ -1,18 +1,18 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::Context;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::{Algorithm, PublicKey};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
-use tokio::sync::Mutex;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::KnownHost;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -45,18 +45,18 @@ impl Api {
     )]
     async fn add_ssh_known_host(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<AddSshKnownHostRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddSshKnownHostResponse, WarpgateError> {
-        use warpgate_db_entities::KnownHost;
+        require_admin_permission(&ctx, None).await?;
 
         // Validate
         Algorithm::from_str(&body.key_type).context("parsing key type")?;
         PublicKey::from_openssh(&format!("{} {}", body.key_type, body.key_base64))
             .context("parsing key")?;
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let model = KnownHost::ActiveModel {
             id: Set(Uuid::new_v4()),
             host: Set(body.host.clone()),
@@ -76,12 +76,12 @@ impl Api {
     )]
     async fn get_ssh_known_hosts(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
-        use warpgate_db_entities::KnownHost;
+        require_admin_permission(&ctx, None).await?;
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let hosts = KnownHost::Entity::find().all(&*db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }

@@ -19,14 +19,12 @@ async function singleLogout () {
 </script>
 
 {#if $serverInfo?.username}
-    <div class="ms-auto">
-        <a href="/@warpgate/#/profile">
-            {$serverInfo.username}
-        </a>
-        {#if $serverInfo.authorizedViaTicket}
-            <span class="ml-2">(ticket auth)</span>
-        {/if}
-    </div>
+    <a href="/@warpgate/#/profile">
+        {$serverInfo.username}
+    </a>
+    {#if $serverInfo.authorizedViaTicket}
+        <span class="ml-2">(ticket auth)</span>
+    {/if}
 
     {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
         <Dropdown>

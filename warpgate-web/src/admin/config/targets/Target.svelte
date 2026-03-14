@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
+    import { adminPermissions } from '../../lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -146,9 +147,6 @@
                     {#if target.options.kind === 'Kubernetes'}
                         Kubernetes target
                     {/if}
-                    {#if target.options.kind === 'WebAdmin'}
-                        This web admin interface
-                    {/if}
                 </div>
             </div>
         </div>
@@ -272,6 +270,7 @@
                                 id="role-{role.id}"
                                 class="mb-0 me-2"
                                 type="switch"
+                                disabled={!$adminPermissions.targetsEdit}
                                 on:change={() => toggleRole(role)}
                                 checked={roleIsAllowed[role.id]} />
                             <div>
@@ -340,15 +339,17 @@
         >Access instructions</Button>
 
         <AsyncButton
-        color="primary"
+            color="primary"
             class="ms-auto"
             click={update}
+            disabled={!$adminPermissions.targetsEdit}
         >Update configuration</AsyncButton>
 
         <AsyncButton
             class="ms-2"
             color="danger"
             click={remove}
+            disabled={!$adminPermissions.targetsDelete}
         >Remove</AsyncButton>
     </div>
 </div>
