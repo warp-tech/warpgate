@@ -1,4 +1,8 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AuthStateId(pub Uuid);
 
 /// Represents the source of authentication of a session
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -58,4 +62,9 @@ impl RequestAuthorization {
             Self::AdminToken => None,
         }
     }
+}
+
+/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+pub fn is_localhost_host(host: &str) -> bool {
+    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
 }

@@ -6269,6 +6269,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+ "uuid",
  "warpgate-common",
  "warpgate-core",
 ]

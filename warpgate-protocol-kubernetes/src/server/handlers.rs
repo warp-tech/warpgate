@@ -16,11 +16,11 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::DONT_FORWARD_HEADERS;
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::Services;
 
 use crate::correlator::RequestCorrelator;
@@ -50,9 +50,8 @@ pub async fn handle_api_request(
     req: &Request,
     Path((target_name, path)): Path<(String, String)>,
     body: Body,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
-    ctx: Data<&AuthenticatedRequestContext>,
+    ctx: Data<&UnauthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
         target_name = target_name,
@@ -97,7 +96,6 @@ pub async fn handle_api_request(
                 user_info,
                 session_id,
                 &ctx.services,
-                *recordings,
             )
             .await
             .map(IntoResponse::into_response)
@@ -110,7 +108,6 @@ pub async fn handle_api_request(
                 user_info,
                 session_id,
                 &ctx.services,
-                *recordings,
             )
             .await
             .map(IntoResponse::into_response)
@@ -144,7 +141,6 @@ async fn _handle_normal_request_inner(
     user_info: AuthStateUserInfo,
     session_id: SessionId,
     services: &Services,
-    recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> Result<Response, WarpgateError> {
     let client =
         create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
@@ -197,7 +193,7 @@ async fn _handle_normal_request_inner(
             config.store.recordings.enable
         };
         if enabled {
-            match start_recording_api(&session_id, recordings).await {
+            match start_recording_api(&session_id, &services.recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -386,7 +382,6 @@ async fn _handle_websocket_request_inner(
     user_info: AuthStateUserInfo,
     session_id: SessionId,
     services: &Services,
-    recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> anyhow::Result<impl IntoResponse> {
     let mut full_url = construct_target_url(req, path, k8s_options)?;
     if full_url.scheme() == "https" {
@@ -409,7 +404,7 @@ async fn _handle_websocket_request_inner(
         if enabled {
             match start_recording_exec(
                 &session_id,
-                recordings,
+                &services.recordings,
                 deduce_exec_recording_metadata(&full_url),
             )
             .await
