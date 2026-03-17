@@ -42,6 +42,10 @@
             })
         ).pipe(
             map(targets => {
+                if (options.search) {
+                    return targets
+                }
+
                 const natural = naturalCompareFactory()
 
                 return targets.sort(
