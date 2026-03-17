@@ -7,7 +7,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::{Algorithm, PublicKey};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::KnownHost;
 
@@ -49,7 +49,7 @@ impl Api {
         body: Json<AddSshKnownHostRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddSshKnownHostResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
         // Validate
         Algorithm::from_str(&body.key_type).context("parsing key type")?;
@@ -79,7 +79,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
         let db = ctx.services.db.lock().await;
         let hosts = KnownHost::Entity::find().all(&*db).await?;

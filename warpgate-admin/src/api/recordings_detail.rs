@@ -80,6 +80,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetKubernetesRecordingResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
@@ -112,6 +113,7 @@ impl Api {
         Ok(GetKubernetesRecordingResponse::Ok(Json(content)))
     }
 }
+
 #[handler]
 pub async fn api_get_recording_cast(
     ctx: Data<&AuthenticatedRequestContext>,

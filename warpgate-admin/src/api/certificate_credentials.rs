@@ -95,7 +95,7 @@ impl ListApi {
         user_id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
         let db = ctx.services.db.lock().await;
 
@@ -217,7 +217,7 @@ impl DetailApi {
         id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersDelete)).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
         let db = ctx.services.db.lock().await;
 

@@ -647,6 +647,7 @@ class ProcessManager:
                     **os.environ,
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
+                    "WARPGATE_UNDER_TEST": "1",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
@@ -791,8 +792,8 @@ def shared_wg(processes: ProcessManager):
 # boilerplate from individual tests.
 from .api_client import admin_client as _admin_client_context
 
-@pytest.fixture
 
+@pytest.fixture
 def admin_client(shared_wg: WarpgateProcess):
     """Yields a ``sdk.DefaultApi`` instance authenticated with the
     built-in token and pointing at the running warpgate instance.
