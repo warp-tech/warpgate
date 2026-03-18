@@ -112,7 +112,7 @@ export function makeKubernetesNamespace (_opt: ConnectionOptions): string {
 
 export function makeKubernetesClusterUrl (opt: ConnectionOptions): string {
     const baseUrl = `https://${opt.serverInfo?.externalHost ?? 'warpgate-host'}:${opt.serverInfo?.ports.kubernetes ?? 'warpgate-kubernetes-port'}`
-    return `${baseUrl}/${opt.targetName ?? 'target'}`
+    return `${baseUrl}/${encodeURIComponent(opt.targetName ?? 'target')}`
 }
 
 export function makeKubeconfig (opt: ConnectionOptions): string {
