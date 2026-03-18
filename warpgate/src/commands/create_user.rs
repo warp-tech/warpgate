@@ -71,14 +71,14 @@ pub(crate) async fn command(
                 };
                 values.insert(&*db).await.map_err(WarpgateError::from)?;
             }
-        } else {
-            // admin role
-            let db_admin = AdminRole::Entity::find()
-                .filter(AdminRole::Column::Name.eq(role_name.clone()))
-                .one(&*db)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("admin role not found"))?;
+        }
 
+        // admin role
+        if let Some(db_admin) = AdminRole::Entity::find()
+            .filter(AdminRole::Column::Name.eq(role_name.clone()))
+            .one(&*db)
+            .await?
+        {
             if UserAdminRoleAssignment::Entity::find()
                 .filter(UserAdminRoleAssignment::Column::UserId.eq(db_user.id))
                 .filter(UserAdminRoleAssignment::Column::AdminRoleId.eq(db_admin.id))
