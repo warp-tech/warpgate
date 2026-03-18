@@ -12,7 +12,9 @@
 
     async function load () {
         ownKeys = await api.getSshOwnKeys()
-        knownHosts = await api.getSshKnownHosts()
+        if ($adminPermissions.configEdit) {
+            knownHosts = await api.getSshKnownHosts()
+        }
     }
 
     load().catch(async e => {

@@ -157,12 +157,14 @@
         <Input bind:value={user.description} />
     </FormGroup>
 
+    {#if $adminPermissions.usersEdit}
     <CredentialEditor
         userId={user.id}
         username={user.username}
         bind:credentialPolicy={user.credentialPolicy!}
         ldapLinked={!!user.ldapServerId}
     />
+    {/if}
 
     <h4 class="mt-4">User roles</h4>
     <div class="list-group list-group-flush mb-3">

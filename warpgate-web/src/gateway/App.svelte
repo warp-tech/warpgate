@@ -113,8 +113,8 @@
                 <div class="ms-auto d-flex align-items-center">
                     {#if $hasAdminAccess}
                     <a href="/@warpgate/admin" class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3">
-                        <Fa icon={faCog} class="me-2" />
-                        Admin
+                        <Fa icon={faCog} class="mx-1" />
+                        <span class="me-1">Admin</span>
                     </a>
                     {/if}
 
