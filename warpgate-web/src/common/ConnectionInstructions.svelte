@@ -3,6 +3,7 @@
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
+    import { ensureCertificateCredential } from 'gateway/lib/certificateProvisioner'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from './sveltestrap-s5-ports/Alert.svelte'
 
@@ -24,6 +25,31 @@
         targetDefaultDatabaseName = undefined,
     }: Props = $props()
 
+    let clientCertificatePem: string | undefined = $state()
+    let clientPrivateKeyPem: string | undefined = $state()
+    let certLoading = $state(false)
+    let certError: string | undefined = $state()
+
+    async function provisionCertificate () {
+        certLoading = true
+        certError = undefined
+        try {
+            const result = await ensureCertificateCredential()
+            clientCertificatePem = result.certificatePem
+            clientPrivateKeyPem = result.privateKeyPem
+        } catch {
+            certError = 'Could not auto-provision a certificate. You may need to issue one manually in your credential settings.'
+        } finally {
+            certLoading = false
+        }
+    }
+
+    $effect(() => {
+        if (targetKind === TargetKind.Kubernetes && !ticketSecret) {
+            provisionCertificate()
+        }
+    })
+
     // Create a reactive opts object that updates when any prop or serverInfo changes
     let opts = $derived.by(() => ({
         targetName,
@@ -32,6 +58,8 @@
         ticketSecret,
         targetExternalHost,
         targetDefaultDatabaseName,
+        clientCertificatePem,
+        clientPrivateKeyPem,
     }))
 
     let sshUsername = $derived(makeSSHUsername(opts))
@@ -124,6 +152,16 @@
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes}
+{#if certLoading && !ticketSecret}
+<Alert color="info">
+    Provisioning certificate...
+</Alert>
+{:else if certError && !ticketSecret}
+<Alert color="warning">
+    {certError}
+</Alert>
+{/if}
+
 <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
     <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
     <CopyButton text={kubeconfig} />
@@ -136,8 +174,5 @@
 
 <Alert color="info">
     Save the kubeconfig above to a file (e.g., <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
-    {#if !ticketSecret}
-        You'll need to replace the placeholder certificate and key data with your actual credentials.
-    {/if}
 </Alert>
 {/if}

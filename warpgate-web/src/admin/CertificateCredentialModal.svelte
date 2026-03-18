@@ -9,6 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
+    import { saveCertificateKey } from 'gateway/lib/certificateStore'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -80,6 +81,13 @@
             // Then submit public key to get certificate issued
             const result = await save(label.trim(), publicKeyPem)
             generatedCertificatePem = result.certificatePem
+
+            // Store in IndexedDB so auto-provisioning can reuse it
+            await saveCertificateKey({
+                credentialId: result.credential.id,
+                privateKeyPem,
+                certificatePem: result.certificatePem,
+            })
 
             generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(generatedCertificatePem)}\n    client-key-data: ${btoa(privateKeyPem)}`
         } catch (error) {
