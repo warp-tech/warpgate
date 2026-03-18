@@ -11,7 +11,8 @@
     import { api, type AuthStateResponseInternal } from './lib/api'
     import { Button } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
+    import { hasAdminAccess } from 'admin/lib/store'
 
     let redirecting = $state(false)
     let serverInfoPromise = reloadServerInfo()
@@ -109,7 +110,16 @@
                     <Brand />
                 </a>
 
-                <AuthBar />
+                <div class="ms-auto d-flex align-items-center">
+                    {#if $hasAdminAccess}
+                    <a href="/@warpgate/admin" class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3">
+                        <Fa icon={faCog} class="mx-1" />
+                        <span class="me-1">Admin</span>
+                    </a>
+                    {/if}
+
+                    <AuthBar />
+                </div>
             </div>
 
             {#if !doNotShowAuthRequests}

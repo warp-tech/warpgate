@@ -7,6 +7,8 @@ use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
 
+use crate::AdminPermission;
+
 #[derive(thiserror::Error, Debug)]
 pub enum WarpgateError {
     #[error("database error: {0}")]
@@ -57,11 +59,23 @@ pub enum WarpgateError {
     TlsSetup(#[from] RustlsSetupError),
     #[error("reqwest: {0}")]
     Reqwest(#[from] reqwest::Error),
+    #[error("admin role required")]
+    NoAdminAccess,
+    #[error("admin permission required: {0:?}")]
+    NoAdminPermission(AdminPermission),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
-        poem::http::StatusCode::INTERNAL_SERVER_ERROR
+        match self {
+            WarpgateError::InvalidTicket(_)
+            | WarpgateError::UserNotFound(_)
+            | WarpgateError::RoleNotFound(_) => poem::http::StatusCode::UNAUTHORIZED,
+            WarpgateError::NoAdminAccess | WarpgateError::NoAdminPermission(_) => {
+                poem::http::StatusCode::FORBIDDEN
+            }
+            _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }
 

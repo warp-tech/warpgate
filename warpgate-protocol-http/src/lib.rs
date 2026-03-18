@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use common::{inject_request_authorization, page_admin_auth};
+use common::inject_request_authorization;
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
@@ -27,7 +27,8 @@ use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
-use warpgate_core::logging::http::{
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_core::{ProtocolServer, Services};
@@ -37,11 +38,11 @@ use warpgate_tls::{
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKIE_NAME};
+use crate::common::{endpoint_auth, page_auth, SESSION_COOKIE_NAME};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
-use crate::session_handle::WarpgateServerHandleFromRequest;
+use crate::session_handle::warpgate_server_handle_for_request;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -104,7 +105,6 @@ impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
-        let db = self.services.db.clone();
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -174,7 +174,7 @@ impl ProtocolServer for HTTPProtocolServer {
             };
             let openapi_ui_route = api_service.stoplight_elements();
             let openapi_spec_route = api_service.spec_endpoint();
-            let admin_api_app = admin_api_app(&self.services).into_endpoint();
+            let admin_api_app = admin_api_app().into_endpoint();
 
             Route::new()
                 .nest("/api/playground", openapi_ui_route)
@@ -186,14 +186,12 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .nest(
                     "/admin/api",
-                    endpoint_auth(endpoint_admin_auth(admin_api_app)).with(cache_bust()),
+                    endpoint_auth(admin_api_app).with(cache_bust()),
                 )
                 .at(
                     "/admin",
-                    page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
-                        "src/admin/index.html",
-                    )))
-                    .with(cache_bust()),
+                    page_auth(EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"))
+                        .with(cache_bust()),
                 )
                 .at(
                     "/api/auth/web-auth-requests/stream",
@@ -211,7 +209,7 @@ impl ProtocolServer for HTTPProtocolServer {
                         async move {
                             let method = req.method().clone();
                             let url = req.original_uri().clone();
-                            let client_ip = get_client_ip(&req, Some(&services)).await;
+                            let client_ip = get_client_ip(&req, &services).await;
 
                             let response = ep.call(req).await.inspect_err(|e| {
                                 log_request_error(&method, &url, client_ip.as_deref(), e);
@@ -243,20 +241,21 @@ impl ProtocolServer for HTTPProtocolServer {
             )
             .around(inject_request_authorization)
             .around(move |ep, req| async move {
+                let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
+                    .await?
+                    .clone();
                 let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?
                     .clone();
 
                 let req = { sm.lock().await.process_request(req).await? };
-                let handle = WarpgateServerHandleFromRequest::from_request_without_body(&req)
-                    .await
-                    .ok();
+                let handle = warpgate_server_handle_for_request(&req).await.ok();
                 let span = match handle {
                     Some(ref handle) => {
                         let handle = handle.lock().await;
-                        span_for_request(&req, Some(&*handle)).await?
+                        span_for_request(&req, &ctx.services, Some(&*handle)).await?
                     }
-                    None => span_for_request(&req, None).await?,
+                    None => span_for_request(&req, &ctx.services, None).await?,
                 };
 
                 ep.call(req).instrument(span).await
@@ -274,10 +273,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
-            .data(self.services.clone())
+            .data(UnauthenticatedRequestContext {
+                services: self.services.clone(),
+            })
             .data(session_store.clone())
-            .data(session_storage)
-            .data(db);
+            .data(session_storage);
 
         tokio::spawn(async move {
             loop {

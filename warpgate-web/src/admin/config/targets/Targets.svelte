@@ -2,6 +2,7 @@
     import { Observable, from, map } from 'rxjs'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { type Target, type TargetGroup, api } from 'admin/lib/api'
+    import { adminPermissions } from '../../lib/store'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
@@ -49,8 +50,7 @@
                 const natural = naturalCompareFactory()
 
                 return targets.sort(
-                    firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
-                        .thenBy((x: Target) => !x.groupId)
+                    firstBy((x: Target) => !x.groupId)
                         // Natural sort between groups
                         .thenBy(
                             (a: Target, b: Target) =>
@@ -109,6 +109,7 @@
             <a
                 class="btn btn-primary"
                 href="/config/targets/create"
+                class:disabled={!$adminPermissions.targetsCreate}
                 use:link>
                 Add a target
             </a>
@@ -130,7 +131,6 @@
         {#snippet item(target)}
             <a
                 class="list-group-item list-group-item-action"
-                class:disabled={target.options.kind === TargetKind.WebAdmin}
                 href="/config/targets/{target.id}"
                 use:link>
                 <div class="me-auto">
@@ -167,9 +167,6 @@
                     {/if}
                     {#if target.options.kind === TargetKind.Kubernetes}
                         Kubernetes
-                    {/if}
-                    {#if target.options.kind === TargetKind.WebAdmin}
-                        This web admin interface
                     {/if}
                 </small>
             </a>

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
@@ -9,12 +7,13 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
     Set,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{UserPublicKeyCredential, WarpgateError};
+use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::PublicKeyCredential;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 async fn check_user_ldap_linked(
     db: &DatabaseConnection,
@@ -117,11 +116,13 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
@@ -140,12 +141,14 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         // Check if user is LDAP-linked
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
@@ -191,13 +194,15 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         // Check if user is LDAP-linked
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
@@ -230,12 +235,14 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         // Check if user is LDAP-linked
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {

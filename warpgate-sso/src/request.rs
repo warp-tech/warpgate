@@ -55,6 +55,7 @@ impl SsoLoginRequest {
                     .map(ToString::to_string)
             });
 
+        let info_claims = result.userinfo_claims.as_ref();
         Ok(SsoLoginResponse {
             preferred_username,
 
@@ -69,9 +70,9 @@ impl SsoLoginRequest {
 
             email_verified: get_claim!(email_verified),
 
-            groups: result
-                .userinfo_claims
-                .and_then(|x| x.additional_claims().warpgate_roles.clone()),
+            target_roles: info_claims.and_then(|x| x.additional_claims().warpgate_roles.clone()),
+            admin_roles: info_claims
+                .and_then(|x| x.additional_claims().warpgate_admin_roles.clone()),
 
             id_token: result.token.clone(),
         })

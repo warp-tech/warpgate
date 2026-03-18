@@ -6,7 +6,7 @@ use poem::Request;
 use tokio::sync::Mutex;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::WarpgateError;
-use warpgate_core::logging::http::get_client_ip;
+use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 
 use crate::session_handle::KubernetesSessionHandle;
@@ -43,7 +43,7 @@ impl RequestCorrelator {
             return Ok(handle.clone());
         }
 
-        let ip = get_client_ip(request, Some(&self.services)).await;
+        let ip = get_client_ip(request, &self.services).await;
 
         let handle = State::register_session(
             &self.services.state,
@@ -64,7 +64,7 @@ impl RequestCorrelator {
         user_info: &AuthStateUserInfo,
         target_name: &str,
     ) -> Result<CorrelationKey, WarpgateError> {
-        let ip = get_client_ip(request, Some(&self.services)).await;
+        let ip = get_client_ip(request, &self.services).await;
         Ok((user_info.username.clone(), target_name.into(), ip))
     }
 

@@ -1,17 +1,16 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
-use tokio::sync::Mutex;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
-use warpgate_core::{SessionSnapshot, State};
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::SessionSnapshot;
 use warpgate_db_entities::{Recording, Session};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -43,11 +42,13 @@ impl Api {
     #[oai(path = "/sessions/:id", method = "get", operation_id = "get_session")]
     async fn api_get_session(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSessionResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let session = Session::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -64,11 +65,13 @@ impl Api {
     )]
     async fn api_get_session_recordings(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSessionRecordingsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+        let db = ctx.services.db.lock().await;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
             .order_by_desc(Recording::Column::Started)
             .filter(Recording::Column::SessionId.eq(id.0))
@@ -84,11 +87,13 @@ impl Api {
     )]
     async fn api_close_session(
         &self,
-        state: Data<&Arc<Mutex<State>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CloseSessionResponse, WarpgateError> {
-        let state = state.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+
+        let state = ctx.services.state.lock().await;
 
         if let Some(s) = state.sessions.get(&id) {
             let mut session = s.lock().await;

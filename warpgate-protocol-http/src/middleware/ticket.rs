@@ -3,7 +3,9 @@ use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use warpgate_common::Secret;
-use warpgate_core::{authorize_ticket, consume_ticket, Services};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::SessionAuthorization;
+use warpgate_core::{authorize_ticket, consume_ticket};
 
 use crate::common::SessionExt;
 
@@ -41,6 +43,8 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         let session = <&Session>::from_request_without_body(&req).await?;
         let session = session.clone();
 
+        let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+
         {
             let params: QueryParams = req.params()?;
 
@@ -59,20 +63,18 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             }
 
             if let Some(ticket) = ticket_value {
-                let services = Data::<&Services>::from_request_without_body(&req).await?;
-
                 if let Some((ticket_model, _user_info)) = {
                     let ticket_secret = Secret::new(ticket);
                     if let Some((ticket, user_info)) =
-                        authorize_ticket(&services.db, &ticket_secret).await?
+                        authorize_ticket(&ctx.services.db, &ticket_secret).await?
                     {
-                        consume_ticket(&services.db, &ticket.id).await?;
+                        consume_ticket(&ctx.services.db, &ticket.id).await?;
                         Some((ticket, user_info))
                     } else {
                         None
                     }
                 } {
-                    session.set_auth(crate::common::SessionAuthorization::Ticket {
+                    session.set_auth(SessionAuthorization::Ticket {
                         username: ticket_model.username,
                         target_name: ticket_model.target,
                     });

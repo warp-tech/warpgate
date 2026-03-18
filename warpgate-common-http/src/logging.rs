@@ -2,18 +2,15 @@ use std::fmt::Debug;
 use std::net::ToSocketAddrs;
 
 use poem::http::{Method, StatusCode, Uri};
-use poem::web::{Data, RemoteAddr};
-use poem::{Addr, FromRequest, Request};
+use poem::web::RemoteAddr;
+use poem::{Addr, Request};
 use tracing::*;
+use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::{Services, WarpgateServerHandle};
-
-pub async fn get_client_ip(req: &Request, services: Option<&Services>) -> Option<String> {
-    let trust_x_forwarded_headers = if let Some(services) = services {
+pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
+    let trust_x_forwarded_headers = {
         let config = services.config.lock().await;
         config.store.http.trust_x_forwarded_headers
-    } else {
-        false
     };
 
     let socket_addr = match req.remote_addr() {
@@ -42,10 +39,10 @@ pub async fn get_client_ip(req: &Request, services: Option<&Services>) -> Option
 
 pub async fn span_for_request(
     req: &Request,
+    services: &Services,
     handle: Option<&WarpgateServerHandle>,
 ) -> poem::Result<Span> {
-    let services = Data::<&Services>::from_request_without_body(req).await.ok();
-    let client_ip = get_client_ip(req, services.as_deref().copied())
+    let client_ip = get_client_ip(req, services)
         .await
         .unwrap_or("<unknown>".into());
 
