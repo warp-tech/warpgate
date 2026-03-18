@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-kubernetes"
-version = "0.21.1"
+version = "0.22.0"
 
 [dependencies]
 anyhow.workspace = true
