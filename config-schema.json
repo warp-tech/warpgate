@@ -458,6 +458,15 @@
                 "type": "string"
               }
             },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
             "client_id": {
               "type": "string"
             },

@@ -1,21 +1,19 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{AdminPermission, Secret, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::LdapServer;
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct ImportLdapUsersRequest {
@@ -41,12 +39,21 @@ impl ImportApi {
     )]
     async fn api_import_ldap_users(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         body: Json<ImportLdapUsersRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ImportLdapUsersResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersCreate)).await?;
+
+        if !std::env::var("WARPGATE_UNDER_TEST")
+            .unwrap_or_default()
+            .is_empty()
+        {
+            return Ok(ImportLdapUsersResponse::Ok(Json(vec![])));
+        }
+
+        let db = ctx.services.db.lock().await;
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
@@ -282,11 +289,13 @@ impl ListApi {
     )]
     async fn api_get_all_ldap_servers(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLdapServersResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let mut query = LdapServer::Entity::find().order_by_asc(LdapServer::Column::Name);
 
@@ -309,17 +318,19 @@ impl ListApi {
     )]
     async fn api_create_ldap_server(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateLdapServerRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateLdapServerResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
         if body.name.is_empty() {
             return Ok(CreateLdapServerResponse::BadRequest(Json(
                 "Name cannot be empty".into(),
             )));
         }
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         // Check if name already exists
         let existing = LdapServer::Entity::find()
@@ -353,7 +364,14 @@ impl ListApi {
         };
 
         // Discover base DNs
-        let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await?;
+        let base_dns = if std::env::var("WARPGATE_UNDER_TEST")
+            .unwrap_or_default()
+            .is_empty()
+        {
+            warpgate_ldap::discover_base_dns(&ldap_config).await?
+        } else {
+            vec![]
+        };
 
         let base_dns_json = serde_json::to_value(&base_dns)?;
 
@@ -389,8 +407,11 @@ impl ListApi {
     async fn api_test_ldap_server(
         &self,
         body: Json<TestLdapServerRequest>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<TestLdapServerConnectionResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
         let ldap_config = warpgate_ldap::LdapConfig {
             host: body.host.clone(),
             port: body.port as u16,
@@ -405,26 +426,39 @@ impl ListApi {
             uuid_attribute: None,
         };
 
-        match warpgate_ldap::test_connection(&ldap_config).await {
-            Ok(_) => {
-                // Try to discover base DNs
-                let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await.ok();
+        if std::env::var("WARPGATE_UNDER_TEST")
+            .unwrap_or_default()
+            .is_empty()
+        {
+            match warpgate_ldap::test_connection(&ldap_config).await {
+                Ok(_) => {
+                    // Try to discover base DNs
+                    let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await.ok();
 
-                Ok(TestLdapServerConnectionResponse::Ok(Json(
+                    Ok(TestLdapServerConnectionResponse::Ok(Json(
+                        TestLdapServerResponse {
+                            success: true,
+                            message: "Connection successful".to_string(),
+                            base_dns,
+                        },
+                    )))
+                }
+                Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
-                        success: true,
-                        message: "Connection successful".to_string(),
-                        base_dns,
+                        success: false,
+                        message: format!("Connection failed: {}", e),
+                        base_dns: None,
                     },
-                )))
+                ))),
             }
-            Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
+        } else {
+            Ok(TestLdapServerConnectionResponse::Ok(Json(
                 TestLdapServerResponse {
-                    success: false,
-                    message: format!("Connection failed: {}", e),
-                    base_dns: None,
+                    success: true,
+                    message: "Connection successful".to_string(),
+                    base_dns: Some(vec![]),
                 },
-            ))),
+            )))
         }
     }
 }
@@ -471,11 +505,13 @@ impl DetailApi {
     )]
     async fn api_get_ldap_server(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLdapServerResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapServerResponse::NotFound);
@@ -491,12 +527,14 @@ impl DetailApi {
     )]
     async fn api_update_ldap_server(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         body: Json<UpdateLdapServerRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateLdapServerResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateLdapServerResponse::NotFound);
@@ -557,11 +595,13 @@ impl DetailApi {
     )]
     async fn api_delete_ldap_server(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteLdapServerResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteLdapServerResponse::NotFound);
@@ -596,15 +636,24 @@ impl QueryApi {
     )]
     async fn api_get_ldap_users(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLdapUsersResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersCreate)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapUsersResponse::NotFound);
         };
+
+        if !std::env::var("WARPGATE_UNDER_TEST")
+            .unwrap_or_default()
+            .is_empty()
+        {
+            return Ok(GetLdapUsersResponse::Ok(Json(vec![])));
+        }
 
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&server)?;
         let users = match warpgate_ldap::list_users(&ldap_config).await {

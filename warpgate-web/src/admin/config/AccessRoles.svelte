@@ -4,6 +4,7 @@
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { adminPermissions } from '../lib/store'
 
     function getRoles(options: LoadOptions): Observable<PaginatedResponse<Role>> {
         return from(
@@ -34,7 +35,8 @@
         <h1>roles</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/roles/create"
+            href="/config/access-roles/create"
+            class:disabled={!$adminPermissions.accessRolesCreate}
             use:link>
             Add a role
         </a>
@@ -44,7 +46,7 @@
         {#snippet item(role)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/roles/{role.id}"
+                href="/config/access-roles/{role.id}"
                 use:link>
                 <div>
                     <strong class="me-auto">

@@ -7,13 +7,12 @@ except ImportError:
     import openapi_client as sdk
 
 
-
 @contextmanager
-def admin_client(host):
+def admin_client(host, token="token-value"):
     config = sdk.Configuration(
         host=f"{host}/@warpgate/admin/api",
         api_key={
-            "TokenSecurityScheme": "token-value",
+            "TokenSecurityScheme": token,
         },
     )
     config.verify_ssl = False

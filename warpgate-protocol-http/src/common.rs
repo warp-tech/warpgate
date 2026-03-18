@@ -5,15 +5,22 @@ use anyhow::Context;
 use http::header::HOST;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use poem::error::InternalServerError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
-use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
-use warpgate_core::{AuthStateStore, ConfigProvider, Services};
+use warpgate_common::{ProtocolName, WarpgateError};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
+use warpgate_core::{AuthStateStore, ConfigProvider};
+use warpgate_db_entities::{User, UserAdminRoleAssignment};
 use warpgate_sso::CoreIdToken;
 
 use crate::session::SessionStore;
@@ -24,7 +31,7 @@ static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
-static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
+pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
@@ -95,167 +102,49 @@ impl SessionExt for Session {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthStateId(pub Uuid);
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum SessionAuthorization {
-    User(String),
-    Ticket {
-        username: String,
-        target_name: String,
-    },
-}
+pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
+    // A user is considered an administrator if they have any admin role assigned.
+    let services = &ctx.services;
 
-impl SessionAuthorization {
-    pub fn username(&self) -> &String {
-        match self {
-            Self::User(username) => username,
-            Self::Ticket { username, .. } => username,
-        }
+    // Admin tokens bypass the database check and are always full administrators.
+    if let RequestAuthorization::AdminToken = ctx.auth {
+        return Ok(true);
     }
-}
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum RequestAuthorization {
-    Session(SessionAuthorization),
-    UserToken { username: String },
-    AdminToken,
-}
-
-impl RequestAuthorization {
-    pub fn username(&self) -> Option<&String> {
-        match self {
-            Self::Session(auth) => Some(auth.username()),
-            Self::UserToken { username } => Some(username),
-            Self::AdminToken => None,
-        }
-    }
-}
-
-pub async fn is_user_admin(req: &Request, auth: &RequestAuthorization) -> poem::Result<bool> {
-    let services = Data::<&Services>::from_request_without_body(req).await?;
-
-    let username = match auth {
+    let username = match &ctx.auth {
         RequestAuthorization::Session(SessionAuthorization::User(username)) => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
         RequestAuthorization::UserToken { username } => username,
-        RequestAuthorization::AdminToken => return Ok(true),
+        RequestAuthorization::AdminToken => unreachable!(),
     };
 
-    let mut config_provider = services.config_provider.lock().await;
-    let targets = config_provider.list_targets().await?;
-    for target in targets {
-        if matches!(target.options, TargetOptions::WebAdmin(_))
-            && config_provider
-                .authorize_target(username, &target.name)
-                .await?
-        {
-            drop(config_provider);
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
+    let db = services.db.lock().await;
 
-pub fn endpoint_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
-    e.around(|ep, req| async move {
-        let auth = Data::<&RequestAuthorization>::from_request_without_body(&req).await?;
-        if is_user_admin(&req, &auth).await? {
-            return Ok(ep.call(req).await?.into_response());
-        }
-        Err(poem::Error::from_status(StatusCode::UNAUTHORIZED))
-    })
-}
-
-pub fn page_admin_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
-    e.around(|ep, req| async move {
-        let auth = Data::<&RequestAuthorization>::from_request_without_body(&req).await?;
-        let session = <&Session>::from_request_without_body(&req).await?;
-        if is_user_admin(&req, &auth).await? {
-            return Ok(ep.call(req).await?.into_response());
-        }
-        session.clear();
-        Ok(gateway_redirect(&req).into_response())
-    })
-}
-
-pub(crate) async fn inject_request_authorization<E: Endpoint + 'static>(
-    ep: Arc<E>,
-    req: Request,
-) -> poem::Result<E::Output> {
-    let session = <&Session>::from_request_without_body(&req).await?;
-    let services = Data::<&Services>::from_request_without_body(&req).await?;
-
-    let mut session_auth = session.get_auth();
-    if session_auth.is_some() {
-        let config = services.config.lock().await;
-        if let Ok(base_url) = config.construct_external_url(None, None) {
-            if let Some(base_host) = base_url.host_str() {
-                let request_host = req
-                    .header(HOST)
-                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
-
-                if let Some(host) = request_host {
-                    // Validate request host matches base host or is a subdomain/localhost
-                    let is_localhost = is_localhost_host(&host);
-                    let is_authorized = host == base_host
-                        || host.ends_with(&format!(".{}", base_host))
-                        || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
-
-                    if !is_authorized {
-                        tracing::warn!(
-                            "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
-                            host,
-                            base_host
-                        );
-                        session.clear();
-                        session_auth = None;
-                    }
-                }
-            }
-        }
-    }
-
-    let auth = match session_auth {
-        Some(auth) => Some(RequestAuthorization::Session(auth)),
-        None => match req.headers().get(&X_WARPGATE_TOKEN) {
-            Some(token_from_header) => {
-                let token_from_header = token_from_header
-                    .to_str()
-                    .map_err(poem::error::BadRequest)?;
-                if Some(token_from_header) == services.admin_token.lock().await.as_deref() {
-                    Some(RequestAuthorization::AdminToken)
-                } else if let Some(user) = services
-                    .config_provider
-                    .lock()
-                    .await
-                    .validate_api_token(token_from_header)
-                    .await?
-                {
-                    Some(RequestAuthorization::UserToken {
-                        username: user.username,
-                    })
-                } else {
-                    None
-                }
-            }
-            None => None,
-        },
+    let Some(user_model) = User::Entity::find()
+        .filter(User::Column::Username.eq(username))
+        .one(&*db)
+        .await
+        .map_err(InternalServerError)?
+    else {
+        return Ok(false);
     };
 
-    if let Some(auth) = auth {
-        // data_opt would change the return type from E::Output
-        Ok(ep.data(auth).call(req).await?)
-    } else {
-        Ok(ep.call(req).await?)
-    }
+    let count: u64 = UserAdminRoleAssignment::Entity::find()
+        .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
+        .count(&*db)
+        .await
+        .map_err(InternalServerError)?;
+
+    Ok(count > 0)
 }
+
 
 pub async fn _inner_auth<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
 ) -> poem::Result<Option<E::Output>> {
-    let auth = Option::<Data<&RequestAuthorization>>::from_request_without_body(&req).await?;
-    if auth.is_none() {
+    let ctx = Option::<Data<&AuthenticatedRequestContext>>::from_request_without_body(&req).await?;
+    if ctx.is_none() {
         return Ok(None);
     }
     return ep.call(req).await.map(Some);
@@ -333,6 +222,7 @@ pub async fn get_auth_state_for_request(
 
 pub async fn authorize_session(
     req: &Request,
+    ctx: &UnauthenticatedRequestContext,
     user_info: AuthStateUserInfo,
 ) -> Result<(), WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
@@ -345,7 +235,7 @@ pub async fn authorize_session(
     let server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req)
+        .create_handle_for(req, ctx)
         .await
         .context("create_handle_for")?;
     server_handle
@@ -356,4 +246,80 @@ pub async fn authorize_session(
     session.set_auth(SessionAuthorization::User(user_info.username));
 
     Ok(())
+}
+
+
+pub async fn inject_request_authorization<E: Endpoint + 'static>(
+    ep: Arc<E>,
+    req: Request,
+) -> poem::Result<E::Output> {
+    let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+    let session = <&Session>::from_request_without_body(&req).await?;
+
+    let mut session_auth = session.get_auth();
+    if session_auth.is_some() {
+        let config = ctx.services.config.lock().await;
+        if let Ok(base_url) = config.construct_external_url(None, None) {
+            if let Some(base_host) = base_url.host_str() {
+                let request_host = req
+                    .header(HOST)
+                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
+                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+
+                if let Some(host) = request_host {
+                    // Validate request host matches base host or is a subdomain/localhost
+                    let is_localhost = is_localhost_host(&host);
+                    let is_authorized = host == base_host
+                        || host.ends_with(&format!(".{}", base_host))
+                        || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
+
+                    if !is_authorized {
+                        tracing::warn!(
+                            "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
+                            host,
+                            base_host
+                        );
+                        session.clear();
+                        session_auth = None;
+                    }
+                }
+            }
+        }
+    }
+
+    let auth = match session_auth {
+        Some(auth) => Some(RequestAuthorization::Session(auth)),
+        None => match req.headers().get(&X_WARPGATE_TOKEN) {
+            Some(token_from_header) => {
+                let token_from_header = token_from_header
+                    .to_str()
+                    .map_err(poem::error::BadRequest)?;
+                if Some(token_from_header) == ctx.services.admin_token.lock().await.as_deref() {
+                    Some(RequestAuthorization::AdminToken)
+                } else if let Some(user) = ctx
+                    .services
+                    .config_provider
+                    .lock()
+                    .await
+                    .validate_api_token(token_from_header)
+                    .await?
+                {
+                    Some(RequestAuthorization::UserToken {
+                        username: user.username,
+                    })
+                } else {
+                    None
+                }
+            }
+            None => None,
+        },
+    };
+
+    if let Some(auth) = auth {
+        // build context and attach it instead of raw authorization
+        let ctx = ctx.to_authenticated(auth);
+        Ok(ep.data(ctx).call(req).await?)
+    } else {
+        Ok(ep.call(req).await?)
+    }
 }

@@ -1,18 +1,15 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
-};
-use tokio::sync::Mutex;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{Secret, UserPasswordCredential, WarpgateError};
+use warpgate_common::{AdminPermission, Secret, UserPasswordCredential, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::PasswordCredential;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct ExistingPasswordCredential {
@@ -53,11 +50,13 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let objects = PasswordCredential::Entity::find()
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
@@ -76,12 +75,14 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewPasswordCredential>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let object = PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -119,12 +120,14 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))

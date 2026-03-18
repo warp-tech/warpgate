@@ -1,14 +1,14 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
-use tokio::sync::Mutex;
+use sea_orm::{EntityTrait, ModelTrait};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_db_entities::KnownHost;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 pub struct Api;
 
 #[derive(ApiResponse)]
@@ -29,12 +29,13 @@ impl Api {
     )]
     async fn api_ssh_delete_known_host(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
-        use warpgate_db_entities::KnownHost;
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let known_host = KnownHost::Entity::find_by_id(id.0).one(&*db).await?;
 

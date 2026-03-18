@@ -5,6 +5,7 @@
     import Fa from 'svelte-fa'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
         id: string,
@@ -39,13 +40,15 @@
 
 <h4 class="mt-4">Authentication</h4>
 
+{#if $adminPermissions.targetsEdit}
 <div class="mb-3">
     {#if !hostKeyCheckInvalidated}
-        <TargetSshHostKeyChecker id={id} options={options} />
+    <TargetSshHostKeyChecker id={id} options={options} />
     {:else}
-        <Alert color="secondary">Save changes to see the host key validation status</Alert>
+    <Alert color="secondary">Save changes to see the host key validation status</Alert>
     {/if}
 </div>
+{/if}
 
 <FormGroup floating label="Username">
     <input class="form-control"

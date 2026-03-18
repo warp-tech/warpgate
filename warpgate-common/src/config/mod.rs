@@ -176,6 +176,85 @@ pub struct Role {
     pub description: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct AdminRole {
+    #[serde(default)]
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+
+    pub targets_create: bool,
+    pub targets_edit: bool,
+    pub targets_delete: bool,
+
+    pub users_create: bool,
+    pub users_edit: bool,
+    pub users_delete: bool,
+
+    pub access_roles_create: bool,
+    pub access_roles_edit: bool,
+    pub access_roles_delete: bool,
+    pub access_roles_assign: bool,
+
+    pub sessions_view: bool,
+    pub sessions_terminate: bool,
+
+    pub recordings_view: bool,
+
+    pub tickets_create: bool,
+    pub tickets_delete: bool,
+
+    pub config_edit: bool,
+
+    pub admin_roles_manage: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminPermission {
+    TargetsCreate,
+    TargetsEdit,
+    TargetsDelete,
+    UsersCreate,
+    UsersEdit,
+    UsersDelete,
+    AccessRolesCreate,
+    AccessRolesEdit,
+    AccessRolesDelete,
+    AccessRolesAssign,
+    SessionsView,
+    SessionsTerminate,
+    RecordingsView,
+    TicketsCreate,
+    TicketsDelete,
+    ConfigEdit,
+    AdminRolesManage,
+}
+
+impl AdminRole {
+    pub fn has_permission(&self, perm: AdminPermission) -> bool {
+        match perm {
+            AdminPermission::TargetsCreate => self.targets_create,
+            AdminPermission::TargetsEdit => self.targets_edit,
+            AdminPermission::TargetsDelete => self.targets_delete,
+            AdminPermission::UsersCreate => self.users_create,
+            AdminPermission::UsersEdit => self.users_edit,
+            AdminPermission::UsersDelete => self.users_delete,
+            AdminPermission::AccessRolesCreate => self.access_roles_create,
+            AdminPermission::AccessRolesEdit => self.access_roles_edit,
+            AdminPermission::AccessRolesDelete => self.access_roles_delete,
+            AdminPermission::AccessRolesAssign => self.access_roles_assign,
+            AdminPermission::SessionsView => self.sessions_view,
+            AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::RecordingsView => self.recordings_view,
+            AdminPermission::TicketsCreate => self.tickets_create,
+            AdminPermission::TicketsDelete => self.tickets_delete,
+            AdminPermission::ConfigEdit => self.config_edit,
+            AdminPermission::AdminRolesManage => self.admin_roles_manage,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]

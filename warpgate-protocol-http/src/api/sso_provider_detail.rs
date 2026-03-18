@@ -7,7 +7,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
 pub struct Api;
@@ -48,11 +48,11 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         name: Path<String>,
         next: Query<Option<String>>,
     ) -> Result<StartSsoResponse, WarpgateError> {
-        let config = services.config.lock().await;
+        let config = ctx.services.config.lock().await;
 
         let name = name.0;
 

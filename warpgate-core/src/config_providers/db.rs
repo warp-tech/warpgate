@@ -607,6 +607,65 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(())
     }
 
+    async fn apply_sso_admin_role_mappings(
+        &mut self,
+        username: &str,
+        managed_admin_role_names: Option<Vec<String>>,
+        assigned_admin_role_names: Vec<String>,
+    ) -> Result<(), WarpgateError> {
+        let db = self.db.lock().await;
+
+        let user = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(username))
+            .one(&*db)
+            .await?
+            .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
+
+        let managed_admin_role_names = match managed_admin_role_names {
+            Some(x) => x,
+            None => entities::AdminRole::Entity::find()
+                .all(&*db)
+                .await?
+                .into_iter()
+                .map(|x| x.name)
+                .collect(),
+        };
+
+        for role_name in managed_admin_role_names.into_iter() {
+            let role = entities::AdminRole::Entity::find()
+                .filter(entities::AdminRole::Column::Name.eq(role_name.clone()))
+                .one(&*db)
+                .await?
+                .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
+
+            let assignment = entities::UserAdminRoleAssignment::Entity::find()
+                .filter(entities::UserAdminRoleAssignment::Column::UserId.eq(user.id))
+                .filter(entities::UserAdminRoleAssignment::Column::AdminRoleId.eq(role.id))
+                .one(&*db)
+                .await?;
+
+            match (assignment, assigned_admin_role_names.contains(&role_name)) {
+                (None, true) => {
+                    info!("Adding admin role {role_name} for user {username} (from SSO)");
+                    let values = entities::UserAdminRoleAssignment::ActiveModel {
+                        user_id: Set(user.id),
+                        admin_role_id: Set(role.id),
+                        ..Default::default()
+                    };
+
+                    values.insert(&*db).await?;
+                }
+                (Some(assignment), false) => {
+                    info!("Removing admin role {role_name} for user {username} (from SSO)");
+                    assignment.delete(&*db).await?;
+                }
+                _ => (),
+            }
+        }
+
+        Ok(())
+    }
+
     async fn update_public_key_last_used(
         &self,
         credential: Option<AuthCredential>,

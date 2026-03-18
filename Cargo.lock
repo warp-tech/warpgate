@@ -6178,6 +6178,7 @@ dependencies = [
  "uuid",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-ldap",
@@ -6257,6 +6258,20 @@ dependencies = [
  "warpgate-tls",
  "webpki",
  "x509-parser 0.17.0",
+]
+
+[[package]]
+name = "warpgate-common-http"
+version = "0.20.2"
+dependencies = [
+ "poem",
+ "poem-openapi",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-common",
+ "warpgate-core",
 ]
 
 [[package]]
@@ -6398,6 +6413,7 @@ dependencies = [
  "warpgate-admin",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-sso",
@@ -6438,6 +6454,7 @@ dependencies = [
  "uuid",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-tls",

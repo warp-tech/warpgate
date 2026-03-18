@@ -25,6 +25,7 @@ tokio-tungstenite.workspace = true
 tracing.workspace = true
 warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }

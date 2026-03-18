@@ -47,6 +47,8 @@ where
 pub struct WarpgateClaims {
     #[serde(default, deserialize_with = "string_or_vec")]
     pub warpgate_roles: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub warpgate_admin_roles: Option<Vec<String>>,
 }
 
 impl AdditionalClaims for WarpgateClaims {}
