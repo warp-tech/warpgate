@@ -13,7 +13,7 @@ use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
-use russh::{CryptoVec, MethodKind, MethodSet, Sig};
+use russh::{MethodKind, MethodSet, Sig};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
@@ -317,8 +317,7 @@ impl ServerSession {
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
             if let Some(session) = self.session_handle.clone() {
-                self.channel_writer
-                    .write(session, channel.0, CryptoVec::from_slice(data));
+                self.channel_writer.write(session, channel.0, data);
             }
         }
         Ok(())
@@ -723,11 +722,8 @@ impl ServerSession {
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
-                    self.channel_writer.write(
-                        session,
-                        server_channel_id.0,
-                        CryptoVec::from_slice(&data),
-                    );
+                    self.channel_writer
+                        .write(session, server_channel_id.0, data);
                 }
             }
             RCEvent::Success(channel) => {
@@ -826,12 +822,8 @@ impl ServerSession {
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
-                    self.channel_writer.write_extended(
-                        session,
-                        server_channel_id.0,
-                        ext,
-                        CryptoVec::from_slice(&data),
-                    );
+                    self.channel_writer
+                        .write_extended(session, server_channel_id.0, ext, data);
                 }
             }
             RCEvent::HostKeyReceived(key) => {

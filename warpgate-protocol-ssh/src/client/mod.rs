@@ -811,7 +811,7 @@ impl RemoteClient {
 
     async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
@@ -836,7 +836,7 @@ impl RemoteClient {
 
     async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
