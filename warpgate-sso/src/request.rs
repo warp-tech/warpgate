@@ -67,29 +67,29 @@ impl SsoLoginRequest {
 
         let email_verified = get_claim!(email_verified);
 
-        // Get groups from warpgate_roles claim (works for Custom providers)
-        let mut groups = result
-            .userinfo_claims
-            .and_then(|x| x.additional_claims().warpgate_roles.clone());
+        let info_claims = result.userinfo_claims.as_ref();
 
-        // For Google provider with service account, fetch groups from Directory API
-        if groups.is_none() {
+        let (access_groups, admin_groups) =
             match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
             {
-                Ok(Some(google_groups)) => groups = Some(google_groups),
-                Ok(None) => {}
+                Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
+                Ok(None) => (
+                    info_claims.and_then(|x| x.additional_claims().warpgate_roles.clone()),
+                    info_claims.and_then(|x| x.additional_claims().warpgate_admin_roles.clone()),
+                ),
                 Err(e) => {
                     error!("Failed to fetch Google groups: {e}");
+                    (None, None)
                 }
-            }
-        }
+            };
 
         Ok(SsoLoginResponse {
             preferred_username,
             name,
             email,
             email_verified,
-            groups,
+            access_roles: access_groups,
+            admin_roles: admin_groups,
             id_token: result.token.clone(),
         })
     }

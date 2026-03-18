@@ -75,6 +75,7 @@ pub enum SsoInternalProviderConfig {
         /// Maps Google group email addresses to Warpgate role names.
         /// Use "*" as a key to set a default role for any group not explicitly mapped.
         role_mappings: Option<HashMap<String, RoleMapping>>,
+        admin_role_mappings: Option<HashMap<String, RoleMapping>>,
     },
     #[serde(rename = "apple")]
     Apple {
@@ -103,6 +104,7 @@ pub enum SsoInternalProviderConfig {
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
         role_mappings: Option<HashMap<String, RoleMapping>>,
+        admin_role_mappings: Option<HashMap<String, RoleMapping>>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -259,6 +261,22 @@ impl SsoInternalProviderConfig {
         match self {
             SsoInternalProviderConfig::Google { role_mappings, .. }
             | SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn admin_role_mappings(&self) -> Option<HashMap<String, RoleMapping>> {
+        #[allow(clippy::match_like_matches_macro)]
+        match self {
+            SsoInternalProviderConfig::Google {
+                admin_role_mappings,
+                ..
+            }
+            | SsoInternalProviderConfig::Custom {
+                admin_role_mappings,
+                ..
+            } => admin_role_mappings.clone(),
             _ => None,
         }
     }

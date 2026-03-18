@@ -7,11 +7,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
-use crate::common::{endpoint_auth, RequestAuthorization};
+use crate::common::endpoint_auth;
 
 pub struct Api;
 
@@ -82,12 +82,12 @@ impl Api {
     )]
     async fn api_get_api_tokens(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(*auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
         };
 
@@ -106,13 +106,13 @@ impl Api {
     )]
     async fn api_create_api_token(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(&auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
 
@@ -143,13 +143,13 @@ impl Api {
     )]
     async fn api_delete_api_token(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(&auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);
         };
 

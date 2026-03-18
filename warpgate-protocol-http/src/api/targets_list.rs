@@ -7,13 +7,16 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
-use warpgate_common::{TargetOptions, WarpgateError};
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
+use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
 use crate::api::AnySecurityScheme;
-use crate::common::{endpoint_auth, RequestAuthorization, SessionAuthorization};
+use crate::common::endpoint_auth;
 
 pub struct Api;
 
@@ -50,12 +53,12 @@ impl Api {
     )]
     async fn api_get_all_targets(
         &self,
-        services: Data<&Services>,
-        auth: Data<&RequestAuthorization>,
+        ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
+        let services = &ctx.services;
         let groups: Vec<TargetGroup::Model> = {
             let db = services.db.lock().await;
             TargetGroup::Entity::find().all(&*db).await
@@ -64,7 +67,7 @@ impl Api {
         let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
-        let mut targets = {
+        let mut targets: Vec<TargetConfig> = {
             let mut config_provider = services.config_provider.lock().await;
             config_provider.list_targets().await?
         };
@@ -80,10 +83,11 @@ impl Api {
             })
         }
 
-        let targets = stream::iter(targets)
+        let auth_clone = ctx.auth.clone();
+        let targets: Vec<_> = stream::iter(targets)
             .filter(|t| {
                 let services = services.clone();
-                let auth = auth.clone();
+                let auth = auth_clone.clone();
                 let name = t.name.clone();
                 async move {
                     match auth {

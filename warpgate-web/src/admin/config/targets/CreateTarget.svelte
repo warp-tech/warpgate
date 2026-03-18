@@ -6,9 +6,10 @@
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import { adminPermissions } from '../../lib/store'
 
     interface Props {
-        params: { kind: string };
+        params: { kind: string }
     }
 
     let { params }: Props = $props()
@@ -63,7 +64,6 @@
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,
                     clusterUrl: 'https://kubernetes.example.com:6443',
-                    namespace: 'default',
                     tls: {
                         mode: TlsMode.Preferred,
                         verify: true,
@@ -74,7 +74,6 @@
                         privateKey: '',
                     },
                 },
-                WebAdmin: null as any,
             }[params.kind]
             if (!options) {
                 return
@@ -102,6 +101,9 @@
 </script>
 
 <div class="container-max-md">
+    {#if !$adminPermissions.targetsCreate}
+        <Alert color="warning">You do not have permission to create targets.</Alert>
+    {/if}
     {#if error}
     <Alert color="danger">{error}</Alert>
     {/if}
@@ -119,6 +121,7 @@
             <Button class="d-none" type="submit"></Button>
 
             <FormGroup floating label="Name">
+                <!-- svelte-ignore a11y_autofocus -->
                 <input class="form-control" autofocus required bind:value={name} />
             </FormGroup>
 

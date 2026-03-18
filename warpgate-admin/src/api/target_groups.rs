@@ -1,21 +1,19 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::prelude::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::TargetGroup;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct TargetGroupDataRequest {
@@ -53,10 +51,12 @@ impl ListApi {
     )]
     async fn api_list_target_groups(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetGroupsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
         let groups = TargetGroup::Entity::find()
             .order_by_asc(TargetGroup::Column::Name)
             .all(&*db)
@@ -72,15 +72,17 @@ impl ListApi {
     )]
     async fn api_create_target_group(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<TargetGroupDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTargetGroupResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsCreate)).await?;
+
         if body.name.is_empty() {
             return Ok(CreateTargetGroupResponse::BadRequest(Json("name".into())));
         }
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -142,11 +144,13 @@ impl DetailApi {
     )]
     async fn api_get_target_group(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         match group {
@@ -162,16 +166,18 @@ impl DetailApi {
     )]
     async fn api_update_target_group(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         body: Json<TargetGroupDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetGroupResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+
         if body.name.is_empty() {
             return Ok(UpdateTargetGroupResponse::BadRequest);
         }
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         let Some(group) = group else {
@@ -204,11 +210,13 @@ impl DetailApi {
     )]
     async fn api_delete_target_group(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
+
+        let db = ctx.services.db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         let Some(group) = group else {
