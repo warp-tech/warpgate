@@ -2,8 +2,10 @@ use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::SimpleExpr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 use warpgate_common::{
@@ -61,11 +63,28 @@ impl ListApi {
 
         let db = ctx.services.db.lock().await;
 
-        let mut targets = Target::Entity::find().order_by_asc(Target::Column::Name);
+        let mut targets = Target::Entity::find();
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            targets = targets.filter(Target::Column::Name.like(search));
+            let search_pattern = format!("%{}%", search.to_lowercase());
+            targets = targets
+                .filter(
+                    Condition::any()
+                        .add(Target::Column::Name.like(&search_pattern))
+                        .add(Target::Column::Description.like(&search_pattern)),
+                )
+                .order_by_asc({
+                    let case_expr: SimpleExpr = Expr::case(
+                        Expr::col((Target::Entity, Target::Column::Name)).like(&search_pattern),
+                        0,
+                    )
+                    .finally(1)
+                    .into();
+                    case_expr
+                })
+                .order_by_asc(Target::Column::Name);
+        } else {
+            targets = targets.order_by_asc(Target::Column::Name);
         }
 
         if let Some(group_id) = *group_id {
