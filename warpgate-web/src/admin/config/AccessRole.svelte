@@ -20,11 +20,8 @@
     let role: Role | undefined = $state()
     const initPromise = init()
 
-    let disabled = $state(false)
-
     async function init () {
         role = await api.getRole({ id: params.id })
-        disabled = role.name === 'warpgate:admin'
     }
 
     function loadUsers (): rx.Observable<PaginatedResponse<User>> {
@@ -80,17 +77,11 @@
         </div>
 
         <FormGroup floating label="Name">
-            <Input
-                bind:value={role!.name}
-                disabled={disabled}
-            />
+            <Input bind:value={role!.name} />
         </FormGroup>
 
         <FormGroup floating label="Description">
-            <Input
-                bind:value={role!.description}
-                disabled={disabled}
-            />
+            <Input bind:value={role!.description} />
         </FormGroup>
     </Loadable>
 
@@ -101,14 +92,14 @@
     <div class="d-flex">
         <AsyncButton
         color="primary"
-            disabled={disabled || !$adminPermissions.accessRolesEdit}
+            disabled={!$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
         >Update</AsyncButton>
 
         <AsyncButton
             class="ms-2"
-            disabled={disabled || !$adminPermissions.accessRolesDelete}
+            disabled={!$adminPermissions.accessRolesDelete}
             color="danger"
             click={remove}
         >Remove</AsyncButton>
