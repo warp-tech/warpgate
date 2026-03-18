@@ -1,21 +1,19 @@
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait,
-    QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
     Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
@@ -93,11 +91,13 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let objects = CertificateCredential::Entity::find()
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -116,12 +116,14 @@ impl ListApi {
     )]
     async fn api_issue(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<IssueCertificateCredentialRequest>,
         user_id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
         let params = Parameters::Entity::get(&db).await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
@@ -176,13 +178,15 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<UpdateCertificateCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
         let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
             .one(&*db)
@@ -208,12 +212,14 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _auth: AnySecurityScheme,
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))

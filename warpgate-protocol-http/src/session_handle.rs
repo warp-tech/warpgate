@@ -4,7 +4,7 @@ use std::sync::Arc;
 use poem::error::GetDataError;
 use poem::session::Session;
 use poem::web::Data;
-use poem::{FromRequest, Request, RequestBody};
+use poem::{FromRequest, Request};
 use tokio::sync::{mpsc, Mutex};
 use warpgate_core::{SessionHandle, WarpgateServerHandle};
 
@@ -32,32 +32,14 @@ impl SessionHandle for HttpSessionHandle {
     }
 }
 
-#[derive(Clone)]
-pub struct WarpgateServerHandleFromRequest(pub Arc<Mutex<WarpgateServerHandle>>);
-
-impl std::ops::Deref for WarpgateServerHandleFromRequest {
-    type Target = Arc<Mutex<WarpgateServerHandle>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a> FromRequest<'a> for WarpgateServerHandleFromRequest {
-    async fn from_request(req: &'a Request, _: &mut RequestBody) -> poem::Result<Self> {
-        let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
-        let session = <&Session>::from_request_without_body(req).await?;
-        Ok(sm
-            .lock()
-            .await
-            .handle_for(session)
-            .map(WarpgateServerHandleFromRequest)
-            .ok_or_else(|| GetDataError(type_name::<WarpgateServerHandle>()))?)
-    }
-}
-
-impl From<Arc<Mutex<WarpgateServerHandle>>> for WarpgateServerHandleFromRequest {
-    fn from(handle: Arc<Mutex<WarpgateServerHandle>>) -> Self {
-        WarpgateServerHandleFromRequest(handle)
-    }
+pub async fn warpgate_server_handle_for_request(
+    req: &Request,
+) -> poem::Result<Arc<Mutex<WarpgateServerHandle>>> {
+    let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req).await?;
+    let session = <&Session>::from_request_without_body(req).await?;
+    Ok(sm
+        .lock()
+        .await
+        .handle_for(session)
+        .ok_or_else(|| GetDataError(type_name::<WarpgateServerHandle>()))?)
 }

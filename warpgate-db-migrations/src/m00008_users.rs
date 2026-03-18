@@ -31,7 +31,7 @@ pub mod user {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-mod user_role_assignment {
+pub(crate) mod user_role_assignment {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 

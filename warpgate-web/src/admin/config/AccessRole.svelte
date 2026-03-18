@@ -8,6 +8,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
+    import { adminPermissions } from '../lib/store'
 
     interface Props {
         params: { id: string };
@@ -19,11 +20,8 @@
     let role: Role | undefined = $state()
     const initPromise = init()
 
-    let disabled = $state(false)
-
     async function init () {
         role = await api.getRole({ id: params.id })
-        disabled = role.name === 'warpgate:admin'
     }
 
     function loadUsers (): rx.Observable<PaginatedResponse<User>> {
@@ -64,7 +62,7 @@
     async function remove () {
         if (confirm(`Delete role ${role!.name}?`)) {
             await api.deleteRole(role!)
-            replace('/config/roles')
+            replace('/config/access-roles')
         }
     }
 </script>
@@ -79,17 +77,11 @@
         </div>
 
         <FormGroup floating label="Name">
-            <Input
-                bind:value={role!.name}
-                disabled={disabled}
-            />
+            <Input bind:value={role!.name} />
         </FormGroup>
 
         <FormGroup floating label="Description">
-            <Input
-                bind:value={role!.description}
-                disabled={disabled}
-            />
+            <Input bind:value={role!.description} />
         </FormGroup>
     </Loadable>
 
@@ -100,14 +92,14 @@
     <div class="d-flex">
         <AsyncButton
         color="primary"
-            disabled={disabled}
+            disabled={!$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
         >Update</AsyncButton>
 
         <AsyncButton
             class="ms-2"
-            disabled={disabled}
+            disabled={!$adminPermissions.accessRolesDelete}
             color="danger"
             click={remove}
         >Remove</AsyncButton>

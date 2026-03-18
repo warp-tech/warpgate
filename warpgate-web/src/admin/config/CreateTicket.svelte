@@ -24,7 +24,6 @@ async function load () {
         api.getTargets(),
         api.getUsers(),
     ])
-    targets = targets.filter(x => x.options.kind !== TargetKind.WebAdmin)
     targets.sort(firstBy('name'))
     users.sort(firstBy('username'))
 }
@@ -76,7 +75,6 @@ async function create () {
                 MySql: TargetKind.MySql,
                 Ssh: TargetKind.Ssh,
                 Postgres: TargetKind.Postgres,
-                WebAdmin: TargetKind.WebAdmin,
                 Kubernetes: TargetKind.Ssh, // Use SSH as placeholder since Kubernetes isn't in gateway TargetKind
             }[selectedTarget.options.kind]}
             username={selectedUser.username}

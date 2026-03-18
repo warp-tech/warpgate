@@ -3,11 +3,14 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError};
-use warpgate_core::Services;
+use warpgate_common::{
+    AdminPermission, SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError,
+};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -40,11 +43,13 @@ impl Api {
     )]
     async fn api_ssh_check_host_key(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CheckSshHostKeyRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
-        let mut handles = RemoteClient::create(Uuid::new_v4(), services.clone())?;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+
+        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services.clone())?;
 
         let _ = handles.command_tx.send((
             RCCommand::Connect(TargetSSHOptions {
