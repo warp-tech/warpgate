@@ -398,6 +398,15 @@
                 "null"
               ]
             },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
             "client_id": {
               "type": "string"
             },
@@ -509,7 +518,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "type": "string"
+                "$ref": "#/$defs/RoleMapping"
               }
             },
             "client_id": {
