@@ -230,7 +230,7 @@
                     The private key for this certificate is not stored in this browser.
                 {/if}
                 The kubeconfig will contain placeholders for authentication.
-                You can issue a new certificate with the "Store in browser" option to generate a ready-to-use kubeconfig.
+                You can issue a new certificate in the dropdown above with the "Store in browser" option to generate a ready-to-use kubeconfig.
             </Alert>
         {/if}
     {/if}
