@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::time::SystemTime;
 
 use data_encoding::BASE64;
@@ -35,12 +36,32 @@ pub static GOOGLE_ISSUER_URL: Lazy<IssuerUrl> =
 pub static APPLE_ISSUER_URL: Lazy<IssuerUrl> =
     Lazy::new(|| IssuerUrl::new("https://appleid.apple.com".to_string()).unwrap());
 
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+pub enum SsoProviderReturnUrlPrefix {
+    #[serde(rename = "@")]
+    #[default]
+    AtSign,
+    #[serde(rename = "_")]
+    Underscore,
+}
+
+impl Display for SsoProviderReturnUrlPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SsoProviderReturnUrlPrefix::AtSign => write!(f, "@"),
+            SsoProviderReturnUrlPrefix::Underscore => write!(f, "_"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
     pub provider: SsoInternalProviderConfig,
     pub return_domain_whitelist: Option<Vec<String>>,
+    #[serde(default)]
+    pub return_url_prefix: SsoProviderReturnUrlPrefix,
     #[serde(default)]
     pub auto_create_users: bool,
     /// Default credential policy for auto-created users.

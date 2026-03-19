@@ -590,11 +590,22 @@
           "items": {
             "type": "string"
           }
+        },
+        "return_url_prefix": {
+          "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
+          "default": "@"
         }
       },
       "required": [
         "name",
         "provider"
+      ]
+    },
+    "SsoProviderReturnUrlPrefix": {
+      "type": "string",
+      "enum": [
+        "@",
+        "_"
       ]
     }
   }
