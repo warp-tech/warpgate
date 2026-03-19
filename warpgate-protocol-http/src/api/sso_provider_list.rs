@@ -263,19 +263,12 @@ impl Api {
             // and names won't be remapped
             let managed_role_names = mappings
                 .as_ref()
-                .map(|m| {
-                    m.iter()
-                        .flat_map(|(_, v)| v.roles())
-                        .collect::<Vec<_>>()
-                });
+                .map(|m| m.iter().flat_map(|(_, v)| v.roles()).collect::<Vec<_>>());
 
             let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
                 // Apply wildcard "*" mapping if user has any groups
                 let mut roles: Vec<String> = if !remote_groups.is_empty() {
-                    mappings
-                        .get("*")
-                        .map(|v| v.roles())
-                        .unwrap_or_default()
+                    mappings.get("*").map(|v| v.roles()).unwrap_or_default()
                 } else {
                     Vec::new()
                 };
@@ -306,11 +299,9 @@ impl Api {
             let admin_map = provider_config.provider.admin_role_mappings();
 
             // compute managed list from mapping values (or all role names if no mapping provided)
-            let managed_admin_names: Option<Vec<String>> = admin_map.as_ref().map(|m| {
-                m.values()
-                    .flat_map(|v| v.roles())
-                    .collect()
-            });
+            let managed_admin_names: Option<Vec<String>> = admin_map
+                .as_ref()
+                .map(|m| m.values().flat_map(|v| v.roles()).collect());
 
             let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
                 remote_admins

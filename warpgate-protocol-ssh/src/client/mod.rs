@@ -620,7 +620,7 @@ impl RemoteClient {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 } else {
-                                    auth_error_msg = Some(format!("Public key authentication was rejected by the SSH target"));
+                                    auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
                                 }
                             }
                         }

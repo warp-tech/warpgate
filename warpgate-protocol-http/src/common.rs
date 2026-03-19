@@ -138,7 +138,6 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
     Ok(count > 0)
 }
 
-
 pub async fn _inner_auth<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
@@ -247,7 +246,6 @@ pub async fn authorize_session(
 
     Ok(())
 }
-
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,

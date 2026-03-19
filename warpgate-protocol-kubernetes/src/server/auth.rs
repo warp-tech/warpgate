@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use base64;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::*;
