@@ -1,9 +1,14 @@
-import { api } from 'gateway/lib/api'
+import { api, type ExistingCertificateCredential } from 'gateway/lib/api'
 import { saveCertificateKey, getCertificateKey, getAllCertificateKeys, type StoredCertificateKey } from './certificateStore'
 
 export interface CertificateCredentialResult {
     certificatePem: string
     privateKeyPem: string
+}
+
+export interface CertificateWithKeyStatus {
+    credential: ExistingCertificateCredential
+    hasLocalKey: boolean
 }
 
 async function generateKeyPair (): Promise<{ publicKeyPem: string, privateKeyPem: string }> {
@@ -97,5 +102,27 @@ export async function ensureCertificateCredential (): Promise<CertificateCredent
     return {
         certificatePem: result.certificatePem,
         privateKeyPem,
+    }
+}
+
+export async function loadCertificatesWithKeyStatus (): Promise<CertificateWithKeyStatus[]> {
+    const creds = await api.getMyCredentials()
+    const localKeys = await getAllCertificateKeys()
+    const localKeySet = new Set(localKeys.map(k => k.credentialId))
+
+    return creds.certificates.map(cert => ({
+        credential: cert,
+        hasLocalKey: localKeySet.has(cert.id),
+    }))
+}
+
+export async function getLocalCertificate (credentialId: string): Promise<CertificateCredentialResult | null> {
+    const local = await getCertificateKey(credentialId)
+    if (!local) {
+        return null
+    }
+    return {
+        certificatePem: local.certificatePem,
+        privateKeyPem: local.privateKeyPem,
     }
 }
