@@ -258,7 +258,7 @@ impl Api {
         }
 
         let mappings = provider_config.provider.role_mappings();
-        if let Some(remote_groups) = response.target_roles {
+        if let Some(remote_groups) = response.access_roles {
             // If mappings is not set, all groups are subject to sync
             // and names won't be remapped
             let managed_role_names = mappings
@@ -305,23 +305,21 @@ impl Api {
         if let Some(remote_admins) = response.admin_roles {
             let admin_map = provider_config.provider.admin_role_mappings();
 
-            // compute managed list from keys of the mapping (or all role names if
-            // no mapping provided)
-            let managed_admin_names: Option<Vec<String>> =
-                admin_map.as_ref().map(|m| m.values().cloned().collect());
+            // compute managed list from mapping values (or all role names if no mapping provided)
+            let managed_admin_names: Option<Vec<String>> = admin_map.as_ref().map(|m| {
+                m.values()
+                    .flat_map(|v| v.roles())
+                    .collect()
+            });
 
-            let active_admin_names: Vec<_> = remote_admins
-                .iter()
-                .filter_map({
-                    |r| {
-                        if let Some(ref mappings) = admin_map {
-                            mappings.get(r).cloned()
-                        } else {
-                            Some(r.clone())
-                        }
-                    }
-                })
-                .collect();
+            let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
+                remote_admins
+                    .iter()
+                    .flat_map(|r| mappings.get(r).map(|v| v.roles()).into_iter().flatten())
+                    .collect()
+            } else {
+                remote_admins.clone()
+            };
 
             debug!("SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}");
             cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)

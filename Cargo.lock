@@ -4389,6 +4389,7 @@ dependencies = [
  "aws-lc-rs",
  "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
@@ -6554,6 +6555,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "yup-oauth2",
 ]
 
 [[package]]
@@ -7347,6 +7349,31 @@ dependencies = [
  "quote",
  "syn 2.0.114",
  "synstructure",
+]
+
+[[package]]
+name = "yup-oauth2"
+version = "12.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef19a12dfb29fe39f78e1547e1be49717b84aef8762a4001359ed4f94d3accc1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "log",
+ "percent-encoding",
+ "rustls",
+ "seahash",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "url",
 ]
 
 [[package]]

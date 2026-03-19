@@ -1,26 +1,10 @@
-use std::time::SystemTime;
-
 use openidconnect::reqwest;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::{debug, warn};
+use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::SsoError;
-
-#[derive(Debug, Serialize)]
-struct ServiceAccountClaims<'a> {
-    iss: &'a str,
-    sub: &'a str,
-    scope: &'a str,
-    aud: &'a str,
-    iat: u64,
-    exp: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenResponse {
-    access_token: String,
-}
 
 #[derive(Debug, Deserialize)]
 struct DirectoryGroupsResponse {
@@ -68,7 +52,7 @@ pub async fn fetch_groups_if_configured(
     debug!("Fetching Google groups for {user_email}");
 
     let http_client = reqwest::ClientBuilder::new().build()?;
-    let access_token = get_access_token(&http_client, sa_email, sa_key, admin_email).await?;
+    let access_token = get_access_token(sa_email, sa_key, admin_email).await?;
     let groups = fetch_user_groups(&http_client, &access_token, user_email).await?;
 
     debug!("Google groups for {user_email}: {groups:?}");
@@ -88,45 +72,40 @@ async fn parse_json_response<T: serde::de::DeserializeOwned>(
 }
 
 async fn get_access_token(
-    http_client: &reqwest::Client,
     service_account_email: &str,
     private_key_pem: &str,
     admin_email: &str,
 ) -> Result<String, SsoError> {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|e| SsoError::Other(Box::new(e)))?
-        .as_secs();
-
-    let claims = ServiceAccountClaims {
-        iss: service_account_email,
-        sub: admin_email,
-        scope: DIRECTORY_SCOPE,
-        aud: GOOGLE_TOKEN_URL,
-        iat: now,
-        exp: now + 3600,
+    let key = ServiceAccountKey {
+        key_type: None,
+        project_id: None,
+        private_key_id: None,
+        private_key: private_key_pem.to_string(),
+        client_email: service_account_email.to_string(),
+        client_id: None,
+        auth_uri: None,
+        token_uri: GOOGLE_TOKEN_URL.to_string(),
+        auth_provider_x509_cert_url: None,
+        client_x509_cert_url: None,
     };
 
-    let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-        .map_err(|e| SsoError::ConfigError(format!("Invalid Google service account key: {e}")))?;
-
-    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
-    let assertion = jsonwebtoken::encode(&header, &claims, &key)?;
-
-    let response = http_client
-        .post(GOOGLE_TOKEN_URL)
-        .form(&[
-            ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
-            ("assertion", &assertion),
-        ])
-        .send()
+    let auth = ServiceAccountAuthenticator::builder(key)
+        .subject(admin_email.to_string())
+        .build()
         .await
-        .map_err(|e| SsoError::GoogleDirectory(format!("token request failed: {e}")))?
-        .error_for_status()
-        .map_err(|e| SsoError::GoogleDirectory(format!("token exchange failed: {e}")))?;
+        .map_err(|e| SsoError::GoogleDirectory(format!("authenticator init failed: {e}")))?;
 
-    let resp: TokenResponse = parse_json_response(response, "token response").await?;
-    Ok(resp.access_token)
+    let token = auth
+        .token(&[DIRECTORY_SCOPE])
+        .await
+        .map_err(|e| SsoError::GoogleDirectory(format!("service account token request failed: {e}"))).inspect_err(|_| {
+            warn!("Ensure that domain-wide delegation is enabled for your service account's client ID with a {DIRECTORY_SCOPE} scope and that Admin SDK API is enabled for your Google Cloud project: https://console.cloud.google.com/apis/library/admin.googleapis.com");
+        })?;
+
+    Ok(token
+        .token()
+        .ok_or(SsoError::GoogleDirectory("no access token received".into()))?
+        .to_string())
 }
 
 async fn fetch_user_groups(
@@ -150,12 +129,21 @@ async fn fetch_user_groups(
         let response = req
             .send()
             .await
-            .map_err(|e| SsoError::GoogleDirectory(format!("group lookup failed: {e}")))?
+            .map_err(|e| SsoError::GoogleDirectory(format!("group lookup failed: {e}")))?;
+
+        if response.status() != 200 {
+            return Err(SsoError::GoogleDirectory(format!(
+                "Google group lookup failed with status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            )));
+        }
+
+        let response = response
             .error_for_status()
             .map_err(|e| SsoError::GoogleDirectory(format!("group lookup failed: {e}")))?;
 
-        let resp: DirectoryGroupsResponse =
-            parse_json_response(response, "group response").await?;
+        let resp: DirectoryGroupsResponse = parse_json_response(response, "group response").await?;
 
         all_groups.extend(resp.groups.into_iter().map(|g| g.email));
 
