@@ -13,6 +13,7 @@ openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "accept-string-booleans",
 ] }
+yup-oauth2 = "12"
 reqwest_12.workspace = true
 serde.workspace = true
 serde_json.workspace = true
