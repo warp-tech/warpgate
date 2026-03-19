@@ -146,6 +146,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/liebermantodd"><img src="https://avatars.githubusercontent.com/u/12155811?v=4?s=100" width="100px;" alt="liebermantodd"/><br /><sub><b>liebermantodd</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=liebermantodd" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://blog.trieoflogs.com"><img src="https://avatars.githubusercontent.com/u/14965074?v=4?s=100" width="100px;" alt="Hariharan"/><br /><sub><b>Hariharan</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=cvhariharan" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/solidassassin"><img src="https://avatars.githubusercontent.com/u/47082246?v=4?s=100" width="100px;" alt="Rokas Krivaitis"/><br /><sub><b>Rokas Krivaitis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=solidassassin" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
