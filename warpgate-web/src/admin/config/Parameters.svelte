@@ -7,6 +7,7 @@
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import { formatDuration, parseDuration } from 'common/duration'
+    import { reloadServerInfo } from 'gateway/lib/store'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
@@ -27,6 +28,7 @@
         await api.updateParameters({
             parameterUpdate: parameters!,
         })
+        await reloadServerInfo()
     }
 
     function onDurationChange () {

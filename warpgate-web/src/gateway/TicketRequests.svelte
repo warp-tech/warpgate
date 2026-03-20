@@ -12,6 +12,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { statusIcon, statusColor } from 'common/ticketRequestStatus'
+    import { formatDuration, parseDuration } from 'common/duration'
 
     let error: string|undefined = $state()
     let success: string|undefined = $state()
@@ -24,7 +25,7 @@
 
     let selectedTarget = $state('')
     let description = $state('')
-    let durationMinutes: number|undefined = $state(480)
+    let durationText = $state('8h')
     let uses: number|undefined = $state()
 
     let selectedTargetData = $derived(targets?.find(t => t.name === selectedTarget))
@@ -34,17 +35,20 @@
         ?? $serverInfo?.ticketMaxDurationSeconds
     )
 
-    let maxDurationMinutes = $derived(
-        maxDurationSeconds ? Math.floor(maxDurationSeconds / 60) : undefined
-    )
+    let durationSeconds = $derived(parseDuration(durationText))
 
     let durationError = $derived.by(() => {
-        if (!durationMinutes || !maxDurationMinutes) return undefined
-        if (durationMinutes > maxDurationMinutes) {
-            return `Maximum duration for this target is ${maxDurationMinutes} minutes`
+        if (!durationSeconds || !maxDurationSeconds) return undefined
+        if (durationSeconds > maxDurationSeconds) {
+            return `Maximum duration: ${formatDuration(maxDurationSeconds)}`
         }
         return undefined
     })
+
+    let descriptionRequired = $derived($serverInfo?.ticketRequireDescription ?? false)
+    let descriptionMissing = $derived(descriptionRequired && !description.trim())
+
+    let formInvalid = $derived(!!durationError || descriptionMissing)
 
     async function load () {
         const [r, t, tgts] = await Promise.all([
@@ -63,7 +67,7 @@
     const initPromise = load()
 
     async function createRequest () {
-        if (durationError) return
+        if (formInvalid) return
         error = undefined
         success = undefined
         lastSecret = undefined
@@ -72,7 +76,7 @@
             const result = await api.createTicketRequest({
                 createTicketRequestBody: {
                     targetName: selectedTarget,
-                    durationSeconds: durationMinutes ? durationMinutes * 60 : undefined,
+                    durationSeconds: durationSeconds || undefined,
                     uses: uses || undefined,
                     description: description || undefined,
                 },
@@ -168,23 +172,34 @@
         </select>
     </FormGroup>
 
-    <FormGroup floating label="Description">
-        <input type="text" bind:value={description} class="form-control" placeholder="Why do you need access?" maxlength="2000"/>
+    <FormGroup floating label={descriptionRequired ? 'Description (required)' : 'Description'}>
+        <input
+            type="text"
+            bind:value={description}
+            class="form-control"
+            class:is-invalid={descriptionMissing && description !== undefined}
+            placeholder="Why do you need access?"
+            maxlength="2000"
+        />
+        {#if descriptionMissing}
+            <small class="form-text text-muted">A description is required for ticket requests.</small>
+        {/if}
     </FormGroup>
 
-    <FormGroup floating label="Duration (minutes)">
+    <FormGroup floating label="Duration">
         <input
-            type="number"
-            min="1"
-            max={maxDurationMinutes ?? undefined}
-            bind:value={durationMinutes}
+            type="text"
+            bind:value={durationText}
             class="form-control"
             class:is-invalid={!!durationError}
+            placeholder="e.g. 8h, 30m, 1d"
         />
         {#if durationError}
             <div class="invalid-feedback">{durationError}</div>
-        {:else if maxDurationMinutes}
-            <small class="form-text text-muted">Maximum: {maxDurationMinutes} minutes</small>
+        {:else if maxDurationSeconds}
+            <small class="form-text text-muted">Maximum: {formatDuration(maxDurationSeconds)}</small>
+        {:else}
+            <small class="form-text text-muted">Examples: 30m, 8h, 1d, 2h30m</small>
         {/if}
     </FormGroup>
 
@@ -195,7 +210,7 @@
     <AsyncButton
         color="primary"
         click={createRequest}
-        disabled={!!durationError}
+        disabled={formInvalid}
     >Request ticket</AsyncButton>
 </div>
 </form>

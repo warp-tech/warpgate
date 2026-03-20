@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.22.0-beta.1-23-g7debb0f-modified"
+    "version": "v0.22.0-beta.1-24-gbb0ba41-modified"
   },
   "servers": [
     {
@@ -1351,6 +1351,7 @@
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
           "ticket_self_service_enabled",
+          "ticket_require_description",
           "ticket_request_show_all_targets",
           "has_ldap"
         ],
@@ -1388,6 +1389,9 @@
           "ticket_max_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
           },
           "ticket_request_show_all_targets": {
             "type": "boolean"
