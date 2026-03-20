@@ -179,6 +179,8 @@ impl Api {
                             combined.recordings_view |= r.recordings_view;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
+                            combined.tickets_create |= r.tickets_create;
+                            combined.tickets_delete |= r.tickets_delete;
                             combined.ticket_requests_manage |= r.ticket_requests_manage;
                         }
                     }
