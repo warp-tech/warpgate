@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.1-21-gd1ce926-modified"
+    "version": "v0.22.0-beta.1-23-g7debb0f-modified"
   },
   "servers": [
     {
@@ -5030,7 +5030,9 @@
           "name",
           "description",
           "allow_roles",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval"
         ],
         "properties": {
           "id": {
@@ -5063,6 +5065,16 @@
           "ticket_max_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },
@@ -5094,6 +5106,16 @@
           "ticket_max_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },

@@ -64,6 +64,11 @@ pub async fn create_ticket_request(
         return Err(validation_err("Target not found"));
     };
 
+    // Per-target: reject if ticket requests are disabled
+    if target.ticket_requests_disabled {
+        return Err(validation_err("Ticket requests are not allowed for this target"));
+    }
+
     // Validate description requirement
     if policy.ticket_require_description && params.description.trim().is_empty() {
         return Err(validation_err("A description is required for ticket requests"));
@@ -96,12 +101,13 @@ pub async fn create_ticket_request(
         }
     }
 
-    // Validate uses
+    // Validate uses — per-target limit takes priority, then global limit
     if let Some(requested_uses) = params.uses {
         if requested_uses <= 0 {
             return Err(validation_err("Number of uses must be a positive number"));
         }
-        if let Some(max_uses) = policy.ticket_max_uses {
+        let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
+        if let Some(max_uses) = max_uses {
             if requested_uses > max_uses {
                 return Err(validation_err(format!(
                     "Requested uses exceeds maximum of {}",
@@ -125,7 +131,10 @@ pub async fn create_ticket_request(
     let db_conn = db.lock().await;
 
     // Determine if this should be auto-approved
-    let auto_approve = has_access && policy.ticket_auto_approve_existing_access;
+    // Per-target require_approval overrides global auto-approve
+    let auto_approve = has_access
+        && policy.ticket_auto_approve_existing_access
+        && !target.ticket_require_approval;
 
     if auto_approve {
         let (ticket_id, secret) = insert_self_service_ticket(

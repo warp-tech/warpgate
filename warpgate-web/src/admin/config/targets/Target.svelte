@@ -321,6 +321,39 @@
         {/if}
 
         {#if $serverInfo?.ticketSelfServiceEnabled}
+        <h5 class="mt-3">Self-service tickets</h5>
+        <label
+            for="ticketRequestsDisabled"
+            class="d-flex align-items-center mb-2"
+        >
+            <Input
+                id="ticketRequestsDisabled"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    target!.ticketRequestsDisabled = !target!.ticketRequestsDisabled
+                    update()
+                }}
+                checked={target.ticketRequestsDisabled} />
+            <div>Disable ticket requests for this target</div>
+        </label>
+
+        <label
+            for="ticketRequireApproval"
+            class="d-flex align-items-center mb-2"
+        >
+            <Input
+                id="ticketRequireApproval"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    target!.ticketRequireApproval = !target!.ticketRequireApproval
+                    update()
+                }}
+                checked={target.ticketRequireApproval} />
+            <div>Always require admin approval</div>
+        </label>
+
         <FormGroup floating label="Max self-service ticket duration">
             <input
                 class="form-control"
@@ -334,7 +367,24 @@
                 }}
             />
             <small class="form-text text-muted">
-                Override the global max ticket duration for this target. Examples: 30m, 8h, 1d. Leave empty to use the global default.
+                Examples: 30m, 8h, 1d. Leave empty to use the global default.
+            </small>
+        </FormGroup>
+
+        <FormGroup floating label="Max uses per ticket">
+            <input
+                type="number"
+                min="1"
+                class="form-control"
+                value={target.ticketMaxUses ?? ''}
+                onchange={e => {
+                    const v = parseInt(e.currentTarget.value)
+                    target!.ticketMaxUses = isNaN(v) ? undefined : v
+                    update()
+                }}
+            />
+            <small class="form-text text-muted">
+                Leave empty to use the global default.
             </small>
         </FormGroup>
         {/if}

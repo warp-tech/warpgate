@@ -36,6 +36,7 @@ pub struct TargetSnapshot {
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
     pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
 }
 
 #[derive(ApiResponse)]
@@ -85,8 +86,15 @@ impl Api {
             })
         }
 
+        let is_ticket_request = for_ticket_request.unwrap_or(false);
+
+        // Filter out targets with ticket requests disabled
+        if is_ticket_request {
+            targets.retain(|t| !t.ticket_requests_disabled);
+        }
+
         // Check if we should skip auth filtering for ticket requests
-        let skip_auth_filter = if for_ticket_request.unwrap_or(false) {
+        let skip_auth_filter = if is_ticket_request {
             let db = services.db.lock().await;
             let params = Parameters::Entity::get(&db).await?;
             params.ticket_self_service_enabled && params.ticket_request_show_all_targets
@@ -153,6 +161,7 @@ impl Api {
                     },
                     group,
                     ticket_max_duration_seconds: t.ticket_max_duration_seconds,
+                    ticket_max_uses: t.ticket_max_uses,
                 }
             })
             .collect();

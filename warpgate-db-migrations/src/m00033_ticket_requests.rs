@@ -152,7 +152,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Add per-target ticket max duration
+        // Add per-target ticket settings
         manager
             .alter_table(
                 Table::alter()
@@ -160,6 +160,47 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_max_duration_seconds"))
                             .big_integer()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("targets"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("ticket_requests_disabled"))
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("targets"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("ticket_require_approval"))
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("targets"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("ticket_max_uses"))
+                            .small_integer()
                             .null(),
                     )
                     .to_owned(),
@@ -237,14 +278,21 @@ impl MigrationTrait for Migration {
                 .await?;
         }
 
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(Alias::new("targets"))
-                    .drop_column(Alias::new("ticket_max_duration_seconds"))
-                    .to_owned(),
-            )
-            .await?;
+        for col in [
+            "ticket_max_duration_seconds",
+            "ticket_requests_disabled",
+            "ticket_require_approval",
+            "ticket_max_uses",
+        ] {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(Alias::new("targets"))
+                        .drop_column(Alias::new(col))
+                        .to_owned(),
+                )
+                .await?;
+        }
 
         Ok(())
     }
