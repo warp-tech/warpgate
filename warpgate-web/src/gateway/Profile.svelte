@@ -22,3 +22,11 @@
         />
     {/if}
 {/if}
+
+{#if $serverInfo?.ticketSelfServiceEnabled}
+    <NavListItem
+        title="Ticket requests"
+        description="Request and manage self-service access tickets"
+        href="/ticket-requests"
+    />
+{/if}

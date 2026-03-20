@@ -26,6 +26,7 @@ struct TargetDataRequest {
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
     group_id: Option<Uuid>,
+    ticket_max_duration_seconds: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -132,6 +133,7 @@ impl ListApi {
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
+            ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -233,6 +235,7 @@ impl DetailApi {
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         model.group_id = Set(body.group_id);
+        model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
         let target = model.update(&*db).await?;
 
         drop(db);

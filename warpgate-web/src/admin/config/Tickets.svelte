@@ -22,8 +22,12 @@
     })
 
     async function deleteTicket (ticket: Ticket) {
-        await api.deleteTicket(ticket)
-        load()
+        try {
+            await api.deleteTicket({ id: ticket.id })
+            await load()
+        } catch (err: any) {
+            error = await stringifyError(err)
+        }
     }
 </script>
 

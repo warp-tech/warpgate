@@ -315,6 +315,24 @@
             </FormGroup>
         {/if}
 
+        <FormGroup floating label="Max self-service ticket duration (seconds)">
+            <input
+                class="form-control"
+                type="number"
+                min="60"
+                placeholder="Use global default"
+                value={target.ticketMaxDurationSeconds ?? ''}
+                onchange={e => {
+                    const v = parseInt(e.currentTarget.value)
+                    target!.ticketMaxDurationSeconds = isNaN(v) ? undefined : v
+                    update()
+                }}
+            />
+            <small class="form-text text-muted">
+                Maximum ticket duration for self-service requests to this target. Leave empty to use the global default.
+            </small>
+        </FormGroup>
+
         <FormGroup>
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput

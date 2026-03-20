@@ -17,6 +17,11 @@ pub struct Model {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub ticket_self_service_enabled: bool,
+    pub ticket_auto_approve_existing_access: bool,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
+    pub ticket_require_description: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -39,6 +44,11 @@ impl Entity {
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
                     minimize_password_login: Set(false),
+                    ticket_self_service_enabled: Set(false),
+                    ticket_auto_approve_existing_access: Set(true),
+                    ticket_max_duration_seconds: Set(Some(28800)),
+                    ticket_max_uses: Set(None),
+                    ticket_require_description: Set(false),
                 }
                 .insert(db)
                 .await

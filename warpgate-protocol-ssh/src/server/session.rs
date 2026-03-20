@@ -1752,7 +1752,7 @@ impl ServerSession {
                 }
             }
             AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, secret).await? {
+                match authorize_ticket(&self.services.db, secret, &self.services.config_provider).await? {
                     Some((ticket, user_info)) => {
                         info!("Authorized for {} with a ticket", ticket.target);
                         consume_ticket(&self.services.db, &ticket.id).await?;

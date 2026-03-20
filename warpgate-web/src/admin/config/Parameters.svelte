@@ -111,6 +111,86 @@
                 Disabling password authentication can help prevent brute-force attacks.
             </InfoBox>
 
+            <h4 class="mt-4">Self-service tickets</h4>
+            <label
+                for="ticketSelfServiceEnabled"
+                class="d-flex align-items-center mb-2"
+            >
+                <Input
+                    id="ticketSelfServiceEnabled"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.ticketSelfServiceEnabled = !parameters!.ticketSelfServiceEnabled
+                        update()
+                    }}
+                    checked={parameters.ticketSelfServiceEnabled} />
+                <div>Allow users to request tickets</div>
+            </label>
+
+            {#if parameters.ticketSelfServiceEnabled}
+            <label
+                for="ticketAutoApproveExistingAccess"
+                class="d-flex align-items-center mb-2"
+            >
+                <Input
+                    id="ticketAutoApproveExistingAccess"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.ticketAutoApproveExistingAccess = !parameters!.ticketAutoApproveExistingAccess
+                        update()
+                    }}
+                    checked={parameters.ticketAutoApproveExistingAccess} />
+                <div>Auto-approve when user already has role-based access</div>
+            </label>
+
+            <label
+                for="ticketRequireDescription"
+                class="d-flex align-items-center mb-2"
+            >
+                <Input
+                    id="ticketRequireDescription"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.ticketRequireDescription = !parameters!.ticketRequireDescription
+                        update()
+                    }}
+                    checked={parameters.ticketRequireDescription} />
+                <div>Require description on ticket requests</div>
+            </label>
+
+            <FormGroup floating label="Max ticket duration (seconds, blank = unlimited)">
+                <input
+                    type="number"
+                    min="60"
+                    class="form-control"
+                    value={parameters.ticketMaxDurationSeconds ?? ''}
+                    onchange={e => {
+                        const v = parseInt(e.currentTarget.value)
+                        parameters!.ticketMaxDurationSeconds = isNaN(v) ? undefined : v
+                        update()
+                    }}
+                />
+            </FormGroup>
+
+            <FormGroup floating label="Max uses per ticket (blank = unlimited)">
+                <input
+                    type="number"
+                    min="1"
+                    class="form-control"
+                    value={parameters.ticketMaxUses ?? ''}
+                    onchange={e => {
+                        const v = parseInt(e.currentTarget.value)
+                        parameters!.ticketMaxUses = isNaN(v) ? undefined : v
+                        update()
+                    }}
+                />
+            </FormGroup>
+
+            {/if}
+
             {#if hasSsoProviders}
             <h4 class="mt-4">Login</h4>
             <label

@@ -35,6 +35,7 @@ pub struct TargetSnapshot {
     pub external_host: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
+    pub ticket_max_duration_seconds: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -136,6 +137,7 @@ impl Api {
                         _ => None,
                     },
                     group,
+                    ticket_max_duration_seconds: t.ticket_max_duration_seconds,
                 }
             })
             .collect();

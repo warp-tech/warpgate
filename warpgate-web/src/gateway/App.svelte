@@ -64,6 +64,10 @@
             asyncComponent: () => import('./ProfileCredentials.svelte') as any,
             conditions: [requireLogin],
         }),
+        '/ticket-requests': wrap({
+            asyncComponent: () => import('./TicketRequests.svelte') as any,
+            conditions: [requireLogin],
+        }),
         '/login': wrap({
             asyncComponent: () => import('./Login.svelte') as any,
         }),

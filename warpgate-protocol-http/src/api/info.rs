@@ -62,6 +62,7 @@ pub struct AdminPermissions {
 
     config_edit: bool,
     admin_roles_manage: bool,
+    ticket_requests_manage: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -75,6 +76,8 @@ pub struct Info {
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
+    ticket_self_service_enabled: bool,
+    ticket_max_duration_seconds: Option<i64>,
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
@@ -176,6 +179,7 @@ impl Api {
                             combined.recordings_view |= r.recordings_view;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
+                            combined.ticket_requests_manage |= r.ticket_requests_manage;
                         }
                     }
                     combined
@@ -235,6 +239,8 @@ impl Api {
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
+            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
+            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,

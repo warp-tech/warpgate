@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.21.1-5-ga76ef2bb-modified"
+    "version": "v0.22.0-beta.1-19-g54615ea-modified"
   },
   "servers": [
     {
@@ -798,6 +798,165 @@
         },
         "operationId": "delete_my_api_token"
       }
+    },
+    "/ticket-requests": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "create_ticket_request"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketRequest"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_ticket_requests"
+      }
+    },
+    "/ticket-requests/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequestResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_ticket_request"
+      }
+    },
+    "/my-tickets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ticket"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_tickets"
+      }
+    },
+    "/my-tickets/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_ticket"
+      }
     }
   },
   "components": {
@@ -822,7 +981,8 @@
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "targets_create": {
@@ -874,6 +1034,9 @@
             "type": "boolean"
           },
           "admin_roles_manage": {
+            "type": "boolean"
+          },
+          "ticket_requests_manage": {
             "type": "boolean"
           }
         }
@@ -944,6 +1107,29 @@
         ],
         "properties": {
           "password": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTicketRequestBody": {
+        "type": "object",
+        "title": "CreateTicketRequestBody",
+        "required": [
+          "target_name"
+        ],
+        "properties": {
+          "target_name": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "description": {
             "type": "string"
           }
         }
@@ -1154,6 +1340,7 @@
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
+          "ticket_self_service_enabled",
           "has_ldap"
         ],
         "properties": {
@@ -1183,6 +1370,13 @@
           },
           "own_credential_management_allowed": {
             "type": "boolean"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           },
           "has_ldap": {
             "type": "boolean"
@@ -1455,8 +1649,139 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
+      },
+      "Ticket": {
+        "type": "object",
+        "title": "Ticket",
+        "required": [
+          "id",
+          "username",
+          "description",
+          "target",
+          "created",
+          "self_service"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "uses_left": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "self_service": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TicketRequest": {
+        "type": "object",
+        "title": "TicketRequest",
+        "required": [
+          "id",
+          "user_id",
+          "username",
+          "target_name",
+          "description",
+          "status",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "requested_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "requested_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketRequestStatus"
+          },
+          "resolved_by_username": {
+            "type": "string"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deny_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "TicketRequestResponse": {
+        "type": "object",
+        "title": "TicketRequestResponse",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/TicketRequest"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "TicketRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Denied",
+          "Expired"
+        ]
       },
       "TokenAndSecret": {
         "type": "object",
