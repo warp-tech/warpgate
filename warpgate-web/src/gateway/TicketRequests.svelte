@@ -5,7 +5,7 @@
     import RelativeDate from 'admin/RelativeDate.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import Fa from 'svelte-fa'
-    import { faTicket } from '@fortawesome/free-solid-svg-icons'
+    import { faTicket, faTriangleExclamation, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { FormGroup, Button } from '@sveltestrap/sveltestrap'
@@ -122,30 +122,32 @@
 {#if success}
 <Alert color="success" fade={false}>
     {success}
-    {#if lastSecret && lastTargetName}
-        {@const targetData = targets?.find(t => t.name === lastTargetName)}
-        {#if targetData}
-            <div class="mt-3">
-                <Alert color="danger" fade={false} class="mb-2">
-                    This ticket is for your personal use only. Do not share the secret with anyone else &mdash; it grants access as your user account.
-                </Alert>
-                <Alert color="warning" fade={false} class="mb-2">
-                    The secret is only shown once &mdash; you won't be able to see it again.
-                </Alert>
-                <ConnectionInstructions
-                    targetName={lastTargetName}
-                    targetKind={targetData.kind}
-                    username={$serverInfo?.username}
-                    ticketSecret={lastSecret}
-                    targetExternalHost={targetData.kind === TargetKind.Http ? targetData.externalHost : undefined}
-                    targetDefaultDatabaseName={
-                        (targetData.kind === TargetKind.MySql || targetData.kind === TargetKind.Postgres)
-                            ? targetData.defaultDatabaseName : undefined}
-                />
-            </div>
-        {/if}
-    {/if}
 </Alert>
+{#if lastSecret && lastTargetName}
+    {@const targetData = targets?.find(t => t.name === lastTargetName)}
+    {#if targetData}
+        <div class="card p-3 mt-3">
+            <p class="mb-2 text-warning">
+                <Fa icon={faTriangleExclamation} fw />
+                <strong>Personal use only</strong> &mdash; do not share this secret. It grants access as your account.
+            </p>
+            <p class="mb-3 text-muted">
+                <Fa icon={faEyeSlash} fw />
+                The secret is only shown once &mdash; you won't be able to see it again.
+            </p>
+            <ConnectionInstructions
+                targetName={lastTargetName}
+                targetKind={targetData.kind}
+                username={$serverInfo?.username}
+                ticketSecret={lastSecret}
+                targetExternalHost={targetData.kind === TargetKind.Http ? targetData.externalHost : undefined}
+                targetDefaultDatabaseName={
+                    (targetData.kind === TargetKind.MySql || targetData.kind === TargetKind.Postgres)
+                        ? targetData.defaultDatabaseName : undefined}
+            />
+        </div>
+    {/if}
+{/if}
 {/if}
 
 <Loadable promise={initPromise}>

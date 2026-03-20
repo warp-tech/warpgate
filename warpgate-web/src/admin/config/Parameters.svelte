@@ -140,10 +140,7 @@
                 <div>Allow users to request tickets</div>
             </label>
             <InfoBox class="mt-3 mb-3">
-                When enabled, authenticated users can request time-limited access tickets from
-                their profile page or via the API. Requests can be auto-approved if the user
-                already has role-based access, or queued for admin approval. Each ticket is
-                scoped to a single target and tied to the requesting user's identity.
+                When enabled, authenticated users can request user-tied, time-limited access tickets from their profile page or via the API to a single target.
             </InfoBox>
 
             {#if parameters.ticketSelfServiceEnabled}
@@ -195,9 +192,7 @@
                 <div>Show all targets in ticket request form</div>
             </label>
             <InfoBox class="mt-3 mb-3">
-                When enabled, users see all targets when requesting a ticket &mdash; including
-                targets they don't currently have role-based access to. When disabled, users can
-                only request tickets for targets they already have access to.
+                When disabled, users only see targets they already have role-based access to.
             </InfoBox>
 
             <FormGroup floating label="Default max ticket duration (blank = unlimited)">
