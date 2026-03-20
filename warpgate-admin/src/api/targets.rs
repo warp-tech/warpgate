@@ -242,12 +242,8 @@ impl DetailApi {
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         model.group_id = Set(body.group_id);
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
-        if let Some(v) = body.ticket_requests_disabled {
-            model.ticket_requests_disabled = Set(v);
-        }
-        if let Some(v) = body.ticket_require_approval {
-            model.ticket_require_approval = Set(v);
-        }
+        model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
+        model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(&*db).await?;
 

@@ -1,6 +1,11 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
+use crate::m00001_create_ticket::ticket;
+use crate::m00007_targets_and_roles::target;
+use crate::m00010_parameters::parameters;
+use crate::m00032_admin_roles::admin_role;
+
 pub(crate) mod ticket_request {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
@@ -56,7 +61,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("tickets"))
+                    .table(ticket::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("self_service"))
                             .boolean()
@@ -71,7 +76,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("admin_roles"))
+                    .table(admin_role::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_requests_manage"))
                             .boolean()
@@ -86,7 +91,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_self_service_enabled"))
                             .boolean()
@@ -100,7 +105,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_auto_approve_existing_access"))
                             .boolean()
@@ -114,7 +119,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_max_duration_seconds"))
                             .big_integer()
@@ -128,7 +133,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_max_uses"))
                             .small_integer()
@@ -141,7 +146,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_require_description"))
                             .boolean()
@@ -156,7 +161,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("targets"))
+                    .table(target::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_max_duration_seconds"))
                             .big_integer()
@@ -169,7 +174,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("targets"))
+                    .table(target::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_requests_disabled"))
                             .boolean()
@@ -183,7 +188,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("targets"))
+                    .table(target::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_require_approval"))
                             .boolean()
@@ -197,7 +202,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("targets"))
+                    .table(target::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_max_uses"))
                             .small_integer()
@@ -211,7 +216,7 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
-                    .table(Alias::new("parameters"))
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("ticket_request_show_all_targets"))
                             .boolean()

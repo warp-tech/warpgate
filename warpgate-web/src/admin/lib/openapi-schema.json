@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.1-23-g7debb0f-modified"
+    "version": "v0.22.0-beta.1-25-g7662819-modified"
   },
   "servers": [
     {
@@ -946,7 +946,7 @@
           {
             "name": "status",
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/TicketRequestStatus"
             },
             "in": "query",
             "required": false,

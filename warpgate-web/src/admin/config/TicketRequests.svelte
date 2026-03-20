@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type TicketRequest, type TicketRequestApproveResponse } from 'admin/lib/api'
+    import { api, TicketRequestStatus, type TicketRequest, type TicketRequestApproveResponse } from 'admin/lib/api'
     import RelativeDate from '../RelativeDate.svelte'
     import Fa from 'svelte-fa'
     import { stringifyError } from 'common/errors'
@@ -10,25 +10,25 @@
     import { Button, FormGroup, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import { statusIcon, statusColor } from 'common/ticketRequestStatus'
+    import { formatDuration } from 'common/duration'
+    import Loadable from 'common/Loadable.svelte'
 
     let error: string|undefined = $state()
     let success: string|undefined = $state()
     let lastSecret: string|undefined = $state()
     let requests: TicketRequest[]|undefined = $state()
-    let statusFilter: string = $state('')
+    let statusFilter: TicketRequestStatus|undefined = $state()
 
     let denyModalRequest: TicketRequest|undefined = $state()
     let denyReason = $state('')
 
     async function load () {
         requests = await api.getTicketRequests({
-            status: statusFilter || undefined,
+            status: statusFilter,
         })
     }
 
-    load().catch(async e => {
-        error = await stringifyError(e)
-    })
+    const initPromise = load()
 
     async function approve (request: TicketRequest) {
         error = undefined
@@ -84,22 +84,27 @@
         {/if}
 
         <div class="page-summary-bar">
-            <h1>Ticket requests</h1>
+            <h1>ticket requests</h1>
             <FormGroup class="ms-auto mb-0">
                 <select
                     class="form-control form-control-sm"
-                    bind:value={statusFilter}
-                    onchange={() => load().catch(async e => { error = await stringifyError(e) })}
+                    value={statusFilter ?? ''}
+                    onchange={e => {
+                        const v = e.currentTarget.value
+                        statusFilter = v ? v as TicketRequestStatus : undefined
+                        load().catch(async err => { error = await stringifyError(err) })
+                    }}
                 >
                     <option value="">All</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Denied">Denied</option>
-                    <option value="Expired">Expired</option>
+                    <option value={TicketRequestStatus.Pending}>Pending</option>
+                    <option value={TicketRequestStatus.Approved}>Approved</option>
+                    <option value={TicketRequestStatus.Denied}>Denied</option>
+                    <option value={TicketRequestStatus.Expired}>Expired</option>
                 </select>
             </FormGroup>
         </div>
 
+        <Loadable promise={initPromise}>
         {#if requests}
             {#if requests.length}
             <div class="list-group list-group-flush">
@@ -117,7 +122,7 @@
                             {/if}
                             {#if request.requestedDurationSeconds}
                                 <small class="d-block text-muted">
-                                    Duration: {Math.round(request.requestedDurationSeconds / 60)}m
+                                    Duration: {formatDuration(request.requestedDurationSeconds)}
                                 </small>
                             {/if}
                             {#if request.requestedUses}
@@ -164,6 +169,7 @@
             />
             {/if}
         {/if}
+        </Loadable>
     </PermissionGate>
 </div>
 

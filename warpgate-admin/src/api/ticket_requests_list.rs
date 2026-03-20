@@ -29,20 +29,12 @@ impl Api {
     async fn api_get_all_ticket_requests(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
-        status: Query<Option<String>>,
+        status: Query<Option<TicketRequestStatus>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let status_filter = match status.as_deref().map(|s| s.to_lowercase()).as_deref() {
-            Some("pending") => Some(TicketRequestStatus::Pending),
-            Some("approved") => Some(TicketRequestStatus::Approved),
-            Some("denied") => Some(TicketRequestStatus::Denied),
-            Some("expired") => Some(TicketRequestStatus::Expired),
-            _ => None,
-        };
-
-        let requests = list_ticket_requests(&ctx.services.db, status_filter).await?;
+        let requests = list_ticket_requests(&ctx.services.db, status.0).await?;
         Ok(GetTicketRequestsResponse::Ok(Json(requests)))
     }
 }

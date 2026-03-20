@@ -79,43 +79,50 @@ pub async fn create_ticket_request(
         return Err(validation_err("Description must be 2000 characters or fewer"));
     }
 
-    // Validate duration
-    if let Some(duration) = params.duration_seconds {
-        if duration <= 0 {
-            return Err(validation_err("Duration must be a positive number"));
-        }
-        if duration < 60 {
-            return Err(validation_err("Minimum ticket duration is 60 seconds"));
-        }
-        // Per-target limit takes priority, then global limit
-        let max_duration = target
-            .ticket_max_duration_seconds
-            .or(policy.ticket_max_duration_seconds);
-        if let Some(max_duration) = max_duration {
-            if duration > max_duration {
-                return Err(validation_err(format!(
-                    "Requested duration exceeds maximum of {} seconds",
-                    max_duration
-                )));
+    // Validate and enforce duration limits
+    let max_duration = target
+        .ticket_max_duration_seconds
+        .or(policy.ticket_max_duration_seconds);
+    let effective_duration = match params.duration_seconds {
+        Some(duration) => {
+            if duration <= 0 {
+                return Err(validation_err("Duration must be a positive number"));
             }
+            if duration < 60 {
+                return Err(validation_err("Minimum ticket duration is 60 seconds"));
+            }
+            if let Some(max_duration) = max_duration {
+                if duration > max_duration {
+                    return Err(validation_err(format!(
+                        "Requested duration exceeds maximum of {} seconds",
+                        max_duration
+                    )));
+                }
+            }
+            Some(duration)
         }
-    }
+        None => max_duration, // Default to max when omitted
+    };
 
-    // Validate uses — per-target limit takes priority, then global limit
-    if let Some(requested_uses) = params.uses {
-        if requested_uses <= 0 {
-            return Err(validation_err("Number of uses must be a positive number"));
-        }
-        let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
-        if let Some(max_uses) = max_uses {
-            if requested_uses > max_uses {
-                return Err(validation_err(format!(
-                    "Requested uses exceeds maximum of {}",
-                    max_uses
-                )));
+    // Validate and enforce uses limits
+    let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
+    let effective_uses = match params.uses {
+        Some(requested_uses) => {
+            if requested_uses <= 0 {
+                return Err(validation_err("Number of uses must be a positive number"));
             }
+            if let Some(max_uses) = max_uses {
+                if requested_uses > max_uses {
+                    return Err(validation_err(format!(
+                        "Requested uses exceeds maximum of {}",
+                        max_uses
+                    )));
+                }
+            }
+            Some(requested_uses)
         }
-    }
+        None => max_uses, // Default to max when omitted
+    };
 
     // Check if user has existing role-based access
     // Drop db lock before acquiring config_provider lock to avoid deadlock
@@ -126,6 +133,11 @@ pub async fn create_ticket_request(
             .await
             .map_err(|e| validation_err(e.to_string()))?
     };
+
+    // Reject if target visibility is restricted and user has no existing access
+    if !policy.ticket_request_show_all_targets && !has_access {
+        return Err(validation_err("Target not found"));
+    }
 
     // Re-acquire db lock
     let db_conn = db.lock().await;
@@ -141,8 +153,8 @@ pub async fn create_ticket_request(
             &*db_conn,
             &params.username,
             &params.target_name,
-            params.duration_seconds,
-            params.uses,
+            effective_duration,
+            effective_uses,
             &params.description,
         )
         .await
@@ -154,8 +166,8 @@ pub async fn create_ticket_request(
             user_id: Set(params.user_id),
             username: Set(params.username.clone()),
             target_name: Set(params.target_name.clone()),
-            requested_duration_seconds: Set(params.duration_seconds),
-            requested_uses: Set(params.uses),
+            requested_duration_seconds: Set(effective_duration),
+            requested_uses: Set(effective_uses),
             description: Set(params.description),
             status: Set(TicketRequestStatus::Approved),
             resolved_by_username: Set(Some("system".to_string())),
@@ -185,8 +197,8 @@ pub async fn create_ticket_request(
             user_id: Set(params.user_id),
             username: Set(params.username.clone()),
             target_name: Set(params.target_name.clone()),
-            requested_duration_seconds: Set(params.duration_seconds),
-            requested_uses: Set(params.uses),
+            requested_duration_seconds: Set(effective_duration),
+            requested_uses: Set(effective_uses),
             description: Set(params.description),
             status: Set(TicketRequestStatus::Pending),
             resolved_by_username: Set(None),
@@ -270,23 +282,40 @@ pub async fn approve_ticket_request(
         return Err(WarpgateError::UserNotFound(request.username.clone()));
     }
 
-    // Verify target still exists
-    let target_exists = Target::Entity::find()
+    // Verify target still exists and load current settings
+    let target = Target::Entity::find()
         .filter(Target::Column::Name.eq(&request.target_name))
-        .count(&*db_conn)
-        .await?
-        > 0;
+        .one(&*db_conn)
+        .await?;
 
-    if !target_exists {
+    let Some(target) = target else {
         return Err(WarpgateError::from(anyhow!("Target no longer exists")));
-    }
+    };
+
+    // Clamp duration/uses to current limits (may have changed since request was created)
+    let policy = Parameters::Entity::get(&db_conn).await?;
+    let max_duration = target
+        .ticket_max_duration_seconds
+        .or(policy.ticket_max_duration_seconds);
+    let effective_duration = match (request.requested_duration_seconds, max_duration) {
+        (Some(d), Some(max)) => Some(d.min(max)),
+        (Some(d), None) => Some(d),
+        (None, max) => max,
+    };
+
+    let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
+    let effective_uses = match (request.requested_uses, max_uses) {
+        (Some(u), Some(max)) => Some(u.min(max)),
+        (Some(u), None) => Some(u),
+        (None, max) => max,
+    };
 
     let (ticket_id, secret) = insert_self_service_ticket(
         &*db_conn,
         &request.username,
         &request.target_name,
-        request.requested_duration_seconds,
-        request.requested_uses,
+        effective_duration,
+        effective_uses,
         &request.description,
     )
     .await?;
