@@ -13,7 +13,7 @@ use warpgate_common_http::{
 };
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
-use warpgate_db_entities::{Target, TargetGroup};
+use warpgate_db_entities::{Parameters, Target, TargetGroup};
 
 use crate::api::AnySecurityScheme;
 use crate::common::endpoint_auth;
@@ -56,6 +56,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
+        for_ticket_request: Query<Option<bool>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
@@ -84,33 +85,47 @@ impl Api {
             })
         }
 
-        let auth_clone = ctx.auth.clone();
-        let targets: Vec<_> = stream::iter(targets)
-            .filter(|t| {
-                let services = services.clone();
-                let auth = auth_clone.clone();
-                let name = t.name.clone();
-                async move {
-                    match auth {
-                        RequestAuthorization::Session(SessionAuthorization::Ticket {
-                            target_name,
-                            ..
-                        }) => target_name == name,
-                        _ => {
-                            let mut config_provider = services.config_provider.lock().await;
-                            let Some(username) = auth.username() else {
-                                return false;
-                            };
-                            matches!(
-                                config_provider.authorize_target(username, &name).await,
-                                Ok(true)
-                            )
+        // Check if we should skip auth filtering for ticket requests
+        let skip_auth_filter = if for_ticket_request.unwrap_or(false) {
+            let db = services.db.lock().await;
+            let params = Parameters::Entity::get(&db).await?;
+            params.ticket_self_service_enabled && params.ticket_request_show_all_targets
+        } else {
+            false
+        };
+
+        let targets: Vec<_> = if skip_auth_filter {
+            targets
+        } else {
+            let auth_clone = ctx.auth.clone();
+            stream::iter(targets)
+                .filter(|t| {
+                    let services = services.clone();
+                    let auth = auth_clone.clone();
+                    let name = t.name.clone();
+                    async move {
+                        match auth {
+                            RequestAuthorization::Session(SessionAuthorization::Ticket {
+                                target_name,
+                                ..
+                            }) => target_name == name,
+                            _ => {
+                                let mut config_provider =
+                                    services.config_provider.lock().await;
+                                let Some(username) = auth.username() else {
+                                    return false;
+                                };
+                                matches!(
+                                    config_provider.authorize_target(username, &name).await,
+                                    Ok(true)
+                                )
+                            }
                         }
                     }
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
+                })
+                .collect::<Vec<_>>()
+                .await
+        };
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()

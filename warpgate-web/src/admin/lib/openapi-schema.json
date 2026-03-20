@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.1-19-g54615ea-modified"
+    "version": "v0.22.0-beta.1-21-gd1ce926-modified"
   },
   "servers": [
     {
@@ -4717,6 +4717,9 @@
           },
           "ticket_require_description": {
             "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
           }
         }
       },
@@ -4731,7 +4734,8 @@
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
-          "ticket_require_description"
+          "ticket_require_description",
+          "ticket_request_show_all_targets"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4768,6 +4772,9 @@
             "format": "int16"
           },
           "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
             "type": "boolean"
           }
         }

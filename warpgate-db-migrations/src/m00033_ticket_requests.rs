@@ -166,6 +166,21 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Show all targets in ticket request form (default: false = only accessible targets)
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("parameters"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("ticket_request_show_all_targets"))
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
         // Grant ticket_requests_manage to the built-in warpgate:admin role
         let conn = manager.get_connection();
         let bool_true = match manager.get_database_backend() {
@@ -210,6 +225,7 @@ impl MigrationTrait for Migration {
             "ticket_max_duration_seconds",
             "ticket_max_uses",
             "ticket_require_description",
+            "ticket_request_show_all_targets",
         ] {
             manager
                 .alter_table(

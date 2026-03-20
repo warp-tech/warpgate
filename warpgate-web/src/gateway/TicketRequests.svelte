@@ -20,6 +20,7 @@
     let requests: TicketRequest[]|undefined = $state()
     let tickets: Ticket[]|undefined = $state()
     let targets: TargetSnapshot[]|undefined = $state()
+    let showForm = $state(true)
 
     let selectedTarget = $state('')
     let description = $state('')
@@ -31,7 +32,6 @@
     let maxDurationSeconds = $derived(
         selectedTargetData?.ticketMaxDurationSeconds
         ?? $serverInfo?.ticketMaxDurationSeconds
-        ?? undefined
     )
 
     let maxDurationMinutes = $derived(
@@ -50,7 +50,7 @@
         const [r, t, tgts] = await Promise.all([
             api.getMyTicketRequests(),
             api.getMyTickets(),
-            api.getTargets({ search: '' }),
+            api.getTargets({ search: '', forTicketRequest: true }),
         ])
         requests = r
         tickets = t
@@ -84,12 +84,21 @@
             } else {
                 success = 'Request submitted and is pending admin approval.'
             }
+            showForm = false
             description = ''
             uses = undefined
             await load()
         } catch (err: any) {
             error = await stringifyError(err)
         }
+    }
+
+    function requestAnother () {
+        showForm = true
+        success = undefined
+        lastSecret = undefined
+        lastTargetName = undefined
+        error = undefined
     }
 
     async function deleteTicket (ticket: Ticket) {
@@ -117,6 +126,9 @@
         {@const targetData = targets?.find(t => t.name === lastTargetName)}
         {#if targetData}
             <div class="mt-3">
+                <Alert color="danger" fade={false} class="mb-2">
+                    This ticket is for your personal use only. Do not share the secret with anyone else &mdash; it grants access as your user account.
+                </Alert>
                 <Alert color="warning" fade={false} class="mb-2">
                     The secret is only shown once &mdash; you won't be able to see it again.
                 </Alert>
@@ -137,6 +149,8 @@
 {/if}
 
 <Loadable promise={initPromise}>
+
+{#if showForm}
 <h4 class="mt-4">Request a ticket</h4>
 
 {#if targets && targets.length}
@@ -185,6 +199,12 @@
 </form>
 {:else if targets}
 <EmptyState title="No targets available" />
+{/if}
+
+{:else}
+<div class="mt-4">
+    <Button color="primary" onclick={requestAnother}>Request another ticket</Button>
+</div>
 {/if}
 
 {#if requests}

@@ -26,6 +26,7 @@ struct ParameterValues {
     pub ticket_max_duration_seconds: Option<i64>,
     pub ticket_max_uses: Option<i16>,
     pub ticket_require_description: bool,
+    pub ticket_request_show_all_targets: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -41,6 +42,7 @@ struct ParameterUpdate {
     pub ticket_max_duration_seconds: Option<Option<i64>>,
     pub ticket_max_uses: Option<Option<i16>>,
     pub ticket_require_description: Option<bool>,
+    pub ticket_request_show_all_targets: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -80,6 +82,7 @@ impl Api {
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
             ticket_max_uses: parameters.ticket_max_uses,
             ticket_require_description: parameters.ticket_require_description,
+            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
         })))
     }
 
@@ -119,6 +122,8 @@ impl Api {
         parameters.ticket_max_uses = body.ticket_max_uses.map_or(NotSet, Set);
         parameters.ticket_require_description =
             body.ticket_require_description.map_or(NotSet, Set);
+        parameters.ticket_request_show_all_targets =
+            body.ticket_request_show_all_targets.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

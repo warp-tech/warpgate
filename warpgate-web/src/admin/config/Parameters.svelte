@@ -6,21 +6,33 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
+    import { formatDuration, parseDuration } from 'common/duration'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
     const initPromise = init()
 
+    let durationText = $state('')
+
     async function init () {
         parameters = await api.getParameters({})
         const ssoProviders = await gatewayApi.getSsoProviders()
         hasSsoProviders = ssoProviders.length > 0
+        durationText = parameters.ticketMaxDurationSeconds
+            ? formatDuration(parameters.ticketMaxDurationSeconds)
+            : ''
     }
 
     async function update() {
         await api.updateParameters({
             parameterUpdate: parameters!,
         })
+    }
+
+    function onDurationChange () {
+        const seconds = parseDuration(durationText)
+        parameters!.ticketMaxDurationSeconds = seconds ?? undefined
+        update()
     }
 </script>
 
@@ -127,6 +139,12 @@
                     checked={parameters.ticketSelfServiceEnabled} />
                 <div>Allow users to request tickets</div>
             </label>
+            <InfoBox class="mt-3 mb-3">
+                When enabled, authenticated users can request time-limited access tickets from
+                their profile page or via the API. Requests can be auto-approved if the user
+                already has role-based access, or queued for admin approval. Each ticket is
+                scoped to a single target and tied to the requesting user's identity.
+            </InfoBox>
 
             {#if parameters.ticketSelfServiceEnabled}
             <label
@@ -161,18 +179,38 @@
                 <div>Require description on ticket requests</div>
             </label>
 
-            <FormGroup floating label="Max ticket duration (seconds, blank = unlimited)">
-                <input
-                    type="number"
-                    min="60"
-                    class="form-control"
-                    value={parameters.ticketMaxDurationSeconds ?? ''}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        parameters!.ticketMaxDurationSeconds = isNaN(v) ? undefined : v
+            <label
+                for="ticketRequestShowAllTargets"
+                class="d-flex align-items-center mb-2"
+            >
+                <Input
+                    id="ticketRequestShowAllTargets"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.ticketRequestShowAllTargets = !parameters!.ticketRequestShowAllTargets
                         update()
                     }}
+                    checked={parameters.ticketRequestShowAllTargets} />
+                <div>Show all targets in ticket request form</div>
+            </label>
+            <InfoBox class="mt-3 mb-3">
+                When enabled, users see all targets when requesting a ticket &mdash; including
+                targets they don't currently have role-based access to. When disabled, users can
+                only request tickets for targets they already have access to.
+            </InfoBox>
+
+            <FormGroup floating label="Default max ticket duration (blank = unlimited)">
+                <input
+                    type="text"
+                    class="form-control"
+                    placeholder="e.g. 8h, 30m, 1d"
+                    bind:value={durationText}
+                    onchange={onDurationChange}
                 />
+                <small class="form-text text-muted">
+                    Global default. Can be overridden per target. Examples: 30m, 8h, 1d, 2h30m.
+                </small>
             </FormGroup>
 
             <FormGroup floating label="Max uses per ticket (blank = unlimited)">

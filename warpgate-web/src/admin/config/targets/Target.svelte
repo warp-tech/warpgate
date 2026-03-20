@@ -14,6 +14,7 @@
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import { formatDuration, parseDuration } from 'common/duration'
 
     interface Props {
         params: { id: string };
@@ -27,12 +28,16 @@
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
+    let ticketDurationText = $state('')
 
     async function init () {
         [target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
+        ticketDurationText = target.ticketMaxDurationSeconds
+            ? formatDuration(target.ticketMaxDurationSeconds)
+            : ''
     }
 
     async function loadRoles () {
@@ -315,23 +320,24 @@
             </FormGroup>
         {/if}
 
-        <FormGroup floating label="Max self-service ticket duration (seconds)">
+        {#if $serverInfo?.ticketSelfServiceEnabled}
+        <FormGroup floating label="Max self-service ticket duration">
             <input
                 class="form-control"
-                type="number"
-                min="60"
+                type="text"
                 placeholder="Use global default"
-                value={target.ticketMaxDurationSeconds ?? ''}
-                onchange={e => {
-                    const v = parseInt(e.currentTarget.value)
-                    target!.ticketMaxDurationSeconds = isNaN(v) ? undefined : v
+                bind:value={ticketDurationText}
+                onchange={() => {
+                    const seconds = parseDuration(ticketDurationText)
+                    target!.ticketMaxDurationSeconds = seconds ?? undefined
                     update()
                 }}
             />
             <small class="form-text text-muted">
-                Maximum ticket duration for self-service requests to this target. Leave empty to use the global default.
+                Override the global max ticket duration for this target. Examples: 30m, 8h, 1d. Leave empty to use the global default.
             </small>
         </FormGroup>
+        {/if}
 
         <FormGroup>
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
