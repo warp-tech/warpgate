@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-admin"
-version = "0.20.2"
+version = "0.22.0"
 
 [dependencies]
 anyhow.workspace = true
@@ -27,6 +27,7 @@ tracing.workspace = true
 uuid.workspace = true
 warpgate-ca = { version = "*", path = "../warpgate-ca" }
 warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-tls = { version = "*", path = "../warpgate-tls" }
 warpgate-core = { version = "*", path = "../warpgate-core" }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }

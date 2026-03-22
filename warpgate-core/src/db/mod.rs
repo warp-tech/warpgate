@@ -3,20 +3,15 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    ModelTrait, QueryFilter, TransactionTrait,
+    ConnectOptions, Database, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
+    TransactionTrait,
 };
 use tracing::*;
-use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{
-    GlobalParams, TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError,
-};
-use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
+use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
+use warpgate_db_entities::LogEntry;
 use warpgate_db_migrations::migrate_database;
 
-use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
 use crate::recordings::SessionRecordings;
 
 pub async fn connect_to_db(
@@ -90,69 +85,6 @@ pub async fn populate_db(
         .exec(db)
         .await
         .map_err(WarpgateError::from)?;
-
-    let admin_role = match Role::Entity::find()
-        .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
-        .all(db)
-        .await?
-        .first()
-    {
-        Some(x) => x.to_owned(),
-        None => {
-            let values = Role::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                description: Set("Built-in admin role".into()),
-                name: Set(BUILTIN_ADMIN_ROLE_NAME.to_owned()),
-                allow_file_upload: Set(true),
-                allow_file_download: Set(true),
-                allowed_paths: Set(None),
-                blocked_extensions: Set(None),
-                max_file_size: Set(None),
-                file_transfer_only: Set(false),
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?
-        }
-    };
-
-    let admin_target = match Target::Entity::find()
-        .filter(Target::Column::Kind.eq(TargetKind::WebAdmin))
-        .all(db)
-        .await?
-        .first()
-    {
-        Some(x) => x.to_owned(),
-        None => {
-            let values = Target::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                name: Set(BUILTIN_ADMIN_TARGET_NAME.to_owned()),
-                description: Set("".into()),
-                kind: Set(TargetKind::WebAdmin),
-                options: Set(serde_json::to_value(TargetOptions::WebAdmin(
-                    TargetWebAdminOptions {},
-                ))
-                .map_err(WarpgateError::from)?),
-                rate_limit_bytes_per_second: Set(None),
-                group_id: Set(None),
-            };
-
-            values.insert(&*db).await.map_err(WarpgateError::from)?
-        }
-    };
-
-    if TargetRoleAssignment::Entity::find()
-        .filter(TargetRoleAssignment::Column::TargetId.eq(admin_target.id))
-        .filter(TargetRoleAssignment::Column::RoleId.eq(admin_role.id))
-        .all(db)
-        .await?
-        .is_empty()
-    {
-        let values = TargetRoleAssignment::ActiveModel {
-            target_id: Set(admin_target.id),
-            role_id: Set(admin_role.id),
-            ..Default::default()
-        };
-        values.insert(&*db).await.map_err(WarpgateError::from)?;
-    }
 
     Ok(())
 }

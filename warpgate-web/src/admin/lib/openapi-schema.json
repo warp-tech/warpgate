@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.2-7-g1cce72fe-modified"
+    "version": "v0.20.2-62-g80644c5c-modified"
   },
   "servers": [
     {
@@ -293,6 +293,14 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_kubernetes_recording"
       }
     },
@@ -688,6 +696,248 @@
           }
         ],
         "operationId": "update_role_file_transfer_defaults"
+      }
+    },
+    "/admin-roles": {
+      "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminRole"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_roles"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRoleDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_admin_role"
+      }
+    },
+    "/admin-roles/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_role"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRoleDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_admin_role"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_admin_role"
+      }
+    },
+    "/admin-roles/{id}/users": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_role_users"
       }
     },
     "/tickets": {
@@ -1170,9 +1420,6 @@
           "204": {
             "description": ""
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1350,9 +1597,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -2451,6 +2695,138 @@
           }
         ],
         "operationId": "get_user_all_role_history"
+      }
+    },
+    "/users/{id}/admin-roles": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminRole"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_admin_roles"
+      }
+    },
+    "/users/{id}/admin-roles/{role_id}": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_user_admin_role"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_user_admin_role"
       }
     },
     "/users/{user_id}/credentials/passwords": {
@@ -3837,6 +4213,178 @@
           }
         }
       },
+      "AdminRole": {
+        "type": "object",
+        "title": "AdminRole",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminRoleDataRequest": {
+        "type": "object",
+        "title": "AdminRoleDataRequest",
+        "required": [
+          "name",
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          }
+        }
+      },
       "BootstrapThemeColor": {
         "type": "string",
         "enum": [
@@ -4627,6 +5175,9 @@
           "sftp_permission_mode": {
             "type": "string",
             "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
+          },
+          "minimize_password_login": {
+            "type": "boolean"
           }
         }
       },
@@ -4638,7 +5189,8 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "sftp_permission_mode"
+          "sftp_permission_mode",
+          "minimize_password_login"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4665,6 +5217,9 @@
           "sftp_permission_mode": {
             "type": "string",
             "description": "SFTP permission enforcement mode: \"strict\" or \"permissive\"\n- strict: Shell/exec/forwarding blocked when SFTP restrictions are active\n- permissive: SFTP enforced but shell/exec/forwarding still allowed"
+          },
+          "minimize_password_login": {
+            "type": "boolean"
           }
         }
       },
@@ -5190,9 +5745,6 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
-          },
-          {
-            "$ref": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
           }
         ],
         "discriminator": {
@@ -5202,8 +5754,7 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
-            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
-            "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions"
           }
         }
       },
@@ -5317,28 +5868,6 @@
           }
         ]
       },
-      "TargetOptions_TargetWebAdminOptions": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "WebAdmin"
-                ],
-                "example": "WebAdmin"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/TargetWebAdminOptions"
-          }
-        ]
-      },
       "TargetPostgresOptions": {
         "type": "object",
         "title": "TargetPostgresOptions",
@@ -5400,10 +5929,6 @@
             "$ref": "#/components/schemas/SSHTargetAuth"
           }
         }
-      },
-      "TargetWebAdminOptions": {
-        "type": "object",
-        "title": "TargetWebAdminOptions"
       },
       "TestLdapServerRequest": {
         "type": "object",

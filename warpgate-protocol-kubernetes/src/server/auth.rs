@@ -1,15 +1,11 @@
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
-use base64;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetKubernetesOptions, TargetOptions, User};
-use warpgate_core::{ConfigProvider, Services, State};
+use warpgate_core::{ConfigProvider, Services};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
 use crate::server::client_certs::RequestCertificateExt;
@@ -17,7 +13,6 @@ use crate::server::client_certs::RequestCertificateExt;
 pub async fn authenticate_and_get_target(
     req: &Request,
     target_name: &str,
-    _state: &Arc<Mutex<State>>,
     services: &Services,
 ) -> poem::Result<(AuthStateUserInfo, Target)> {
     // Check for Bearer token authentication (API tokens)
@@ -165,7 +160,6 @@ pub fn create_authenticated_client(
                 pem_bundle.push('\n');
             }
 
-            info!("Configuring Kubernetes client with mTLS (certificate auth)");
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
                 .context("Invalid client certificate/key for Kubernetes upstream")?;
             client_builder = client_builder.identity(identity);

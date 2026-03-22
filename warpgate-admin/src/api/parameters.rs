@@ -4,11 +4,12 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
-use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -25,6 +26,7 @@ struct ParameterValues {
     /// - strict: Shell/exec/forwarding blocked when SFTP restrictions are active
     /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
     pub sftp_permission_mode: String,
+    pub minimize_password_login: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -40,6 +42,7 @@ struct ParameterUpdate {
     /// - strict: Shell/exec/forwarding blocked when SFTP restrictions are active
     /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
     pub sftp_permission_mode: Option<String>,
+    pub minimize_password_login: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -59,10 +62,12 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -73,6 +78,7 @@ impl Api {
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             file_transfer_hash_threshold_bytes: parameters.file_transfer_hash_threshold_bytes,
             sftp_permission_mode: parameters.sftp_permission_mode,
+            minimize_password_login: parameters.minimize_password_login,
         })))
     }
 
@@ -83,10 +89,13 @@ impl Api {
     )]
     async fn api_update_parameters(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<ParameterUpdate>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let services = &ctx.services;
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
@@ -111,6 +120,7 @@ impl Api {
             }
             parameters.sftp_permission_mode = Set(mode.clone());
         }
+        parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

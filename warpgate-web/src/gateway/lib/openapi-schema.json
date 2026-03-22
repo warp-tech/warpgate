@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.20.2-7-g1cce72fe-modified"
+    "version": "v0.21.1-5-ga76ef2bb-modified"
   },
   "servers": [
     {
@@ -139,6 +139,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_web_auth_requests"
       }
     },
@@ -205,6 +213,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "approve_auth"
       }
     },
@@ -238,6 +254,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "reject_auth"
       }
     },
@@ -778,6 +802,82 @@
   },
   "components": {
     "schemas": {
+      "AdminPermissions": {
+        "type": "object",
+        "title": "AdminPermissions",
+        "required": [
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          }
+        }
+      },
       "ApiAuthState": {
         "type": "string",
         "enum": [
@@ -1050,6 +1150,7 @@
         "title": "Info",
         "required": [
           "ports",
+          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
@@ -1071,6 +1172,9 @@
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           },
+          "minimize_password_login": {
+            "type": "boolean"
+          },
           "authorized_via_ticket": {
             "type": "boolean"
           },
@@ -1085,6 +1189,9 @@
           },
           "setup_state": {
             "$ref": "#/components/schemas/SetupState"
+          },
+          "admin_permissions": {
+            "$ref": "#/components/schemas/AdminPermissions"
           }
         }
       },
@@ -1319,8 +1426,7 @@
           "Kubernetes",
           "MySql",
           "Ssh",
-          "Postgres",
-          "WebAdmin"
+          "Postgres"
         ]
       },
       "TargetSnapshot": {

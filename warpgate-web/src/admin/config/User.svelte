@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type Role, type User, type UserRoleAssignmentResponse, type UserRoleHistoryEntry, type SessionSnapshot } from 'admin/lib/api'
+    import { api, type Role, type User, type UserRoleAssignmentResponse, type UserRoleHistoryEntry, type SessionSnapshot, type AdminRole } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
@@ -14,6 +14,8 @@
     import { faCaretDown, faLink, faUnlink, faClock, faUser, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp, faRedo } from '@fortawesome/free-solid-svg-icons'
     import RelativeDate from '../RelativeDate.svelte'
     import { onMount, onDestroy } from 'svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import AdminRolePermissionsBadge from './AdminRolePermissionsBadge.svelte'
 
     interface Props {
         params: { id: string };
@@ -73,6 +75,9 @@
         }
     }
 
+    let allAdminRoles: AdminRole[] = $state([])
+    let adminRoleIsAllowed: Record<string, any> = $state({})
+
     const initPromise = init()
 
     async function init () {
@@ -82,6 +87,12 @@
         allRoles = await api.getRoles()
         userRoles = await api.getUserRoles(user)
         roleIsAllowed = Object.fromEntries(userRoles.map(r => [r.id, true]))
+        const allowedRoles = await api.getUserRoles(user)
+        roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
+
+        allAdminRoles = await api.getAdminRoles()
+        const allowedAdmins = await api.getUserAdminRoles({ id: user.id })
+        adminRoleIsAllowed = Object.fromEntries(allowedAdmins.map(r => [r.id, true]))
     }
 
     async function update () {
@@ -443,6 +454,22 @@
         return new Date(date).toLocaleString()
     }
 
+    async function toggleAdminRole (role: AdminRole) {
+        if (adminRoleIsAllowed[role.id]) {
+            await api.deleteUserAdminRole({
+                id: user!.id,
+                roleId: role.id,
+            })
+            adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: false }
+        } else {
+            await api.addUserAdminRole({
+                id: user!.id,
+                roleId: role.id,
+            })
+            adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: true }
+        }
+    }
+
     async function unlinkFromLdap () {
         try {
             user = await api.unlinkUserFromLdap({ id: params.id })
@@ -465,282 +492,363 @@
 <div class="container-max-md">
     <Loadable promise={initPromise}>
         {#if user}
-            <div class="page-summary-bar">
-                <div>
-                    <h1>{user.username}</h1>
-                    <div class="text-muted">User</div>
-                </div>
+        <div class="page-summary-bar">
+            <div>
+                <h1>{user.username}</h1>
+                <div class="text-muted">User</div>
             </div>
+        </div>
 
-            <div class="d-flex align-items-center gap-3">
-                <FormGroup floating label="Username" class="flex-grow-1">
-                    <Input bind:value={user.username} disabled={!user.ldapServerId} />
-                </FormGroup>
-
-                {#if $serverInfo?.hasLdap}
-                    <Dropdown class="mb-3">
-                        <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
-                            {#if user.ldapServerId}
-                                <Fa icon={faLink} fw />
-                            {/if}
-                            LDAP
-                            <Fa icon={faCaretDown} />
-                        </DropdownToggle>
-                        <DropdownMenu right={true}>
-                            {#if user.ldapServerId}
-                                <DropdownItem on:click={unlinkFromLdap}>
-                                    <Fa icon={faUnlink} fw />
-                                    Unlink from LDAP
-                                </DropdownItem>
-                            {:else}
-                                <DropdownItem on:click={autoLinkToLdap}>
-                                    <Fa icon={faLink} fw />
-                                    Auto-link to LDAP
-                                </DropdownItem>
-                            {/if}
-                        </DropdownMenu>
-                    </Dropdown>
-                {/if}
-            </div>
-
-            <FormGroup floating label="Description">
-                <Input bind:value={user.description} />
+        <div class="d-flex align-items-center gap-3">
+            <FormGroup floating label="Username" class="flex-grow-1">
+                <Input bind:value={user.username} disabled={!user.ldapServerId} />
             </FormGroup>
 
-            <CredentialEditor
-                userId={user.id}
-                username={user.username}
-                bind:credentialPolicy={user.credentialPolicy!}
-                ldapLinked={!!user.ldapServerId}
-            />
+            {#if $serverInfo?.hasLdap}
+            <Dropdown class="mb-3">
+                <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
+                    {#if user.ldapServerId}
+                        <Fa icon={faLink} fw />
+                    {/if}
+                    LDAP
+                    <Fa icon={faCaretDown} />
+                </DropdownToggle>
+                <DropdownMenu right={true}>
+                    {#if user.ldapServerId}
+                    <DropdownItem on:click={unlinkFromLdap}>
+                        <Fa icon={faUnlink} fw />
+                        Unlink from LDAP
+                    </DropdownItem>
+                    {:else}
+                    <DropdownItem on:click={autoLinkToLdap}>
+                        <Fa icon={faLink} fw />
+                        Auto-link to LDAP
+                    </DropdownItem>
+                    {/if}
+                </DropdownMenu>
+            </Dropdown>
+            {/if}
+        </div>
 
-            <h4 class="mt-4">User roles</h4>
-            <div class="list-group list-group-flush mb-3">
-                {#each allRoles as role (role.id)}
-                    {@const activeAssignment = userRoles.find(ur => ur.id === role.id && !ur.isExpired)}
-                    {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
-                    {@const isActive = !!activeAssignment}
-                    {@const isExpired = !!expiredAssignment && !isActive}
-                    {@const assignment = activeAssignment ?? expiredAssignment}
-                    {@const status = assignment ? getExpiryStatus(assignment) : null}
-                    <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
-                        <div class="d-flex align-items-center gap-3">
-                            <Input
-                                id="role-{role.id}"
-                                class="mb-0"
-                                type="switch"
-                                on:change={() => toggleRole(role)}
-                                checked={isActive} />
-                            <div>
-                                <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
-                                {#if isActive && activeAssignment}
-                                    <div class="d-flex gap-2 align-items-center flex-wrap">
-                                        <small class={status?.class ?? ''}>
-                                            {status?.text ?? ''}
-                                        </small>
-                                        {#if activeAssignment.grantedAt}
-                                            <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
-                                                &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
-                                            </small>
-                                        {/if}
-                                    </div>
-                                {:else if isExpired && expiredAssignment}
-                                    <div class="d-flex gap-2 align-items-center flex-wrap">
-                                        <small class="text-danger">
-                                            <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
-                                        </small>
-                                        {#if expiredAssignment.expiresAt}
-                                            <small class="text-muted">
-                                                {new Date(expiredAssignment.expiresAt).toLocaleDateString()}
-                                            </small>
-                                        {/if}
-                                    </div>
-                                {:else if role.description}
-                                    <small class="text-muted">{role.description}</small>
-                                {/if}
-                            </div>
-                        </div>
-                        <div class="d-flex gap-2">
+        <FormGroup floating label="Description">
+            <Input bind:value={user.description} />
+        </FormGroup>
+
+        {#if $adminPermissions.usersEdit}
+        <CredentialEditor
+            userId={user.id}
+            username={user.username}
+            bind:credentialPolicy={user.credentialPolicy!}
+            ldapLinked={!!user.ldapServerId}
+        />
+        {/if}
+
+        <div class="d-flex align-items-center gap-3">
+            <FormGroup floating label="Username" class="flex-grow-1">
+                <Input bind:value={user.username} disabled={!user.ldapServerId} />
+            </FormGroup>
+
+            {#if $serverInfo?.hasLdap}
+                <Dropdown class="mb-3">
+                    <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
+                        {#if user.ldapServerId}
+                            <Fa icon={faLink} fw />
+                        {/if}
+                        LDAP
+                        <Fa icon={faCaretDown} />
+                    </DropdownToggle>
+                    <DropdownMenu right={true}>
+                        {#if user.ldapServerId}
+                            <DropdownItem on:click={unlinkFromLdap}>
+                                <Fa icon={faUnlink} fw />
+                                Unlink from LDAP
+                            </DropdownItem>
+                        {:else}
+                            <DropdownItem on:click={autoLinkToLdap}>
+                                <Fa icon={faLink} fw />
+                                Auto-link to LDAP
+                            </DropdownItem>
+                        {/if}
+                    </DropdownMenu>
+                </Dropdown>
+            {/if}
+        </div>
+
+        <FormGroup floating label="Description">
+            <Input bind:value={user.description} />
+        </FormGroup>
+
+        <CredentialEditor
+            userId={user.id}
+            username={user.username}
+            bind:credentialPolicy={user.credentialPolicy!}
+            ldapLinked={!!user.ldapServerId}
+        />
+
+        <h4 class="mt-4">User roles</h4>
+        <div class="list-group list-group-flush mb-3">
+            {#each allRoles as role (role.id)}
+                {@const activeAssignment = userRoles.find(ur => ur.id === role.id && !ur.isExpired)}
+                {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
+                {@const isActive = !!activeAssignment}
+                {@const isExpired = !!expiredAssignment && !isActive}
+                {@const assignment = activeAssignment ?? expiredAssignment}
+                {@const status = assignment ? getExpiryStatus(assignment) : null}
+                <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
+                    <div class="d-flex align-items-center gap-3">
+                        <Input
+                            id="role-{role.id}"
+                            class="mb-0"
+                            type="switch"
+                            on:change={() => toggleRole(role)}
+                            checked={isActive} />
+                        <div>
+                            <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
                             {#if isActive && activeAssignment}
-                                <Button
-                                    size="sm"
-                                    outline
-                                    color="secondary"
-                                    on:click={() => openExpiryModal(activeAssignment)}
-                                    title="Edit expiry"
-                                >
-                                    <Fa icon={faClock} class="me-1" />
-                                    Expiry
-                                </Button>
-                            {:else if isExpired}
-                                <Button
-                                    size="sm"
-                                    outline
-                                    color="success"
-                                    on:click={() => toggleRole(role)}
-                                    title="Re-enable this role"
-                                >
-                                    <Fa icon={faRedo} class="me-1" />
-                                    Re-enable
-                                </Button>
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <small class={status?.class ?? ''}>
+                                        {status?.text ?? ''}
+                                    </small>
+                                    {#if activeAssignment.grantedAt}
+                                        <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
+                                            &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
+                                        </small>
+                                    {/if}
+                                </div>
+                            {:else if isExpired && expiredAssignment}
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <small class="text-danger">
+                                        <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
+                                    </small>
+                                    {#if expiredAssignment.expiresAt}
+                                        <small class="text-muted">
+                                            {new Date(expiredAssignment.expiresAt).toLocaleDateString()}
+                                        </small>
+                                    {/if}
+                                </div>
+                            {:else if role.description}
+                                <small class="text-muted">{role.description}</small>
                             {/if}
                         </div>
                     </div>
-                {/each}
-            </div>
+                    <div class="d-flex gap-2">
+                        {#if isActive && activeAssignment}
+                            <Button
+                                size="sm"
+                                outline
+                                color="secondary"
+                                on:click={() => openExpiryModal(activeAssignment)}
+                                title="Edit expiry"
+                            >
+                                <Fa icon={faClock} class="me-1" />
+                                Expiry
+                            </Button>
+                        {:else if isExpired}
+                            <Button
+                                size="sm"
+                                outline
+                                color="success"
+                                on:click={() => toggleRole(role)}
+                                title="Re-enable this role"
+                            >
+                                <Fa icon={faRedo} class="me-1" />
+                                Re-enable
+                            </Button>
+                        {/if}
+                    </div>
+                </div>
+            {/each}
+        </div>
 
-            <hr class="mt-4 mb-4" />
 
-            <h4 class="mb-3">Traffic</h4>
-            <FormGroup class="mb-5">
-                <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
-                <RateLimitInput
-                    id="rateLimitBytesPerSecond"
-                    bind:value={user.rateLimitBytesPerSecond}
-                />
-            </FormGroup>
+        <hr class="mt-4 mb-4" />
 
-            <!-- Role Assignment History Section -->
-            <Card class="mb-4">
-                <button
-                    type="button"
-                    class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
-                    style="cursor: pointer"
-                    onclick={() => roleHistoryCollapsed = !roleHistoryCollapsed}
-                    aria-expanded={!roleHistoryCollapsed}
-                    aria-controls="role-history-collapse"
-                >
-                    <h4 class="mb-0">Role Assignment History</h4>
-                    <Fa icon={roleHistoryCollapsed ? faChevronDown : faChevronUp} />
-                </button>
-                <Collapse isOpen={!roleHistoryCollapsed}>
-                    <CardBody>
-                        {#if !roleHistoryLoaded}
-                            <div class="text-center py-3 text-muted small">Loading history...</div>
-                        {:else if roleHistory.length === 0}
-                            <div class="text-muted small">No history found for this user.</div>
-                        {:else}
-                            <div class="list-group list-group-flush mb-3">
-                                {#each roleHistory as entry (entry.id)}
-                                    <div class="list-group-item py-2 px-0 border-0">
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <strong>{entry.details.roleName}</strong>
-                                            <span class="badge bg-{getActionDisplayColor(entry.action)}">
-                                                {getActionDisplayLabel(entry.action)}
+        <h4 class="mb-3">Traffic</h4>
+        <FormGroup class="mb-5">
+            <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+            <RateLimitInput
+                id="rateLimitBytesPerSecond"
+                bind:value={user.rateLimitBytesPerSecond}
+            />
+        </FormGroup>
+
+        <!-- Role Assignment History Section -->
+        <Card class="mb-4">
+            <button
+                type="button"
+                class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
+                style="cursor: pointer"
+                onclick={() => roleHistoryCollapsed = !roleHistoryCollapsed}
+                aria-expanded={!roleHistoryCollapsed}
+                aria-controls="role-history-collapse"
+            >
+                <h4 class="mb-0">Role Assignment History</h4>
+                <Fa icon={roleHistoryCollapsed ? faChevronDown : faChevronUp} />
+            </button>
+            <Collapse isOpen={!roleHistoryCollapsed}>
+                <CardBody>
+                    {#if !roleHistoryLoaded}
+                        <div class="text-center py-3 text-muted small">Loading history...</div>
+                    {:else if roleHistory.length === 0}
+                        <div class="text-muted small">No history found for this user.</div>
+                    {:else}
+                        <div class="list-group list-group-flush mb-3">
+                            {#each roleHistory as entry (entry.id)}
+                                <div class="list-group-item py-2 px-0 border-0">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <strong>{entry.details.roleName}</strong>
+                                        <span class="badge bg-{getActionDisplayColor(entry.action)}">
+                                            {getActionDisplayLabel(entry.action)}
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mt-1">
+                                        <div class="text-muted small d-flex align-items-center">
+                                            <Fa icon={faUser} fw class="me-1" />
+                                            <span>
+                                                {entry.actorUsername || 'System'} changed:
+                                                {#if entry.action === 'expiry_changed'}
+                                                    {formatHistoryDate(entry.details.oldExpiresAt)} &rarr; {formatHistoryDate(entry.details.newExpiresAt)}
+                                                {:else if entry.details.expiresAt}
+                                                    {formatHistoryDate(entry.details.expiresAt)}
+                                                {:else}
+                                                    Permanent
+                                                {/if}
                                             </span>
                                         </div>
-                                        <div class="d-flex justify-content-between align-items-center mt-1">
-                                            <div class="text-muted small d-flex align-items-center">
-                                                <Fa icon={faUser} fw class="me-1" />
-                                                <span>
-                                                    {entry.actorUsername || 'System'} changed:
-                                                    {#if entry.action === 'expiry_changed'}
-                                                        {formatHistoryDate(entry.details.oldExpiresAt)} &rarr; {formatHistoryDate(entry.details.newExpiresAt)}
-                                                    {:else if entry.details.expiresAt}
-                                                        {formatHistoryDate(entry.details.expiresAt)}
-                                                    {:else}
-                                                        Permanent
-                                                    {/if}
-                                                </span>
-                                            </div>
-                                            <div class="text-muted small">{new Date(entry.occurredAt).toLocaleString()}</div>
-                                        </div>
+                                        <div class="text-muted small">{new Date(entry.occurredAt).toLocaleString()}</div>
                                     </div>
-                                {/each}
-                            </div>
-
-                            {#if hasMoreHistory}
-                                <div class="d-grid mt-2">
-                                    <AsyncButton
-                                        outline
-                                        color="secondary"
-                                        click={() => loadAllRoleHistory(true)}
-                                    >
-                                        Load more
-                                    </AsyncButton>
                                 </div>
-                            {/if}
-                        {/if}
-                    </CardBody>
-                </Collapse>
-            </Card>
+                            {/each}
+                        </div>
 
-            <!-- Connection History Section -->
-            <Card class="mb-4">
-                <button
-                    type="button"
-                    class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
-                    style="cursor: pointer"
-                    onclick={() => sessionHistoryCollapsed = !sessionHistoryCollapsed}
-                    aria-expanded={!sessionHistoryCollapsed}
-                    aria-controls="session-history-collapse"
-                >
-                    <h4 class="mb-0">Connection History</h4>
-                    <Fa icon={sessionHistoryCollapsed ? faChevronDown : faChevronUp} />
-                </button>
-                <Collapse isOpen={!sessionHistoryCollapsed}>
-                    <CardBody>
-                        {#if !sessionHistoryLoaded}
-                            <div class="text-center py-3 text-muted small">Loading connections...</div>
-                        {:else if sessionHistory.length === 0}
-                            <div class="text-muted small">No connection history found for this user.</div>
-                        {:else}
-                            <div class="list-group list-group-flush mb-3">
-                                {#each sessionHistory as session (session.id)}
-                                    <div class="list-group-item py-3">
-                                        <div class="d-flex justify-content-between align-items-start">
-                                            <div class="d-flex align-items-center gap-2">
-                                                <Fa icon={getSessionProtocolIcon(session.protocol)} class="text-muted" />
-                                                <div>
-                                                    <strong class="text-capitalize">{session.protocol}</strong>
-                                                    {#if session.target?.name}
-                                                        <span class="text-muted ms-2">&rarr; {session.target.name}</span>
-                                                    {/if}
-                                                </div>
-                                            </div>
-                                            <div class="text-end">
-                                                {#if session.ended}
-                                                    <span class="badge bg-secondary">Ended</span>
-                                                {:else}
-                                                    <span class="badge bg-success">Active</span>
+                        {#if hasMoreHistory}
+                            <div class="d-grid mt-2">
+                                <AsyncButton
+                                    outline
+                                    color="secondary"
+                                    click={() => loadAllRoleHistory(true)}
+                                >
+                                    Load more
+                                </AsyncButton>
+                            </div>
+                        {/if}
+                    {/if}
+                </CardBody>
+            </Collapse>
+        </Card>
+
+        <!-- Connection History Section -->
+        <Card class="mb-4">
+            <button
+                type="button"
+                class="card-header d-flex justify-content-between align-items-center w-100 text-start border-0 bg-transparent"
+                style="cursor: pointer"
+                onclick={() => sessionHistoryCollapsed = !sessionHistoryCollapsed}
+                aria-expanded={!sessionHistoryCollapsed}
+                aria-controls="session-history-collapse"
+            >
+                <h4 class="mb-0">Connection History</h4>
+                <Fa icon={sessionHistoryCollapsed ? faChevronDown : faChevronUp} />
+            </button>
+            <Collapse isOpen={!sessionHistoryCollapsed}>
+                <CardBody>
+                    {#if !sessionHistoryLoaded}
+                        <div class="text-center py-3 text-muted small">Loading connections...</div>
+                    {:else if sessionHistory.length === 0}
+                        <div class="text-muted small">No connection history found for this user.</div>
+                    {:else}
+                        <div class="list-group list-group-flush mb-3">
+                            {#each sessionHistory as session (session.id)}
+                                <div class="list-group-item py-3">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <Fa icon={getSessionProtocolIcon(session.protocol)} class="text-muted" />
+                                            <div>
+                                                <strong class="text-capitalize">{session.protocol}</strong>
+                                                {#if session.target?.name}
+                                                    <span class="text-muted ms-2">&rarr; {session.target.name}</span>
                                                 {/if}
                                             </div>
                                         </div>
-                                        <div class="d-flex justify-content-between align-items-center mt-2">
-                                            <div class="text-muted small">
-                                                <div>Started: {new Date(session.started).toLocaleString()}</div>
-                                                {#if session.ended}
-                                                    <div>Ended: {new Date(session.ended).toLocaleString()}</div>
-                                                    <div>Duration: {formatSessionDuration(session.started, session.ended)}</div>
-                                                {:else}
-                                                    <div>Duration: {formatSessionDuration(session.started)}</div>
-                                                {/if}
-                                            </div>
-                                            {#if session.ticketId}
-                                                <div class="text-muted small">
-                                                    <span class="badge bg-info">Ticket</span>
-                                                </div>
+                                        <div class="text-end">
+                                            {#if session.ended}
+                                                <span class="badge bg-secondary">Ended</span>
+                                            {:else}
+                                                <span class="badge bg-success">Active</span>
                                             {/if}
                                         </div>
                                     </div>
-                                {/each}
-                            </div>
-
-                            {#if hasMoreSessions}
-                                <div class="d-grid mt-2">
-                                    <AsyncButton
-                                        outline
-                                        color="secondary"
-                                        click={() => loadSessionHistory(true)}
-                                    >
-                                        Load more
-                                    </AsyncButton>
+                                    <div class="d-flex justify-content-between align-items-center mt-2">
+                                        <div class="text-muted small">
+                                            <div>Started: {new Date(session.started).toLocaleString()}</div>
+                                            {#if session.ended}
+                                                <div>Ended: {new Date(session.ended).toLocaleString()}</div>
+                                                <div>Duration: {formatSessionDuration(session.started, session.ended)}</div>
+                                            {:else}
+                                                <div>Duration: {formatSessionDuration(session.started)}</div>
+                                            {/if}
+                                        </div>
+                                        {#if session.ticketId}
+                                            <div class="text-muted small">
+                                                <span class="badge bg-info">Ticket</span>
+                                            </div>
+                                        {/if}
+                                    </div>
                                 </div>
-                            {/if}
+                            {/each}
+                        </div>
+
+                        {#if hasMoreSessions}
+                            <div class="d-grid mt-2">
+                                <AsyncButton
+                                    outline
+                                    color="secondary"
+                                    click={() => loadSessionHistory(true)}
+                                >
+                                    Load more
+                                </AsyncButton>
+                            </div>
                         {/if}
-                    </CardBody>
-                </Collapse>
-            </Card>
+                    {/if}
+                </CardBody>
+            </Collapse>
+        </Card>
+
+        <h4 class="mt-4">Admin roles</h4>
+        <div class="list-group list-group-flush mb-3">
+            {#each allAdminRoles as role (role.id)}
+                <label
+                    for="admin-role-{role.id}"
+                    class="list-group-item list-group-item-action d-flex align-items-center"
+                >
+                    <Input
+                        id="admin-role-{role.id}"
+                        class="mb-0 me-2"
+                        type="switch"
+                        on:change={() => toggleAdminRole(role)}
+                        disabled={!$adminPermissions.adminRolesManage}
+                        checked={adminRoleIsAllowed[role.id]} />
+                    <div>
+                        <div>{role.name}</div>
+                        {#if role.description}
+                            <small class="text-muted">{role.description}</small>
+                        {/if}
+                    </div   >
+                    <span class="ms-auto">
+                        <AdminRolePermissionsBadge {role} />
+                    </span>
+                </label>
+            {/each}
+        </div>
+
+        <h4 class="mt-4">Traffic</h4>
+        <FormGroup class="mb-5">
+            <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+            <RateLimitInput
+                id="rateLimitBytesPerSecond"
+                bind:value={user.rateLimitBytesPerSecond}
+            />
+        </FormGroup>
         {/if}
     </Loadable>
 
@@ -753,12 +861,14 @@
             color="primary"
             class="ms-auto"
             click={update}
+            disabled={!$adminPermissions.usersEdit}
         >Update</AsyncButton>
 
         <AsyncButton
             class="ms-2"
             color="danger"
             click={remove}
+            disabled={!$adminPermissions.usersDelete}
         >Remove</AsyncButton>
     </div>
 </div>

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.93.1-bullseye@sha256:fae8ebcb8eda28d37df2b965c87c15a572dac2b6d3893a72d6dea99d700d1786 AS build
+FROM rust:1.94.0-bullseye@sha256:16950191527a4cb9e0762d9d48b705a6315158e4035e64f7a93ce8656a1b053c AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,7 +26,7 @@ RUN just npm ci \
     && just npm run build \
     && cargo build --features mysql,postgres --release
 
-FROM debian:bullseye-20260223@sha256:550c53afe18c60e0dc975327dcb75a4ef8265e247e1190822bf8881a70825fce
+FROM debian:bullseye-20260316@sha256:943d97fa707482c24e1bc2bdd0b0adc45f75eb345c61dc4272c4157f9a2cc9cc
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
 

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -10,22 +9,23 @@ use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::{HeaderValue, Uri};
-use once_cell::sync::Lazy;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
-use poem::web::Data;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
+use warpgate_common::http_headers::{
+    DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
+};
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
-use warpgate_core::logging::http::{get_client_ip, log_request_result};
-use warpgate_core::Services;
+use warpgate_common_http::logging::{get_client_ip, log_request_result};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_tls::{configure_tls_connector, TlsMode};
 use warpgate_web::lookup_built_file;
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::SessionExt;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -80,26 +80,6 @@ impl SomeRequestBuilder for http::request::Builder {
         self.header(k, v)
     }
 }
-
-static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
-    #[allow(clippy::mutable_key_type)]
-    let mut s = HashSet::new();
-    s.insert(http::header::ACCEPT_ENCODING);
-    s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
-    s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
-    s.insert(http::header::SEC_WEBSOCKET_KEY);
-    s.insert(http::header::SEC_WEBSOCKET_VERSION);
-    s.insert(http::header::UPGRADE);
-    s.insert(http::header::HOST);
-    s.insert(http::header::CONNECTION);
-    s.insert(http::header::STRICT_TRANSPORT_SECURITY);
-    s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
-    s
-});
-
-static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
-static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
@@ -261,11 +241,11 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
 
 pub async fn proxy_normal_request(
     req: &Request,
+    ctx: &AuthenticatedRequestContext,
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
-    let services = Data::<&Services>::from_request_without_body(req).await?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -329,7 +309,7 @@ pub async fn proxy_normal_request(
     log_request_result(
         req.method(),
         req.original_uri(),
-        get_client_ip(req, Some(*services)).await.as_deref(),
+        get_client_ip(req, &ctx.services).await.as_deref(),
         &status,
     );
 

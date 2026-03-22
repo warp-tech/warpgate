@@ -1,23 +1,21 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{
-    Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
+    AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct RoleDataRequest {
@@ -46,11 +44,14 @@ impl ListApi {
     #[oai(path = "/roles", method = "get", operation_id = "get_roles")]
     async fn api_get_all_roles(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRolesResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        // listing roles is allowed for any administrator
+        let db = ctx.services.db.lock().await;
 
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
@@ -69,17 +70,19 @@ impl ListApi {
     #[oai(path = "/roles", method = "post", operation_id = "create_role")]
     async fn api_create_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<RoleDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateRoleResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesCreate)).await?;
+
         use warpgate_db_entities::Role;
 
         if body.name.is_empty() {
             return Ok(CreateRoleResponse::BadRequest(Json("name".into())));
         }
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let values = Role::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -151,11 +154,13 @@ impl DetailApi {
     #[oai(path = "/role/:id", method = "get", operation_id = "get_role")]
     async fn api_get_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -168,12 +173,14 @@ impl DetailApi {
     #[oai(path = "/role/:id", method = "put", operation_id = "update_role")]
     async fn api_update_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<RoleDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
@@ -194,11 +201,13 @@ impl DetailApi {
     #[oai(path = "/role/:id", method = "delete", operation_id = "delete_role")]
     async fn api_delete_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesDelete)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
@@ -219,11 +228,13 @@ impl DetailApi {
     )]
     async fn api_get_role_targets(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleTargetsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleTargetsResponse::NotFound);
@@ -246,11 +257,13 @@ impl DetailApi {
     )]
     async fn api_get_role_users(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleUsersResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleUsersResponse::NotFound);
@@ -318,11 +331,11 @@ impl FileTransferApi {
     )]
     async fn api_get_role_file_transfer(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetRoleFileTransferResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleFileTransferResponse::NotFound);
@@ -358,12 +371,12 @@ impl FileTransferApi {
     )]
     async fn api_update_role_file_transfer(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         body: Json<RoleFileTransferDefaults>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateRoleFileTransferResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleFileTransferResponse::NotFound);

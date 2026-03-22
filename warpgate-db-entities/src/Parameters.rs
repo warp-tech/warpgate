@@ -24,6 +24,7 @@ pub struct Model {
     /// - permissive: SFTP enforced but shell/exec/forwarding still allowed
     #[sea_orm(default_value = "strict")]
     pub sftp_permission_mode: String,
+    pub minimize_password_login: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -47,6 +48,7 @@ impl Entity {
                     ssh_client_auth_keyboard_interactive: Set(true),
                     file_transfer_hash_threshold_bytes: Set(Some(10485760)), // 10MB default
                     sftp_permission_mode: Set("strict".to_string()),
+                    minimize_password_login: Set(false),
                 }
                 .insert(db)
                 .await

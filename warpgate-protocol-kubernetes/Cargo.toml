@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-kubernetes"
-version = "0.16.0"
+version = "0.22.0"
 
 [dependencies]
 anyhow.workspace = true
@@ -31,6 +31,7 @@ tracing.workspace = true
 url = { version = "2.0", default-features = false }
 uuid.workspace = true
 warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-common-http = { version = "*", path = "../warpgate-common-http", default-features = false }
 warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
 warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }

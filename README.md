@@ -26,7 +26,7 @@
 
 ---
 
-Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion host that doesn't require a client app or an SSH wrapper.
+Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQL bastion host that doesn't require a client app or an SSH wrapper.
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
@@ -34,6 +34,12 @@ Warpgate is a smart & fully transparent SSH, HTTPS, MySQL and PostgreSQL bastion
 * Native 2FA and SSO support (TOTP & OpenID Connect)
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
+
+<p align="center" style="margin: 30px 0 10px">Supported by: </p>
+<p align="center" style="margin: 0 0 30px">
+<a href="https://floss.fund"><img src="https://floss.fund/static/badge.svg" alt="FLOSS/fund badge" /></a>
+</p>
+
 
 ## Getting started & downloads
 
@@ -82,7 +88,7 @@ The project is ready for production.
 
 ## How it works
 
-Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, MySQL and PostgreSQL connections and provide an (optional) web admin UI.
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, Kubernetes, MySQL and PostgreSQL connections and provide an (optional) web admin UI.
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://warpgate.null.page/getting-started/) for details.
 
@@ -138,14 +144,16 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/samtoxie"><img src="https://avatars.githubusercontent.com/u/7732658?v=4?s=100" width="100px;" alt="samtoxie"/><br /><sub><b>samtoxie</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=samtoxie" title="Code">💻</a></td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://p.foundation/"><img src="https://avatars.githubusercontent.com/u/80860929?v=4?s=100" width="100px;" alt="P Foundation"/><br /><sub><b>P Foundation</b></sub></a><br /><a href="#financial-pfoundation" title="Financial">💵</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://sixteenink.com"><img src="https://avatars.githubusercontent.com/u/1480236?v=4?s=100" width="100px;" alt="Skyler Lewis"/><br /><sub><b>Skyler Lewis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=alairock" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://www.mohammednoureldin.com"><img src="https://avatars.githubusercontent.com/u/14913147?v=4?s=100" width="100px;" alt="Mohammed Noureldin"/><br /><sub><b>Mohammed Noureldin</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=MohammedNoureldin" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mrmm"><img src="https://avatars.githubusercontent.com/u/796467?v=4?s=100" width="100px;" alt="Mourad Maatoug"/><br /><sub><b>Mourad Maatoug</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=mrmm" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://justinforlenza.dev"><img src="https://avatars.githubusercontent.com/u/11709872?v=4?s=100" width="100px;" alt="Justin"/><br /><sub><b>Justin</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=justinforlenza" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/liebermantodd"><img src="https://avatars.githubusercontent.com/u/12155811?v=4?s=100" width="100px;" alt="liebermantodd"/><br /><sub><b>liebermantodd</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=liebermantodd" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://blog.trieoflogs.com"><img src="https://avatars.githubusercontent.com/u/14965074?v=4?s=100" width="100px;" alt="Hariharan"/><br /><sub><b>Hariharan</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=cvhariharan" title="Code">💻</a></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://p.foundation/"><img src="https://avatars.githubusercontent.com/u/80860929?v=4?s=100" width="100px;" alt="P Foundation"/><br /><sub><b>P Foundation</b></sub></a><br /><a href="#financial-pfoundation" title="Financial">💵</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/solidassassin"><img src="https://avatars.githubusercontent.com/u/47082246?v=4?s=100" width="100px;" alt="Rokas Krivaitis"/><br /><sub><b>Rokas Krivaitis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=solidassassin" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

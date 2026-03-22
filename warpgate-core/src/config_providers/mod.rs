@@ -85,6 +85,14 @@ pub trait ConfigProvider {
         active_role_names: Vec<String>,
     ) -> Result<(), WarpgateError>;
 
+    /// Similar to `apply_sso_role_mappings` but operates on *admin* roles.
+    async fn apply_sso_admin_role_mappings(
+        &mut self,
+        username: &str,
+        managed_admin_role_names: Option<Vec<String>>,
+        active_admin_role_names: Vec<String>,
+    ) -> Result<(), WarpgateError>;
+
     async fn get_credential_policy(
         &mut self,
         username: &str,

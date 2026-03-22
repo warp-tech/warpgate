@@ -1,7 +1,7 @@
 use openidconnect::url::Url;
 use openidconnect::{CsrfToken, Nonce, PkceCodeVerifier, RedirectUrl};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::{SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse};
 
@@ -29,7 +29,8 @@ impl SsoLoginRequest {
     }
 
     pub async fn verify_code(self, code: String) -> Result<SsoLoginResponse, SsoError> {
-        let result = SsoClient::new(self.config)?
+        let config = self.config;
+        let result = SsoClient::new(config.clone())?
             .finish_login(self.pkce_verifier, self.redirect_url, &self.nonce, code)
             .await?;
 
@@ -55,24 +56,51 @@ impl SsoLoginRequest {
                     .map(ToString::to_string)
             });
 
+        let name = get_claim!(name)
+            .and_then(|x| x.get(None))
+            .map(|x| x.as_str())
+            .map(ToString::to_string);
+
+        let email = get_claim!(email)
+            .map(|x| x.as_str())
+            .map(ToString::to_string);
+
+        let email_verified = get_claim!(email_verified);
+
+        let info_claims = result.userinfo_claims.as_ref();
+
+        macro_rules! get_additional_claim {
+            ($method:ident) => {
+                result
+                    .claims
+                    .additional_claims()
+                    .$method
+                    .clone()
+                    .or(info_claims.and_then(|x| x.additional_claims().$method.clone()))
+            };
+        }
+
+        let (access_groups, admin_groups) =
+            match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
+            {
+                Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
+                Ok(None) => (
+                    get_additional_claim!(warpgate_roles),
+                    get_additional_claim!(warpgate_admin_roles),
+                ),
+                Err(e) => {
+                    error!("Failed to fetch Google groups: {e}");
+                    (None, None)
+                }
+            };
+
         Ok(SsoLoginResponse {
             preferred_username,
-
-            name: get_claim!(name)
-                .and_then(|x| x.get(None))
-                .map(|x| x.as_str())
-                .map(ToString::to_string),
-
-            email: get_claim!(email)
-                .map(|x| x.as_str())
-                .map(ToString::to_string),
-
-            email_verified: get_claim!(email_verified),
-
-            groups: result
-                .userinfo_claims
-                .and_then(|x| x.additional_claims().warpgate_roles.clone()),
-
+            name,
+            email,
+            email_verified,
+            access_roles: access_groups,
+            admin_roles: admin_groups,
             id_token: result.token.clone(),
         })
     }

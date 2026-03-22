@@ -5,6 +5,7 @@ pub mod consts;
 mod error;
 pub mod eventhub;
 pub mod helpers;
+pub mod http_headers;
 mod state;
 mod try_macro;
 mod types;

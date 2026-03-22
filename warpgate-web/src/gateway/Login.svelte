@@ -7,7 +7,7 @@
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
     import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
-    import { reloadServerInfo } from 'gateway/lib/store'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -20,6 +20,7 @@
     let otpInput: HTMLInputElement|undefined = $state()
     let authState: ApiAuthState|undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
+    let showPasswordLogin = $state(false)
 
     const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
@@ -129,7 +130,48 @@
     }
 </script>
 
+{#snippet localLoginForm()}
+    <form autocomplete="on" onsubmit={e => {
+        login()
+        e.preventDefault()
+    }}>
+        <FormGroup floating label="Username">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+                bind:value={username}
+                name="username"
+                autocomplete="username"
+                disabled={busy}
+                class="form-control"
+                required
+                autofocus />
+        </FormGroup>
+
+        <FormGroup floating label="Password">
+            <input
+                bind:value={password}
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                disabled={busy}
+                required
+                class="form-control" />
+        </FormGroup>
+
+        <Button
+            class="d-flex align-items-center"
+            color="primary"
+            type="submit"
+            disabled={busy}
+        >
+            Login
+            <Fa class="ms-2" fw icon={faArrowRight} />
+        </Button>
+    </form>
+{/snippet}
+
 <Loadable promise={initPromise}>
+
     <div class="mt-5">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
@@ -167,44 +209,9 @@
                 </Button>
             </form>
         {/if}
-        {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed}
-        <form autocomplete="on" onsubmit={e => {
-            login()
-            e.preventDefault()
-        }}>
-            <FormGroup floating label="Username">
-                <!-- svelte-ignore a11y_autofocus -->
-                <input
-                    bind:value={username}
-                    name="username"
-                    autocomplete="username"
-                    disabled={busy}
-                    class="form-control"
-                    required
-                    autofocus />
-            </FormGroup>
-
-            <FormGroup floating label="Password">
-                <input
-                    bind:value={password}
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    disabled={busy}
-                    required
-                    class="form-control" />
-            </FormGroup>
-
-            <Button
-                class="d-flex align-items-center"
-                color="primary"
-                type="submit"
-                disabled={busy}
-            >
-                Login
-                <Fa class="ms-2" fw icon={faArrowRight} />
-            </Button>
-        </form>
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
+            <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
+            {@render localLoginForm()}
         {/if}
 
         <div class="mt-3"></div>
@@ -239,12 +246,28 @@
                             {#if ssoProvider.kind === SsoProviderKind.Apple}
                                 <Fa fw class="me-2" icon={faApple} />
                             {/if}
-                            {ssoProvider.name || ssoProvider.label}
+                            {ssoProvider.label || ssoProvider.name}
                         </button>
                     {/each}
                 </div>
             {/snippet}
         </Loadable>
+    {/if}
+
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
+        <div class="mt-3 text-center">
+            <!-- svelte-ignore a11y_invalid_attribute -->
+            <a
+                href="#"
+                class="password-login-link"
+                onclick={e => {
+                    e.preventDefault()
+                    showPasswordLogin = true
+                }}
+            >
+                Password login
+            </a>
+        </div>
     {/if}
 
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
@@ -275,4 +298,6 @@
             text-wrap: nowrap;
         }
     }
+
+
 </style>

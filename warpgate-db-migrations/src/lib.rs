@@ -32,13 +32,15 @@ mod m00027_ca;
 mod m00028_certificate_credentials;
 mod m00029_certificate_revocation;
 mod m00030_add_recording_metadata;
-mod m00031_file_transfer_permissions;
-mod m00032_file_transfer_config;
-mod m00033_user_role_expiry_history;
-mod m00034_role_file_transfer_defaults;
-mod m00035_target_role_nullable_overrides;
-mod m00036_sftp_permission_mode;
-mod m00037_file_transfer_only;
+mod m00031_minimize_password_login;
+mod m00032_admin_roles;
+mod m00033_file_transfer_permissions;
+mod m00034_file_transfer_config;
+mod m00035_user_role_expiry_history;
+mod m00036_role_file_transfer_defaults;
+mod m00037_target_role_nullable_overrides;
+mod m00038_sftp_permission_mode;
+mod m00039_file_transfer_only;
 
 pub struct Migrator;
 
@@ -76,13 +78,15 @@ impl MigratorTrait for Migrator {
             Box::new(m00028_certificate_credentials::Migration),
             Box::new(m00029_certificate_revocation::Migration),
             Box::new(m00030_add_recording_metadata::Migration),
-            Box::new(m00031_file_transfer_permissions::Migration),
-            Box::new(m00032_file_transfer_config::Migration),
-            Box::new(m00033_user_role_expiry_history::Migration),
-            Box::new(m00034_role_file_transfer_defaults::Migration),
-            Box::new(m00035_target_role_nullable_overrides::Migration),
-            Box::new(m00036_sftp_permission_mode::Migration),
-            Box::new(m00037_file_transfer_only::Migration),
+            Box::new(m00031_minimize_password_login::Migration),
+            Box::new(m00032_admin_roles::Migration),
+            Box::new(m00033_file_transfer_permissions::Migration),
+            Box::new(m00034_file_transfer_config::Migration),
+            Box::new(m00035_user_role_expiry_history::Migration),
+            Box::new(m00036_role_file_transfer_defaults::Migration),
+            Box::new(m00037_target_role_nullable_overrides::Migration),
+            Box::new(m00038_sftp_permission_mode::Migration),
+            Box::new(m00039_file_transfer_only::Migration),
         ]
     }
 }
