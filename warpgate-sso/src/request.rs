@@ -69,13 +69,24 @@ impl SsoLoginRequest {
 
         let info_claims = result.userinfo_claims.as_ref();
 
+        macro_rules! get_additional_claim {
+            ($method:ident) => {
+                result
+                    .claims
+                    .additional_claims()
+                    .$method
+                    .clone()
+                    .or(info_claims.and_then(|x| x.additional_claims().$method.clone()))
+            };
+        }
+
         let (access_groups, admin_groups) =
             match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
             {
                 Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
                 Ok(None) => (
-                    info_claims.and_then(|x| x.additional_claims().warpgate_roles.clone()),
-                    info_claims.and_then(|x| x.additional_claims().warpgate_admin_roles.clone()),
+                    get_additional_claim!(warpgate_roles),
+                    get_additional_claim!(warpgate_admin_roles),
                 ),
                 Err(e) => {
                     error!("Failed to fetch Google groups: {e}");
