@@ -496,12 +496,12 @@ impl RolesApi {
     )]
     async fn api_get_target_role_file_transfer(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetFileTransferPermissionResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let Some(assignment) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -543,13 +543,13 @@ impl RolesApi {
     )]
     async fn api_update_target_role_file_transfer(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         body: Json<FileTransferPermissionData>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateFileTransferPermissionResponse, WarpgateError> {
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let Some(assignment) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))

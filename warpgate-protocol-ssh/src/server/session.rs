@@ -556,11 +556,13 @@ impl ServerSession {
                             "\r\n\x1b[97;41m ✗ Access Denied \x1b[0m {reason}\r\n\r\n\
                              Only SFTP file transfers are permitted. Use an SFTP client to connect.\r\n\r\n"
                         );
-                        let _ = session.extended_data(
-                            server_channel_id.0,
-                            1, // SSH_EXTENDED_DATA_STDERR
-                            CryptoVec::from_slice(banner.as_bytes()),
-                        ).await;
+                        let _ = session
+                            .extended_data(
+                                server_channel_id.0,
+                                1, // SSH_EXTENDED_DATA_STDERR
+                                banner.as_bytes().to_vec(),
+                            )
+                            .await;
                         let _ = session.exit_status_request(server_channel_id.0, 1).await;
                         let _ = session.close(server_channel_id.0).await;
                     }
@@ -658,11 +660,13 @@ impl ServerSession {
                             "\x1b[97;41m ✗ Access Denied \x1b[0m {reason}\r\n\
                              Only SFTP file transfers are permitted.\r\n"
                         );
-                        let _ = session.extended_data(
-                            server_channel_id.0,
-                            1, // SSH_EXTENDED_DATA_STDERR
-                            CryptoVec::from_slice(msg.as_bytes()),
-                        ).await;
+                        let _ = session
+                            .extended_data(
+                                server_channel_id.0,
+                                1, // SSH_EXTENDED_DATA_STDERR
+                                msg.as_bytes().to_vec(),
+                            )
+                            .await;
                         let _ = session.exit_status_request(server_channel_id.0, 1).await;
                         let _ = session.close(server_channel_id.0).await;
                     }
@@ -1593,7 +1597,8 @@ impl ServerSession {
         }
 
         // Parse all complete packets from the buffer
-        let (packets, consumed) = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
+        let (packets, consumed) = if let Some(state) = self.sftp_channel_state.get_mut(&channel_id)
+        {
             let before_len = state.client_buf.len();
             let pkts = crate::sftp::parse_all_packets(&mut state.client_buf);
             let consumed = before_len - state.client_buf.len();
@@ -1625,7 +1630,9 @@ impl ServerSession {
             let Some(operation) = packet_to_operation(packet) else {
                 continue; // Read-only metadata packet, safe to forward
             };
-            if let Some((request_id, msg)) = self.check_sftp_operation_inner(channel_id, &operation, &permission) {
+            if let Some((request_id, msg)) =
+                self.check_sftp_operation_inner(channel_id, &operation, &permission)
+            {
                 // Clear both buffers on denial to avoid stale data
                 if let Some(state) = self.sftp_channel_state.get_mut(&channel_id) {
                     state.client_buf.clear();
@@ -1647,7 +1654,6 @@ impl ServerSession {
         operation: &SftpFileOperation,
         permission: &FileTransferPermission,
     ) -> Option<(u32, String)> {
-
         match operation {
             SftpFileOperation::Open {
                 request_id,
@@ -1740,13 +1746,9 @@ impl ServerSession {
                             if new_total > max_size as u64 {
                                 let path_str = _path.to_string();
                                 let handle_str = String::from_utf8_lossy(handle).to_string();
-                                let reason = format!(
-                                    "file size {new_total} exceeds limit {max_size}"
-                                );
-                                let msg = self.build_permission_message(
-                                    &reason,
-                                    Some(&path_str),
-                                );
+                                let reason =
+                                    format!("file size {new_total} exceeds limit {max_size}");
+                                let msg = self.build_permission_message(&reason, Some(&path_str));
                                 self.log_transfer_denied(
                                     "sftp",
                                     TransferDirection::Upload,
@@ -1974,7 +1976,7 @@ impl ServerSession {
                     "statvfs@openssh.com",  // Filesystem stats (read-only)
                     "fstatvfs@openssh.com", // Filesystem stats by handle (read-only)
                     "fsync@openssh.com",    // Flush file data (safe, no data transfer)
-                    "limits@openssh.com",   // Query server limits (read-only, required by OpenSSH 9.x+ clients)
+                    "limits@openssh.com", // Query server limits (read-only, required by OpenSSH 9.x+ clients)
                 ];
 
                 if SAFE_EXTENSIONS.contains(&request_name.as_str()) {
@@ -2138,11 +2140,8 @@ impl ServerSession {
         let response = build_denial_response(request_id, message);
 
         if let Some(session) = self.session_handle.clone() {
-            self.channel_writer.write(
-                session,
-                server_channel_id.0,
-                CryptoVec::from_slice(&response),
-            );
+            self.channel_writer
+                .write(session, server_channel_id.0, response);
         }
 
         Ok(())
