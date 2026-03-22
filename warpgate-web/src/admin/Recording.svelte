@@ -14,9 +14,14 @@
     let { params = { id: '' } }: Props = $props()
 
     let error: string|null = $state(null)
+    import { adminPermissions } from './lib/store'
     let recording: Recording|null = $state(null)
 
     async function load () {
+        if (!$adminPermissions.recordingsView) {
+            error = 'You do not have permission to view recordings.'
+            return
+        }
         recording = await api.getRecording(params)
     }
 

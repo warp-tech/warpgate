@@ -6,6 +6,7 @@ use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
 use warpgate_tls::{
     SingleCertResolver, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
@@ -22,20 +23,15 @@ mod handlers;
 use client_certs::CertificateExtractorMiddleware;
 
 pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
-    let state = services.state.clone();
-    let auth_state_store = services.auth_state_store.clone();
-    let recordings = services.recordings.clone();
-
     let correlator = RequestCorrelator::new(&services);
 
     let app = Route::new()
         .at("/:target_name/*path", handle_api_request)
         .with(poem::middleware::Cors::new())
         .with(CertificateExtractorMiddleware)
-        .data(state)
-        .data(auth_state_store)
-        .data(recordings)
-        .data(services.clone())
+        .data(UnauthenticatedRequestContext {
+            services: services.clone(),
+        })
         .data(correlator);
 
     info!(?address, "Kubernetes protocol listening");

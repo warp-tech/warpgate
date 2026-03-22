@@ -1,24 +1,23 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::SimpleExpr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::{
-    Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions, WarpgateError,
+    AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
+    WarpgateError,
 };
-use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
-use warpgate_core::Services;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct TargetDataRequest {
@@ -55,18 +54,37 @@ impl ListApi {
     #[oai(path = "/targets", method = "get", operation_id = "get_targets")]
     async fn api_get_all_targets(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
         group_id: Query<Option<Uuid>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
 
-        let mut targets = Target::Entity::find().order_by_asc(Target::Column::Name);
+        let db = ctx.services.db.lock().await;
+
+        let mut targets = Target::Entity::find();
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            targets = targets.filter(Target::Column::Name.like(search));
+            let search_pattern = format!("%{}%", search.to_lowercase());
+            targets = targets
+                .filter(
+                    Condition::any()
+                        .add(Target::Column::Name.like(&search_pattern))
+                        .add(Target::Column::Description.like(&search_pattern)),
+                )
+                .order_by_asc({
+                    let case_expr: SimpleExpr = Expr::case(
+                        Expr::col((Target::Entity, Target::Column::Name)).like(&search_pattern),
+                        0,
+                    )
+                    .finally(1)
+                    .into();
+                    case_expr
+                })
+                .order_by_asc(Target::Column::Name);
+        } else {
+            targets = targets.order_by_asc(Target::Column::Name);
         }
 
         if let Some(group_id) = *group_id {
@@ -85,19 +103,17 @@ impl ListApi {
     #[oai(path = "/targets", method = "post", operation_id = "create_target")]
     async fn api_create_target(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<TargetDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTargetResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsCreate)).await?;
+
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
         }
 
-        if let TargetOptions::WebAdmin(_) = body.options {
-            return Ok(CreateTargetResponse::BadRequest(Json("kind".into())));
-        }
-
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -151,9 +167,6 @@ enum DeleteTargetResponse {
     #[oai(status = 204)]
     Deleted,
 
-    #[oai(status = 403)]
-    Forbidden,
-
     #[oai(status = 404)]
     NotFound,
 }
@@ -177,11 +190,13 @@ impl DetailApi {
     #[oai(path = "/targets/:id", method = "get", operation_id = "get_target")]
     async fn api_get_target(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetTargetResponse::NotFound);
@@ -193,12 +208,14 @@ impl DetailApi {
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
     async fn api_update_target(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<TargetDataRequest>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -208,6 +225,7 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
+        let services = &ctx.services;
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
@@ -238,19 +256,17 @@ impl DetailApi {
     )]
     async fn api_delete_target(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
         };
-
-        if target.kind == TargetKind::WebAdmin {
-            return Ok(DeleteTargetResponse::Forbidden);
-        }
 
         TargetRoleAssignment::Entity::delete_many()
             .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
@@ -280,11 +296,13 @@ impl DetailApi {
     )]
     async fn get_ssh_target_known_ssh_host_keys(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
@@ -330,8 +348,6 @@ enum AddTargetRoleResponse {
 enum DeleteTargetRoleResponse {
     #[oai(status = 204)]
     Deleted,
-    #[oai(status = 403)]
-    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -347,11 +363,13 @@ impl RolesApi {
     )]
     async fn api_get_target_roles(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -375,12 +393,14 @@ impl RolesApi {
     )]
     async fn api_add_target_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
+
+        let db = ctx.services.db.lock().await;
 
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -411,24 +431,14 @@ impl RolesApi {
     )]
     async fn api_delete_target_role(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
-            return Ok(DeleteTargetRoleResponse::NotFound);
-        };
-
-        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
-            return Ok(DeleteTargetRoleResponse::NotFound);
-        };
-
-        if role.name == BUILTIN_ADMIN_ROLE_NAME && target.kind == TargetKind::WebAdmin {
-            return Ok(DeleteTargetRoleResponse::Forbidden);
-        }
+        let db = ctx.services.db.lock().await;
 
         let Some(model) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))

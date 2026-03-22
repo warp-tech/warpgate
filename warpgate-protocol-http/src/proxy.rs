@@ -11,7 +11,6 @@ use http::uri::{Authority, Scheme};
 use http::{HeaderValue, Uri};
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
-use poem::web::Data;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
 use tracing::*;
@@ -21,12 +20,12 @@ use warpgate_common::http_headers::{
     DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
 };
 use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
-use warpgate_core::logging::http::{get_client_ip, log_request_result};
-use warpgate_core::Services;
+use warpgate_common_http::logging::{get_client_ip, log_request_result};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_tls::{configure_tls_connector, TlsMode};
 use warpgate_web::lookup_built_file;
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::SessionExt;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -242,11 +241,11 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
 
 pub async fn proxy_normal_request(
     req: &Request,
+    ctx: &AuthenticatedRequestContext,
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
-    let services = Data::<&Services>::from_request_without_body(req).await?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -310,7 +309,7 @@ pub async fn proxy_normal_request(
     log_request_result(
         req.method(),
         req.original_uri(),
-        get_client_ip(req, Some(*services)).await.as_deref(),
+        get_client_ip(req, &ctx.services).await.as_deref(),
         &status,
     );
 

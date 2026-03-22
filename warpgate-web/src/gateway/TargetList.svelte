@@ -23,8 +23,7 @@ function loadTargets(
             const naturalCompare = naturalCompareFactory()
 
             result = result.sort(
-                firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
-                    .thenBy((x: TargetSnapshot) => !x.group)
+                firstBy<TargetSnapshot, boolean>((x: TargetSnapshot) => !x.group)
                     // Natural sort between groups
                     .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
                         naturalCompare(
@@ -51,10 +50,13 @@ function loadTargets(
 }
 
 function selectTarget (target: TargetSnapshot) {
-    if (target.kind === TargetKind.WebAdmin) {
-        loadURL('/@warpgate/admin')
-    } else if (target.kind === TargetKind.Http) {
-        loadURL(`/?warpgate-target=${target.name}`)
+    if (target.kind === TargetKind.Http) {
+        if (target.externalHost) {
+            const port = location.port ? `:${location.port}` : ''
+            loadURL(`${location.protocol}//${target.externalHost}${port}`)
+        } else {
+            loadURL(`/?warpgate-target=${target.name}`)
+        }
     } else {
         selectedTarget = target
     }
@@ -71,13 +73,6 @@ interface GroupInfo {
 }
 
 function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
-    if (target.kind === TargetKind.WebAdmin) {
-        return {
-            id: '$admin',
-            name: 'Administration',
-            color: BootstrapThemeColor.Danger,
-        }
-    }
     if (!target.group) {
         return {
             id: '$ungrouped',
@@ -114,11 +109,11 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         <a
             class="list-group-item list-group-item-action target-item"
             href={
-                target.kind === TargetKind.WebAdmin
-                    ? '/@warpgate/admin'
-                    : target.kind === TargetKind.Http
-                        ? `/?warpgate-target=${target.name}`
-                        : '/@warpgate/admin'
+                target.kind === TargetKind.Http
+                    ? (target.externalHost
+                        ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
+                        : `/?warpgate-target=${target.name}`)
+                    : '/@warpgate/admin'
             }
             onclick={e => {
                 if (e.metaKey || e.ctrlKey) {
@@ -129,16 +124,12 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
             }}
         >
             <span class="me-auto">
-                {#if target.kind === TargetKind.WebAdmin}
-                    Manage Warpgate
-                {:else}
-                    <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2">
                         {target.name}
                     </div>
                     {#if target.description}
                         <small class="d-block text-muted">{target.description}</small>
                     {/if}
-                {/if}
             </span>
             <small class="protocol text-muted ms-auto">
                 {#if target.kind === TargetKind.Ssh}
@@ -150,8 +141,11 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {#if target.kind === TargetKind.Postgres}
                     PostgreSQL
                 {/if}
+                {#if target.kind === TargetKind.Kubernetes}
+                    Kubernetes
+                {/if}
             </small>
-            {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
+            {#if target.kind === TargetKind.Http}
                 <Fa icon={faArrowRight} fw />
             {/if}
         </a>

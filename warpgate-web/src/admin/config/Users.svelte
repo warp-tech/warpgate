@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
     import { type LdapServerResponse, type User, api } from 'admin/lib/api'
+    import { adminPermissions } from '../lib/store'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link, push } from 'svelte-spa-router'
     import { onMount } from 'svelte'
@@ -42,12 +43,13 @@
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>users</h1>
-        <a
-            class="btn btn-primary ms-auto"
-            href="/config/users/create"
-            use:link>
-            Add a user
-        </a>
+            <a
+                class="btn btn-primary ms-auto"
+                href="/config/users/create"
+                class:disabled={!$adminPermissions.usersCreate}
+                use:link>
+                Add a user
+            </a>
             {#if ldapServers.length > 0}
             <Dropdown>
                 <DropdownToggle caret>
@@ -55,9 +57,12 @@
                 </DropdownToggle>
                 <DropdownMenu>
                     {#each ldapServers as server (server.id)}
-                        <DropdownItem onclick={() => {
-                            push(`/config/ldap-servers/${server.id}/users`)
-                        }}>
+                        <DropdownItem
+                            onclick={() => {
+                                push(`/config/ldap-servers/${server.id}/users`)
+                            }}
+                            disabled={!$adminPermissions.usersCreate}
+                        >
                             {server.name}
                         </DropdownItem>
                     {/each}

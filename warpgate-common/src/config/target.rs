@@ -139,9 +139,6 @@ pub struct TargetPostgresOptions {
     pub default_database_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct TargetWebAdminOptions {}
-
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
@@ -202,6 +199,4 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
-    #[serde(rename = "web_admin")]
-    WebAdmin(TargetWebAdminOptions),
 }

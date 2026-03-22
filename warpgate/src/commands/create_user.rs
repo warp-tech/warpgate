@@ -4,7 +4,9 @@ use warpgate_common::{
     GlobalParams, Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_core::Services;
-use warpgate_db_entities::{PasswordCredential, Role, User, UserRoleAssignment};
+use warpgate_db_entities::{
+    AdminRole, PasswordCredential, Role, User, UserAdminRoleAssignment, UserRoleAssignment,
+};
 
 use crate::config::load_config;
 
@@ -48,29 +50,49 @@ pub(crate) async fn command(
     .insert(&*db)
     .await?;
 
-    // Assign a role if a role is specified
-    if role.is_some() {
-        let db_role = Role::Entity::find()
-            .filter(Role::Column::Name.eq(role.to_owned()))
-            .all(&*db)
+    if let Some(role_name) = role {
+        // try regular role first
+        if let Some(db_role) = Role::Entity::find()
+            .filter(Role::Column::Name.eq(role_name.clone()))
+            .one(&*db)
             .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Role not found"))?;
-
-        if UserRoleAssignment::Entity::find()
-            .filter(UserRoleAssignment::Column::UserId.eq(db_user.id))
-            .filter(UserRoleAssignment::Column::RoleId.eq(db_role.id))
-            .all(&*db)
-            .await?
-            .is_empty()
         {
-            let values = UserRoleAssignment::ActiveModel {
-                user_id: Set(db_user.id),
-                role_id: Set(db_role.id),
-                ..Default::default()
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?;
+            if UserRoleAssignment::Entity::find()
+                .filter(UserRoleAssignment::Column::UserId.eq(db_user.id))
+                .filter(UserRoleAssignment::Column::RoleId.eq(db_role.id))
+                .all(&*db)
+                .await?
+                .is_empty()
+            {
+                let values = UserRoleAssignment::ActiveModel {
+                    user_id: Set(db_user.id),
+                    role_id: Set(db_role.id),
+                    ..Default::default()
+                };
+                values.insert(&*db).await.map_err(WarpgateError::from)?;
+            }
+        }
+
+        // admin role
+        if let Some(db_admin) = AdminRole::Entity::find()
+            .filter(AdminRole::Column::Name.eq(role_name.clone()))
+            .one(&*db)
+            .await?
+        {
+            if UserAdminRoleAssignment::Entity::find()
+                .filter(UserAdminRoleAssignment::Column::UserId.eq(db_user.id))
+                .filter(UserAdminRoleAssignment::Column::AdminRoleId.eq(db_admin.id))
+                .all(&*db)
+                .await?
+                .is_empty()
+            {
+                let values = UserAdminRoleAssignment::ActiveModel {
+                    user_id: Set(db_user.id),
+                    admin_role_id: Set(db_admin.id),
+                    ..Default::default()
+                };
+                values.insert(&*db).await.map_err(WarpgateError::from)?;
+            }
         }
     }
 
