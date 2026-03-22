@@ -496,6 +496,8 @@ impl RemoteClient {
         let mut config = russh::client::Config {
             preferred: algos,
             nodelay: true,
+            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
+            keepalive_interval: config.store.ssh.keepalive_interval,
             ..Default::default()
         };
         if ssh_options.allow_insecure_algos.unwrap_or(false) {
