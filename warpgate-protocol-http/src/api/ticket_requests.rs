@@ -8,11 +8,13 @@ use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_core::ticket_requests::{
-    create_ticket_request, CreateTicketRequestParams, TicketRequestResult,
+    create_ticket_request, CreateTicketRequestError, CreateTicketRequestParams,
+    TicketRequestResult,
 };
 use warpgate_db_entities::{Ticket, TicketRequest};
 
 use super::common::get_user;
+use crate::api::AnySecurityScheme;
 use crate::common::endpoint_auth;
 
 fn is_ticket_session(ctx: &AuthenticatedRequestContext) -> bool {
@@ -107,6 +109,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateTicketRequestBody>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTicketRequestResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(CreateTicketRequestResponse::Forbidden(Json(
@@ -143,9 +146,10 @@ impl Api {
 
         match result {
             Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(result.into()))),
-            Err(e) => Ok(CreateTicketRequestResponse::BadRequest(Json(
-                e.to_string(),
-            ))),
+            Err(CreateTicketRequestError::InvalidInput(msg)) => {
+                Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
+            }
+            Err(CreateTicketRequestError::Internal(e)) => Err(e),
         }
     }
 
@@ -158,6 +162,7 @@ impl Api {
     async fn api_get_my_ticket_requests(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestsResponse::Unauthorized);
@@ -186,6 +191,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketRequestResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestResponse::Unauthorized);
@@ -218,6 +224,7 @@ impl Api {
     async fn api_get_my_tickets(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetMyTicketsResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetMyTicketsResponse::Unauthorized);
@@ -247,6 +254,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteMyTicketResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(DeleteMyTicketResponse::Unauthorized);

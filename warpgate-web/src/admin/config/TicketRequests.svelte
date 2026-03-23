@@ -21,6 +21,7 @@
 
     let denyModalRequest: TicketRequest|undefined = $state()
     let denyReason = $state('')
+    let denyError: string|undefined = $state()
 
     async function load () {
         requests = await api.getTicketRequests({
@@ -41,12 +42,13 @@
             await load()
         } catch (err: any) {
             error = await stringifyError(err)
+            throw err
         }
     }
 
     async function deny () {
         if (!denyModalRequest) return
-        error = undefined
+        denyError = undefined
         success = undefined
         try {
             await api.denyTicketRequest({
@@ -60,7 +62,8 @@
             denyReason = ''
             await load()
         } catch (err: any) {
-            error = await stringifyError(err)
+            denyError = await stringifyError(err)
+            throw err
         }
     }
 </script>
@@ -132,7 +135,7 @@
                             {/if}
                             {#if request.resolvedByUsername}
                                 <small class="d-block text-muted">
-                                    {request.status === 'Approved' ? 'Approved' : 'Denied'} by {request.resolvedByUsername}
+                                    {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'} by {request.resolvedByUsername}
                                 </small>
                             {/if}
                             {#if request.denyReason}
@@ -144,7 +147,7 @@
                         <small class="text-muted mx-3">
                             <RelativeDate date={request.created} />
                         </small>
-                        {#if request.status === 'Pending'}
+                        {#if request.status === TicketRequestStatus.Pending}
                             <AsyncButton
                                 color="success"
                                 class="me-1"
@@ -156,6 +159,7 @@
                                 onclick={() => {
                                     denyModalRequest = request
                                     denyReason = ''
+                                    denyError = undefined
                                 }}
                             >Deny</Button>
                         {/if}
@@ -176,12 +180,15 @@
 <Modal isOpen={!!denyModalRequest} toggle={() => denyModalRequest = undefined}>
     <ModalBody>
         <h5 class="modal-title mb-3">Deny ticket request</h5>
+        {#if denyError}
+        <Alert color="danger">{denyError}</Alert>
+        {/if}
         {#if denyModalRequest}
         <p>
             Deny request from <strong>{denyModalRequest.username}</strong> to <strong>{denyModalRequest.targetName}</strong>?
         </p>
         <FormGroup floating label="Reason (optional)">
-            <input type="text" bind:value={denyReason} class="form-control" placeholder="Why is this being denied?" maxlength="500"/>
+            <input type="text" bind:value={denyReason} class="form-control" placeholder="Why is this being denied?" maxlength="2000"/>
         </FormGroup>
         {/if}
     </ModalBody>

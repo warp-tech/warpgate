@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.22.0-beta.1-25-g7662819-modified"
+    "version": "v0.22.0-beta.1-26-ga63b272-modified"
   },
   "servers": [
     {
@@ -856,6 +856,14 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "create_ticket_request"
       },
       "get": {
@@ -877,6 +885,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_ticket_requests"
       }
     },
@@ -913,6 +929,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_ticket_request"
       }
     },
@@ -936,6 +960,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_tickets"
       }
     },
@@ -965,6 +997,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_ticket"
       }
     }
@@ -1389,6 +1429,10 @@
           "ticket_max_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           },
           "ticket_require_description": {
             "type": "boolean"

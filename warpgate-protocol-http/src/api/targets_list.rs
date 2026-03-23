@@ -102,42 +102,57 @@ impl Api {
             false
         };
 
-        let targets: Vec<_> = if skip_auth_filter {
-            targets
-        } else {
+        // Build a set of target names the user is authorized for
+        let authorized_names: std::collections::HashSet<String> = {
             let auth_clone = ctx.auth.clone();
-            stream::iter(targets)
-                .filter(|t| {
+            stream::iter(targets.iter())
+                .filter_map(|t| {
                     let services = services.clone();
                     let auth = auth_clone.clone();
                     let name = t.name.clone();
                     async move {
-                        match auth {
+                        let authorized = match auth {
                             RequestAuthorization::Session(SessionAuthorization::Ticket {
-                                target_name,
+                                ref target_name,
                                 ..
-                            }) => target_name == name,
+                            }) => *target_name == name,
                             _ => {
                                 let mut config_provider =
                                     services.config_provider.lock().await;
                                 let Some(username) = auth.username() else {
-                                    return false;
+                                    return None;
                                 };
                                 matches!(
                                     config_provider.authorize_target(username, &name).await,
                                     Ok(true)
                                 )
                             }
+                        };
+                        if authorized {
+                            Some(name)
+                        } else {
+                            None
                         }
                     }
                 })
-                .collect::<Vec<_>>()
+                .collect::<std::collections::HashSet<_>>()
                 .await
+        };
+
+        // If not showing all targets, filter to only authorized ones
+        let targets: Vec<_> = if skip_auth_filter {
+            targets
+        } else {
+            targets
+                .into_iter()
+                .filter(|t| authorized_names.contains(&t.name))
+                .collect()
         };
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()
             .map(|t| {
+                let authorized = authorized_names.contains(&t.name);
                 let group = t.group_id.and_then(|group_id| {
                     group_map.get(&group_id).map(|group| GroupInfo {
                         id: group.id,
@@ -148,20 +163,43 @@ impl Api {
 
                 TargetSnapshot {
                     name: t.name.clone(),
-                    description: t.description.clone(),
-                    kind: (&t.options).into(),
-                    external_host: match t.options {
-                        TargetOptions::Http(ref opt) => opt.external_host.clone(),
-                        _ => None,
+                    // Only expose sensitive details to authorized users
+                    description: if authorized {
+                        t.description.clone()
+                    } else {
+                        String::new()
                     },
-                    default_database_name: match t.options {
-                        TargetOptions::Postgres(ref opt) => opt.default_database_name.clone(),
-                        TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
-                        _ => None,
+                    kind: (&t.options).into(),
+                    external_host: if authorized {
+                        match t.options {
+                            TargetOptions::Http(ref opt) => opt.external_host.clone(),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    },
+                    default_database_name: if authorized {
+                        match t.options {
+                            TargetOptions::Postgres(ref opt) => {
+                                opt.default_database_name.clone()
+                            }
+                            TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     },
                     group,
-                    ticket_max_duration_seconds: t.ticket_max_duration_seconds,
-                    ticket_max_uses: t.ticket_max_uses,
+                    ticket_max_duration_seconds: if authorized {
+                        t.ticket_max_duration_seconds
+                    } else {
+                        None
+                    },
+                    ticket_max_uses: if authorized {
+                        t.ticket_max_uses
+                    } else {
+                        None
+                    },
                 }
             })
             .collect();

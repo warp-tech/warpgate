@@ -10,6 +10,7 @@ use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
+use warpgate_common::AdminPermission;
 
 pub struct Api;
 
@@ -32,7 +33,7 @@ impl Api {
         status: Query<Option<TicketRequestStatus>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         let requests = list_ticket_requests(&ctx.services.db, status.0).await?;
         Ok(GetTicketRequestsResponse::Ok(Json(requests)))

@@ -25,6 +25,7 @@
 
     let selectedTarget = $state('')
     let description = $state('')
+    let descriptionTouched = $state(false)
     let durationText = $state('8h')
     let uses: number|undefined = $state()
 
@@ -35,9 +36,17 @@
         ?? $serverInfo?.ticketMaxDurationSeconds
     )
 
+    let maxUses = $derived(
+        selectedTargetData?.ticketMaxUses
+        ?? $serverInfo?.ticketMaxUses
+    )
+
     let durationSeconds = $derived(parseDuration(durationText))
 
     let durationError = $derived.by(() => {
+        if (durationText.trim() && !durationSeconds) {
+            return 'Invalid duration. Examples: 30m, 8h, 1d, 2h30m'
+        }
         if (!durationSeconds || !maxDurationSeconds) return undefined
         if (durationSeconds > maxDurationSeconds) {
             return `Maximum duration: ${formatDuration(maxDurationSeconds)}`
@@ -45,10 +54,17 @@
         return undefined
     })
 
+    let usesError = $derived.by(() => {
+        if (uses != null && maxUses != null && uses > maxUses) {
+            return `Maximum uses: ${maxUses}`
+        }
+        return undefined
+    })
+
     let descriptionRequired = $derived($serverInfo?.ticketRequireDescription ?? false)
     let descriptionMissing = $derived(descriptionRequired && !description.trim())
 
-    let formInvalid = $derived(!!durationError || descriptionMissing)
+    let formInvalid = $derived(!!durationError || !!usesError || descriptionMissing)
 
     async function load () {
         const [r, t, tgts] = await Promise.all([
@@ -90,10 +106,12 @@
             }
             showForm = false
             description = ''
+            descriptionTouched = false
             uses = undefined
             await load()
         } catch (err: any) {
             error = await stringifyError(err)
+            throw err
         }
     }
 
@@ -103,6 +121,7 @@
         lastSecret = undefined
         lastTargetName = undefined
         error = undefined
+        descriptionTouched = false
     }
 
     async function deleteTicket (ticket: Ticket) {
@@ -177,9 +196,10 @@
             type="text"
             bind:value={description}
             class="form-control"
-            class:is-invalid={descriptionMissing && description !== undefined}
+            class:is-invalid={descriptionMissing && descriptionTouched}
             placeholder="Why do you need access?"
             maxlength="2000"
+            onblur={() => descriptionTouched = true}
         />
         {#if descriptionMissing}
             <small class="form-text text-muted">A description is required for ticket requests.</small>
@@ -204,7 +224,12 @@
     </FormGroup>
 
     <FormGroup floating label="Number of uses (optional)">
-        <input type="number" min="1" bind:value={uses} class="form-control"/>
+        <input type="number" min="1" bind:value={uses} class="form-control" class:is-invalid={!!usesError}/>
+        {#if usesError}
+            <div class="invalid-feedback">{usesError}</div>
+        {:else if maxUses}
+            <small class="form-text text-muted">Maximum: {maxUses}</small>
+        {/if}
     </FormGroup>
 
     <AsyncButton

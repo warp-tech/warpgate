@@ -28,55 +28,63 @@ pub struct CreateTicketRequestParams {
     pub description: String,
 }
 
-/// Validation error for ticket request operations.
-/// These are expected user errors (not server bugs), so they should map to HTTP 400.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct TicketRequestValidationError(pub String);
+#[derive(Debug)]
+pub enum CreateTicketRequestError {
+    InvalidInput(String),
+    Internal(WarpgateError),
+}
 
-fn validation_err(msg: impl Into<String>) -> TicketRequestValidationError {
-    TicketRequestValidationError(msg.into())
+impl From<sea_orm::DbErr> for CreateTicketRequestError {
+    fn from(e: sea_orm::DbErr) -> Self {
+        Self::Internal(e.into())
+    }
+}
+
+impl From<WarpgateError> for CreateTicketRequestError {
+    fn from(e: WarpgateError) -> Self {
+        Self::Internal(e)
+    }
 }
 
 pub async fn create_ticket_request(
     db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
     config_provider: &Arc<Mutex<ConfigProviderEnum>>,
     params: CreateTicketRequestParams,
-) -> Result<TicketRequestResult, TicketRequestValidationError> {
+) -> Result<TicketRequestResult, CreateTicketRequestError> {
     let db_conn = db.lock().await;
 
-    let policy = Parameters::Entity::get(&db_conn)
-        .await
-        .map_err(|e| validation_err(e.to_string()))?;
+    let policy = Parameters::Entity::get(&db_conn).await?;
 
     if !policy.ticket_self_service_enabled {
-        return Err(validation_err("Self-service tickets are not enabled"));
+        return Err(CreateTicketRequestError::InvalidInput(
+            "Self-service tickets are not enabled".into(),
+        ));
     }
 
     // Validate target exists and get per-target settings
     let target = Target::Entity::find()
         .filter(Target::Column::Name.eq(&params.target_name))
         .one(&*db_conn)
-        .await
-        .map_err(|e| validation_err(e.to_string()))?;
+        .await?;
 
     let Some(target) = target else {
-        return Err(validation_err("Target not found"));
+        return Err(CreateTicketRequestError::InvalidInput(
+            "Target not found".into(),
+        ));
     };
-
-    // Per-target: reject if ticket requests are disabled
-    if target.ticket_requests_disabled {
-        return Err(validation_err("Ticket requests are not allowed for this target"));
-    }
 
     // Validate description requirement
     if policy.ticket_require_description && params.description.trim().is_empty() {
-        return Err(validation_err("A description is required for ticket requests"));
+        return Err(CreateTicketRequestError::InvalidInput(
+            "A description is required for ticket requests".into(),
+        ));
     }
 
     // Validate description length
-    if params.description.len() > 2000 {
-        return Err(validation_err("Description must be 2000 characters or fewer"));
+    if params.description.chars().count() > 2000 {
+        return Err(CreateTicketRequestError::InvalidInput(
+            "Description must be 2000 characters or fewer".into(),
+        ));
     }
 
     // Validate and enforce duration limits
@@ -86,14 +94,18 @@ pub async fn create_ticket_request(
     let effective_duration = match params.duration_seconds {
         Some(duration) => {
             if duration <= 0 {
-                return Err(validation_err("Duration must be a positive number"));
+                return Err(CreateTicketRequestError::InvalidInput(
+                    "Duration must be a positive number".into(),
+                ));
             }
             if duration < 60 {
-                return Err(validation_err("Minimum ticket duration is 60 seconds"));
+                return Err(CreateTicketRequestError::InvalidInput(
+                    "Minimum ticket duration is 60 seconds".into(),
+                ));
             }
             if let Some(max_duration) = max_duration {
                 if duration > max_duration {
-                    return Err(validation_err(format!(
+                    return Err(CreateTicketRequestError::InvalidInput(format!(
                         "Requested duration exceeds maximum of {} seconds",
                         max_duration
                     )));
@@ -109,11 +121,13 @@ pub async fn create_ticket_request(
     let effective_uses = match params.uses {
         Some(requested_uses) => {
             if requested_uses <= 0 {
-                return Err(validation_err("Number of uses must be a positive number"));
+                return Err(CreateTicketRequestError::InvalidInput(
+                    "Number of uses must be a positive number".into(),
+                ));
             }
             if let Some(max_uses) = max_uses {
                 if requested_uses > max_uses {
-                    return Err(validation_err(format!(
+                    return Err(CreateTicketRequestError::InvalidInput(format!(
                         "Requested uses exceeds maximum of {}",
                         max_uses
                     )));
@@ -130,17 +144,40 @@ pub async fn create_ticket_request(
         drop(db_conn);
         let mut cp = config_provider.lock().await;
         cp.authorize_target(&params.username, &params.target_name)
-            .await
-            .map_err(|e| validation_err(e.to_string()))?
+            .await?
     };
 
     // Reject if target visibility is restricted and user has no existing access
     if !policy.ticket_request_show_all_targets && !has_access {
-        return Err(validation_err("Target not found"));
+        return Err(CreateTicketRequestError::InvalidInput(
+            "Target not found".into(),
+        ));
+    }
+
+    // Per-target: reject if ticket requests are disabled
+    // (checked after auth to avoid leaking target existence to unauthorized users)
+    if target.ticket_requests_disabled {
+        return Err(CreateTicketRequestError::InvalidInput(
+            "Ticket requests are not allowed for this target".into(),
+        ));
     }
 
     // Re-acquire db lock
     let db_conn = db.lock().await;
+
+    // Check for duplicate pending request (same user + same target)
+    let existing_pending = TicketRequest::Entity::find()
+        .filter(TicketRequest::Column::UserId.eq(params.user_id))
+        .filter(TicketRequest::Column::TargetName.eq(&params.target_name))
+        .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
+        .count(&*db_conn)
+        .await?;
+
+    if existing_pending > 0 {
+        return Err(CreateTicketRequestError::InvalidInput(
+            "You already have a pending request for this target".into(),
+        ));
+    }
 
     // Determine if this should be auto-approved
     // Per-target require_approval overrides global auto-approve
@@ -157,8 +194,7 @@ pub async fn create_ticket_request(
             effective_uses,
             &params.description,
         )
-        .await
-        .map_err(|e| validation_err(e.to_string()))?;
+        .await?;
 
         let request_id = Uuid::new_v4();
         let request = TicketRequest::ActiveModel {
@@ -176,10 +212,7 @@ pub async fn create_ticket_request(
             resolved_at: Set(Some(Utc::now())),
             deny_reason: Set(None),
         };
-        let request_model = request
-            .insert(&*db_conn)
-            .await
-            .map_err(|e| validation_err(e.to_string()))?;
+        let request_model = request.insert(&*db_conn).await?;
 
         info!(
             "Auto-approved ticket request {} for user {} to target {}",
@@ -207,10 +240,7 @@ pub async fn create_ticket_request(
             resolved_at: Set(None),
             deny_reason: Set(None),
         };
-        let request_model = request
-            .insert(&*db_conn)
-            .await
-            .map_err(|e| validation_err(e.to_string()))?;
+        let request_model = request.insert(&*db_conn).await?;
 
         info!(
             "Created pending ticket request {} for user {} to target {}",
@@ -271,9 +301,8 @@ pub async fn approve_ticket_request(
         return Ok(None);
     };
 
-    // Verify user still exists
-    let user_exists = warpgate_db_entities::User::Entity::find()
-        .filter(warpgate_db_entities::User::Column::Username.eq(&request.username))
+    // Verify user still exists (use user_id, not username, to avoid confusion if username was reused)
+    let user_exists = warpgate_db_entities::User::Entity::find_by_id(request.user_id)
         .count(&*db_conn)
         .await?
         > 0;
@@ -350,6 +379,14 @@ pub async fn deny_ticket_request(
     else {
         return Ok(None);
     };
+
+    let reason = reason.map(|r| {
+        if r.chars().count() > 2000 {
+            r.chars().take(2000).collect::<String>()
+        } else {
+            r
+        }
+    });
 
     let mut active: TicketRequest::ActiveModel = request.into();
     active.status = Set(TicketRequestStatus::Denied);
