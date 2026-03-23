@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.1-26-ga63b272-modified"
+    "version": "v0.22.0-beta.1-27-gaf973ca-modified"
   },
   "servers": [
     {
@@ -1001,7 +1001,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/TicketRequestApproveResponse"
+                  "$ref": "#/components/schemas/TicketRequest"
                 }
               }
             }
@@ -5609,22 +5609,6 @@
             "format": "date-time"
           },
           "deny_reason": {
-            "type": "string"
-          }
-        }
-      },
-      "TicketRequestApproveResponse": {
-        "type": "object",
-        "title": "TicketRequestApproveResponse",
-        "required": [
-          "request",
-          "secret"
-        ],
-        "properties": {
-          "request": {
-            "$ref": "#/components/schemas/TicketRequest"
-          },
-          "secret": {
             "type": "string"
           }
         }

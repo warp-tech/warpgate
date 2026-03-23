@@ -21,12 +21,6 @@ fn admin_username(ctx: &AuthenticatedRequestContext) -> String {
 pub struct Api;
 
 #[derive(Object)]
-struct TicketRequestApproveResponse {
-    request: TicketRequest::Model,
-    secret: String,
-}
-
-#[derive(Object)]
 struct DenyTicketRequestBody {
     reason: Option<String>,
 }
@@ -34,7 +28,7 @@ struct DenyTicketRequestBody {
 #[derive(ApiResponse)]
 enum ApproveTicketRequestResponse {
     #[oai(status = 200)]
-    Ok(Json<TicketRequestApproveResponse>),
+    Ok(Json<TicketRequest::Model>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -63,12 +57,7 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         match approve_ticket_request(&ctx.services.db, id.0, &admin_username(&ctx)).await? {
-            Some((request, secret)) => Ok(ApproveTicketRequestResponse::Ok(Json(
-                TicketRequestApproveResponse {
-                    request,
-                    secret: secret.expose_secret().to_string(),
-                },
-            ))),
+            Some(request) => Ok(ApproveTicketRequestResponse::Ok(Json(request))),
             None => Ok(ApproveTicketRequestResponse::NotFound),
         }
     }

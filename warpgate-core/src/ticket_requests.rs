@@ -255,7 +255,7 @@ pub async fn create_ticket_request(
 }
 
 /// Shared helper to create a self-service ticket in the database.
-/// Used by both auto-approve and admin-approve flows.
+/// Used by auto-approve and user-activation flows.
 async fn insert_self_service_ticket(
     db_conn: &sea_orm::DatabaseConnection,
     username: &str,
@@ -290,7 +290,7 @@ pub async fn approve_ticket_request(
     db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
     request_id: Uuid,
     admin_username: &str,
-) -> Result<Option<(TicketRequest::Model, Secret<String>)>, WarpgateError> {
+) -> Result<Option<TicketRequest::Model>, WarpgateError> {
     let db_conn = db.lock().await;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
@@ -311,6 +311,77 @@ pub async fn approve_ticket_request(
         return Err(WarpgateError::UserNotFound(request.username.clone()));
     }
 
+    // Verify target still exists
+    let target_exists = Target::Entity::find()
+        .filter(Target::Column::Name.eq(&request.target_name))
+        .count(&*db_conn)
+        .await?
+        > 0;
+
+    if !target_exists {
+        return Err(WarpgateError::from(anyhow!("Target no longer exists")));
+    }
+
+    // Just mark as approved — no ticket is created yet.
+    // The user will activate the request to create the ticket,
+    // so the duration clock starts when they actually need it.
+    let mut active: TicketRequest::ActiveModel = request.into();
+    active.status = Set(TicketRequestStatus::Approved);
+    active.resolved_by_username = Set(Some(admin_username.to_string()));
+    active.resolved_at = Set(Some(Utc::now()));
+    let updated = active.update(&*db_conn).await?;
+
+    info!(
+        "Admin {} approved ticket request {}",
+        admin_username, request_id
+    );
+
+    Ok(Some(updated))
+}
+
+#[derive(Debug)]
+pub enum ActivateTicketRequestError {
+    NotFound,
+    AlreadyActivated,
+    TargetGone,
+    Internal(WarpgateError),
+}
+
+impl From<sea_orm::DbErr> for ActivateTicketRequestError {
+    fn from(e: sea_orm::DbErr) -> Self {
+        Self::Internal(e.into())
+    }
+}
+
+impl From<WarpgateError> for ActivateTicketRequestError {
+    fn from(e: WarpgateError) -> Self {
+        Self::Internal(e)
+    }
+}
+
+/// Activate an approved ticket request: creates the actual ticket and returns the secret.
+/// Called by the requesting user (not the admin). The ticket duration starts now.
+pub async fn activate_ticket_request(
+    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    request_id: Uuid,
+    user_id: Uuid,
+) -> Result<(TicketRequest::Model, Secret<String>), ActivateTicketRequestError> {
+    let db_conn = db.lock().await;
+
+    let Some(request) = TicketRequest::Entity::find_by_id(request_id)
+        .filter(TicketRequest::Column::UserId.eq(user_id))
+        .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
+        .one(&*db_conn)
+        .await?
+    else {
+        return Err(ActivateTicketRequestError::NotFound);
+    };
+
+    // Already activated — ticket_id is set
+    if request.ticket_id.is_some() {
+        return Err(ActivateTicketRequestError::AlreadyActivated);
+    }
+
     // Verify target still exists and load current settings
     let target = Target::Entity::find()
         .filter(Target::Column::Name.eq(&request.target_name))
@@ -318,7 +389,7 @@ pub async fn approve_ticket_request(
         .await?;
 
     let Some(target) = target else {
-        return Err(WarpgateError::from(anyhow!("Target no longer exists")));
+        return Err(ActivateTicketRequestError::TargetGone);
     };
 
     // Clamp duration/uses to current limits (may have changed since request was created)
@@ -350,18 +421,15 @@ pub async fn approve_ticket_request(
     .await?;
 
     let mut active: TicketRequest::ActiveModel = request.into();
-    active.status = Set(TicketRequestStatus::Approved);
-    active.resolved_by_username = Set(Some(admin_username.to_string()));
     active.ticket_id = Set(Some(ticket_id));
-    active.resolved_at = Set(Some(Utc::now()));
     let updated = active.update(&*db_conn).await?;
 
     info!(
-        "Admin {} approved ticket request {}",
-        admin_username, request_id
+        "User activated approved ticket request {}, ticket {} created",
+        request_id, ticket_id
     );
 
-    Ok(Some((updated, secret)))
+    Ok((updated, secret))
 }
 
 pub async fn deny_ticket_request(

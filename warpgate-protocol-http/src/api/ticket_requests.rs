@@ -8,8 +8,8 @@ use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_core::ticket_requests::{
-    create_ticket_request, CreateTicketRequestError, CreateTicketRequestParams,
-    TicketRequestResult,
+    activate_ticket_request, create_ticket_request, ActivateTicketRequestError,
+    CreateTicketRequestError, CreateTicketRequestParams, TicketRequestResult,
 };
 use warpgate_db_entities::{Ticket, TicketRequest};
 
@@ -85,6 +85,20 @@ enum GetMyTicketsResponse {
     Ok(Json<Vec<Ticket::Model>>),
     #[oai(status = 401)]
     Unauthorized,
+}
+
+#[derive(ApiResponse)]
+enum ActivateTicketRequestResponse {
+    #[oai(status = 200)]
+    Ok(Json<TicketRequestResponse>),
+    #[oai(status = 401)]
+    Unauthorized,
+    #[oai(status = 404)]
+    NotFound,
+    #[oai(status = 409)]
+    AlreadyActivated(Json<String>),
+    #[oai(status = 410)]
+    TargetGone(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -213,6 +227,51 @@ impl Api {
             request,
             secret: None,
         })))
+    }
+
+    #[oai(
+        path = "/ticket-requests/:id/activate",
+        method = "post",
+        operation_id = "activate_ticket_request",
+        transform = "endpoint_auth"
+    )]
+    async fn api_activate_ticket_request(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ActivateTicketRequestResponse, WarpgateError> {
+        if is_ticket_session(&ctx) {
+            return Ok(ActivateTicketRequestResponse::Unauthorized);
+        }
+        let db = ctx.services.db.lock().await;
+        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+            return Ok(ActivateTicketRequestResponse::Unauthorized);
+        };
+        drop(db);
+
+        match activate_ticket_request(&ctx.services.db, id.0, user_model.id).await {
+            Ok((request, secret)) => {
+                Ok(ActivateTicketRequestResponse::Ok(Json(TicketRequestResponse {
+                    request,
+                    secret: Some(secret.expose_secret().to_string()),
+                })))
+            }
+            Err(ActivateTicketRequestError::NotFound) => {
+                Ok(ActivateTicketRequestResponse::NotFound)
+            }
+            Err(ActivateTicketRequestError::AlreadyActivated) => {
+                Ok(ActivateTicketRequestResponse::AlreadyActivated(Json(
+                    "This ticket has already been activated".into(),
+                )))
+            }
+            Err(ActivateTicketRequestError::TargetGone) => {
+                Ok(ActivateTicketRequestResponse::TargetGone(Json(
+                    "The target no longer exists".into(),
+                )))
+            }
+            Err(ActivateTicketRequestError::Internal(e)) => Err(e),
+        }
     }
 
     #[oai(

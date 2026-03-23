@@ -1,12 +1,11 @@
 <script lang="ts">
-    import { api, TicketRequestStatus, type TicketRequest, type TicketRequestApproveResponse } from 'admin/lib/api'
+    import { api, TicketRequestStatus, type TicketRequest } from 'admin/lib/api'
     import RelativeDate from '../RelativeDate.svelte'
     import Fa from 'svelte-fa'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
     import { Button, FormGroup, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import { statusIcon, statusColor } from 'common/ticketRequestStatus'
@@ -15,7 +14,6 @@
 
     let error: string|undefined = $state()
     let success: string|undefined = $state()
-    let lastSecret: string|undefined = $state()
     let requests: TicketRequest[]|undefined = $state()
     let statusFilter: TicketRequestStatus|undefined = $state()
 
@@ -34,11 +32,9 @@
     async function approve (request: TicketRequest) {
         error = undefined
         success = undefined
-        lastSecret = undefined
         try {
-            const result: TicketRequestApproveResponse = await api.approveTicketRequest({ id: request.id })
-            success = `Approved ticket for ${result.request.username} to ${result.request.targetName}.`
-            lastSecret = result.secret
+            const result = await api.approveTicketRequest({ id: request.id })
+            success = `Approved ticket request for ${result.username} to ${result.targetName}. The user can now activate it.`
             await load()
         } catch (err: any) {
             error = await stringifyError(err)
@@ -75,15 +71,7 @@
         {/if}
 
         {#if success}
-        <Alert color="success">
-            {success}
-            {#if lastSecret}
-                <div class="mt-2 d-flex align-items-center">
-                    <code class="me-2">{lastSecret}</code>
-                    <CopyButton text={lastSecret} label="Copy" />
-                </div>
-            {/if}
-        </Alert>
+        <Alert color="success">{success}</Alert>
         {/if}
 
         <div class="page-summary-bar">
@@ -136,6 +124,11 @@
                             {#if request.resolvedByUsername}
                                 <small class="d-block text-muted">
                                     {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'} by {request.resolvedByUsername}
+                                </small>
+                            {/if}
+                            {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
+                                <small class="d-block text-info">
+                                    Awaiting user activation
                                 </small>
                             {/if}
                             {#if request.denyReason}

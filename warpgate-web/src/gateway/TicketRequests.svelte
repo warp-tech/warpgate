@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, TargetKind, type TicketRequest, type Ticket, type TargetSnapshot } from 'gateway/lib/api'
+    import { api, TargetKind, TicketRequestStatus, type TicketRequest, type Ticket, type TargetSnapshot } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import RelativeDate from 'admin/RelativeDate.svelte'
@@ -122,6 +122,26 @@
         lastTargetName = undefined
         error = undefined
         descriptionTouched = false
+    }
+
+    async function activateRequest (request: TicketRequest) {
+        error = undefined
+        success = undefined
+        lastSecret = undefined
+        lastTargetName = undefined
+        try {
+            const result = await api.activateTicketRequest({ id: request.id })
+            if (result.secret) {
+                success = 'Ticket activated!'
+                lastSecret = result.secret
+                lastTargetName = request.targetName
+            }
+            showForm = false
+            await load()
+        } catch (err: any) {
+            error = await stringifyError(err)
+            throw err
+        }
     }
 
     async function deleteTicket (ticket: Ticket) {
@@ -270,7 +290,14 @@
                     <small class="d-block text-muted">{request.description}</small>
                 {/if}
             </div>
-            <small class="text-muted ms-auto">
+            {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
+                <AsyncButton
+                    color="success"
+                    class="ms-auto me-2"
+                    click={() => activateRequest(request)}
+                >Activate</AsyncButton>
+            {/if}
+            <small class="text-muted{request.status === TicketRequestStatus.Approved && !request.ticketId ? ' mx-2' : ' ms-auto'}">
                 <RelativeDate date={request.created} />
             </small>
         </div>
