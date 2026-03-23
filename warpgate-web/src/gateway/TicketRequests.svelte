@@ -22,6 +22,14 @@
     let tickets: Ticket[]|undefined = $state()
     let targets: TargetSnapshot[]|undefined = $state()
     let showForm = $state(true)
+    let showAllRequests = $state(false)
+
+    const REQUEST_PAGE_SIZE = 25
+    let visibleRequests = $derived.by(() => {
+        if (!requests) return []
+        if (showAllRequests) return requests
+        return requests.slice(0, REQUEST_PAGE_SIZE)
+    })
 
     let selectedTarget = $state('')
     let description = $state('')
@@ -273,12 +281,12 @@
 <h4 class="mt-4">My requests</h4>
 {#if requests.length}
 <div class="list-group list-group-flush mb-4">
-    {#each requests as request (request.id)}
-        <div class="list-group-item d-flex align-items-center">
+    {#each visibleRequests as request (request.id)}
+        <div class="list-group-item">
             <span class={statusColor(request.status)} title={request.status}>
                 <Fa icon={statusIcon(request.status)} fw />
             </span>
-            <div class="ms-2">
+            <div class="ms-2 me-auto">
                 <strong>{request.targetName}</strong>
                 <small class="d-block text-muted">
                     {request.status}
@@ -293,16 +301,21 @@
             {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
                 <AsyncButton
                     color="success"
-                    class="ms-auto me-2"
+                    class="ms-1"
                     click={() => activateRequest(request)}
                 >Activate</AsyncButton>
             {/if}
-            <small class="text-muted{request.status === TicketRequestStatus.Approved && !request.ticketId ? ' mx-2' : ' ms-auto'}">
+            <small class="text-muted ms-3 flex-shrink-0">
                 <RelativeDate date={request.created} />
             </small>
         </div>
     {/each}
 </div>
+{#if !showAllRequests && requests.length > REQUEST_PAGE_SIZE}
+    <Button color="link" onclick={() => showAllRequests = true}>
+        Show all {requests.length} requests
+    </Button>
+{/if}
 {:else}
 <EmptyState title="No ticket requests yet" />
 {/if}
@@ -313,25 +326,25 @@
 {#if tickets.length}
 <div class="list-group list-group-flush">
     {#each tickets as ticket (ticket.id)}
-        <div class="list-group-item d-flex align-items-center">
+        <div class="list-group-item">
             <Fa icon={faTicket} fw class="text-success" />
-            <div class="ms-2">
+            <div class="ms-2 me-auto">
                 <strong>{ticket.target}</strong>
                 {#if ticket.description}
                     <small class="d-block text-muted">{ticket.description}</small>
                 {/if}
             </div>
             {#if ticket.expiry}
-                <small class="text-muted ms-4">
+                <small class="text-muted ms-3 flex-shrink-0">
                     Expires {ticket.expiry.toLocaleString()}
                 </small>
             {/if}
             {#if ticket.usesLeft != null}
-                <small class="text-muted ms-4">
+                <small class="text-muted ms-3 flex-shrink-0">
                     {ticket.usesLeft} uses left
                 </small>
             {/if}
-            <small class="text-muted ms-auto me-2">
+            <small class="text-muted ms-3 me-2 flex-shrink-0">
                 <RelativeDate date={ticket.created} />
             </small>
             <Button
@@ -347,3 +360,10 @@
 {/if}
 {/if}
 </Loadable>
+
+<style lang="scss">
+    .list-group-item {
+        display: flex;
+        align-items: center;
+    }
+</style>
