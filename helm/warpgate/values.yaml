@@ -74,6 +74,11 @@ data:
     enabled: false          # true = use PersistentVolumeClaim, false = use emptyDir
     claimName: ""           # if set, uses existing PVC instead of template
     template: {}            # PVC template spec for dynamic provisioning
+      # accessModes:
+      #   - ReadWriteOnce
+      # resources:
+      #   requests:
+      #     storage: 1Gi
 
 # Automatic Warpgate setup
 # Ref: https://warpgate.null.page/getting-started/#setup
