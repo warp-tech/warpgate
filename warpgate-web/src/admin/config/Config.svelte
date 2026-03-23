@@ -55,9 +55,6 @@
         '/tickets/create': wrap({
             asyncComponent: () => import('./CreateTicket.svelte') as any,
         }),
-        '/ticket-requests': wrap({
-            asyncComponent: () => import('./TicketRequests.svelte') as any,
-        }),
         '/ldap-servers': wrap({
             asyncComponent: () => import('./ldap/LdapServers.svelte') as any,
         }),
@@ -128,16 +125,8 @@
     <NavListItem
         class="mb-2"
         title="Tickets"
-        description="Temporary access credentials"
+        description="Access credentials and self-service requests"
         href="/config/tickets"
-        small={sidebarMode}
-    />
-
-    <NavListItem
-        class="mb-2"
-        title="Ticket requests"
-        description="Review self-service ticket requests"
-        href="/config/ticket-requests"
         small={sidebarMode}
     />
 
