@@ -147,7 +147,8 @@ class TestTicketRequests:
         echo_server_port,
         shared_wg: WarpgateProcess,
     ):
-        """When auto-approve is off, request stays pending until admin approves."""
+        """When auto-approve is off, request stays pending until admin approves.
+        Admin approval does NOT create a ticket — the user must activate it."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
             user, target, role = self._setup_user_and_target(api, echo_server_port)
@@ -171,14 +172,23 @@ class TestTicketRequests:
             assert data["secret"] is None
             request_id = data["request"]["id"]
 
-            # Admin approves via admin API
+            # Admin approves via admin API — returns TicketRequest, no secret
             with admin_client(url) as api:
                 result = api.approve_ticket_request(request_id)
-                assert result.request.status == "Approved"
-                assert result.secret is not None
-                secret = result.secret
+                assert result.status == "Approved"
+                assert result.ticket_id is None  # no ticket yet
 
-            # The approved ticket should work
+            # User activates the approved request via gateway API
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
+            )
+            assert resp.status_code == 200
+            activate_data = resp.json()
+            assert activate_data["secret"] is not None
+            assert activate_data["request"]["ticket_id"] is not None
+            secret = activate_data["secret"]
+
+            # The activated ticket should work for HTTP access
             verify_session = requests.Session()
             verify_session.verify = False
             resp = verify_session.get(
@@ -187,6 +197,122 @@ class TestTicketRequests:
                 allow_redirects=False,
             )
             assert resp.status_code // 100 == 2
+        finally:
+            _disable_self_service(url)
+
+    def test_activate_double_rejected(
+        self,
+        echo_server_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Activating an already-activated request returns 409."""
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, target, role = self._setup_user_and_target(api, echo_server_port)
+            api.update_parameters(_default_params(
+                ticket_self_service_enabled=True,
+                ticket_auto_approve_existing_access=False,
+            ))
+
+        try:
+            session = self._login(url, user.username)
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests",
+                json={
+                    "target_name": target.name,
+                    "description": "double activate test",
+                },
+            )
+            assert resp.status_code == 201
+            request_id = resp.json()["request"]["id"]
+
+            with admin_client(url) as api:
+                api.approve_ticket_request(request_id)
+
+            # First activation succeeds
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
+            )
+            assert resp.status_code == 200
+
+            # Second activation should fail with 409
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
+            )
+            assert resp.status_code == 409
+        finally:
+            _disable_self_service(url)
+
+    def test_activate_pending_rejected(
+        self,
+        echo_server_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Activating a still-pending request returns 404 (not approved yet)."""
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, target, role = self._setup_user_and_target(api, echo_server_port)
+            api.update_parameters(_default_params(
+                ticket_self_service_enabled=True,
+                ticket_auto_approve_existing_access=False,
+            ))
+
+        try:
+            session = self._login(url, user.username)
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests",
+                json={
+                    "target_name": target.name,
+                    "description": "not yet approved",
+                },
+            )
+            assert resp.status_code == 201
+            request_id = resp.json()["request"]["id"]
+
+            # Try to activate without admin approval — should 404
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
+            )
+            assert resp.status_code == 404
+        finally:
+            _disable_self_service(url)
+
+    def test_activate_target_gone(
+        self,
+        echo_server_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """Activating when the target has been deleted returns 410."""
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, target, role = self._setup_user_and_target(api, echo_server_port)
+            api.update_parameters(_default_params(
+                ticket_self_service_enabled=True,
+                ticket_auto_approve_existing_access=False,
+            ))
+
+        try:
+            session = self._login(url, user.username)
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests",
+                json={
+                    "target_name": target.name,
+                    "description": "target will be deleted",
+                },
+            )
+            assert resp.status_code == 201
+            request_id = resp.json()["request"]["id"]
+
+            # Admin approves, then deletes the target
+            with admin_client(url) as api:
+                api.approve_ticket_request(request_id)
+                api.delete_target(target.id)
+
+            # User tries to activate — target is gone
+            resp = session.post(
+                f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
+            )
+            assert resp.status_code == 410
         finally:
             _disable_self_service(url)
 
