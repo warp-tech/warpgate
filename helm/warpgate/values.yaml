@@ -129,6 +129,8 @@ ingress:
   enabled: false
   className: "nginx"
   annotations:
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"
     cert-manager.io/cluster-issuer: default-issuer
     kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
