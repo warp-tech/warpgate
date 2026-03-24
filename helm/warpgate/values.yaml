@@ -152,3 +152,27 @@ httpRoute:
   #   sectionName: gateway-section-name
   hostnames: []
   # - warpgate.example.com
+
+# extraObjects could be utilized to add dynamic manifests via values
+extraObjects: []
+# Examples:
+# extraObjects:
+# - apiVersion: traefik.io/v1alpha1
+#   kind: ServersTransport
+#   metadata:
+#     name: warpgate-transport
+#     namespace: warpgate
+#   spec:
+#     serverName: warpgate.warpgate
+#     insecureSkipVerify: true
+# Alternatively, you can use strings, which lets you use additional templating features:
+# extraObjects:
+# - |
+#   apiVersion: traefik.io/v1alpha1
+#   kind: ServersTransport
+#   metadata:
+#     name: warpgate-transport-{{ .Release.Name }}
+#     namespace: warpgate
+#   spec:
+#     serverName: warpgate.warpgate
+#     insecureSkipVerify: true
