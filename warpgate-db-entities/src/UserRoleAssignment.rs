@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
@@ -11,6 +12,16 @@ pub struct Model {
     pub id: i32,
     pub user_id: Uuid,
     pub role_id: Uuid,
+    /// When this role assignment was granted (nullable in DB for SQLite compat, but always set by app)
+    pub granted_at: Option<DateTime<Utc>>,
+    /// Who granted this role assignment (admin user ID, null for system/SSO)
+    pub granted_by: Option<Uuid>,
+    /// When this role assignment expires (null = never)
+    pub expires_at: Option<DateTime<Utc>>,
+    /// When this role assignment was revoked (null = not revoked)
+    pub revoked_at: Option<DateTime<Utc>>,
+    /// Who revoked this role assignment
+    pub revoked_by: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

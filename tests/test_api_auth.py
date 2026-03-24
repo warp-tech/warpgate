@@ -713,6 +713,34 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={204},
     ),
     AdminApiTestCase(
+        id="get_user_role",
+        permission=None,
+        call=lambda api, r: api.get_user_role_with_http_info(
+            r["user_id"], r["role_id"]
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="update_user_role_expiry",
+        permission=None,
+        call=lambda api, r: api.update_user_role_expiry_with_http_info(
+            r["user_id"],
+            r["role_id"],
+            sdk.UpdateUserRoleExpiryRequest(
+                expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            ),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="remove_user_role_expiry",
+        permission=None,
+        call=lambda api, r: api.remove_user_role_expiry_with_http_info(
+            r["user_id"], r["role_id"]
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
         id="delete_role",
         permission="access_roles_delete",
         call=lambda api, r: api.delete_role_with_http_info(r["role_id"]),

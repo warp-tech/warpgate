@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.21.1-5-ga76ef2bb-modified"
+    "version": "v0.20.2-96-g2a5268d-modified"
   },
   "servers": [
     {
@@ -50,6 +50,16 @@
             "name": "logged_in_only",
             "schema": {
               "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
             },
             "in": "query",
             "required": false,
@@ -2024,6 +2034,7 @@
     },
     "/users/{id}/roles": {
       "get": {
+        "summary": "Get all role assignments for a user with expiry information",
         "parameters": [
           {
             "name": "id",
@@ -2045,7 +2056,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Role"
+                    "$ref": "#/components/schemas/UserRoleAssignmentResponse"
                   }
                 }
               }
@@ -2067,7 +2078,8 @@
       }
     },
     "/users/{id}/roles/{role_id}": {
-      "post": {
+      "get": {
+        "summary": "Get a single user role assignment with details",
         "parameters": [
           {
             "name": "id",
@@ -2093,8 +2105,76 @@
           }
         ],
         "responses": {
-          "201": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_role"
+      },
+      "post": {
+        "summary": "Add a role to a user with optional expiry",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserRoleRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
           },
           "409": {
             "description": ""
@@ -2111,6 +2191,7 @@
         "operationId": "add_user_role"
       },
       "delete": {
+        "summary": "Remove a role from a user (soft delete - sets revoked_at)",
         "parameters": [
           {
             "name": "id",
@@ -2152,6 +2233,120 @@
           }
         ],
         "operationId": "delete_user_role"
+      }
+    },
+    "/users/{id}/roles/{role_id}/expiry": {
+      "put": {
+        "summary": "Update expiry for a user role assignment",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleExpiryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_user_role_expiry"
+      },
+      "delete": {
+        "summary": "Remove expiry from a user role assignment (make permanent)",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "remove_user_role_expiry"
       }
     },
     "/users/{id}/admin-roles": {
@@ -3655,6 +3850,18 @@
           },
           "key_base64": {
             "type": "string"
+          }
+        }
+      },
+      "AddUserRoleRequest": {
+        "type": "object",
+        "title": "AddUserRoleRequest",
+        "description": "Request to add a user role with optional expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "default": null
           }
         }
       },
@@ -5424,6 +5631,18 @@
           }
         }
       },
+      "UpdateUserRoleExpiryRequest": {
+        "type": "object",
+        "title": "UpdateUserRoleExpiryRequest",
+        "description": "Request to update user role expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The new expiry timestamp, or null to remove expiry (make permanent)"
+          }
+        }
+      },
       "User": {
         "type": "object",
         "title": "User",
@@ -5511,6 +5730,61 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          }
+        }
+      },
+      "UserRoleAssignmentResponse": {
+        "type": "object",
+        "title": "UserRoleAssignmentResponse",
+        "description": "Response containing user role assignment with expiry info.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "granted_at",
+          "is_expired",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Role ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Role name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Role description"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the role was granted"
+          },
+          "granted_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the user who granted this role"
+          },
+          "granted_by_username": {
+            "type": "string",
+            "description": "Username of the user who granted this role"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this role assignment expires (null = permanent)"
+          },
+          "is_expired": {
+            "type": "boolean",
+            "description": "Whether this assignment has expired"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether this assignment is currently active (not expired, not revoked)"
           }
         }
       }
