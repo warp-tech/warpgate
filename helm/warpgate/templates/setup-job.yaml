@@ -50,7 +50,7 @@ spec:
                 # Creates the admin user which is normally only created when the unattended-setup is called. REF: https://github.com/warp-tech/warpgate/issues/1618
                 warpgate -c /data/warpgate.yaml create-user --password "$WARPGATE_ADMIN_PASSWORD" --role warpgate:admin admin
               else
-                warpgate -c /data/warpgate.yaml unattended-setup --data-path /data \
+                warpgate -c /data/warpgate.yaml unattended-setup --data-path /data
                   {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
