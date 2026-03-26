@@ -11,7 +11,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
-use warpgate_db_entities::{Role, Target, User};
+use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -208,6 +208,17 @@ impl DetailApi {
         if role.name == BUILTIN_ADMIN_ROLE_NAME {
             return Ok(DeleteRoleResponse::Forbidden);
         }
+
+        // Clean up referencing assignments before deleting the role
+        UserRoleAssignment::Entity::delete_many()
+            .filter(UserRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
+
+        TargetRoleAssignment::Entity::delete_many()
+            .filter(TargetRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
 
         role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)

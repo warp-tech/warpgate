@@ -29,6 +29,18 @@ pub struct DatabaseConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
 }
 
+fn is_user_role_active(assignment: &entities::UserRoleAssignment::Model) -> bool {
+    if assignment.revoked_at.is_some() {
+        return false;
+    }
+    if let Some(expires_at) = assignment.expires_at {
+        if expires_at <= Utc::now() {
+            return false;
+        }
+    }
+    true
+}
+
 impl DatabaseConfigProvider {
     pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
@@ -536,8 +548,19 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_roles: HashSet<String> = user_model
-            .find_related(entities::Role::Entity)
+        let user_assignments = entities::UserRoleAssignment::Entity::find()
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
+            .all(&*db)
+            .await?;
+
+        let user_role_ids: HashSet<Uuid> = user_assignments
+            .iter()
+            .filter(|a| is_user_role_active(a))
+            .map(|a| a.role_id)
+            .collect();
+
+        let user_roles: HashSet<String> = entities::Role::Entity::find()
+            .filter(entities::Role::Column::Id.is_in(user_role_ids))
             .all(&*db)
             .await?
             .into_iter()
@@ -603,7 +626,10 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await?;
+                    let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
+                    model.revoked_at = Set(Some(Utc::now()));
+                    model.revoked_by = Set(None);
+                    model.update(&*db).await?;
                 }
                 _ => (),
             }
