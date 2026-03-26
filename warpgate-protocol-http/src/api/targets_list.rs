@@ -13,7 +13,7 @@ use warpgate_common_http::{
 };
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
-use warpgate_db_entities::{Target, TargetGroup};
+use warpgate_db_entities::{Parameters, Target, TargetGroup};
 
 use crate::api::AnySecurityScheme;
 use crate::common::endpoint_auth;
@@ -35,6 +35,8 @@ pub struct TargetSnapshot {
     pub external_host: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
 }
 
 #[derive(ApiResponse)]
@@ -55,6 +57,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         search: Query<Option<String>>,
+        for_ticket_request: Query<Option<bool>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
@@ -83,37 +86,73 @@ impl Api {
             })
         }
 
-        let auth_clone = ctx.auth.clone();
-        let targets: Vec<_> = stream::iter(targets)
-            .filter(|t| {
-                let services = services.clone();
-                let auth = auth_clone.clone();
-                let name = t.name.clone();
-                async move {
-                    match auth {
-                        RequestAuthorization::Session(SessionAuthorization::Ticket {
-                            target_name,
-                            ..
-                        }) => target_name == name,
-                        _ => {
-                            let mut config_provider = services.config_provider.lock().await;
-                            let Some(username) = auth.username() else {
-                                return false;
-                            };
-                            matches!(
-                                config_provider.authorize_target(username, &name).await,
-                                Ok(true)
-                            )
+        let is_ticket_request = for_ticket_request.unwrap_or(false);
+
+        // Filter out targets with ticket requests disabled
+        if is_ticket_request {
+            targets.retain(|t| !t.ticket_requests_disabled);
+        }
+
+        // Check if we should skip auth filtering for ticket requests
+        let skip_auth_filter = if is_ticket_request {
+            let db = services.db.lock().await;
+            let params = Parameters::Entity::get(&db).await?;
+            params.ticket_self_service_enabled && params.ticket_request_show_all_targets
+        } else {
+            false
+        };
+
+        // Build a set of target names the user is authorized for
+        let authorized_names: std::collections::HashSet<String> = {
+            let auth_clone = ctx.auth.clone();
+            stream::iter(targets.iter())
+                .filter_map(|t| {
+                    let services = services.clone();
+                    let auth = auth_clone.clone();
+                    let name = t.name.clone();
+                    async move {
+                        let authorized = match auth {
+                            RequestAuthorization::Session(SessionAuthorization::Ticket {
+                                ref target_name,
+                                ..
+                            }) => *target_name == name,
+                            _ => {
+                                let mut config_provider =
+                                    services.config_provider.lock().await;
+                                let Some(username) = auth.username() else {
+                                    return None;
+                                };
+                                matches!(
+                                    config_provider.authorize_target(username, &name).await,
+                                    Ok(true)
+                                )
+                            }
+                        };
+                        if authorized {
+                            Some(name)
+                        } else {
+                            None
                         }
                     }
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .await
+        };
+
+        // If not showing all targets, filter to only authorized ones
+        let targets: Vec<_> = if skip_auth_filter {
+            targets
+        } else {
+            targets
+                .into_iter()
+                .filter(|t| authorized_names.contains(&t.name))
+                .collect()
+        };
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()
             .map(|t| {
+                let authorized = authorized_names.contains(&t.name);
                 let group = t.group_id.and_then(|group_id| {
                     group_map.get(&group_id).map(|group| GroupInfo {
                         id: group.id,
@@ -124,18 +163,43 @@ impl Api {
 
                 TargetSnapshot {
                     name: t.name.clone(),
-                    description: t.description.clone(),
-                    kind: (&t.options).into(),
-                    external_host: match t.options {
-                        TargetOptions::Http(ref opt) => opt.external_host.clone(),
-                        _ => None,
+                    // Only expose sensitive details to authorized users
+                    description: if authorized {
+                        t.description.clone()
+                    } else {
+                        String::new()
                     },
-                    default_database_name: match t.options {
-                        TargetOptions::Postgres(ref opt) => opt.default_database_name.clone(),
-                        TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
-                        _ => None,
+                    kind: (&t.options).into(),
+                    external_host: if authorized {
+                        match t.options {
+                            TargetOptions::Http(ref opt) => opt.external_host.clone(),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    },
+                    default_database_name: if authorized {
+                        match t.options {
+                            TargetOptions::Postgres(ref opt) => {
+                                opt.default_database_name.clone()
+                            }
+                            TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     },
                     group,
+                    ticket_max_duration_seconds: if authorized {
+                        t.ticket_max_duration_seconds
+                    } else {
+                        None
+                    },
+                    ticket_max_uses: if authorized {
+                        t.ticket_max_uses
+                    } else {
+                        None
+                    },
                 }
             })
             .collect();

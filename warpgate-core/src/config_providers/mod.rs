@@ -77,6 +77,7 @@ pub trait ConfigProvider {
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
+    config_provider: &Arc<Mutex<ConfigProviderEnum>>,
 ) -> Result<Option<(e::Ticket::Model, AuthStateUserInfo)>, WarpgateError> {
     let db = db.lock().await;
     let ticket = {
@@ -108,6 +109,22 @@ pub async fn authorize_ticket(
             else {
                 return Err(WarpgateError::UserNotFound(ticket.username.clone()));
             };
+
+            // Self-service tickets must re-validate role-based access at use time.
+            // This ensures revoking a user's role immediately invalidates their
+            // self-service tickets, unlike admin-created tickets which intentionally
+            // bypass role checks.
+            if ticket.self_service {
+                drop(db);
+                let mut cp = config_provider.lock().await;
+                if !cp.authorize_target(&ticket.username, &ticket.target).await? {
+                    warn!(
+                        "Self-service ticket {} denied: user {} no longer has role-based access to target {}",
+                        &ticket.id, &ticket.username, &ticket.target
+                    );
+                    return Ok(None);
+                }
+            }
 
             Ok(Some((ticket, (&User::try_from(ticket_user)?).into())))
         }

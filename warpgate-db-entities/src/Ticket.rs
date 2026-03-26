@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     #[oai(skip)]
+    #[serde(skip_serializing)]
     pub secret: String,
     pub username: String,
     #[sea_orm(column_type = "Text")]
@@ -19,6 +20,7 @@ pub struct Model {
     pub uses_left: Option<i16>,
     pub expiry: Option<DateTime<Utc>>,
     pub created: DateTime<Utc>,
+    pub self_service: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

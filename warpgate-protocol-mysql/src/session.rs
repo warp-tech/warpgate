@@ -248,7 +248,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 }
             }
             AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, &secret)
+                match authorize_ticket(&self.services.db, &secret, &self.services.config_provider)
                     .await
                     .map_err(MySqlError::other)?
                 {

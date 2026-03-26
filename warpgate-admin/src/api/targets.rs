@@ -26,6 +26,10 @@ struct TargetDataRequest {
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
     group_id: Option<Uuid>,
+    ticket_max_duration_seconds: Option<i64>,
+    ticket_requests_disabled: Option<bool>,
+    ticket_require_approval: Option<bool>,
+    ticket_max_uses: Option<i16>,
 }
 
 #[derive(ApiResponse)]
@@ -132,6 +136,10 @@ impl ListApi {
             options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
+            ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
+            ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
+            ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
+            ticket_max_uses: Set(body.ticket_max_uses),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -233,6 +241,10 @@ impl DetailApi {
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
         model.group_id = Set(body.group_id);
+        model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
+        model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
+        model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
+        model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(&*db).await?;
 
         drop(db);

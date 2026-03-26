@@ -40,6 +40,8 @@ pub struct Model {
     pub config_edit: bool,
 
     pub admin_roles_manage: bool,
+
+    pub ticket_requests_manage: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -87,6 +89,7 @@ impl From<Model> for warpgate_common::AdminRole {
             tickets_delete: model.tickets_delete,
             config_edit: model.config_edit,
             admin_roles_manage: model.admin_roles_manage,
+            ticket_requests_manage: model.ticket_requests_manage,
         }
     }
 }

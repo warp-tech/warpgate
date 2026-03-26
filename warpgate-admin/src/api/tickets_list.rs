@@ -92,6 +92,7 @@ impl Api {
             expiry: Set(body.expiry),
             uses_left: Set(body.number_of_uses),
             description: Set(body.description.clone().unwrap_or_default()),
+            self_service: Set(false),
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;
