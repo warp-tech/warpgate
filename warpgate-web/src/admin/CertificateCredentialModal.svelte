@@ -9,6 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
+    import { saveCertificateKey } from 'gateway/lib/certificateStore'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -19,6 +20,8 @@
         username: string
         save: (label: string, publicKeyPem: string) => Promise<IssuedCertificateCredential>
         onClose?: () => void
+        storeInBrowserByDefault?: boolean
+        closeOnIssue?: boolean
     }
 
     let {
@@ -26,6 +29,8 @@
         username,
         save,
         onClose,
+        storeInBrowserByDefault = false,
+        closeOnIssue = false,
     }: Props = $props()
 
     let saving = $state(false)
@@ -34,6 +39,13 @@
     let label = $state('')
     let generatedCertificatePem = $state('')
     let generatedKubeConfig = $state('')
+    let storeInBrowser = $state(false)
+
+    $effect(() => {
+        if (isOpen) {
+            storeInBrowser = storeInBrowserByDefault
+        }
+    })
 
     async function generateKeyPair() {
         try {
@@ -81,7 +93,20 @@
             const result = await save(label.trim(), publicKeyPem)
             generatedCertificatePem = result.certificatePem
 
+            if (storeInBrowser) {
+                await saveCertificateKey({
+                    credentialId: result.credential.id,
+                    privateKeyPem,
+                    certificatePem: result.certificatePem,
+                })
+            }
+
             generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(generatedCertificatePem)}\n    client-key-data: ${btoa(privateKeyPem)}`
+
+            if (closeOnIssue) {
+                close()
+                return
+            }
         } catch (error) {
             console.error('Failed to generate certificate:', error)
             alert('Failed to generate certificate. Please try again.')
@@ -125,6 +150,7 @@
         publicKeyPem = ''
         label = ''
         generatedCertificatePem = ''
+        storeInBrowser = false
         saving = false
         onClose?.()
     }
@@ -155,6 +181,20 @@
                     <br/>
                     You'll need to save it after the certificate is issued.
                 </small>
+            </div>
+
+            <div class="mt-4">
+                <div class="form-check form-switch">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="storeCertInBrowser"
+                        bind:checked={storeInBrowser}
+                    />
+                    <label class="form-check-label" for="storeCertInBrowser">
+                        Store certificate in browser for Kubernetes targets
+                    </label>
+                </div>
             </div>
         {/if}
     </ModalBody>

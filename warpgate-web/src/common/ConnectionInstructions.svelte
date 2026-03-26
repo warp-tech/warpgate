@@ -1,8 +1,10 @@
 <script lang="ts">
     import { FormGroup } from '@sveltestrap/sveltestrap'
-    import { TargetKind } from 'gateway/lib/api'
+    import { api, TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
+    import { loadCertificatesWithKeyStatus, getLocalCertificate, type CertificateWithKeyStatus } from 'gateway/lib/certificateProvisioner'
+    import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from './sveltestrap-s5-ports/Alert.svelte'
 
@@ -24,6 +26,78 @@
         targetDefaultDatabaseName = undefined,
     }: Props = $props()
 
+    let clientCertificatePem: string | undefined = $state()
+    let clientPrivateKeyPem: string | undefined = $state()
+    let certLoading = $state(false)
+    let certificates: CertificateWithKeyStatus[] = $state([])
+    let selectedCertId: string = $state('')
+    let issuingCertificate = $state(false)
+    let pendingSelectCertId: string | undefined = $state()
+
+    async function loadCertificates () {
+        certLoading = true
+        try {
+            certificates = await loadCertificatesWithKeyStatus()
+            // If a cert was just issued, select it; otherwise pick the first with a local key
+            const preferredId = pendingSelectCertId
+            pendingSelectCertId = undefined
+            const preferred = preferredId ? certificates.find(c => c.credential.id === preferredId) : undefined
+            const toSelect = preferred ?? certificates.find(c => c.hasLocalKey) ?? certificates[0]
+            if (toSelect) {
+                selectedCertId = toSelect.credential.id
+                await selectCertificate(toSelect.credential.id)
+            }
+        } catch {
+            certificates = []
+        } finally {
+            certLoading = false
+        }
+    }
+
+    async function selectCertificate (credentialId: string) {
+        selectedCertId = credentialId
+        const result = await getLocalCertificate(credentialId)
+        if (result) {
+            clientCertificatePem = result.certificatePem
+            clientPrivateKeyPem = result.privateKeyPem
+        } else {
+            clientCertificatePem = undefined
+            clientPrivateKeyPem = undefined
+        }
+    }
+
+    function handleCertSelect (e: Event) {
+        const value = (e.target as HTMLSelectElement).value
+        if (value === '__new__') {
+            issuingCertificate = true
+            // Reset select to previous value
+            ;(e.target as HTMLSelectElement).value = selectedCertId
+            return
+        }
+        if (value) {
+            selectCertificate(value)
+        }
+    }
+
+    async function issueCertificate (label: string, publicKeyPem: string) {
+        const response = await api.issueMyCertificate({
+            issueCertificateCredentialRequest: {
+                label,
+                publicKeyPem,
+            },
+        })
+        // Don't check IndexedDB here — the modal saves AFTER this callback returns.
+        // We reload the full list (with correct key status) when the modal closes.
+        pendingSelectCertId = response.credential.id
+        return response
+    }
+
+    $effect(() => {
+        if (targetKind === TargetKind.Kubernetes && !ticketSecret) {
+            loadCertificates()
+        }
+    })
+
     // Create a reactive opts object that updates when any prop or serverInfo changes
     let opts = $derived.by(() => ({
         targetName,
@@ -32,6 +106,8 @@
         ticketSecret,
         targetExternalHost,
         targetDefaultDatabaseName,
+        clientCertificatePem,
+        clientPrivateKeyPem,
     }))
 
     let sshUsername = $derived(makeSSHUsername(opts))
@@ -124,6 +200,42 @@
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes}
+{#if !ticketSecret}
+    {#if certLoading}
+        <Alert color="info">
+            Loading certificates...
+        </Alert>
+    {:else}
+        <FormGroup floating label="Certificate" class="d-flex align-items-center">
+            <select class="form-select" value={selectedCertId} onchange={handleCertSelect}>
+                {#if certificates.length === 0}
+                    <option value="">No certificates available</option>
+                {/if}
+                {#each certificates as cert (cert.credential.id)}
+                    <option value={cert.credential.id}>
+                        {cert.credential.label} — {cert.hasLocalKey ? 'Private key available in this browser' : 'Private key not in this browser'}
+                    </option>
+                {/each}
+                {#if $serverInfo?.ownCredentialManagementAllowed}
+                    <option value="__new__">+ Issue new certificate...</option>
+                {/if}
+            </select>
+        </FormGroup>
+
+        {#if !selectedCertId || !clientPrivateKeyPem}
+            <Alert color="warning">
+                {#if !selectedCertId}
+                    There is no certificate selected.
+                {:else}
+                    The private key for this certificate is not stored in this browser.
+                {/if}
+                The kubeconfig will contain placeholders for authentication.
+                You can issue a new certificate in the dropdown above with the "Store in browser" option to generate a ready-to-use kubeconfig.
+            </Alert>
+        {/if}
+    {/if}
+{/if}
+
 <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
     <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
     <CopyButton text={kubeconfig} />
@@ -136,8 +248,16 @@
 
 <Alert color="info">
     Save the kubeconfig above to a file (e.g., <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
-    {#if !ticketSecret}
-        You'll need to replace the placeholder certificate and key data with your actual credentials.
-    {/if}
 </Alert>
+{/if}
+
+{#if issuingCertificate}
+<CertificateCredentialModal
+    bind:isOpen={issuingCertificate}
+    save={issueCertificate}
+    username={username ?? ''}
+    storeInBrowserByDefault={true}
+    closeOnIssue={true}
+    onClose={() => { issuingCertificate = false; loadCertificates() }}
+/>
 {/if}
