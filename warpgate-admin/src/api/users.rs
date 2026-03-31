@@ -241,6 +241,11 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        UserAdminRoleAssignment::Entity::delete_many()
+            .filter(UserAdminRoleAssignment::Column::UserId.eq(user.id))
+            .exec(&*db)
+            .await?;
+
         user.delete(&*db).await?;
         Ok(DeleteUserResponse::Deleted)
     }
