@@ -207,10 +207,10 @@ pub async fn api_get_recording_tcpdump(
 #[handler]
 pub async fn api_get_recording_stream(
     ws: WebSocket,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> impl IntoResponse {
-    let recordings = recordings.lock().await;
+    let recordings = ctx.services.recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
     ws.on_upgrade(|socket| async move {
