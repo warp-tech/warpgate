@@ -18,7 +18,7 @@ sea-orm = { workspace = true, features = [
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
 secrecy = "0.10"
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+warpgate-ldap = { path = "../warpgate-ldap" }
