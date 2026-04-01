@@ -223,6 +223,8 @@ impl Api {
                             combined.sessions_view |= r.sessions_view;
                             combined.sessions_terminate |= r.sessions_terminate;
                             combined.recordings_view |= r.recordings_view;
+                            combined.tickets_create |= r.tickets_create;
+                            combined.tickets_delete |= r.tickets_delete;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
                         }
