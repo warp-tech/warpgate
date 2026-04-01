@@ -81,7 +81,7 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<L
                     .get(custom_uuid_attr)
                     .and_then(|v| v.first())
                     .and_then(|s| {
-                        Uuid::parse_str(&s)
+                        Uuid::parse_str(s)
                             .inspect_err(|e| {
                                 warn!("Failed to parse UUID {s} from LDAP attribute {custom_uuid_attr}: {e}");
                             })

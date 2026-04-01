@@ -62,12 +62,14 @@ impl Api {
             q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
         }
         if let Some(ref search) = body.search {
-            q = q.filter(
-                LogEntry::Column::Text
-                    .contains(search)
-                    .or(LogEntry::Column::Username.contains(search))
-                    .or(LogEntry::Column::Values.contains(search)),
-            );
+            if !search.is_empty() {
+                q = q.filter(
+                    LogEntry::Column::Text
+                        .contains(search)
+                        .or(LogEntry::Column::Username.contains(search))
+                        .or(LogEntry::Column::Values.contains(search)),
+                );
+            }
         }
 
         let logs = q.all(&*db).await?;

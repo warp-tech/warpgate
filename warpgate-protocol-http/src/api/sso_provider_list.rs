@@ -258,25 +258,36 @@ impl Api {
         }
 
         let mappings = provider_config.provider.role_mappings();
-        if let Some(remote_groups) = response.target_roles {
+        if let Some(remote_groups) = response.access_roles {
             // If mappings is not set, all groups are subject to sync
             // and names won't be remapped
             let managed_role_names = mappings
                 .as_ref()
-                .map(|m| m.iter().map(|x| x.1.clone()).collect::<Vec<_>>());
+                .map(|m| m.iter().flat_map(|(_, v)| v.roles()).collect::<Vec<_>>());
 
-            let active_role_names: Vec<_> = remote_groups
-                .iter()
-                .filter_map({
-                    |r| {
-                        if let Some(ref mappings) = mappings {
-                            mappings.get(r).cloned()
-                        } else {
-                            Some(r.clone())
-                        }
+            let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
+                // Apply wildcard "*" mapping if user has any groups
+                let mut roles: Vec<String> = if !remote_groups.is_empty() {
+                    mappings.get("*").map(|v| v.roles()).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                // Apply specific group mappings
+                for group in &remote_groups {
+                    if let Some(mapping) = mappings.get(group) {
+                        roles.extend(mapping.roles());
                     }
-                })
-                .collect();
+                }
+
+                roles
+            } else {
+                // No mappings configured, pass through group names as-is
+                remote_groups
+            };
+
+            active_role_names.sort();
+            active_role_names.dedup();
 
             debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
             cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
@@ -287,23 +298,19 @@ impl Api {
         if let Some(remote_admins) = response.admin_roles {
             let admin_map = provider_config.provider.admin_role_mappings();
 
-            // compute managed list from keys of the mapping (or all role names if
-            // no mapping provided)
-            let managed_admin_names: Option<Vec<String>> =
-                admin_map.as_ref().map(|m| m.values().cloned().collect());
+            // compute managed list from mapping values (or all role names if no mapping provided)
+            let managed_admin_names: Option<Vec<String>> = admin_map
+                .as_ref()
+                .map(|m| m.values().flat_map(|v| v.roles()).collect());
 
-            let active_admin_names: Vec<_> = remote_admins
-                .iter()
-                .filter_map({
-                    |r| {
-                        if let Some(ref mappings) = admin_map {
-                            mappings.get(r).cloned()
-                        } else {
-                            Some(r.clone())
-                        }
-                    }
-                })
-                .collect();
+            let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
+                remote_admins
+                    .iter()
+                    .flat_map(|r| mappings.get(r).map(|v| v.roles()).into_iter().flatten())
+                    .collect()
+            } else {
+                remote_admins.clone()
+            };
 
             debug!("SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}");
             cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)

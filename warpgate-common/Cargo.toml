@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-common"
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [[bin]]
 name = "config-schema"
@@ -49,9 +49,9 @@ tracing-core = { version = "0.1", default-features = false }
 tracing.workspace = true
 url = { version = "2.2", default-features = false }
 uuid.workspace = true
-warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
-warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-ca = { path = "../warpgate-ca", default-features = false }
+warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-sso = { path = "../warpgate-sso", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
 webpki = { version = "0.22", default-features = false }
 x509-parser = "0.17.0"
