@@ -7,7 +7,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
 pub struct Api;
@@ -48,11 +48,11 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         name: Path<String>,
         next: Query<Option<String>>,
     ) -> Result<StartSsoResponse, WarpgateError> {
-        let config = services.config.lock().await;
+        let config = ctx.services.config.lock().await;
 
         let name = name.0;
 
@@ -60,10 +60,16 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
-        let mut return_url = config
-            .construct_external_url(None, provider_config.return_domain_whitelist.as_deref())?;
-        return_url.set_path("@warpgate/api/sso/return");
-        debug!("Return URL: {}", &return_url);
+        let mut return_url = config.construct_external_url(
+            Some(req),
+            provider_config.return_domain_whitelist.as_deref(),
+        )?;
+        info!("{:?}", provider_config);
+        return_url.set_path(&format!(
+            "{}warpgate/api/sso/return",
+            provider_config.return_url_prefix
+        ));
+        debug!("Return URL: {return_url}");
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 

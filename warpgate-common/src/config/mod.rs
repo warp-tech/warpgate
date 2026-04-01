@@ -31,6 +31,8 @@ pub enum UserAuthCredential {
     Password(UserPasswordCredential),
     #[serde(rename = "publickey")]
     PublicKey(UserPublicKeyCredential),
+    #[serde(rename = "certificate")]
+    Certificate(UserCertificateCredential),
     #[serde(rename = "otp")]
     Totp(UserTotpCredential),
     #[serde(rename = "sso")]
@@ -54,6 +56,12 @@ impl UserPasswordCredential {
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct UserCertificateCredential {
+    pub certificate_pem: Secret<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct UserTotpCredential {
     #[serde(with = "crate::helpers::serde_base64_secret")]
@@ -70,6 +78,7 @@ impl UserAuthCredential {
         match self {
             Self::Password(_) => CredentialKind::Password,
             Self::PublicKey(_) => CredentialKind::PublicKey,
+            Self::Certificate(_) => CredentialKind::Certificate,
             Self::Totp(_) => CredentialKind::Totp,
             Self::Sso(_) => CredentialKind::Sso,
         }
@@ -80,6 +89,8 @@ impl UserAuthCredential {
 pub struct UserRequireCredentialsPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kubernetes: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,6 +176,85 @@ pub struct Role {
     pub description: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct AdminRole {
+    #[serde(default)]
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+
+    pub targets_create: bool,
+    pub targets_edit: bool,
+    pub targets_delete: bool,
+
+    pub users_create: bool,
+    pub users_edit: bool,
+    pub users_delete: bool,
+
+    pub access_roles_create: bool,
+    pub access_roles_edit: bool,
+    pub access_roles_delete: bool,
+    pub access_roles_assign: bool,
+
+    pub sessions_view: bool,
+    pub sessions_terminate: bool,
+
+    pub recordings_view: bool,
+
+    pub tickets_create: bool,
+    pub tickets_delete: bool,
+
+    pub config_edit: bool,
+
+    pub admin_roles_manage: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminPermission {
+    TargetsCreate,
+    TargetsEdit,
+    TargetsDelete,
+    UsersCreate,
+    UsersEdit,
+    UsersDelete,
+    AccessRolesCreate,
+    AccessRolesEdit,
+    AccessRolesDelete,
+    AccessRolesAssign,
+    SessionsView,
+    SessionsTerminate,
+    RecordingsView,
+    TicketsCreate,
+    TicketsDelete,
+    ConfigEdit,
+    AdminRolesManage,
+}
+
+impl AdminRole {
+    pub fn has_permission(&self, perm: AdminPermission) -> bool {
+        match perm {
+            AdminPermission::TargetsCreate => self.targets_create,
+            AdminPermission::TargetsEdit => self.targets_edit,
+            AdminPermission::TargetsDelete => self.targets_delete,
+            AdminPermission::UsersCreate => self.users_create,
+            AdminPermission::UsersEdit => self.users_edit,
+            AdminPermission::UsersDelete => self.users_delete,
+            AdminPermission::AccessRolesCreate => self.access_roles_create,
+            AdminPermission::AccessRolesEdit => self.access_roles_edit,
+            AdminPermission::AccessRolesDelete => self.access_roles_delete,
+            AdminPermission::AccessRolesAssign => self.access_roles_assign,
+            AdminPermission::SessionsView => self.sessions_view,
+            AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::RecordingsView => self.recordings_view,
+            AdminPermission::TicketsCreate => self.tickets_create,
+            AdminPermission::TicketsDelete => self.tickets_delete,
+            AdminPermission::ConfigEdit => self.config_edit,
+            AdminPermission::AdminRolesManage => self.admin_roles_manage,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
@@ -197,6 +287,9 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_port: Option<u16>,
 
+    #[serde(default)]
+    pub external_host: Option<String>,
+
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
 
@@ -219,6 +312,7 @@ impl Default for SshConfig {
             keys: _default_ssh_keys_path(),
             host_key_verification: Default::default(),
             external_port: None,
+            external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
             keepalive_interval: None,
         }
@@ -228,6 +322,10 @@ impl Default for SshConfig {
 impl SshConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -244,6 +342,9 @@ pub struct HttpConfig {
 
     #[serde(default)]
     pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
 
     #[serde(default)]
     pub certificate: String,
@@ -271,6 +372,7 @@ impl Default for HttpConfig {
         HttpConfig {
             listen: _default_http_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
             trust_x_forwarded_headers: false,
@@ -284,6 +386,10 @@ impl Default for HttpConfig {
 impl HttpConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -319,6 +425,9 @@ pub struct MySqlConfig {
     pub external_port: Option<u16>,
 
     #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
     pub certificate: String,
 
     #[serde(default)]
@@ -331,6 +440,7 @@ impl Default for MySqlConfig {
             enable: false,
             listen: _default_mysql_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -340,6 +450,59 @@ impl Default for MySqlConfig {
 impl MySqlConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct KubernetesConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_kubernetes_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+
+    #[serde(default = "_default_session_max_age", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub session_max_age: Duration,
+}
+
+impl Default for KubernetesConfig {
+    fn default() -> Self {
+        KubernetesConfig {
+            enable: false,
+            listen: _default_kubernetes_listen(),
+            external_port: None,
+            external_host: None,
+            certificate: "".to_owned(),
+            key: "".to_owned(),
+            session_max_age: _default_session_max_age(),
+        }
+    }
+}
+
+impl KubernetesConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -355,6 +518,9 @@ pub struct PostgresConfig {
     pub external_port: Option<u16>,
 
     #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
     pub certificate: String,
 
     #[serde(default)]
@@ -367,6 +533,7 @@ impl Default for PostgresConfig {
             enable: false,
             listen: _default_postgres_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -376,6 +543,10 @@ impl Default for PostgresConfig {
 impl PostgresConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -442,6 +613,9 @@ pub struct WarpgateConfigStore {
     pub http: HttpConfig,
 
     #[serde(default)]
+    pub kubernetes: KubernetesConfig,
+
+    #[serde(default)]
     pub mysql: MySqlConfig,
 
     #[serde(default)]
@@ -460,6 +634,7 @@ impl Default for WarpgateConfigStore {
             database_url: _default_database_url(),
             ssh: <_>::default(),
             http: <_>::default(),
+            kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
             log: <_>::default(),

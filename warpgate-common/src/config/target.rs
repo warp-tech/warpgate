@@ -8,6 +8,21 @@ use warpgate_tls::TlsMode;
 use super::defaults::*;
 use crate::Secret;
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct KubernetesTargetCertificateAuth {
+    pub certificate: Secret<String>,
+    pub private_key: Secret<String>,
+}
+
+impl Default for KubernetesTargetCertificateAuth {
+    fn default() -> Self {
+        Self {
+            certificate: Secret::new(String::new()),
+            private_key: Secret::new(String::new()),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
@@ -95,6 +110,9 @@ pub struct TargetMySqlOptions {
 
     #[serde(default)]
     pub tls: Tls,
+
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -116,10 +134,43 @@ pub struct TargetPostgresOptions {
 
     #[serde(default = "_default_postgres_idle_timeout_str")]
     pub idle_timeout: Option<String>,
+
+    #[serde(default)]
+    pub default_database_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct TargetWebAdminOptions {}
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetKubernetesOptions {
+    #[serde(default = "_default_empty_string")]
+    pub cluster_url: String,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    #[serde(default)]
+    pub auth: KubernetesTargetAuth,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(untagged)]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum KubernetesTargetAuth {
+    #[serde(rename = "token")]
+    Token(KubernetesTargetTokenAuth),
+    #[serde(rename = "certificate")]
+    Certificate(KubernetesTargetCertificateAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct KubernetesTargetTokenAuth {
+    pub token: Secret<String>,
+}
+
+impl Default for KubernetesTargetAuth {
+    fn default() -> Self {
+        KubernetesTargetAuth::Certificate(KubernetesTargetCertificateAuth::default())
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct Target {
@@ -142,10 +193,10 @@ pub enum TargetOptions {
     Ssh(TargetSSHOptions),
     #[serde(rename = "http")]
     Http(TargetHTTPOptions),
+    #[serde(rename = "kubernetes")]
+    Kubernetes(TargetKubernetesOptions),
     #[serde(rename = "mysql")]
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
-    #[serde(rename = "web_admin")]
-    WebAdmin(TargetWebAdminOptions),
 }

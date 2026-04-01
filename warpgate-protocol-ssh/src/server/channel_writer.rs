@@ -1,11 +1,11 @@
 use russh::server::Handle;
-use russh::{ChannelId, CryptoVec};
+use russh::ChannelId;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
 enum ChannelWriteOperation {
-    Data(Handle, ChannelId, CryptoVec),
-    ExtendedData(Handle, ChannelId, u32, CryptoVec),
+    Data(Handle, ChannelId, Vec<u8>),
+    ExtendedData(Handle, ChannelId, u32, Vec<u8>),
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
@@ -35,15 +35,24 @@ impl ChannelWriter {
         ChannelWriter { tx }
     }
 
-    pub fn write(&self, handle: Handle, channel: ChannelId, data: CryptoVec) {
+    pub fn write<D: Into<Vec<u8>>>(&self, handle: Handle, channel: ChannelId, data: D) {
         let _ = self
             .tx
-            .send(ChannelWriteOperation::Data(handle, channel, data));
+            .send(ChannelWriteOperation::Data(handle, channel, data.into()));
     }
 
-    pub fn write_extended(&self, handle: Handle, channel: ChannelId, ext: u32, data: CryptoVec) {
+    pub fn write_extended<D: Into<Vec<u8>>>(
+        &self,
+        handle: Handle,
+        channel: ChannelId,
+        ext: u32,
+        data: D,
+    ) {
         let _ = self.tx.send(ChannelWriteOperation::ExtendedData(
-            handle, channel, ext, data,
+            handle,
+            channel,
+            ext,
+            data.into(),
         ));
     }
 

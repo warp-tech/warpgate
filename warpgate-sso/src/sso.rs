@@ -1,16 +1,19 @@
 use std::borrow::Cow;
 use std::ops::Deref;
 
-use futures::future::OptionFuture;
 use openidconnect::core::{
-    CoreAuthenticationFlow, CoreClient, CoreGenderClaim, CoreIdToken, CoreIdTokenClaims,
+    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
+    CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
+    CoreRevocableToken, CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    reqwest, AccessTokenHash, AdditionalClaims, AuthorizationCode, CsrfToken, DiscoveryError,
-    EndpointMaybeSet, EndpointNotSet, EndpointSet, LogoutRequest, Nonce, OAuth2TokenResponse,
-    PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, ProviderMetadataWithLogout,
-    RedirectUrl, RequestTokenError, Scope, TokenResponse, UserInfoClaims,
+    reqwest, AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
+    DiscoveryError, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse, UserInfoClaims,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -19,17 +22,83 @@ use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::SsoError;
 
+/// Deserialize a value that may be either a single string or a sequence of strings.
+///
+/// Some OIDC providers (e.g. oidc-mock) return a single claim value
+/// as a bare string rather than a one-element array.
+/// This deserializer accepts both forms.
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    Option::<StringOrVec>::deserialize(deserializer).map(|opt| {
+        opt.map(|sv| match sv {
+            StringOrVec::String(s) => vec![s],
+            StringOrVec::Vec(v) => v,
+        })
+    })
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WarpgateClaims {
-    // This uses the "warpgate_roles" claim from OIDC
+    #[serde(default, deserialize_with = "string_or_vec")]
     pub warpgate_roles: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub warpgate_admin_roles: Option<Vec<String>>,
 }
 
 impl AdditionalClaims for WarpgateClaims {}
 
+pub type WarpgateIdToken = IdToken<
+    WarpgateClaims,
+    CoreGenderClaim,
+    CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm,
+>;
+
+type WarpgateIdTokenClaims = IdTokenClaims<WarpgateClaims, CoreGenderClaim>;
+
+type WarpgateTokenResponse = StandardTokenResponse<
+    IdTokenFields<
+        WarpgateClaims,
+        EmptyExtraTokenFields,
+        CoreGenderClaim,
+        CoreJweContentEncryptionAlgorithm,
+        CoreJwsSigningAlgorithm,
+    >,
+    CoreTokenType,
+>;
+
+type WarpgateClient = Client<
+    WarpgateClaims,
+    CoreAuthDisplay,
+    CoreGenderClaim,
+    CoreJweContentEncryptionAlgorithm,
+    CoreJsonWebKey,
+    CoreAuthPrompt,
+    StandardErrorResponse<CoreErrorResponseType>,
+    WarpgateTokenResponse,
+    CoreTokenIntrospectionResponse,
+    CoreRevocableToken,
+    CoreRevocationErrorResponse,
+    EndpointSet,      // HasAuthUrl
+    EndpointNotSet,   // HasDeviceAuthUrl
+    EndpointNotSet,   // HasIntrospectionUrl
+    EndpointNotSet,   // HasRevocationUrl
+    EndpointMaybeSet, // HasTokenUrl
+    EndpointMaybeSet, // HasUserInfoUrl
+>;
+
 pub struct SsoResult {
-    pub token: CoreIdToken,
-    pub claims: CoreIdTokenClaims,
+    pub token: WarpgateIdToken,
+    pub claims: WarpgateIdTokenClaims,
     pub userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>>,
 }
 
@@ -46,7 +115,7 @@ pub async fn discover_metadata(
         .await
         .map_err(|e| {
             SsoError::Discovery(match e {
-                DiscoveryError::Request(inner) => format!("Request error: {inner}"),
+                DiscoveryError::Request(inner) => format!("Request error: {inner:?}"),
                 e => format!("{e}"),
             })
         })
@@ -55,20 +124,10 @@ pub async fn discover_metadata(
 async fn make_client(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
-) -> Result<
-    CoreClient<
-        EndpointSet,      // HasAuthUrl
-        EndpointNotSet,   // HasDeviceAuthUrl
-        EndpointNotSet,   // HasIntrospectionUrl
-        EndpointNotSet,   // HasRevocationUrl
-        EndpointMaybeSet, // HasTokenUrl
-        EndpointMaybeSet, // HasUserInfoUrl
-    >,
-    SsoError,
-> {
+) -> Result<WarpgateClient, SsoError> {
     let metadata = discover_metadata(config, http_client).await?;
 
-    let client = CoreClient::from_provider_metadata(
+    let client = WarpgateClient::from_provider_metadata(
         metadata,
         config.client_id().clone(),
         Some(config.client_secret()?),
@@ -96,7 +155,7 @@ impl SsoClient {
 
     pub async fn start_login(&self, redirect_url: String) -> Result<SsoLoginRequest, SsoError> {
         let redirect_url = RedirectUrl::new(redirect_url)?;
-        let client = make_client(&self.config, &self.http_client).await?;
+        let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
         let mut auth_req = client
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
@@ -140,7 +199,7 @@ impl SsoClient {
         nonce: &Nonce,
         code: String,
     ) -> Result<SsoResult, SsoError> {
-        let client = make_client(&self.config, &self.http_client)
+        let client: WarpgateClient = make_client(&self.config, &self.http_client)
             .await?
             .set_redirect_uri(redirect_url);
 
@@ -149,33 +208,38 @@ impl SsoClient {
             req = req.set_pkce_verifier(verifier);
         }
 
-        let token_response = req
-            .request_async(&self.http_client)
-            .await
-            .map_err(|e| match e {
-                RequestTokenError::ServerResponse(response) => {
-                    SsoError::Verification(response.error().to_string())
-                }
+        let token_response = req.request_async(&self.http_client).await.map_err(
+            |e: RequestTokenError<
+                HttpClientError<reqwest::Error>,
+                StandardErrorResponse<CoreErrorResponseType>,
+            >| match e {
+                RequestTokenError::ServerResponse(response) => SsoError::Verification(format!(
+                    "{}: {:?}",
+                    response.error(),
+                    response.error_description()
+                )),
                 RequestTokenError::Parse(err, path) => SsoError::Verification(format!(
                     "Parse error: {:?} / {:?}",
                     err,
                     String::from_utf8_lossy(&path)
                 )),
                 e => SsoError::Verification(format!("{e}")),
-            })?;
+            },
+        )?;
 
         let mut token_verifier = client.id_token_verifier();
 
         if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
-            token_verifier = token_verifier
-                .set_other_audience_verifier_fn(|aud| trusted_audiences.contains(aud.deref()));
+            token_verifier = token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
+                trusted_audiences.contains(aud.deref())
+            });
         }
 
         if self.config.trust_unknown_audiences() {
             token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
         }
 
-        let id_token: &CoreIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
+        let id_token: &WarpgateIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = id_token.claims(&token_verifier, nonce)?;
 
         let user_info_req = client
@@ -187,15 +251,17 @@ impl SsoClient {
             .ok();
 
         let userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>> =
-            OptionFuture::from(user_info_req.map(|req| req.request_async(&self.http_client)))
-                .await
-                .and_then(|res| {
-                    res.map_err(|err| {
+            if let Some(user_info_req) = user_info_req {
+                match user_info_req.request_async(&self.http_client).await {
+                    Ok(userinfo) => Some(userinfo),
+                    Err(err) => {
                         error!("Failed to fetch userinfo: {err:?}");
-                        err
-                    })
-                    .ok()
-                });
+                        None
+                    }
+                }
+            } else {
+                None
+            };
 
         if let Some(expected_access_token_hash) = claims.access_token_hash() {
             let actual_access_token_hash = AccessTokenHash::from_token(
@@ -215,7 +281,7 @@ impl SsoClient {
         })
     }
 
-    pub async fn logout(&self, token: CoreIdToken, redirect_url: Url) -> Result<Url, SsoError> {
+    pub async fn logout(&self, token: WarpgateIdToken, redirect_url: Url) -> Result<Url, SsoError> {
         let metadata = discover_metadata(&self.config, &self.http_client).await?;
         let Some(ref url) = metadata.additional_metadata().end_session_endpoint else {
             return Err(SsoError::LogoutNotSupported);

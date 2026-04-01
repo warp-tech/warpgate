@@ -5,7 +5,10 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
 
-use crate::{OtpCredential, PasswordCredential, PublicKeyCredential, Role, SsoCredential};
+use crate::{
+    CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role,
+    SsoCredential,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "users")]
@@ -33,6 +36,16 @@ impl Related<super::Role::Entity> for Entity {
     }
 }
 
+impl Related<super::AdminRole::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::UserAdminRoleAssignment::Relation::AdminRole.def()
+    }
+
+    fn via() -> Option<RelationDef> {
+        Some(super::UserAdminRoleAssignment::Relation::User.def().rev())
+    }
+}
+
 impl Related<super::OtpCredential::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::OtpCredentials.def()
@@ -48,6 +61,12 @@ impl Related<super::PasswordCredential::Entity> for Entity {
 impl Related<super::PublicKeyCredential::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::PublicKeyCredentials.def()
+    }
+}
+
+impl Related<super::CertificateCredential::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::CertificateCredentials.def()
     }
 }
 
@@ -69,8 +88,10 @@ pub enum Relation {
     OtpCredentials,
     PasswordCredentials,
     PublicKeyCredentials,
+    CertificateCredentials,
     SsoCredentials,
     ApiTokens,
+    AdminRoles,
 }
 
 impl RelationTrait for Relation {
@@ -88,6 +109,10 @@ impl RelationTrait for Relation {
                 .from(Column::Id)
                 .to(super::PublicKeyCredential::Column::UserId)
                 .into(),
+            Self::CertificateCredentials => Entity::has_many(super::CertificateCredential::Entity)
+                .from(Column::Id)
+                .to(super::CertificateCredential::Column::UserId)
+                .into(),
             Self::SsoCredentials => Entity::has_many(super::SsoCredential::Entity)
                 .from(Column::Id)
                 .to(super::SsoCredential::Column::UserId)
@@ -95,6 +120,10 @@ impl RelationTrait for Relation {
             Self::ApiTokens => Entity::has_many(super::ApiToken::Entity)
                 .from(Column::Id)
                 .to(super::ApiToken::Column::UserId)
+                .into(),
+            Self::AdminRoles => Entity::has_many(super::UserAdminRoleAssignment::Entity)
+                .from(Column::Id)
+                .to(super::UserAdminRoleAssignment::Column::UserId)
                 .into(),
         }
     }
@@ -152,6 +181,13 @@ impl Model {
         );
         credentials.extend(
             self.find_related(PublicKeyCredential::Entity)
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|x| x.into()),
+        );
+        credentials.extend(
+            self.find_related(CertificateCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()

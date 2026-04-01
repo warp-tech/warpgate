@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
+    import { adminPermissions } from '../../lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -87,7 +88,7 @@
                 Access instructions
             </ModalHeader>
             <ModalBody>
-                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
                     <Loadable promise={api.getUsers()}>
                         {#snippet children(users)}
                             <FormGroup floating label="Select a user">
@@ -103,18 +104,17 @@
                     </Loadable>
                 {/if}
 
-                <ConnectionInstructions
-                    targetName={target.name}
-                    username={selectedUsername}
-                    targetKind={{
-                        Ssh: TargetKind.Ssh,
-                        WebAdmin: TargetKind.WebAdmin,
-                        Http: TargetKind.Http,
-                        MySql: TargetKind.MySql,
-                        Postgres: TargetKind.Postgres,
-                    }[target.options.kind ?? '']}
-                    targetExternalHost={target.options.kind === 'Http' ? target.options.externalHost : undefined}
-                />
+                {#key connectionsInstructionsModalOpen} <!-- regenerate examples when modal opens -->
+                    <ConnectionInstructions
+                        targetName={target.name}
+                        username={selectedUsername}
+                        targetKind={target.options.kind}
+                        targetExternalHost={target.options.kind === TargetKind.Http ? target.options.externalHost : undefined}
+                        targetDefaultDatabaseName={
+                            (target.options.kind === TargetKind.MySql || target.options.kind === TargetKind.Postgres)
+                                ? target.options.defaultDatabaseName : undefined}
+                    />
+                {/key}
             </ModalBody>
             <ModalFooter>
                 <Button
@@ -144,8 +144,8 @@
                     {#if target.options.kind === 'Http'}
                         HTTP target
                     {/if}
-                    {#if target.options.kind === 'WebAdmin'}
-                        This web admin interface
+                    {#if target.options.kind === 'Kubernetes'}
+                        Kubernetes target
                     {/if}
                 </div>
             </div>
@@ -224,21 +224,37 @@
             </div>
 
             <TlsConfiguration bind:value={target.options.tls} />
+        {/if}
 
-            {#if target.options.kind === 'Postgres'}
-                <FormGroup floating label="Idle timeout">
-                    <input
-                        class="form-control"
-                        type="text"
-                        placeholder="10m"
-                        bind:value={target.options.idleTimeout}
-                        title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
-                    />
-                    <small class="form-text text-muted">
-                        How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
-                    </small>
+        {#if target.options.kind === 'Kubernetes'}
+            <FormGroup floating label="Cluster URL">
+                <input class="form-control" bind:value={target.options.clusterUrl} placeholder="https://kubernetes.example.com:6443" />
+            </FormGroup>
+
+            <h5 class="mt-3">Authentication</h5>
+            <FormGroup floating label="Auth Type">
+                <select class="form-control" bind:value={target.options.auth.kind}>
+                    <option value="Certificate">Certificate</option>
+                    <option value="Token">Token</option>
+                </select>
+            </FormGroup>
+
+            {#if target.options.auth.kind === 'Certificate'}
+                <FormGroup floating label="Client Certificate">
+                    <textarea class="form-control" style="height: 18rem;" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                </FormGroup>
+                <FormGroup floating label="Client Private Key">
+                    <textarea class="form-control" style="height: 12rem;" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
                 </FormGroup>
             {/if}
+
+            {#if target.options.auth.kind === 'Token'}
+                <FormGroup floating label="Bearer Token">
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth.token} />
+                </FormGroup>
+            {/if}
+
+            <TlsConfiguration bind:value={target.options.tls} />
         {/if}
 
         <h4 class="mt-4">Allow access for roles</h4>
@@ -254,6 +270,7 @@
                                 id="role-{role.id}"
                                 class="mb-0 me-2"
                                 type="switch"
+                                disabled={!$adminPermissions.targetsEdit}
                                 on:change={() => toggleRole(role)}
                                 checked={roleIsAllowed[role.id]} />
                             <div>
@@ -268,14 +285,45 @@
             {/snippet}
         </Loadable>
 
-        <h4 class="mt-4">Traffic</h4>
-        <FormGroup class="mb-5">
+        <h4 class="mt-4">Advanced</h4>
+        {#if target.options.kind === 'Postgres'}
+            <FormGroup floating label="Idle timeout">
+                <input
+                    class="form-control"
+                    type="text"
+                    placeholder="10m"
+                    bind:value={target.options.idleTimeout}
+                    title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                />
+                <small class="form-text text-muted">
+                    How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
+                </small>
+            </FormGroup>
+        {/if}
+
+        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+            <FormGroup floating label="Default database name for connection examples">
+                <input
+                    class="form-control"
+                    type="text"
+                    placeholder="database-name"
+                    bind:value={target.options.defaultDatabaseName}
+                />
+                <small class="form-text text-muted">
+                    Default database name used in connection examples. This is only for display purposes and does not restrict which databases users can access. Leave empty to use the global default.
+                </small>
+            </FormGroup>
+        {/if}
+
+        <FormGroup>
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput
                 id="rateLimitBytesPerSecond"
                 bind:value={target.rateLimitBytesPerSecond}
             />
         </FormGroup>
+
+        <div class="mb-5"></div>
     {/if}
     </Loadable>
 
@@ -291,15 +339,17 @@
         >Access instructions</Button>
 
         <AsyncButton
-        color="primary"
+            color="primary"
             class="ms-auto"
             click={update}
+            disabled={!$adminPermissions.targetsEdit}
         >Update configuration</AsyncButton>
 
         <AsyncButton
             class="ms-2"
             color="danger"
             click={remove}
+            disabled={!$adminPermissions.targetsDelete}
         >Remove</AsyncButton>
     </div>
 </div>

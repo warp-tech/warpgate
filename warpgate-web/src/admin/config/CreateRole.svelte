@@ -16,7 +16,7 @@ async function create () {
                 name,
             },
         })
-        replace(`/config/roles/${role.id}`)
+        replace(`/config/access-roles/${role.id}`)
     } catch (err) {
         error = await stringifyError(err)
     }

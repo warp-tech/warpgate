@@ -24,7 +24,6 @@ async function load () {
         api.getTargets(),
         api.getUsers(),
     ])
-    targets = targets.filter(x => x.options.kind !== TargetKind.WebAdmin)
     targets.sort(firstBy('name'))
     users.sort(firstBy('username'))
 }
@@ -71,10 +70,19 @@ async function create () {
         {#if selectedTarget && selectedUser}
         <ConnectionInstructions
             targetName={selectedTarget.name}
-            targetKind={TargetKind[selectedTarget.options.kind]}
+            targetKind={{
+                Http: TargetKind.Http,
+                MySql: TargetKind.MySql,
+                Ssh: TargetKind.Ssh,
+                Postgres: TargetKind.Postgres,
+                Kubernetes: TargetKind.Ssh, // Use SSH as placeholder since Kubernetes isn't in gateway TargetKind
+            }[selectedTarget.options.kind]}
             username={selectedUser.username}
             targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
             ticketSecret={result.secret}
+            targetDefaultDatabaseName={
+                (selectedTarget.options.kind === TargetKind.MySql || selectedTarget.options.kind === TargetKind.Postgres)
+                    ? selectedTarget.options.defaultDatabaseName : undefined}
         />
         {/if}
 

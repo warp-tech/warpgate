@@ -2,9 +2,8 @@ pub mod api;
 mod catchall;
 mod common;
 mod error;
-mod logging;
 mod middleware;
-mod proxy;
+pub mod proxy;
 mod session;
 mod session_handle;
 
@@ -13,14 +12,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use common::{inject_request_authorization, page_admin_auth};
+use common::inject_request_authorization;
 pub use common::{SsoLoginState, PROTOCOL_NAME};
 use http::HeaderValue;
-use logging::{get_client_ip, log_request_error, log_request_result, span_for_request};
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession, Session};
+use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -28,18 +26,23 @@ use tokio::sync::Mutex;
 use tracing::*;
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{GlobalParams, ListenEndpoint, Target, TargetOptions, WarpgateConfig};
-use warpgate_core::{ProtocolServer, Services, TargetTestError};
+use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::{
+    get_client_ip, log_request_error, log_request_result, span_for_request,
+};
+use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::{
     IntoTlsCertificateRelativePaths, RustlsSetupError, TlsCertificateAndPrivateKey,
     TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_admin_auth, endpoint_auth, page_auth, SESSION_COOKIE_NAME};
+use crate::common::{endpoint_auth, page_auth, SESSION_COOKIE_NAME};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
+use crate::session_handle::warpgate_server_handle_for_request;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -100,16 +103,8 @@ async fn make_rustls_config(
 
 impl ProtocolServer for HTTPProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
-        let admin_api_app = admin_api_app(&self.services).into_endpoint();
-        let api_service =
-            OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
-                .server("/@warpgate/api");
-        let ui = api_service.stoplight_elements();
-        let spec = api_service.spec_endpoint();
-
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
-        let db = self.services.db.clone();
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -170,50 +165,71 @@ impl ProtocolServer for HTTPProtocolServer {
             }
         };
 
-        let app = Route::new()
-            .nest(
-                "/@warpgate",
-                Route::new()
-                    .nest("/api/playground", ui)
-                    .nest("/api", api_service.with(cache_bust()))
-                    .nest("/api/openapi.json", spec)
-                    .nest_no_strip(
-                        "/assets",
-                        EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
-                    )
-                    .nest(
-                        "/admin/api",
-                        endpoint_auth(endpoint_admin_auth(admin_api_app)).with(cache_bust()),
-                    )
-                    .at(
-                        "/admin",
-                        page_auth(page_admin_auth(EmbeddedFileEndpoint::<Assets>::new(
-                            "src/admin/index.html",
-                        )))
+        // /@warpgate/ routes
+        let at_warpgate_endpoints = || {
+            let services = self.services.clone();
+            let api_service = {
+                OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
+                    .server("/@warpgate/api")
+            };
+            let openapi_ui_route = api_service.stoplight_elements();
+            let openapi_spec_route = api_service.spec_endpoint();
+            let admin_api_app = admin_api_app().into_endpoint();
+
+            Route::new()
+                .nest("/api/playground", openapi_ui_route)
+                .nest("/api", api_service.with(cache_bust()))
+                .nest("/api/openapi.json", openapi_spec_route)
+                .nest_no_strip(
+                    "/assets",
+                    EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
+                )
+                .nest(
+                    "/admin/api",
+                    endpoint_auth(admin_api_app).with(cache_bust()),
+                )
+                .at(
+                    "/admin",
+                    page_auth(EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"))
                         .with(cache_bust()),
-                    )
-                    .at(
-                        "/api/auth/web-auth-requests/stream",
-                        endpoint_auth(api::auth::api_get_web_auth_requests_stream),
-                    )
-                    .at(
-                        "",
-                        EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
-                            .with(cache_bust()),
-                    )
-                    .around(move |ep, req| async move {
-                        let method = req.method().clone();
-                        let url = req.original_uri().clone();
-                        let client_ip = get_client_ip(&req).await?;
+                )
+                .at(
+                    "/api/auth/web-auth-requests/stream",
+                    endpoint_auth(api::auth::api_get_web_auth_requests_stream),
+                )
+                .at(
+                    "",
+                    EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
+                        .with(cache_bust()),
+                )
+                .around({
+                    let services = services.clone();
+                    move |ep, req| {
+                        let services = services.clone();
+                        async move {
+                            let method = req.method().clone();
+                            let url = req.original_uri().clone();
+                            let client_ip = get_client_ip(&req, &services).await;
 
-                        let response = ep.call(req).await.inspect_err(|e| {
-                            log_request_error(&method, &url, &client_ip, e);
-                        })?;
+                            let response = ep.call(req).await.inspect_err(|e| {
+                                log_request_error(&method, &url, client_ip.as_deref(), e);
+                            })?;
 
-                        log_request_result(&method, &url, &client_ip, &response.status());
-                        Ok(response)
-                    }),
-            )
+                            log_request_result(
+                                &method,
+                                &url,
+                                client_ip.as_deref(),
+                                &response.status(),
+                            );
+                            Ok(response)
+                        }
+                    }
+                })
+        };
+
+        let app = Route::new()
+            .nest("/@warpgate", at_warpgate_endpoints())
+            .nest("/_warpgate", at_warpgate_endpoints())
             .nest_no_strip(
                 "/",
                 page_auth(catchall::catchall_endpoint).around(move |ep, req| async move {
@@ -225,13 +241,22 @@ impl ProtocolServer for HTTPProtocolServer {
             )
             .around(inject_request_authorization)
             .around(move |ep, req| async move {
+                let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
+                    .await?
+                    .clone();
                 let sm = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(&req)
                     .await?
                     .clone();
 
                 let req = { sm.lock().await.process_request(req).await? };
-
-                let span = span_for_request(&req).await?;
+                let handle = warpgate_server_handle_for_request(&req).await.ok();
+                let span = match handle {
+                    Some(ref handle) => {
+                        let handle = handle.lock().await;
+                        span_for_request(&req, &ctx.services, Some(&*handle)).await?
+                    }
+                    None => span_for_request(&req, &ctx.services, None).await?,
+                };
 
                 ep.call(req).instrument(span).await
             })
@@ -248,10 +273,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
-            .data(self.services.clone())
+            .data(UnauthenticatedRequestContext {
+                services: self.services.clone(),
+            })
             .data(session_store.clone())
-            .data(session_storage)
-            .data(db);
+            .data(session_storage);
 
         tokio::spawn(async move {
             loop {
@@ -271,21 +297,6 @@ impl ProtocolServer for HTTPProtocolServer {
             .run(app)
             .await?;
 
-        Ok(())
-    }
-
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Http(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not an HTTP target".to_owned(),
-            ));
-        };
-
-        let mut request = poem::Request::builder().uri_str("http://host/").finish();
-        request.extensions_mut().insert(Session::default());
-        crate::proxy::proxy_normal_request(&request, poem::Body::empty(), &options)
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
         Ok(())
     }
 

@@ -10,10 +10,20 @@ import subprocess
 import tempfile
 import urllib3
 import uuid
+import base64
+
+# cryptography is used to generate client certificates/CSRs locally
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
 from typing import List, Optional
+
+from deepmerge import always_merger
 
 from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
@@ -34,6 +44,32 @@ class Context:
 
 
 @dataclass
+class K3sInstance:
+    port: int
+    token: str
+    container_name: str
+    client_cert: str
+    client_key: str
+
+    def kubectl(self, cmd_args, input=None, check=True):
+        ret = subprocess.run(
+            ["docker", "exec", "-i", self.container_name, "kubectl", *cmd_args],
+            input=input,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check:
+            try:
+                ret.check_returncode()
+            except subprocess.CalledProcessError as e:
+                logging.error(
+                    f"kubectl command failed: {' '.join(cmd_args)}\nstdout: {e.stdout.decode()}\nstderr: {e.stderr.decode()}"
+                )
+                raise
+        return ret
+
+
+@dataclass
 class Child:
     process: subprocess.Popen
     stop_signal: signal.Signals
@@ -48,6 +84,7 @@ class WarpgateProcess:
     ssh_port: int
     mysql_port: int
     postgres_port: int
+    kubernetes_port: int
 
 
 class ProcessManager:
@@ -83,7 +120,7 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config=''):
+    def start_ssh_server(self, trusted_keys=[], extra_config=""):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
@@ -178,13 +215,387 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
+    def start_k3s(self) -> K3sInstance:
+        """
+        Runs a privileged k3s container, waits for the API to be ready,
+        creates a ServiceAccount and clusterrolebinding, then uses
+        `kubectl create token` to fetch the bearer token. Assumes a modern
+        k8s version (no fallback logic needed).
+        """
+        port = alloc_port()
+        container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
+        image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.35.2-k3s1")
+
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--privileged",
+                "-p",
+                f"{port}:6443",
+                image,
+                "server",
+                "--disable",
+                "traefik",
+            ]
+        )
+
+        def wait_k3s():
+            # Wait until kube-apiserver is responding
+            while True:
+                try:
+                    subprocess.check_call(
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "kubectl",
+                            "get",
+                            "nodes",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_k3s, "k3s API is not ready", timeout=self.timeout * 5)
+
+        # k3s sometimes returns OK for `get nodes` before namespace controller
+        # has created the "default" namespace.  make sure it exists before we
+        # try to create objects inside it.
+        def wait_default_ns():
+            while True:
+                r = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "kubectl",
+                        "get",
+                        "namespace",
+                        "default",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if r.returncode:
+                    time.sleep(1)
+                else:
+                    break
+
+        _wait_timeout(
+            wait_default_ns, "default namespace is not ready", timeout=self.timeout * 5
+        )
+
+        # Create service account inside the container
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "serviceaccount",
+                "test-sa",
+                "-n",
+                "default",
+            ]
+        )
+
+        # Assign cluster admin role so our SA can do anything
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "clusterrolebinding",
+                "test-sa-binding",
+                "--clusterrole=cluster-admin",
+                "--serviceaccount=default:test-sa",
+            ]
+        )
+
+        token = (
+            subprocess.check_output(
+                [
+                    "docker",
+                    "exec",
+                    container_name,
+                    "kubectl",
+                    "create",
+                    "token",
+                    "test-sa",
+                    "-n",
+                    "default",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+
+        # generate a client key and CSR locally, then ask the k3s CA to sign it
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        csr = (
+            x509.CertificateSigningRequestBuilder()
+            .subject_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "system:masters")])
+            )
+            .sign(key, hashes.SHA256())
+        )
+        client_key = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM)
+
+        # create the CSR resource inside the cluster using kubectl
+        csr_name = "wg-client"
+        csr_yaml = dedent(
+            f"""
+            apiVersion: certificates.k8s.io/v1
+            kind: CertificateSigningRequest
+            metadata:
+              name: {csr_name}
+            spec:
+              groups:
+              - system:authenticated
+              - system:masters
+              request: {base64.b64encode(csr_pem).decode()}
+              signerName: kubernetes.io/kube-apiserver-client
+              usages:
+              - client auth
+            """
+        )
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                container_name,
+                "sh",
+                "-c",
+                "kubectl apply -f -",
+            ],
+            input=csr_yaml.encode(),
+            check=True,
+        )
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "certificate",
+                "approve",
+                csr_name,
+            ]
+        )
+
+        # after approving the CSR the certificate may take a moment to
+        # appear in the resource status
+        def fetch_cert() -> str:
+            while True:
+                cert = subprocess.check_output(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "sh",
+                        "-c",
+                        (
+                            f"kubectl get csr {csr_name} -o jsonpath='{{.status.certificate}}' "
+                            "| base64 -d"
+                        ),
+                    ]
+                ).decode()
+                if cert:
+                    return cert
+                time.sleep(0.1)
+
+        client_cert = ""
+        _wait_timeout(
+            fetch_cert,
+            "k3s did not sign CSR",
+            timeout=self.timeout,
+        )
+
+        client_cert = fetch_cert()
+
+        logging.debug("retrieved signed client certificate from k3s")
+
+        # the cert subject is "system:masters" so bind that user.
+        subprocess.check_call(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "kubectl",
+                "create",
+                "clusterrolebinding",
+                "wg-cert-binding",
+                "--clusterrole=cluster-admin",
+                "--user=system:masters",
+            ]
+        )
+
+        logging.debug(f"k3s {container_name} is up on port {port}")
+        return K3sInstance(
+            port=port,
+            token=token,
+            container_name=container_name,
+            client_cert=client_cert,
+            client_key=client_key,
+        )
+
+    def start_oidc_server(
+        self,
+        warpgate_http_port,
+        extra_scopes=None,
+        users_override=None,
+        extra_identity_resources=None,
+    ):
+        port = alloc_port()
+        container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
+
+        oidc_data_dir = self.ctx.tmpdir / f"oidc-{uuid.uuid4()}"
+        oidc_data_dir.mkdir(parents=True)
+
+        import json as _json
+
+        allowed_scopes = [
+            "openid",
+            "profile",
+            "email",
+            "preferred_username",
+        ]
+        if extra_scopes:
+            allowed_scopes.extend(extra_scopes)
+
+        clients_config = [
+            {
+                "ClientId": "warpgate-test",
+                "ClientSecrets": ["warpgate-test-secret"],
+                "AllowedGrantTypes": ["authorization_code"],
+                "AllowedScopes": allowed_scopes,
+                "ClientClaimsPrefix": "",
+                "RedirectUris": [
+                    f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
+                ],
+            }
+        ]
+
+        clients_config_path = oidc_data_dir / "clients-config.json"
+        with open(clients_config_path, "w") as f:
+            _json.dump(clients_config, f)
+
+        server_options = _json.dumps(
+            {
+                "AccessTokenJwtType": "JWT",
+                "Discovery": {"ShowKeySet": True},
+                "Authentication": {
+                    "CookieSameSiteMode": "Lax",
+                    "CheckSessionCookieSameSiteMode": "Lax",
+                },
+            }
+        )
+        default_users = [
+            {
+                "SubjectId": "1",
+                "Username": "User1",
+                "Password": "pwd",
+                "Claims": [
+                    {
+                        "Type": "name",
+                        "Value": "Sam Tailor",
+                        "ValueType": "string",
+                    },
+                    {
+                        "Type": "email",
+                        "Value": "sam.tailor@gmail.com",
+                        "ValueType": "string",
+                    },
+                    {
+                        "Type": "preferred_username",
+                        "Value": "sam_tailor",
+                        "ValueType": "string",
+                    },
+                ],
+            }
+        ]
+        users_config = _json.dumps(
+            users_override if users_override is not None else default_users
+        )
+        identity_resources_list = [
+            {"Name": "preferred_username", "ClaimTypes": ["preferred_username"]},
+        ]
+        if extra_identity_resources:
+            identity_resources_list.extend(extra_identity_resources)
+        identity_resources = _json.dumps(identity_resources_list)
+
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:8080",
+                "-e",
+                "ASPNETCORE_ENVIRONMENT=Development",
+                "-e",
+                f"SERVER_OPTIONS_INLINE={server_options}",
+                "-e",
+                'LOGIN_OPTIONS_INLINE={"AllowRememberLogin": true}',
+                "-e",
+                f"USERS_CONFIGURATION_INLINE={users_config}",
+                "-e",
+                f"IDENTITY_RESOURCES_INLINE={identity_resources}",
+                "-e",
+                "CLIENTS_CONFIGURATION_PATH=/tmp/config/clients-config.json",
+                "-v",
+                f"{oidc_data_dir}:/tmp/config:ro",
+                "ghcr.io/soluto/oidc-server-mock:0.10.1",
+            ]
+        )
+
+        def wait_oidc():
+            import urllib3
+
+            urllib3.disable_warnings()
+            while True:
+                try:
+                    r = requests.get(
+                        f"http://localhost:{port}/.well-known/openid-configuration",
+                        timeout=2,
+                    )
+                    if r.status_code == 200:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+        _wait_timeout(wait_oidc, "OIDC mock is not ready", timeout=self.timeout * 3)
+        logging.debug(f"OIDC mock {container_name} is up on port {port}")
+        return port
+
     def start_wg(
         self,
-        config="",
+        config_patch=None,
         args=None,
         share_with: Optional[WarpgateProcess] = None,
         stderr=None,
         stdout=None,
+        http_port=None,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
@@ -194,11 +605,14 @@ class ProcessManager:
             mysql_port = share_with.mysql_port
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
+            kubernetes_port = share_with.kubernetes_port
         else:
             ssh_port = alloc_port()
-            http_port = alloc_port()
+            http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            kubernetes_port = alloc_port()
+
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
@@ -233,6 +647,7 @@ class ProcessManager:
                     **os.environ,
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
+                    "WARPGATE_UNDER_TEST": "1",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
@@ -253,6 +668,8 @@ class ProcessManager:
                     str(mysql_port),
                     "--postgres-port",
                     str(postgres_port),
+                    "--kubernetes-port",
+                    str(kubernetes_port),
                     "--data-path",
                     data_dir,
                     "--external-host",
@@ -268,6 +685,8 @@ class ProcessManager:
 
             config = yaml.safe_load(config_path.open())
             config["ssh"]["host_key_verification"] = "auto_accept"
+            if config_patch:
+                always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
                 yaml.safe_dump(config, f)
 
@@ -279,6 +698,7 @@ class ProcessManager:
             http_port=http_port,
             mysql_port=mysql_port,
             postgres_port=postgres_port,
+            kubernetes_port=kubernetes_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -362,7 +782,30 @@ def shared_wg(processes: ProcessManager):
     wg = processes.start_wg()
     wait_port(wg.http_port, for_process=wg.process, recv=False)
     wait_port(wg.ssh_port, for_process=wg.process)
+    wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
     yield wg
+
+
+# sometimes tests just want a pre‑configured API client for the admin
+# endpoint.  previously everyone called ``admin_client(url)`` directly;
+# a fixture lets us compute the URL from ``shared_wg`` once and removes
+# boilerplate from individual tests.
+from .api_client import admin_client as _admin_client_context
+
+
+@pytest.fixture
+def admin_client(shared_wg: WarpgateProcess):
+    """Yields a ``sdk.DefaultApi`` instance authenticated with the
+    built-in token and pointing at the running warpgate instance.
+
+    Usage::
+
+        def test_something(shared_wg, admin_client):
+            user = admin_client.create_user(...)
+    """
+    url = f"https://localhost:{shared_wg.http_port}"
+    with _admin_client_context(url) as api:
+        yield api
 
 
 # ----

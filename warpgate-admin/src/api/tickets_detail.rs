@@ -1,14 +1,13 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
-use tokio::sync::Mutex;
+use sea_orm::{EntityTrait, ModelTrait};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -30,12 +29,14 @@ impl Api {
     )]
     async fn api_delete_ticket(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTicketResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::TicketsDelete)).await?;
+
         use warpgate_db_entities::Ticket;
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
 
         let ticket = Ticket::Entity::find_by_id(id.0).one(&*db).await?;
 

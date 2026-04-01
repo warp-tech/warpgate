@@ -1,21 +1,36 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
     import { type LdapServerResponse, type User, api } from 'admin/lib/api'
+    import { adminPermissions } from '../lib/store'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link, push } from 'svelte-spa-router'
     import { onMount } from 'svelte'
     import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from '@sveltestrap/sveltestrap'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
 
     let ldapServers = $state<LdapServerResponse[]>([])
 
-    function getUsers (options: LoadOptions): Observable<PaginatedResponse<User>> {
-        return from(api.getUsers({
-            search: options.search,
-        })).pipe(map(targets => ({
-            items: targets,
-            offset: 0,
-            total: targets.length,
-        })))
+    function getUsers(options: LoadOptions): Observable<PaginatedResponse<User>> {
+        return from(
+            api.getUsers({
+                search: options.search,
+            })
+        ).pipe(
+            map(users => {
+                const sorted = users.sort((a, b) =>
+                    naturalCompareFactory()(
+                        a.username.toLowerCase(),
+                        b.username.toLowerCase()
+                    )
+                )
+
+                return {
+                    items: sorted,
+                    offset: 0,
+                    total: sorted.length,
+                }
+            })
+        )
     }
 
     onMount(() => {
@@ -28,12 +43,13 @@
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>users</h1>
-        <a
-            class="btn btn-primary ms-auto"
-            href="/config/users/create"
-            use:link>
-            Add a user
-        </a>
+            <a
+                class="btn btn-primary ms-auto"
+                href="/config/users/create"
+                class:disabled={!$adminPermissions.usersCreate}
+                use:link>
+                Add a user
+            </a>
             {#if ldapServers.length > 0}
             <Dropdown>
                 <DropdownToggle caret>
@@ -41,9 +57,12 @@
                 </DropdownToggle>
                 <DropdownMenu>
                     {#each ldapServers as server (server.id)}
-                        <DropdownItem onclick={() => {
-                            push(`/config/ldap-servers/${server.id}/users`)
-                        }}>
+                        <DropdownItem
+                            onclick={() => {
+                                push(`/config/ldap-servers/${server.id}/users`)
+                            }}
+                            disabled={!$adminPermissions.usersCreate}
+                        >
                             {server.name}
                         </DropdownItem>
                     {/each}

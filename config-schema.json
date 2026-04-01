@@ -19,12 +19,25 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
         "session_max_age": "30m",
         "sni_certificates": [],
         "trust_x_forwarded_headers": false
+      }
+    },
+    "kubernetes": {
+      "$ref": "#/$defs/KubernetesConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:8443",
+        "session_max_age": "30m"
       }
     },
     "log": {
@@ -40,6 +53,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:33306"
@@ -50,6 +64,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:55432"
@@ -66,6 +81,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
@@ -113,6 +129,13 @@
           "type": "string",
           "default": "1day"
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -145,6 +168,48 @@
         "trust_x_forwarded_headers": {
           "type": "boolean",
           "default": false
+        }
+      }
+    },
+    "KubernetesConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:8443"
+        },
+        "session_max_age": {
+          "type": "string",
+          "default": "30m"
         }
       }
     },
@@ -189,6 +254,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -219,6 +291,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -253,6 +332,20 @@
         }
       }
     },
+    "RoleMapping": {
+      "description": "A role mapping value that accepts either a single role or a list of roles.\n In YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "SniCertificateConfig": {
       "type": "object",
       "properties": {
@@ -274,6 +367,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -331,11 +431,51 @@
               "type": "string",
               "const": "google"
             },
+            "admin_email": {
+              "description": "A Google Workspace admin email for domain-wide delegation",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
             "client_id": {
               "type": "string"
             },
             "client_secret": {
               "type": "string"
+            },
+            "role_mappings": {
+              "description": "Maps Google group email addresses to Warpgate role names.\n Use \"*\" as a key to set a default role for any group not explicitly mapped.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
+            "service_account_email": {
+              "description": "Service account email for Google Directory API group lookups",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service_account_key": {
+              "description": "PEM private key from the service account JSON key file",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -412,6 +552,15 @@
                 "type": "string"
               }
             },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
             "client_id": {
               "type": "string"
             },
@@ -427,7 +576,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "type": "string"
+                "$ref": "#/$defs/RoleMapping"
               }
             },
             "scopes": {
@@ -458,6 +607,9 @@
           "type": "boolean",
           "default": false
         },
+        "default_credential_policy": {
+          "description": "Default credential policy for auto-created users.\n Keys: \"http\", \"ssh\", \"mysql\", \"postgres\"\n Values: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+        },
         "label": {
           "type": [
             "string",
@@ -478,11 +630,22 @@
           "items": {
             "type": "string"
           }
+        },
+        "return_url_prefix": {
+          "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
+          "default": "@"
         }
       },
       "required": [
         "name",
         "provider"
+      ]
+    },
+    "SsoProviderReturnUrlPrefix": {
+      "type": "string",
+      "enum": [
+        "@",
+        "_"
       ]
     }
   }

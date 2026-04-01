@@ -3,7 +3,11 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
+use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
+use warpgate_tls::RustlsSetupError;
+
+use crate::AdminPermission;
 
 #[derive(thiserror::Error, Debug)]
 pub enum WarpgateError {
@@ -36,6 +40,8 @@ pub enum WarpgateError {
     #[error(transparent)]
     Sso(#[from] SsoError),
     #[error(transparent)]
+    Ca(#[from] CaError),
+    #[error(transparent)]
     Ldap(#[from] warpgate_ldap::LdapError),
     #[error(transparent)]
     RusshKeys(#[from] russh::keys::Error),
@@ -47,11 +53,29 @@ pub enum WarpgateError {
     RateLimiterInvalidQuota(u32),
     #[error("Session end")]
     SessionEnd,
+    #[error("rcgen: {0}")]
+    RcGen(#[from] rcgen::Error),
+    #[error("rustls setup: {0}")]
+    TlsSetup(#[from] RustlsSetupError),
+    #[error("reqwest: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("admin role required")]
+    NoAdminAccess,
+    #[error("admin permission required: {0:?}")]
+    NoAdminPermission(AdminPermission),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
-        poem::http::StatusCode::INTERNAL_SERVER_ERROR
+        match self {
+            WarpgateError::InvalidTicket(_)
+            | WarpgateError::UserNotFound(_)
+            | WarpgateError::RoleNotFound(_) => poem::http::StatusCode::UNAUTHORIZED,
+            WarpgateError::NoAdminAccess | WarpgateError::NoAdminPermission(_) => {
+                poem::http::StatusCode::FORBIDDEN
+            }
+            _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }
 

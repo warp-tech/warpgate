@@ -3,17 +3,20 @@
         { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
         | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
         | { kind: typeof CredentialKind.PublicKey } & ExistingPublicKeyCredential
+        | { kind: typeof CredentialKind.Certificate } & ExistingCertificateCredential
         | { kind: typeof CredentialKind.Totp } & ExistingOtpCredential
 </script>
 
 <script lang="ts">
-    import { faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy } from 'admin/lib/api'
+    import { faCertificate, faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
+    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues, type ExistingCertificateCredential } from 'admin/lib/api'
+    import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import { Button } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from './CreatePasswordModal.svelte'
     import SsoCredentialModal from './SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
+    import CertificateCredentialModal from './CertificateCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
@@ -21,6 +24,7 @@
     import Loadable from 'common/Loadable.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+    import { adminPermissions } from './lib/store'
 
     interface Props {
         userId: string
@@ -31,6 +35,7 @@
     let { userId, username, credentialPolicy = $bindable(), ldapLinked = false }: Props = $props()
 
     let credentials: ExistingCredential[] = $state([])
+    let globalParameters: ParameterValues | undefined = $state()
 
     let creatingPassword = $state(false)
     let creatingOtp = $state(false)
@@ -38,23 +43,62 @@
     let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
     let editingPublicKeyCredential = $state(false)
     let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
+    let editingCertificateCredential = $state(false)
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres', name: string }[] = [
+    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes', name: string }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
+        { id: 'kubernetes', name: 'Kubernetes' },
     ]
+
+    // Get effective possible credentials for a protocol, considering global SSH auth settings
+    function getEffectivePossibleCredentials(protocolId: string): SvelteSet<CredentialKind> {
+        const base = possibleCredentials[protocolId]
+        if (!base) {
+            return new SvelteSet()
+        }
+
+        // For SSH, filter based on global auth method settings
+        if (protocolId === 'ssh' && globalParameters) {
+            const filtered = new SvelteSet<CredentialKind>()
+            for (const kind of base) {
+                // PublicKey requires publickey auth enabled
+                if (kind === CredentialKind.PublicKey && !globalParameters.sshClientAuthPublickey) {
+                    continue
+                }
+                // Password requires password auth enabled
+                if (kind === CredentialKind.Password && !globalParameters.sshClientAuthPassword) {
+                    continue
+                }
+                // Totp and WebUserApproval require keyboard-interactive auth enabled
+                if ((kind === CredentialKind.Totp || kind === CredentialKind.WebUserApproval) && !globalParameters.sshClientAuthKeyboardInteractive) {
+                    continue
+                }
+                filtered.add(kind)
+            }
+            return filtered
+        }
+
+        return new SvelteSet(base)
+    }
 
     async function load () {
         await Promise.all([
             loadPasswords(),
             loadSso(),
             loadPublicKeys(),
+            loadCertificates(),
             loadOtp(),
+            loadParameters(),
         ])
+    }
+
+    async function loadParameters () {
+        globalParameters = await api.getParameters({})
     }
 
     async function loadPasswords () {
@@ -78,6 +122,13 @@
         })))
     }
 
+    async function loadCertificates () {
+        credentials.push(...(await api.getCertificateCredentials({ userId })).map(c => ({
+            kind: CredentialKind.Certificate,
+            ...c,
+        })))
+    }
+
     async function loadOtp () {
         credentials.push(...(await api.getOtpCredentials({ userId })).map(c => ({
             kind: CredentialKind.Totp,
@@ -86,7 +137,14 @@
     }
 
     async function deleteCredential (credential: ExistingCredential) {
+        if (credential.kind === CredentialKind.Certificate) {
+            if (!confirm('Permanently revoke certificate? This cannot be undone.')) {
+                return
+            }
+        }
+
         credentials = credentials.filter(c => c !== credential)
+
         if (credential.kind === CredentialKind.Password) {
             await api.deletePasswordCredential({
                 id: credential.id,
@@ -101,6 +159,12 @@
         }
         if (credential.kind === CredentialKind.PublicKey) {
             await api.deletePublicKeyCredential({
+                id: credential.id,
+                userId,
+            })
+        }
+        if (credential.kind === CredentialKind.Certificate) {
+            await api.revokeCertificateCredential({
                 id: credential.id,
                 userId,
             })
@@ -141,10 +205,11 @@
         // Automatically set up a 2FA policy when adding an OTP
         for (const protocol of ['http', 'ssh'] as ('http'|'ssh')[]) {
             for (const ck of [CredentialKind.Password, CredentialKind.PublicKey]) {
+                const effectiveCreds = getEffectivePossibleCredentials(protocol)
                 if (
                     !credentialPolicy[protocol]
                     && credentials.some(x => x.kind === ck)
-                    && possibleCredentials[protocol]?.has(ck)
+                    && effectiveCreds.has(ck)
                 ) {
                     credentialPolicy = {
                         ...credentialPolicy ?? {},
@@ -207,20 +272,34 @@
         editingPublicKeyCredentialInstance = null
     }
 
-    function assertDefined<T>(value: T|undefined): T {
-        if (value === undefined) {
-            throw new Error('Value is undefined')
-        }
-        return value
+    async function saveCertificateCredential (label: string, publicKeyPem: string) {
+        const response = await api.issueCertificateCredential({
+            userId,
+            issueCertificateCredentialRequest: {
+                label,
+                publicKeyPem,
+            },
+        })
+
+        credentials.push({
+            kind: CredentialKind.Certificate,
+            ...response.credential,
+        })
+
+        return response
     }
 </script>
 
 <div class="d-flex align-items-center mt-4 mb-2">
     <h4 class="m-0">Credentials</h4>
     <span class="ms-auto"></span>
+    {#if $adminPermissions.usersEdit}
     <Button size="sm" color="link" on:click={() => creatingPassword = true}>
         Add password
     </Button>
+    <Button size="sm" color="link" on:click={() => {
+        editingCertificateCredential = true
+    }}>Issue certificate</Button>
     <Button
         id="addPublicKeyCredentialButton"
         size="sm"
@@ -241,6 +320,7 @@
         editingSsoCredentialInstance = null
         editingSsoCredential = true
     }}>Add SSO</Button>
+    {/if}
 </div>
 
 <Loadable promise={loadPromise}>
@@ -252,7 +332,7 @@
     {/if}
     <div class="list-group list-group-flush mb-3">
         {#each credentials as credential (credential.id)}
-        <div class="list-group-item credential">
+        <div class="list-group-item credential gap-2">
             {#if credential.kind === CredentialKind.Password }
                 <Fa fw icon={faKeyboard} />
                 <span class="label me-auto">Password</span>
@@ -266,7 +346,16 @@
                     <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
                 </div>
                 <CredentialUsedStateBadge credential={credential} />
-                <div class="me-2"></div>
+            {/if}
+            {#if credential.kind === CredentialKind.Certificate}
+                <Fa fw icon={faCertificate} />
+                <div class="main me-auto abbreviate">
+                    <div class="label d-flex align-items-center">
+                        {credential.label}
+                    </div>
+                    <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
+                </div>
+                <CredentialUsedStateBadge credential={credential} />
             {/if}
             {#if credential.kind === 'Totp'}
                 <Fa fw icon={faMobileScreen} />
@@ -275,7 +364,7 @@
             {#if credential.kind === CredentialKind.Sso}
                 <Fa fw icon={faIdBadge} />
                 <span class="label">Single sign-on</span>
-                <span class="text-muted ms-2 me-auto">
+                <span class="text-muted me-auto">
                     {credential.email}
                     {#if credential.provider} ({credential.provider}){/if}
                 </span>
@@ -283,9 +372,9 @@
 
             {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
-                disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
+                disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
                 onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
@@ -301,9 +390,9 @@
             </Button>
             {/if}
             <Button
-                class="ms-2 px-0"
+                class="px-0"
                 color="link"
-                disabled={credential.kind === CredentialKind.PublicKey && ldapLinked}
+                disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
                 onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()
@@ -317,20 +406,22 @@
     <h4>Auth policy</h4>
     <div class="list-group list-group-flush mb-3">
         {#each policyProtocols as protocol (protocol)}
-        <div class="list-group-item">
-            <div class="mb-1">
-                <strong>{protocol.name}</strong>
+            {@const effectiveCredentials = getEffectivePossibleCredentials(protocol.id)}
+            <div class="list-group-item">
+                <div class="mb-1">
+                    <strong>{protocol.name}</strong>
+                </div>
+                {#if effectiveCredentials.size > 0}
+                    <AuthPolicyEditor
+                        bind:value={credentialPolicy}
+                        existingCredentials={credentials}
+                        possibleCredentials={effectiveCredentials}
+                        protocolId={protocol.id}
+                    />
+                {:else}
+                    <span class="text-muted">No authentication methods available for this protocol</span>
+                {/if}
             </div>
-            {#if possibleCredentials[protocol.id]}
-                {@const _possibleCredentials = assertDefined(possibleCredentials[protocol.id])}
-                <AuthPolicyEditor
-                    bind:value={credentialPolicy}
-                    existingCredentials={credentials}
-                    possibleCredentials={_possibleCredentials}
-                    protocolId={protocol.id}
-                />
-            {/if}
-        </div>
         {/each}
     </div>
 </Loadable>
@@ -363,6 +454,17 @@
     bind:isOpen={editingPublicKeyCredential}
     instance={editingPublicKeyCredentialInstance ?? undefined}
     save={savePublicKeyCredential}
+/>
+{/if}
+
+{#if editingCertificateCredential}
+<CertificateCredentialModal
+    bind:isOpen={editingCertificateCredential}
+    save={saveCertificateCredential}
+    {username}
+    onClose={() => {
+        editingCertificateCredential = false
+    }}
 />
 {/if}
 

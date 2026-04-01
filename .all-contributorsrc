@@ -74,6 +74,15 @@
       ]
     },
     {
+      "login": "pfoundation",
+      "name": "P Foundation",
+      "avatar_url": "https://avatars.githubusercontent.com/u/80860929?v=4",
+      "profile": "https://p.foundation/",
+      "contributions": [
+        "financial"
+      ]
+    },
+    {
       "login": "alairock",
       "name": "Skyler Lewis",
       "avatar_url": "https://avatars.githubusercontent.com/u/1480236?v=4",
@@ -105,6 +114,42 @@
       "name": "Justin",
       "avatar_url": "https://avatars.githubusercontent.com/u/11709872?v=4",
       "profile": "http://justinforlenza.dev",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "liebermantodd",
+      "name": "liebermantodd",
+      "avatar_url": "https://avatars.githubusercontent.com/u/12155811?v=4",
+      "profile": "https://github.com/liebermantodd",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "cvhariharan",
+      "name": "Hariharan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/14965074?v=4",
+      "profile": "https://blog.trieoflogs.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "solidassassin",
+      "name": "Rokas Krivaitis",
+      "avatar_url": "https://avatars.githubusercontent.com/u/47082246?v=4",
+      "profile": "https://github.com/solidassassin",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "SachinMaharana",
+      "name": "SachinMaharana",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8871040?v=4",
+      "profile": "https://github.com/SachinMaharana",
       "contributions": [
         "code"
       ]

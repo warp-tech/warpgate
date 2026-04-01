@@ -2,7 +2,7 @@
     import { FormGroup } from '@sveltestrap/sveltestrap'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeExampleSCPCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI } from 'common/protocols'
+    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from './sveltestrap-s5-ports/Alert.svelte'
 
@@ -12,6 +12,7 @@
         targetExternalHost?: string;
         username?: string;
         ticketSecret?: string;
+        targetDefaultDatabaseName?: string;
     }
 
     let {
@@ -20,15 +21,19 @@
         targetExternalHost = undefined,
         username,
         ticketSecret = undefined,
+        targetDefaultDatabaseName = undefined,
     }: Props = $props()
 
-    let opts = $derived({
+    // Create a reactive opts object that updates when any prop or serverInfo changes
+    let opts = $derived.by(() => ({
         targetName,
         username,
         serverInfo: $serverInfo,
         ticketSecret,
         targetExternalHost,
-    })
+        targetDefaultDatabaseName,
+    }))
+
     let sshUsername = $derived(makeSSHUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
     let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
@@ -40,6 +45,8 @@
     let examplePostgreSQLURI = $derived(makeExamplePostgreSQLURI(opts))
     let targetURL = $derived(targetName ? makeTargetURL(opts) : '')
     let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
+    let kubeconfig = $derived(makeKubeconfig(opts))
+    let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
 </script>
 
 {#if targetKind === TargetKind.Ssh}
@@ -113,5 +120,24 @@
 
 <Alert color="info">
     Make sure you've set your client to require TLS and allowed cleartext password authentication.
+</Alert>
+{/if}
+
+{#if targetKind === TargetKind.Kubernetes}
+<FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
+    <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
+    <CopyButton text={kubeconfig} />
+</FormGroup>
+
+<FormGroup floating label="Example kubectl command" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={exampleKubectlCommand} />
+    <CopyButton text={exampleKubectlCommand} />
+</FormGroup>
+
+<Alert color="info">
+    Save the kubeconfig above to a file (e.g., <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
+    {#if !ticketSecret}
+        You'll need to replace the placeholder certificate and key data with your actual credentials.
+    {/if}
 </Alert>
 {/if}

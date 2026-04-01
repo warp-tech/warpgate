@@ -1,13 +1,15 @@
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{EntityTrait, Set};
+use sea_orm::ActiveValue::NotSet;
+use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
-use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -15,12 +17,20 @@ pub struct Api;
 struct ParameterValues {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub ssh_client_auth_publickey: bool,
+    pub ssh_client_auth_password: bool,
+    pub ssh_client_auth_keyboard_interactive: bool,
+    pub minimize_password_login: bool,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<u32>,
+    pub ssh_client_auth_publickey: Option<bool>,
+    pub ssh_client_auth_password: Option<bool>,
+    pub ssh_client_auth_keyboard_interactive: Option<bool>,
+    pub minimize_password_login: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -40,15 +50,21 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
             rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
+            ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
+            ssh_client_auth_password: parameters.ssh_client_auth_password,
+            ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
+            minimize_password_login: parameters.minimize_password_login,
         })))
     }
 
@@ -59,19 +75,27 @@ impl Api {
     )]
     async fn api_update_parameters(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<ParameterUpdate>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let services = &ctx.services;
         let db = services.db.lock().await;
+        let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
-        let am = Parameters::ActiveModel {
-            id: Set(Parameters::Entity::get(&db).await?.id),
-            allow_own_credential_management: Set(body.allow_own_credential_management),
-            rate_limit_bytes_per_second: Set(body.rate_limit_bytes_per_second.map(|x| x as i64)),
-        };
+        parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
+        parameters.rate_limit_bytes_per_second =
+            Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
+        parameters.ssh_client_auth_password = body.ssh_client_auth_password.map_or(NotSet, Set);
+        parameters.ssh_client_auth_keyboard_interactive = body
+            .ssh_client_auth_keyboard_interactive
+            .map_or(NotSet, Set);
+        parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
 
-        Parameters::Entity::update(am).exec(&*db).await?;
+        Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);
 
         services

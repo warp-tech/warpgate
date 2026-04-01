@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Observable, from, map } from 'rxjs'
-import { compare as naturalCompare } from 'natural-orderby'
+import { compare as naturalCompareFactory } from 'natural-orderby'
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
@@ -15,30 +15,48 @@ import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
 let selectedTarget: TargetSnapshot|undefined = $state()
 
-function loadTargets (options: LoadOptions): Observable<PaginatedResponse<TargetSnapshot>> {
+function loadTargets(
+    options: LoadOptions
+): Observable<PaginatedResponse<TargetSnapshot>> {
     return from(api.getTargets({ search: options.search })).pipe(
         map(result => {
+            const naturalCompare = naturalCompareFactory()
+
             result = result.sort(
-                firstBy<TargetSnapshot, boolean>(x => x.kind !== TargetKind.WebAdmin)
-                    .thenBy<TargetSnapshot, boolean>(x => !x.group)
-                    .thenBy<TargetSnapshot, string | undefined>(x => x.group?.name.toLowerCase())
-                    .thenBy((a, b) =>
-                        naturalCompare(a.name.toLowerCase(), b.name.toLowerCase()))
+                firstBy<TargetSnapshot, boolean>((x: TargetSnapshot) => !x.group)
+                    // Natural sort between groups
+                    .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
+                        naturalCompare(
+                            (a.group?.name ?? '').toLowerCase(),
+                            (b.group?.name ?? '').toLowerCase()
+                        )
+                    )
+                    // Natural sort within a group
+                    .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
+                        naturalCompare(
+                            a.name.toLowerCase(),
+                            b.name.toLowerCase()
+                        )
+                    )
             )
+
             return {
                 items: result,
                 offset: 0,
                 total: result.length,
             }
-        })
+        }),
     )
 }
 
 function selectTarget (target: TargetSnapshot) {
-    if (target.kind === TargetKind.WebAdmin) {
-        loadURL('/@warpgate/admin')
-    } else if (target.kind === TargetKind.Http) {
-        loadURL(`/?warpgate-target=${target.name}`)
+    if (target.kind === TargetKind.Http) {
+        if (target.externalHost) {
+            const port = location.port ? `:${location.port}` : ''
+            loadURL(`${location.protocol}//${target.externalHost}${port}`)
+        } else {
+            loadURL(`/?warpgate-target=${target.name}`)
+        }
     } else {
         selectedTarget = target
     }
@@ -55,13 +73,6 @@ interface GroupInfo {
 }
 
 function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
-    if (target.kind === TargetKind.WebAdmin) {
-        return {
-            id: '$admin',
-            name: 'Administration',
-            color: BootstrapThemeColor.Danger,
-        }
-    }
     if (!target.group) {
         return {
             id: '$ungrouped',
@@ -98,11 +109,11 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         <a
             class="list-group-item list-group-item-action target-item"
             href={
-                target.kind === TargetKind.WebAdmin
-                    ? '/@warpgate/admin'
-                    : target.kind === TargetKind.Http
-                        ? `/?warpgate-target=${target.name}`
-                        : '/@warpgate/admin'
+                target.kind === TargetKind.Http
+                    ? (target.externalHost
+                        ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
+                        : `/?warpgate-target=${target.name}`)
+                    : '/@warpgate/admin'
             }
             onclick={e => {
                 if (e.metaKey || e.ctrlKey) {
@@ -113,16 +124,12 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
             }}
         >
             <span class="me-auto">
-                {#if target.kind === TargetKind.WebAdmin}
-                    Manage Warpgate
-                {:else}
-                    <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2">
                         {target.name}
                     </div>
                     {#if target.description}
                         <small class="d-block text-muted">{target.description}</small>
                     {/if}
-                {/if}
             </span>
             <small class="protocol text-muted ms-auto">
                 {#if target.kind === TargetKind.Ssh}
@@ -134,8 +141,11 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {#if target.kind === TargetKind.Postgres}
                     PostgreSQL
                 {/if}
+                {#if target.kind === TargetKind.Kubernetes}
+                    Kubernetes
+                {/if}
             </small>
-            {#if target.kind === TargetKind.Http || target.kind === TargetKind.WebAdmin}
+            {#if target.kind === TargetKind.Http}
                 <Fa icon={faArrowRight} fw />
             {/if}
         </a>
@@ -150,11 +160,16 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
 
 <Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
     <ModalBody>
+        {#if selectedTarget}
         <ConnectionInstructions
-            targetName={selectedTarget?.name}
+            targetName={selectedTarget.name}
             username={$serverInfo?.username}
-            targetKind={selectedTarget?.kind ?? TargetKind.Ssh}
+            targetKind={selectedTarget.kind ?? TargetKind.Ssh}
+            targetDefaultDatabaseName={
+                (selectedTarget.kind === TargetKind.MySql || selectedTarget.kind === TargetKind.Postgres)
+                    ? selectedTarget.defaultDatabaseName : undefined}
         />
+        {/if}
     </ModalBody>
     <ModalFooter>
         <Button

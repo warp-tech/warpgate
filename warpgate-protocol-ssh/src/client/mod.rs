@@ -392,6 +392,7 @@ impl RemoteClient {
                     debug!("Connect error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e));
                     self.set_disconnected();
+
                     return Ok(true);
                 }
             },
@@ -488,11 +489,20 @@ impl RemoteClient {
             Preferred::default()
         };
 
-        let config = russh::client::Config {
+        let ssh_config = { self.services.config.lock().await.store.ssh.clone() };
+        let mut config = russh::client::Config {
             preferred: algos,
             nodelay: true,
+            inactivity_timeout: Some(ssh_config.inactivity_timeout),
+            keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
+        if ssh_options.allow_insecure_algos.unwrap_or(false) {
+            if let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192) {
+                config.gex = gex;
+            }
+        }
+
         let config = Arc::new(config);
 
         let (event_tx, mut event_rx) = unbounded_channel();
@@ -539,6 +549,7 @@ impl RemoteClient {
                     };
 
                     let mut auth_result = false;
+                    let mut auth_error_msg: Option<String> = None;
                     match ssh_options.auth {
                         SSHTargetAuth::Password(auth) => {
                             let response = session
@@ -554,6 +565,8 @@ impl RemoteClient {
                             ).await.unwrap_or(false);
                             if auth_result {
                                 debug!(username=&ssh_options.username[..], "Authenticated with password");
+                            } else {
+                                auth_error_msg = Some("Password authentication was rejected by the SSH target".to_string());
                             }
                         }
                         SSHTargetAuth::PublicKey(_) => {
@@ -605,13 +618,16 @@ impl RemoteClient {
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
+                                } else {
+                                    auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
                                 }
                             }
                         }
                     }
 
                     if !auth_result {
-                        error!("Auth rejected");
+                        let reason = auth_error_msg.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
+                        error!(%reason, "Warpgate could not authenticate with SSH target");
                         let _ = session
                             .disconnect(russh::Disconnect::ByApplication, "", "")
                             .await;
@@ -794,7 +810,7 @@ impl RemoteClient {
 
     async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
@@ -819,7 +835,7 @@ impl RemoteClient {
 
     async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
