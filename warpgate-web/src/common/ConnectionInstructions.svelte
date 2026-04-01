@@ -327,7 +327,6 @@
     save={issueCertificate}
     username={username ?? ''}
     storeInBrowserByDefault={true}
-    closeOnIssue={true}
     onClose={() => { issuingCertificate = false; loadCertificates() }}
 />
 {/if}
