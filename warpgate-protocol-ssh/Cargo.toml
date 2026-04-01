@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-ssh"
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [dependencies]
 ansi_term = { version = "0.12", default-features = false }
@@ -22,7 +22,7 @@ time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
-warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 zeroize = { version = "^1.5", default-features = false }
