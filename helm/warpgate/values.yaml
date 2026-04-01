@@ -5,7 +5,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.16.0"
+  tag: "0.22.0"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -74,6 +74,11 @@ data:
     enabled: false          # true = use PersistentVolumeClaim, false = use emptyDir
     claimName: ""           # if set, uses existing PVC instead of template
     template: {}            # PVC template spec for dynamic provisioning
+      # accessModes:
+      #   - ReadWriteOnce
+      # resources:
+      #   requests:
+      #     storage: 1Gi
 
 # Automatic Warpgate setup
 # Ref: https://warpgate.null.page/getting-started/#setup
@@ -129,8 +134,45 @@ ingress:
   enabled: false
   className: "nginx"
   annotations:
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"
     cert-manager.io/cluster-issuer: default-issuer
     kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts: []
   tls: []
+
+# HTTPRoute configuration
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+  # - name: gateway-name
+  #   namespace: gateway-namespace
+  #   sectionName: gateway-section-name
+  hostnames: []
+  # - warpgate.example.com
+
+# extraObjects could be utilized to add dynamic manifests via values
+extraObjects: []
+# Examples:
+# extraObjects:
+# - apiVersion: traefik.io/v1alpha1
+#   kind: ServersTransport
+#   metadata:
+#     name: warpgate-transport
+#     namespace: warpgate
+#   spec:
+#     serverName: warpgate.warpgate
+#     insecureSkipVerify: true
+# Alternatively, you can use strings, which lets you use additional templating features:
+# extraObjects:
+# - |
+#   apiVersion: traefik.io/v1alpha1
+#   kind: ServersTransport
+#   metadata:
+#     name: warpgate-transport-{{ .Release.Name }}
+#     namespace: warpgate
+#   spec:
+#     serverName: warpgate.warpgate
+#     insecureSkipVerify: true

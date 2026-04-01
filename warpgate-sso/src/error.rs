@@ -32,6 +32,8 @@ pub enum SsoError {
     SignatureVerification(#[from] SignatureVerificationError),
     #[error("configuration: {0}")]
     Configuration(#[from] ConfigurationError),
+    #[error("Google Directory API error: {0}")]
+    GoogleDirectory(String),
     #[error("the OIDC provider doesn't support RP-initiated logout")]
     LogoutNotSupported,
     #[error(transparent)]

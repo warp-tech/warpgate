@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [dependencies]
 anyhow = "1.0"
@@ -23,15 +23,15 @@ serde_json.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
-warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
+warpgate-admin = { path = "../warpgate-admin", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http" }
-warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
-warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
-warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }
-warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
+warpgate-ca = { path = "../warpgate-ca", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-web = { path = "../warpgate-web", default-features = false }
+warpgate-sso = { path = "../warpgate-sso", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
 uuid.workspace = true
 regex.workspace = true
