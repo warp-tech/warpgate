@@ -25,6 +25,15 @@ pub struct PortsInfo {
     kubernetes: Option<u16>,
 }
 
+#[derive(Serialize, Object)]
+pub struct ExternalHostsInfo {
+    ssh: Option<String>,
+    http: Option<String>,
+    mysql: Option<String>,
+    postgres: Option<String>,
+    kubernetes: Option<String>,
+}
+
 #[derive(Serialize, Object, Debug)]
 pub struct SetupState {
     has_targets: bool,
@@ -70,6 +79,7 @@ pub struct Info {
     username: Option<String>,
     selected_target: Option<String>,
     external_host: Option<String>,
+    external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
     minimize_password_login: bool,
     authorized_via_ticket: bool,
@@ -143,6 +153,45 @@ impl Api {
             .context("loading LDAP servers")?
             .is_some();
 
+        let fallback_host = external_host.clone();
+
+        let protocol_external_hosts = if auth_ctx.is_some() {
+            Some(ExternalHostsInfo {
+                ssh: config
+                    .store
+                    .ssh
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                http: config
+                    .store
+                    .http
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                mysql: config
+                    .store
+                    .mysql
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                postgres: config
+                    .store
+                    .postgres
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                kubernetes: config
+                    .store
+                    .kubernetes
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+            })
+        } else {
+            None
+        };
+
         // compute admin permissions (only if authenticated)
         let admin_permissions = if let Some(ctx) = &auth_ctx {
             if let Some(username) = ctx.auth.username() {
@@ -174,6 +223,8 @@ impl Api {
                             combined.sessions_view |= r.sessions_view;
                             combined.sessions_terminate |= r.sessions_terminate;
                             combined.recordings_view |= r.recordings_view;
+                            combined.tickets_create |= r.tickets_create;
+                            combined.tickets_delete |= r.tickets_delete;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
                         }
@@ -201,6 +252,7 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
+            external_hosts: protocol_external_hosts,
             ports: if auth_ctx.is_some() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {

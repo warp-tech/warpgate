@@ -2,13 +2,13 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [dependencies]
-warpgate-common = { version = "*", path = "../warpgate-common" }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
-warpgate-db-migrations = { version = "*", path = "../warpgate-db-migrations" }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
+warpgate-common = { path = "../warpgate-common" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-db-migrations = { path = "../warpgate-db-migrations" }
+warpgate-ldap = { path = "../warpgate-ldap" }
 
 anyhow.workspace = true
 argon2 = "0.5"
@@ -41,7 +41,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url = { version = "2.2", default-features = false }
 uuid.workspace = true
-warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
+warpgate-sso = { path = "../warpgate-sso", default-features = false }
 rustls.workspace = true
 webpki = { version = "0.22", default-features = false }
 governor.workspace = true
