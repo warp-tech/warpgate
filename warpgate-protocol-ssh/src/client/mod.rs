@@ -391,10 +391,6 @@ impl RemoteClient {
                 Err(e) => {
                     debug!("Connect error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e));
-
-                    // Allow some time for the SessionServer to process the ConnectionError and print a message to the terminal
-                    // before closing the session. If we don't wait, the session might close too quickly and the user won't see the error.
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     self.set_disconnected();
 
                     return Ok(true);
@@ -493,9 +489,12 @@ impl RemoteClient {
             Preferred::default()
         };
 
+        let ssh_config = { self.services.config.lock().await.store.ssh.clone() };
         let mut config = russh::client::Config {
             preferred: algos,
             nodelay: true,
+            inactivity_timeout: Some(ssh_config.inactivity_timeout),
+            keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
         if ssh_options.allow_insecure_algos.unwrap_or(false) {
@@ -620,7 +619,7 @@ impl RemoteClient {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
                                 } else {
-                                    auth_error_msg = Some(format!("Public key authentication was rejected by the SSH target"));
+                                    auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
                                 }
                             }
                         }
@@ -811,7 +810,7 @@ impl RemoteClient {
 
     async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
@@ -836,7 +835,7 @@ impl RemoteClient {
 
     async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let mut session = session.lock().await;
+            let session = session.lock().await;
             session.streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards.push(socket_path);

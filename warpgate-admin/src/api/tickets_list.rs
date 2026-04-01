@@ -1,19 +1,18 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
-use tokio::sync::Mutex;
+use sea_orm::{ActiveModelTrait, EntityTrait};
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Ticket;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -52,12 +51,14 @@ impl Api {
     #[oai(path = "/tickets", method = "get", operation_id = "get_tickets")]
     async fn api_get_all_tickets(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketsResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+
         use warpgate_db_entities::Ticket;
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
         Ok(GetTicketsResponse::Ok(Json(tickets)))
     }
@@ -65,10 +66,12 @@ impl Api {
     #[oai(path = "/tickets", method = "post", operation_id = "create_ticket")]
     async fn api_create_ticket(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateTicketRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CreateTicketResponse> {
+        require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
+
         use warpgate_db_entities::Ticket;
 
         if body.username.is_empty() {
@@ -78,7 +81,7 @@ impl Api {
             return Ok(CreateTicketResponse::BadRequest(Json("target_name".into())));
         }
 
-        let db = db.lock().await;
+        let db = ctx.services.db.lock().await;
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),

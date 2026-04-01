@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.20.2-27-g52fb3b68-modified"
+    "version": "chart-v0.0.2-1-g389616d3-modified"
   },
   "servers": [
     {
@@ -139,6 +139,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_web_auth_requests"
       }
     },
@@ -205,6 +213,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "approve_auth"
       }
     },
@@ -238,6 +254,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "reject_auth"
       }
     },
@@ -778,6 +802,82 @@
   },
   "components": {
     "schemas": {
+      "AdminPermissions": {
+        "type": "object",
+        "title": "AdminPermissions",
+        "required": [
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          }
+        }
+      },
       "ApiAuthState": {
         "type": "string",
         "enum": [
@@ -1025,6 +1125,27 @@
           }
         }
       },
+      "ExternalHostsInfo": {
+        "type": "object",
+        "title": "ExternalHostsInfo",
+        "properties": {
+          "ssh": {
+            "type": "string"
+          },
+          "http": {
+            "type": "string"
+          },
+          "mysql": {
+            "type": "string"
+          },
+          "postgres": {
+            "type": "string"
+          },
+          "kubernetes": {
+            "type": "string"
+          }
+        }
+      },
       "GroupInfo": {
         "type": "object",
         "title": "GroupInfo",
@@ -1069,6 +1190,9 @@
           "external_host": {
             "type": "string"
           },
+          "external_hosts": {
+            "$ref": "#/components/schemas/ExternalHostsInfo"
+          },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           },
@@ -1089,6 +1213,9 @@
           },
           "setup_state": {
             "$ref": "#/components/schemas/SetupState"
+          },
+          "admin_permissions": {
+            "$ref": "#/components/schemas/AdminPermissions"
           }
         }
       },
@@ -1323,8 +1450,7 @@
           "Kubernetes",
           "MySql",
           "Ssh",
-          "Postgres",
-          "WebAdmin"
+          "Postgres"
         ]
       },
       "TargetSnapshot": {

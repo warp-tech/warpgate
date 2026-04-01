@@ -47,7 +47,9 @@
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
-            <AuthBar />
+            <div class="ms-auto">
+                <AuthBar />
+            </div>
         </header>
         <main>
             <Router {routes}/>

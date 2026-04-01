@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-sso"
-version = "0.20.2"
+version = "0.22.0-beta.4"
 
 [dependencies]
 bytes.workspace = true
@@ -13,6 +13,8 @@ openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "accept-string-booleans",
 ] }
+yup-oauth2 = "12"
+reqwest_12.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 once_cell = { version = "1.17", default-features = false }

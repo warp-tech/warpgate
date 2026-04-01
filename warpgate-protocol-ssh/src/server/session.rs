@@ -13,7 +13,7 @@ use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
-use russh::{CryptoVec, MethodKind, MethodSet, Sig};
+use russh::{MethodKind, MethodSet, Sig};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
@@ -302,12 +302,13 @@ impl ServerSession {
     pub async fn emit_service_message(&mut self, msg: &str) -> Result<()> {
         debug!("Service message: {}", msg);
 
-        self.service_output.emit_output(Bytes::from(format!(
+        let output = format!(
             "{}{} {}\r\n",
             ERASE_PROGRESS_SPINNER,
             Colour::Black.on(Colour::White).paint(" Warpgate "),
             msg.replace('\n', "\r\n"),
-        )));
+        );
+        self.emit_pty_output(output.as_bytes()).await?;
 
         Ok(())
     }
@@ -317,8 +318,7 @@ impl ServerSession {
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
             if let Some(session) = self.session_handle.clone() {
-                self.channel_writer
-                    .write(session, channel.0, CryptoVec::from_slice(data));
+                self.channel_writer.write(session, channel.0, data);
             }
         }
         Ok(())
@@ -632,24 +632,25 @@ impl ServerSession {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.service_output.hide_progress().await;
-                        self.service_output.emit_output(Bytes::from(format!(
+                        self.service_output.stop_progress();
+                        let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
                             Colour::Black
                                 .on(Colour::Green)
                                 .paint(" ✓ Warpgate connected ")
-                        )));
+                        );
+                        let _ = self.emit_pty_output(msg.as_bytes()).await;
                     }
                     RCState::Disconnected => {
-                        self.service_output.hide_progress().await;
+                        self.service_output.stop_progress();
                         self.disconnect_server().await;
                     }
                     _ => {}
                 }
             }
             RCEvent::ConnectionError(error) => {
-                self.service_output.hide_progress().await;
+                self.service_output.stop_progress();
 
                 match error {
                     ConnectionError::HostKeyMismatch {
@@ -680,26 +681,28 @@ impl ServerSession {
                         .await?;
                     }
                     ConnectionError::Authentication => {
-                        self.service_output.emit_output(Bytes::from(format!(
+                        let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
                             Colour::Black
                                 .on(Colour::Red)
                                 .paint(" ✗ SSH target rejected Warpgate authentication request ")
-                        )));
+                        );
+                        let _ = self.emit_pty_output(msg.as_bytes()).await;
                     }
                     error => {
-                        self.service_output.emit_output(Bytes::from(format!(
+                        let msg = format!(
                             "{}{} {}\r\n",
                             ERASE_PROGRESS_SPINNER,
                             Colour::Black.on(Colour::Red).paint(" ✗ Connection failed "),
                             error
-                        )));
+                        );
+                        let _ = self.emit_pty_output(msg.as_bytes()).await;
                     }
                 }
             }
             RCEvent::Error(e) => {
-                self.service_output.hide_progress().await;
+                self.service_output.stop_progress();
                 let _ = self.emit_service_message(&format!("Error: {e}")).await;
                 self.disconnect_server().await;
             }
@@ -723,11 +726,8 @@ impl ServerSession {
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
-                    self.channel_writer.write(
-                        session,
-                        server_channel_id.0,
-                        CryptoVec::from_slice(&data),
-                    );
+                    self.channel_writer
+                        .write(session, server_channel_id.0, data);
                 }
             }
             RCEvent::Success(channel) => {
@@ -826,12 +826,8 @@ impl ServerSession {
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
-                    self.channel_writer.write_extended(
-                        session,
-                        server_channel_id.0,
-                        ext,
-                        CryptoVec::from_slice(&data),
-                    );
+                    self.channel_writer
+                        .write_extended(session, server_channel_id.0, ext, data);
                 }
             }
             RCEvent::HostKeyReceived(key) => {
@@ -946,7 +942,7 @@ impl ServerSession {
         key: PublicKey,
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
-        self.service_output.hide_progress().await;
+        self.service_output.stop_progress();
 
         let mode = self
             .services
@@ -1891,6 +1887,11 @@ impl ServerSession {
     }
 
     async fn disconnect_server(&mut self) {
+        // Flush pending writes so that any messages emitted before
+        // disconnecting (e.g. error or timeout notices) are delivered
+        // to the client before the channels are closed.
+        let _ = self.channel_writer.flush().await;
+
         let all_channels = std::mem::take(&mut self.all_channels);
         let channels = all_channels
             .into_iter()

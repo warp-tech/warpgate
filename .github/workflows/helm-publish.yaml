@@ -1,0 +1,78 @@
+name: Helm
+
+permissions: read-all
+
+on:
+  push:
+    branches: [ '**' ]
+    tags: [ 'chart-v*.*.*' ]
+  pull_request:
+    branches: [ '**' ]
+
+env:
+  REGISTRY: ghcr.io
+  CHART_NAME: warpgate
+  CHART_PATH: helm/warpgate
+  OCI_REPO: oci://ghcr.io/warp-tech/helm-charts
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint ${{ env.CHART_PATH }} --strict
+
+      - name: Template render test
+        run: helm template ${{ env.CHART_NAME }} ${{ env.CHART_PATH }} --debug > /dev/null
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/chart-v')
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # chart-v0.0.1 -> 0.0.1
+          VERSION="${GITHUB_REF_NAME#chart-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Chart version: ${VERSION}"
+
+      - name: Update Chart.yaml version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" ${{ env.CHART_PATH }}/Chart.yaml
+          echo "--- Chart.yaml ---"
+          cat ${{ env.CHART_PATH }}/Chart.yaml
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package chart
+        run: helm package ${{ env.CHART_PATH }} --destination ${{ runner.temp }}
+
+      - name: Push chart to GHCR
+        run: helm push ${{ runner.temp }}/${{ env.CHART_NAME }}-${{ steps.version.outputs.version }}.tgz ${{ env.OCI_REPO }}
+
+      - name: Verify pushed chart
+        run: helm show chart ${{ env.OCI_REPO }}/${{ env.CHART_NAME }} --version ${{ steps.version.outputs.version }}

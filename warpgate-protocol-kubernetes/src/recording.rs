@@ -128,14 +128,14 @@ pub async fn start_recording_api(
     recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> anyhow::Result<KubernetesRecorder> {
     let mut recordings = recordings.lock().await;
-    Ok(recordings
+    recordings
         .start::<KubernetesRecorder, _>(
             session_id,
             Some("api".into()),
             SessionRecordingMetadata::Api,
         )
         .await
-        .context("starting recording")?)
+        .context("starting recording")
 }
 
 pub async fn start_recording_exec(

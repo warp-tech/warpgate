@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role, type Target, type TargetGroup } from 'admin/lib/api'
+    import { adminPermissions } from '../../lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { TargetKind } from 'gateway/lib/api'
@@ -146,9 +147,6 @@
                     {#if target.options.kind === 'Kubernetes'}
                         Kubernetes target
                     {/if}
-                    {#if target.options.kind === 'WebAdmin'}
-                        This web admin interface
-                    {/if}
                 </div>
             </div>
         </div>
@@ -233,10 +231,6 @@
                 <input class="form-control" bind:value={target.options.clusterUrl} placeholder="https://kubernetes.example.com:6443" />
             </FormGroup>
 
-            <FormGroup floating label="Namespace">
-                <input class="form-control" bind:value={target.options.namespace} placeholder="default" />
-            </FormGroup>
-
             <h5 class="mt-3">Authentication</h5>
             <FormGroup floating label="Auth Type">
                 <select class="form-control" bind:value={target.options.auth.kind}>
@@ -247,10 +241,10 @@
 
             {#if target.options.auth.kind === 'Certificate'}
                 <FormGroup floating label="Client Certificate">
-                    <textarea class="form-control" rows="8" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                    <textarea class="form-control" style="height: 18rem;" bind:value={target.options.auth.certificate} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
                 </FormGroup>
                 <FormGroup floating label="Client Private Key">
-                    <textarea class="form-control" rows="8" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+                    <textarea class="form-control" style="height: 12rem;" bind:value={target.options.auth.privateKey} placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
                 </FormGroup>
             {/if}
 
@@ -276,6 +270,7 @@
                                 id="role-{role.id}"
                                 class="mb-0 me-2"
                                 type="switch"
+                                disabled={!$adminPermissions.targetsEdit}
                                 on:change={() => toggleRole(role)}
                                 checked={roleIsAllowed[role.id]} />
                             <div>
@@ -344,15 +339,17 @@
         >Access instructions</Button>
 
         <AsyncButton
-        color="primary"
+            color="primary"
             class="ms-auto"
             click={update}
+            disabled={!$adminPermissions.targetsEdit}
         >Update configuration</AsyncButton>
 
         <AsyncButton
             class="ms-2"
             color="danger"
             click={remove}
+            disabled={!$adminPermissions.targetsDelete}
         >Remove</AsyncButton>
     </div>
 </div>

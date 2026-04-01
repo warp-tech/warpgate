@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-admin"
-version = "0.20.2"
+version = "0.22.0-beta.4"
 
 [dependencies]
 anyhow.workspace = true
@@ -25,12 +25,13 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warpgate-ca = { version = "*", path = "../warpgate-ca" }
-warpgate-common = { version = "*", path = "../warpgate-common" }
-warpgate-tls = { version = "*", path = "../warpgate-tls" }
-warpgate-core = { version = "*", path = "../warpgate-core" }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
-warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
-warpgate-protocol-kubernetes = { version = "*", path = "../warpgate-protocol-kubernetes" }
+warpgate-ca = { path = "../warpgate-ca" }
+warpgate-common = { path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
+warpgate-tls = { path = "../warpgate-tls" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
+warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 regex.workspace = true

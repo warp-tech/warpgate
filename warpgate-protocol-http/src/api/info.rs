@@ -4,13 +4,15 @@ use poem::web::Data;
 use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
-use warpgate_core::{ConfigProvider, Services};
-use warpgate_db_entities::{LdapServer, Parameters};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_core::ConfigProvider;
+use warpgate_db_entities::{AdminRole, LdapServer, Parameters, User};
 
-use crate::common::{is_user_admin, RequestAuthorization, SessionAuthorization, SessionExt};
+use crate::common::{is_user_admin, SessionExt};
 
 pub struct Api;
 
@@ -21,6 +23,15 @@ pub struct PortsInfo {
     mysql: Option<u16>,
     postgres: Option<u16>,
     kubernetes: Option<u16>,
+}
+
+#[derive(Serialize, Object)]
+pub struct ExternalHostsInfo {
+    ssh: Option<String>,
+    http: Option<String>,
+    mysql: Option<String>,
+    postgres: Option<String>,
+    kubernetes: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -35,12 +46,40 @@ impl SetupState {
     }
 }
 
+#[derive(Serialize, Object, Default)]
+pub struct AdminPermissions {
+    targets_create: bool,
+    targets_edit: bool,
+    targets_delete: bool,
+
+    users_create: bool,
+    users_edit: bool,
+    users_delete: bool,
+
+    access_roles_create: bool,
+    access_roles_edit: bool,
+    access_roles_delete: bool,
+    access_roles_assign: bool,
+
+    sessions_view: bool,
+    sessions_terminate: bool,
+
+    recordings_view: bool,
+
+    tickets_create: bool,
+    tickets_delete: bool,
+
+    config_edit: bool,
+    admin_roles_manage: bool,
+}
+
 #[derive(Serialize, Object)]
 pub struct Info {
     version: Option<String>,
     username: Option<String>,
     selected_target: Option<String>,
     external_host: Option<String>,
+    external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
     minimize_password_login: bool,
     authorized_via_ticket: bool,
@@ -48,6 +87,7 @@ pub struct Info {
     own_credential_management_allowed: bool,
     has_ldap: bool,
     setup_state: Option<SetupState>,
+    admin_permissions: Option<AdminPermissions>,
 }
 
 #[derive(ApiResponse)]
@@ -63,10 +103,10 @@ impl Api {
         &self,
         req: &Request,
         session: &Session,
-        services: Data<&Services>,
-        request_authorization: Option<Data<&RequestAuthorization>>,
+        ctx: Data<&UnauthenticatedRequestContext>,
+        auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
-        let config = services.config.lock().await;
+        let config = ctx.services.config.lock().await;
         let external_host = config
             .construct_external_url(Some(req), None)
             .ok()
@@ -75,20 +115,20 @@ impl Api {
             .map(|x| x.to_string());
 
         let parameters = {
-            Parameters::Entity::get(&*services.db.lock().await)
+            Parameters::Entity::get(&*ctx.services.db.lock().await)
                 .await
                 .context("loading parameters")?
         };
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = services.config_provider.lock().await;
+                let mut p = ctx.services.config_provider.lock().await;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)
             };
-            let user_is_admin = if let Some(auth) = &request_authorization {
-                is_user_admin(req, auth).await?
+            let user_is_admin = if let Some(ctx) = &auth_ctx {
+                is_user_admin(ctx).await?
             } else {
                 false
             };
@@ -108,15 +148,99 @@ impl Api {
         };
 
         let has_ldap = LdapServer::Entity::find()
-            .one(&*services.db.lock().await)
+            .one(&*ctx.services.db.lock().await)
             .await
             .context("loading LDAP servers")?
             .is_some();
 
+        let fallback_host = external_host.clone();
+
+        let protocol_external_hosts = if auth_ctx.is_some() {
+            Some(ExternalHostsInfo {
+                ssh: config
+                    .store
+                    .ssh
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                http: config
+                    .store
+                    .http
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                mysql: config
+                    .store
+                    .mysql
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                postgres: config
+                    .store
+                    .postgres
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                kubernetes: config
+                    .store
+                    .kubernetes
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+            })
+        } else {
+            None
+        };
+
+        // compute admin permissions (only if authenticated)
+        let admin_permissions = if let Some(ctx) = &auth_ctx {
+            if let Some(username) = ctx.auth.username() {
+                let db = ctx.services.db.lock().await;
+                let perms = {
+                    let mut combined = AdminPermissions::default();
+                    if let Some(user) = User::Entity::find()
+                        .filter(User::Column::Username.eq(username))
+                        .one(&*db)
+                        .await
+                        .context("loading user")?
+                    {
+                        let roles: Vec<AdminRole::Model> = user
+                            .find_related(AdminRole::Entity)
+                            .all(&*db)
+                            .await
+                            .context("loading roles")?;
+                        for r in roles {
+                            combined.targets_create |= r.targets_create;
+                            combined.targets_edit |= r.targets_edit;
+                            combined.targets_delete |= r.targets_delete;
+                            combined.users_create |= r.users_create;
+                            combined.users_edit |= r.users_edit;
+                            combined.users_delete |= r.users_delete;
+                            combined.access_roles_create |= r.access_roles_create;
+                            combined.access_roles_edit |= r.access_roles_edit;
+                            combined.access_roles_delete |= r.access_roles_delete;
+                            combined.access_roles_assign |= r.access_roles_assign;
+                            combined.sessions_view |= r.sessions_view;
+                            combined.sessions_terminate |= r.sessions_terminate;
+                            combined.recordings_view |= r.recordings_view;
+                            combined.tickets_create |= r.tickets_create;
+                            combined.tickets_delete |= r.tickets_delete;
+                            combined.config_edit |= r.config_edit;
+                            combined.admin_roles_manage |= r.admin_roles_manage;
+                        }
+                    }
+                    combined
+                };
+                Some(perms)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(InstanceInfoResponse::Ok(Json(Info {
-            version: request_authorization
-                .is_some()
-                .then(|| warpgate_version().to_string()),
+            version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
             username: session.get_username(),
             selected_target: session.get_target_name(),
             external_host,
@@ -128,8 +252,9 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
-            ports: match request_authorization {
-                Some(_) => PortsInfo {
+            external_hosts: protocol_external_hosts,
+            ports: if auth_ctx.is_some() {
+                PortsInfo {
                     ssh: if config.store.ssh.enable {
                         Some(config.store.ssh.external_port())
                     } else {
@@ -151,18 +276,20 @@ impl Api {
                     } else {
                         None
                     },
-                },
-                None => PortsInfo {
+                }
+            } else {
+                PortsInfo {
                     ssh: None,
                     http: None,
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
-                },
+                }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
             setup_state,
-            has_ldap: request_authorization.is_some() && has_ldap,
+            has_ldap: auth_ctx.is_some() && has_ldap,
+            admin_permissions,
         })))
     }
 }

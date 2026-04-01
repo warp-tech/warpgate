@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use poem::web::websocket::{WebSocket, WebSocketStream};
 use poem::web::{Data, Path};
@@ -16,11 +16,12 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::DONT_FORWARD_HEADERS;
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
-use warpgate_core::logging::http::{
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
-use warpgate_core::{Services, State};
+use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_core::Services;
 
 use crate::correlator::RequestCorrelator;
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
@@ -49,10 +50,8 @@ pub async fn handle_api_request(
     req: &Request,
     Path((target_name, path)): Path<(String, String)>,
     body: Body,
-    state: Data<&Arc<Mutex<State>>>,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
-    services: Data<&Services>,
+    ctx: Data<&UnauthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
         target_name = target_name,
@@ -61,8 +60,7 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) =
-        authenticate_and_get_target(req, &target_name, &state, &services).await?;
+    let (user_info, target) = authenticate_and_get_target(req, &target_name, &ctx.services).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
@@ -82,7 +80,10 @@ pub async fn handle_api_request(
             handle.lock().await;
         handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
-        (handle.id(), span_for_request(req, Some(&*handle)).await?)
+        (
+            handle.id(),
+            span_for_request(req, &ctx.services, Some(&*handle)).await?,
+        )
     };
 
     async {
@@ -94,8 +95,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                *services,
-                *recordings,
+                &ctx.services,
             )
             .await
             .map(IntoResponse::into_response)
@@ -107,15 +107,14 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                *services,
-                *recordings,
+                &ctx.services,
             )
             .await
             .map(IntoResponse::into_response)
             .context("handling Kubernetes API request")
         };
 
-        let client_ip = get_client_ip(req, Some(*services)).await;
+        let client_ip = get_client_ip(req, &ctx.services).await;
         let response = response.inspect_err(|e| {
             log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;
@@ -142,7 +141,6 @@ async fn _handle_normal_request_inner(
     user_info: AuthStateUserInfo,
     session_id: SessionId,
     services: &Services,
-    recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> Result<Response, WarpgateError> {
     let client =
         create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
@@ -195,7 +193,7 @@ async fn _handle_normal_request_inner(
             config.store.recordings.enable
         };
         if enabled {
-            match start_recording_api(&session_id, recordings).await {
+            match start_recording_api(&session_id, &services.recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -285,11 +283,7 @@ async fn _handle_normal_request_inner(
 
         if transfer_encoding == "chunked" || is_watch {
             (
-                Body::from_bytes_stream(
-                    response
-                        .bytes_stream()
-                        .map_err(|e| std::io::Error::other(e)),
-                ),
+                Body::from_bytes_stream(response.bytes_stream().map_err(std::io::Error::other)),
                 None,
             )
         } else {
@@ -307,7 +301,7 @@ async fn _handle_normal_request_inner(
         if let Err(e) = recorder
             .record_response(
                 method,
-                &full_url.to_string(),
+                full_url.as_ref(),
                 headers,
                 &body_bytes,
                 status.as_u16(),
@@ -339,7 +333,7 @@ async fn run_websocket_recording(mut recorder: TerminalRecorder, mut rx: mpsc::R
             continue;
         }
         let msg_type = data[0];
-        let data = (&data[1..]).to_vec();
+        let data = data[1..].to_vec();
 
         let result = match msg_type {
             0..2 => {
@@ -384,7 +378,6 @@ async fn _handle_websocket_request_inner(
     user_info: AuthStateUserInfo,
     session_id: SessionId,
     services: &Services,
-    recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> anyhow::Result<impl IntoResponse> {
     let mut full_url = construct_target_url(req, path, k8s_options)?;
     if full_url.scheme() == "https" {
@@ -407,7 +400,7 @@ async fn _handle_websocket_request_inner(
         if enabled {
             match start_recording_exec(
                 &session_id,
-                recordings,
+                &services.recordings,
                 deduce_exec_recording_metadata(&full_url),
             )
             .await
@@ -485,7 +478,7 @@ async fn _handle_websocket_request_inner(
         Ok::<(), anyhow::Error>(())
     };
 
-    return Ok(ws
+    Ok(ws
         .protocols(vec![
             "channel.k8s.io",
             "v2.channel.k8s.io",
@@ -499,5 +492,5 @@ async fn _handle_websocket_request_inner(
             })?;
             Ok::<(), anyhow::Error>(())
         })
-        .into_response());
+        .into_response())
 }
