@@ -21,7 +21,6 @@
         save: (label: string, publicKeyPem: string) => Promise<IssuedCertificateCredential>
         onClose?: () => void
         storeInBrowserByDefault?: boolean
-        closeOnIssue?: boolean
     }
 
     let {
@@ -30,7 +29,6 @@
         save,
         onClose,
         storeInBrowserByDefault = false,
-        closeOnIssue = false,
     }: Props = $props()
 
     let saving = $state(false)
@@ -103,7 +101,7 @@
 
             generatedKubeConfig = `- name: ${username}\n  user:\n    client-certificate-data: ${btoa(generatedCertificatePem)}\n    client-key-data: ${btoa(privateKeyPem)}`
 
-            if (closeOnIssue) {
+            if (storeInBrowser && storeInBrowserByDefault) {
                 close()
                 return
             }
@@ -192,7 +190,7 @@
                         bind:checked={storeInBrowser}
                     />
                     <label class="form-check-label" for="storeCertInBrowser">
-                        Store certificate in browser for Kubernetes targets
+                        Store certificate and private key in this browser for kubeconfig generation
                     </label>
                 </div>
             </div>
