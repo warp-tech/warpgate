@@ -12,7 +12,7 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::{AdminRole, Role, User, UserRoleAssignment};
+use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -238,6 +238,11 @@ impl DetailApi {
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
+            .exec(&*db)
+            .await?;
+
+        UserAdminRoleAssignment::Entity::delete_many()
+            .filter(UserAdminRoleAssignment::Column::UserId.eq(user.id))
             .exec(&*db)
             .await?;
 

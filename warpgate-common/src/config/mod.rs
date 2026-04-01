@@ -287,6 +287,9 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_port: Option<u16>,
 
+    #[serde(default)]
+    pub external_host: Option<String>,
+
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
 
@@ -309,6 +312,7 @@ impl Default for SshConfig {
             keys: _default_ssh_keys_path(),
             host_key_verification: Default::default(),
             external_port: None,
+            external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
             keepalive_interval: None,
         }
@@ -318,6 +322,10 @@ impl Default for SshConfig {
 impl SshConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -334,6 +342,9 @@ pub struct HttpConfig {
 
     #[serde(default)]
     pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
 
     #[serde(default)]
     pub certificate: String,
@@ -361,6 +372,7 @@ impl Default for HttpConfig {
         HttpConfig {
             listen: _default_http_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
             trust_x_forwarded_headers: false,
@@ -374,6 +386,10 @@ impl Default for HttpConfig {
 impl HttpConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -409,6 +425,9 @@ pub struct MySqlConfig {
     pub external_port: Option<u16>,
 
     #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
     pub certificate: String,
 
     #[serde(default)]
@@ -421,6 +440,7 @@ impl Default for MySqlConfig {
             enable: false,
             listen: _default_mysql_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -430,6 +450,10 @@ impl Default for MySqlConfig {
 impl MySqlConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -443,6 +467,9 @@ pub struct KubernetesConfig {
 
     #[serde(default)]
     pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
 
     #[serde(default)]
     pub certificate: String,
@@ -461,6 +488,7 @@ impl Default for KubernetesConfig {
             enable: false,
             listen: _default_kubernetes_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
             session_max_age: _default_session_max_age(),
@@ -471,6 +499,10 @@ impl Default for KubernetesConfig {
 impl KubernetesConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 
@@ -486,6 +518,9 @@ pub struct PostgresConfig {
     pub external_port: Option<u16>,
 
     #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
     pub certificate: String,
 
     #[serde(default)]
@@ -498,6 +533,7 @@ impl Default for PostgresConfig {
             enable: false,
             listen: _default_postgres_listen(),
             external_port: None,
+            external_host: None,
             certificate: "".to_owned(),
             key: "".to_owned(),
         }
@@ -507,6 +543,10 @@ impl Default for PostgresConfig {
 impl PostgresConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or(self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
     }
 }
 

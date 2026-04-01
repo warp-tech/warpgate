@@ -3,7 +3,7 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-migrations"
 publish = false
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [lib]
 
@@ -23,7 +23,7 @@ tracing.workspace = true
 uuid.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
+warpgate-ca = { path = "../warpgate-ca", default-features = false }
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

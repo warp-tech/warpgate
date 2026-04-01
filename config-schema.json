@@ -19,6 +19,7 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
@@ -32,6 +33,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8443",
@@ -51,6 +53,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:33306"
@@ -61,6 +64,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:55432"
@@ -77,6 +81,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
@@ -124,6 +129,13 @@
           "type": "string",
           "default": "1day"
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -169,6 +181,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -235,6 +254,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -265,6 +291,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -334,6 +367,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
