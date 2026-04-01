@@ -21,9 +21,9 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     let _ = LOG_SENDER.set(tokio::sync::broadcast::channel(1024).0);
-    ValuesLogLayer::new(|values| {
+    ValuesLogLayer::new(|values, target| {
         if let Some(sender) = LOG_SENDER.get() {
-            if let Some(entry) = values_to_log_entry_data(values) {
+            if let Some(entry) = values_to_log_entry_data(values, target) {
                 let _ = sender.send(entry);
             }
         }
@@ -51,7 +51,7 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
     });
 }
 
-fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEntry::ActiveModel> {
+fn values_to_log_entry_data(mut values: SerializedRecordValues, target: String) -> Option<LogEntry::ActiveModel> {
     let session_id = (*values).remove("session");
     let username = (*values).remove("session_username");
     let message = (*values).remove("message").unwrap_or_default();
@@ -62,6 +62,7 @@ fn values_to_log_entry_data(mut values: SerializedRecordValues) -> Option<LogEnt
     Some(LogEntry::ActiveModel {
         id: Set(Uuid::new_v4()),
         text: Set(message),
+        target: Set(target),
         values: Set(values
             .into_values()
             .into_iter()

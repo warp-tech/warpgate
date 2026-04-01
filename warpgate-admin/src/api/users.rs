@@ -5,7 +5,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, Role as RoleConfig, User as UserConfig,
@@ -106,6 +106,14 @@ impl ListApi {
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
+
+        info!(
+            target: "audit",
+            _type="UserCreated1",
+            user_id=%user.id,
+            username=user.username,
+            "Created user"
+        );
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
@@ -246,7 +254,16 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        info!(
+            target: "audit",
+            _type="UserDeleted1",
+            user_id=%user.id,
+            username=user.username,
+            "Deleted user"
+        );
+
         user.delete(&*db).await?;
+
         Ok(DeleteUserResponse::Deleted)
     }
 
@@ -373,6 +390,8 @@ enum AddUserRoleResponse {
     Created,
     #[oai(status = 409)]
     AlreadyExists,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -397,6 +416,8 @@ enum AddUserAdminRoleResponse {
     Created,
     #[oai(status = 409)]
     AlreadyExists,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -457,6 +478,14 @@ impl RolesApi {
 
         let db = ctx.services.db.lock().await;
 
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(AddUserRoleResponse::NotFound);
+        };
+
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(AddUserRoleResponse::NotFound);
+        };
+
         if !UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
@@ -475,6 +504,16 @@ impl RolesApi {
         };
 
         values.insert(&*db).await.map_err(WarpgateError::from)?;
+
+        info!(
+            target: "audit",
+            _type="AccessRoleGranted1",
+            grantee_id=%grantee.id,
+            grantee_username=grantee.username,
+            role_id=%role.id,
+            role_name=role.name,
+            "Granted access role"
+        );
 
         Ok(AddUserRoleResponse::Created)
     }
@@ -495,11 +534,11 @@ impl RolesApi {
 
         let db = ctx.services.db.lock().await;
 
-        let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
-        let Some(_role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
@@ -514,6 +553,16 @@ impl RolesApi {
         };
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
+
+        info!(
+            target: "audit",
+            _type="AccessRoleRevoked1",
+            grantee_id=%grantee.id,
+            grantee_username=grantee.username,
+            role_id=%role.id,
+            role_name=role.name,
+            "Revoked access role"
+        );
 
         Ok(DeleteUserRoleResponse::Deleted)
     }
@@ -564,6 +613,14 @@ impl RolesApi {
 
         let db = ctx.services.db.lock().await;
 
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(AddUserAdminRoleResponse::NotFound);
+        };
+
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(AddUserAdminRoleResponse::NotFound);
+        };
+
         if !warpgate_db_entities::UserAdminRoleAssignment::Entity::find()
             .filter(warpgate_db_entities::UserAdminRoleAssignment::Column::UserId.eq(id.0))
             .filter(
@@ -584,6 +641,17 @@ impl RolesApi {
         };
 
         values.insert(&*db).await.map_err(WarpgateError::from)?;
+
+        info!(
+            target: "audit",
+            _type="AdminRoleGranted1",
+            grantee_id=%grantee.id,
+            grantee_username=grantee.username,
+            admin_role_id=%role.id,
+            admin_role_name=role.name,
+            "Granted admin role"
+        );
+
         Ok(AddUserAdminRoleResponse::Created)
     }
 
@@ -603,11 +671,11 @@ impl RolesApi {
 
         let db = ctx.services.db.lock().await;
 
-        let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
-        let Some(_role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
@@ -624,6 +692,17 @@ impl RolesApi {
         };
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
+
+        info!(
+            target: "audit",
+            _type="AdminRoleRevoked1",
+            grantee_id=%grantee.id,
+            grantee_username=grantee.username,
+            admin_role_id=%role.id,
+            admin_role_name=role.name,
+            "Revoked admin role"
+        );
+
         Ok(DeleteUserAdminRoleResponse::Deleted)
     }
 }

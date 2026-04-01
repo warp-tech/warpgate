@@ -27,6 +27,7 @@ struct GetLogsRequest {
     session_id: Option<Uuid>,
     username: Option<String>,
     search: Option<String>,
+    target: Option<String>,
 }
 
 #[OpenApi]
@@ -60,6 +61,11 @@ impl Api {
         }
         if let Some(ref username) = body.username {
             q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
+        }
+        if let Some(ref target) = body.target {
+            if !target.is_empty() {
+                q = q.filter(LogEntry::Column::Target.eq(target.clone()));
+            }
         }
         if let Some(ref search) = body.search {
             if !search.is_empty() {

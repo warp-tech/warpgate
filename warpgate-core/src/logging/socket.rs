@@ -29,10 +29,14 @@ where
 
     let got_socket = socket.is_some();
 
-    let layer = ValuesLogLayer::new(move |mut values| {
+    let layer = ValuesLogLayer::new(move |mut values, target| {
         if !got_socket || values.contains_key(&SKIP_KEY) {
             return;
         }
+        values.insert(
+            "target",
+            target.clone(),
+        );
         values.insert(
             "timestamp",
             Local::now().to_rfc3339_opts(SecondsFormat::Nanos, false),

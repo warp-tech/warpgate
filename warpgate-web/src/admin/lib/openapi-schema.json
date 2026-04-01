@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.2-1-g389616d3-modified"
+    "version": "v0.22.0-beta.4-11-ge6c01455-modified"
   },
   "servers": [
     {
@@ -2098,6 +2098,9 @@
           },
           "409": {
             "description": ""
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2229,6 +2232,9 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         },
@@ -4136,6 +4142,9 @@
           },
           "search": {
             "type": "string"
+          },
+          "target": {
+            "type": "string"
           }
         }
       },
@@ -4416,6 +4425,7 @@
         "required": [
           "id",
           "text",
+          "target",
           "values",
           "timestamp",
           "session_id"
@@ -4426,6 +4436,9 @@
             "format": "uuid"
           },
           "text": {
+            "type": "string"
+          },
+          "target": {
             "type": "string"
           },
           "values": {},

@@ -93,18 +93,27 @@ pub async fn cleanup_db(
     db: &mut DatabaseConnection,
     recordings: &mut SessionRecordings,
     retention: &Duration,
+    audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{Recording, Session};
-    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
+    use warpgate_db_entities::{LogEntry, Recording, Session};
+    let audit_cutoff = chrono::Utc::now() - chrono::Duration::from_std(*audit_retention)?;
+    let recording_cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
 
     LogEntry::Entity::delete_many()
-        .filter(Expr::col(LogEntry::Column::Timestamp).lt(cutoff))
+        .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(audit_cutoff))
+        .exec(db)
+        .await?;
+
+    LogEntry::Entity::delete_many()
+        .filter(Expr::col(LogEntry::Column::Target).ne("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(recording_cutoff))
         .exec(db)
         .await?;
 
     let recordings_to_delete = Recording::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .all(db)
         .await?;
 
@@ -120,7 +129,7 @@ pub async fn cleanup_db(
 
     Session::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .exec(db)
         .await?;
 

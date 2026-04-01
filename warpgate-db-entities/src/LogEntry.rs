@@ -12,6 +12,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub text: String,
+    pub target: String,
     pub values: JsonValue,
     pub timestamp: DateTime<Utc>,
     pub session_id: Uuid,
