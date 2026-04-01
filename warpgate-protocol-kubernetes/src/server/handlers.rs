@@ -283,11 +283,7 @@ async fn _handle_normal_request_inner(
 
         if transfer_encoding == "chunked" || is_watch {
             (
-                Body::from_bytes_stream(
-                    response
-                        .bytes_stream()
-                        .map_err(|e| std::io::Error::other(e)),
-                ),
+                Body::from_bytes_stream(response.bytes_stream().map_err(std::io::Error::other)),
                 None,
             )
         } else {
@@ -305,7 +301,7 @@ async fn _handle_normal_request_inner(
         if let Err(e) = recorder
             .record_response(
                 method,
-                &full_url.to_string(),
+                full_url.as_ref(),
                 headers,
                 &body_bytes,
                 status.as_u16(),
@@ -337,7 +333,7 @@ async fn run_websocket_recording(mut recorder: TerminalRecorder, mut rx: mpsc::R
             continue;
         }
         let msg_type = data[0];
-        let data = (&data[1..]).to_vec();
+        let data = data[1..].to_vec();
 
         let result = match msg_type {
             0..2 => {
@@ -482,7 +478,7 @@ async fn _handle_websocket_request_inner(
         Ok::<(), anyhow::Error>(())
     };
 
-    return Ok(ws
+    Ok(ws
         .protocols(vec![
             "channel.k8s.io",
             "v2.channel.k8s.io",
@@ -496,5 +492,5 @@ async fn _handle_websocket_request_inner(
             })?;
             Ok::<(), anyhow::Error>(())
         })
-        .into_response());
+        .into_response())
 }

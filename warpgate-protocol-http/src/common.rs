@@ -21,7 +21,7 @@ use warpgate_common_http::{
 };
 use warpgate_core::{AuthStateStore, ConfigProvider};
 use warpgate_db_entities::{User, UserAdminRoleAssignment};
-use warpgate_sso::CoreIdToken;
+use warpgate_sso::WarpgateIdToken;
 
 use crate::session::SessionStore;
 
@@ -40,7 +40,7 @@ pub fn is_localhost_host(host: &str) -> bool {
 
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
-    pub token: CoreIdToken,
+    pub token: WarpgateIdToken,
     pub provider: String,
     pub supports_single_logout: bool,
 }
@@ -137,7 +137,6 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
 
     Ok(count > 0)
 }
-
 
 pub async fn _inner_auth<E: Endpoint + 'static>(
     ep: Arc<E>,
@@ -247,7 +246,6 @@ pub async fn authorize_session(
 
     Ok(())
 }
-
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,

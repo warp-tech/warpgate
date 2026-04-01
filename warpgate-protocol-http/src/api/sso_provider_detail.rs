@@ -64,8 +64,12 @@ impl Api {
             Some(req),
             provider_config.return_domain_whitelist.as_deref(),
         )?;
-        return_url.set_path("@warpgate/api/sso/return");
-        debug!("Return URL: {}", &return_url);
+        info!("{:?}", provider_config);
+        return_url.set_path(&format!(
+            "{}warpgate/api/sso/return",
+            provider_config.return_url_prefix
+        ));
+        debug!("Return URL: {return_url}");
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 

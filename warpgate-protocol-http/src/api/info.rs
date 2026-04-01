@@ -25,6 +25,15 @@ pub struct PortsInfo {
     kubernetes: Option<u16>,
 }
 
+#[derive(Serialize, Object)]
+pub struct ExternalHostsInfo {
+    ssh: Option<String>,
+    http: Option<String>,
+    mysql: Option<String>,
+    postgres: Option<String>,
+    kubernetes: Option<String>,
+}
+
 #[derive(Serialize, Object, Debug)]
 pub struct SetupState {
     has_targets: bool,
@@ -37,7 +46,7 @@ impl SetupState {
     }
 }
 
-#[derive(Serialize, Object)]
+#[derive(Serialize, Object, Default)]
 pub struct AdminPermissions {
     targets_create: bool,
     targets_edit: bool,
@@ -64,36 +73,13 @@ pub struct AdminPermissions {
     admin_roles_manage: bool,
 }
 
-impl Default for AdminPermissions {
-    fn default() -> Self {
-        Self {
-            targets_create: false,
-            targets_edit: false,
-            targets_delete: false,
-            users_create: false,
-            users_edit: false,
-            users_delete: false,
-            access_roles_create: false,
-            access_roles_edit: false,
-            access_roles_delete: false,
-            access_roles_assign: false,
-            sessions_view: false,
-            sessions_terminate: false,
-            recordings_view: false,
-            tickets_create: false,
-            tickets_delete: false,
-            config_edit: false,
-            admin_roles_manage: false,
-        }
-    }
-}
-
 #[derive(Serialize, Object)]
 pub struct Info {
     version: Option<String>,
     username: Option<String>,
     selected_target: Option<String>,
     external_host: Option<String>,
+    external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
     minimize_password_login: bool,
     authorized_via_ticket: bool,
@@ -167,6 +153,45 @@ impl Api {
             .context("loading LDAP servers")?
             .is_some();
 
+        let fallback_host = external_host.clone();
+
+        let protocol_external_hosts = if auth_ctx.is_some() {
+            Some(ExternalHostsInfo {
+                ssh: config
+                    .store
+                    .ssh
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                http: config
+                    .store
+                    .http
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                mysql: config
+                    .store
+                    .mysql
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                postgres: config
+                    .store
+                    .postgres
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                kubernetes: config
+                    .store
+                    .kubernetes
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+            })
+        } else {
+            None
+        };
+
         // compute admin permissions (only if authenticated)
         let admin_permissions = if let Some(ctx) = &auth_ctx {
             if let Some(username) = ctx.auth.username() {
@@ -225,9 +250,9 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
-            ports: auth_ctx
-                .is_some()
-                .then(|| PortsInfo {
+            external_hosts: protocol_external_hosts,
+            ports: if auth_ctx.is_some() {
+                PortsInfo {
                     ssh: if config.store.ssh.enable {
                         Some(config.store.ssh.external_port())
                     } else {
@@ -249,14 +274,16 @@ impl Api {
                     } else {
                         None
                     },
-                })
-                .unwrap_or(PortsInfo {
+                }
+            } else {
+                PortsInfo {
                     ssh: None,
                     http: None,
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
-                }),
+                }
+            },
             own_credential_management_allowed: parameters.allow_own_credential_management,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,

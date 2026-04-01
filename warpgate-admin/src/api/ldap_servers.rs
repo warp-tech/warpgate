@@ -463,6 +463,7 @@ impl ListApi {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(ApiResponse)]
 enum GetLdapServerResponse {
     #[oai(status = 200)]
