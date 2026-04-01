@@ -10,7 +10,6 @@ use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AnySecurityScheme;
@@ -178,10 +177,6 @@ impl DetailApi {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
-        if role.name == BUILTIN_ADMIN_ROLE_NAME {
-            return Ok(UpdateRoleResponse::Forbidden);
-        }
-
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
@@ -204,10 +199,6 @@ impl DetailApi {
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
-
-        if role.name == BUILTIN_ADMIN_ROLE_NAME {
-            return Ok(DeleteRoleResponse::Forbidden);
-        }
 
         role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)

@@ -29,8 +29,7 @@ pub async fn has_admin_permission(
     let Some(user_model) = User::Entity::find()
         .filter(User::Column::Username.eq(username))
         .one(&*db)
-        .await
-        .map_err(|e| WarpgateError::other(e))?
+        .await?
     else {
         return Ok(false);
     };
@@ -71,10 +70,7 @@ pub async fn has_admin_permission(
         });
     }
 
-    let count = query
-        .count(&*db)
-        .await
-        .map_err(|e| WarpgateError::other(e))?;
+    let count = query.count(&*db).await?;
     Ok(count > 0)
 }
 

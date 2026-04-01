@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.21.1-5-ga76ef2bb-modified"
+    "version": "chart-v0.0.2-1-g389616d3-modified"
   },
   "servers": [
     {
@@ -1125,6 +1125,27 @@
           }
         }
       },
+      "ExternalHostsInfo": {
+        "type": "object",
+        "title": "ExternalHostsInfo",
+        "properties": {
+          "ssh": {
+            "type": "string"
+          },
+          "http": {
+            "type": "string"
+          },
+          "mysql": {
+            "type": "string"
+          },
+          "postgres": {
+            "type": "string"
+          },
+          "kubernetes": {
+            "type": "string"
+          }
+        }
+      },
       "GroupInfo": {
         "type": "object",
         "title": "GroupInfo",
@@ -1168,6 +1189,9 @@
           },
           "external_host": {
             "type": "string"
+          },
+          "external_hosts": {
+            "$ref": "#/components/schemas/ExternalHostsInfo"
           },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"

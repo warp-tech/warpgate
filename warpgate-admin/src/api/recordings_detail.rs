@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
@@ -14,12 +12,11 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::AdminPermission;
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
+use warpgate_core::recordings::{AsciiCast, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_protocol_kubernetes::recording::{
     KubernetesRecordingItem, KubernetesRecordingItemApiObject,
@@ -117,7 +114,6 @@ impl Api {
 #[handler]
 pub async fn api_get_recording_cast(
     ctx: Data<&AuthenticatedRequestContext>,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<String> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
@@ -135,7 +131,8 @@ pub async fn api_get_recording_cast(
     };
 
     let path = {
-        recordings
+        ctx.services
+            .recordings
             .lock()
             .await
             .path_for(&recording.session_id, &recording.name)
@@ -175,7 +172,6 @@ pub async fn api_get_recording_cast(
 #[handler]
 pub async fn api_get_recording_tcpdump(
     ctx: Data<&AuthenticatedRequestContext>,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<Bytes> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
@@ -193,7 +189,8 @@ pub async fn api_get_recording_tcpdump(
     };
 
     let path = {
-        recordings
+        ctx.services
+            .recordings
             .lock()
             .await
             .path_for(&recording.session_id, &recording.name)
@@ -207,10 +204,10 @@ pub async fn api_get_recording_tcpdump(
 #[handler]
 pub async fn api_get_recording_stream(
     ws: WebSocket,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> impl IntoResponse {
-    let recordings = recordings.lock().await;
+    let recordings = ctx.services.recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
     ws.on_upgrade(|socket| async move {

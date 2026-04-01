@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-ldap"
-version = "0.22.0"
+version = "0.22.0-beta.4"
 
 [dependencies]
 anyhow.workspace = true
@@ -14,4 +14,4 @@ poem-openapi.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
