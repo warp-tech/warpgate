@@ -70,13 +70,7 @@ async function create () {
         {#if selectedTarget && selectedUser}
         <ConnectionInstructions
             targetName={selectedTarget.name}
-            targetKind={{
-                Http: TargetKind.Http,
-                MySql: TargetKind.MySql,
-                Ssh: TargetKind.Ssh,
-                Postgres: TargetKind.Postgres,
-                Kubernetes: TargetKind.Ssh, // Use SSH as placeholder since Kubernetes isn't in gateway TargetKind
-            }[selectedTarget.options.kind]}
+            targetKind={selectedTarget.options.kind}
             username={selectedUser.username}
             targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
             ticketSecret={result.secret}
