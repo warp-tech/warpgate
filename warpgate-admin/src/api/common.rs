@@ -16,11 +16,9 @@ pub async fn has_admin_permission(
     }
 
     let username = match auth {
-        RequestAuthorization::Session(SessionAuthorization::User(ref username)) => username,
-        RequestAuthorization::Session(SessionAuthorization::Ticket { ref username, .. }) => {
-            username
-        }
-        RequestAuthorization::UserToken { ref username } => username,
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => username,
+        RequestAuthorization::Session(SessionAuthorization::Ticket { username, .. }) => username,
+        RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::AdminToken => unreachable!(),
     };
 

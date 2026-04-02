@@ -6,10 +6,9 @@
 
     export let id: string
     export let name: string
-    export let color = 'success'
 </script>
 
-<Badge color={color} class="d-flex align-items-center">
+<Badge color="success" class="d-flex align-items-center">
     <Fa icon={faUser} class="me-2" />
     <a href="/config/users/{id}" use:link>{name}</a>
 </Badge>

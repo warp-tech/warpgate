@@ -5,13 +5,14 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tracing::{info, warn};
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, Role as RoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{format_related_ids, AuditEvent};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
@@ -107,13 +108,12 @@ impl ListApi {
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
 
-        info!(
-            target: "audit",
-            _type="UserCreated1",
-            user_id=%user.id,
-            username=user.username,
-            "Created user"
-        );
+        AuditEvent::UserCreated {
+            user_id: user.id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+        }
+        .emit();
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
@@ -254,13 +254,12 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
-        info!(
-            target: "audit",
-            _type="UserDeleted1",
-            user_id=%user.id,
-            username=user.username,
-            "Deleted user"
-        );
+        AuditEvent::UserDeleted {
+            user_id: user.id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+        }
+        .emit();
 
         user.delete(&*db).await?;
 
@@ -505,15 +504,15 @@ impl RolesApi {
 
         values.insert(&*db).await.map_err(WarpgateError::from)?;
 
-        info!(
-            target: "audit",
-            _type="AccessRoleGranted1",
-            grantee_id=%grantee.id,
-            grantee_username=grantee.username,
-            role_id=%role.id,
-            role_name=role.name,
-            "Granted access role"
-        );
+        AuditEvent::AccessRoleGranted {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            role_id: role.id,
+            role_name: role.name.clone(),
+            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
 
         Ok(AddUserRoleResponse::Created)
     }
@@ -554,15 +553,15 @@ impl RolesApi {
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
 
-        info!(
-            target: "audit",
-            _type="AccessRoleRevoked1",
-            grantee_id=%grantee.id,
-            grantee_username=grantee.username,
-            role_id=%role.id,
-            role_name=role.name,
-            "Revoked access role"
-        );
+        AuditEvent::AccessRoleRevoked {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            role_id: role.id,
+            role_name: role.name.clone(),
+            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
 
         Ok(DeleteUserRoleResponse::Deleted)
     }
@@ -642,15 +641,15 @@ impl RolesApi {
 
         values.insert(&*db).await.map_err(WarpgateError::from)?;
 
-        info!(
-            target: "audit",
-            _type="AdminRoleGranted1",
-            grantee_id=%grantee.id,
-            grantee_username=grantee.username,
-            admin_role_id=%role.id,
-            admin_role_name=role.name,
-            "Granted admin role"
-        );
+        AuditEvent::AdminRoleGranted {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            admin_role_id: role.id,
+            admin_role_name: role.name.clone(),
+            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            related_admin_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
 
         Ok(AddUserAdminRoleResponse::Created)
     }
@@ -693,15 +692,15 @@ impl RolesApi {
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
 
-        info!(
-            target: "audit",
-            _type="AdminRoleRevoked1",
-            grantee_id=%grantee.id,
-            grantee_username=grantee.username,
-            admin_role_id=%role.id,
-            admin_role_name=role.name,
-            "Revoked admin role"
-        );
+        AuditEvent::AdminRoleRevoked {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            admin_role_id: role.id,
+            admin_role_name: role.name.clone(),
+            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            related_admin_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
 
         Ok(DeleteUserAdminRoleResponse::Deleted)
     }

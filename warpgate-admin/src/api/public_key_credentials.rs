@@ -10,7 +10,8 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::PublicKeyCredential;
+use warpgate_core::logging::{format_related_ids, AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{PublicKeyCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -21,12 +22,11 @@ async fn check_user_ldap_linked(
 ) -> Result<bool, WarpgateError> {
     use warpgate_db_entities::User;
 
-    let user = User::Entity::find_by_id(user_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| WarpgateError::UserNotFound(user_id.to_string()))?;
+    let maybe_user = User::Entity::find_by_id(user_id).one(db).await?;
 
-    Ok(user.ldap_server_id.is_some())
+    Ok(maybe_user
+        .map(|u| u.ldap_server_id.is_some())
+        .unwrap_or(false))
 }
 
 /// Checks if a user is LDAP-linked and returns an error message if they are.
@@ -91,6 +91,8 @@ enum GetPublicKeyCredentialsResponse {
 enum CreatePublicKeyCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingPublicKeyCredential>),
+    #[oai(status = 404)]
+    NotFound,
     #[oai(status = 403)]
     Forbidden(Json<String>),
 }
@@ -150,7 +152,11 @@ impl ListApi {
 
         let db = ctx.services.db.lock().await;
 
-        // Check if user is LDAP-linked
+        // Ensure user exists and is not LDAP-linked
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreatePublicKeyCredentialResponse::NotFound);
+        };
+
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
             return Ok(CreatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
@@ -166,6 +172,17 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let credential_name = body.label.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "public_key".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+        }
+        .emit();
 
         Ok(CreatePublicKeyCredentialResponse::Created(Json(
             object.into(),
@@ -204,7 +221,12 @@ impl DetailApi {
 
         let db = ctx.services.db.lock().await;
 
-        // Check if user is LDAP-linked
+        // Ensure user exists and is not LDAP-linked
+        let _ = match User::Entity::find_by_id(*user_id).one(&*db).await? {
+            Some(user) => user,
+            None => return Ok(UpdatePublicKeyCredentialResponse::NotFound),
+        };
+
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
             return Ok(UpdatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
@@ -257,7 +279,24 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
+        let credential_name = model.label.clone();
         model.delete(&*db).await?;
+
+        let user = match User::Entity::find_by_id(*user_id).one(&*db).await? {
+            Some(user) => user,
+            None => return Ok(DeleteCredentialResponse::NotFound),
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "public_key".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

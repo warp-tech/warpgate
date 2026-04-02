@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-11-ge6c01455-modified"
+    "version": "v0.22.0-beta.4-12-g918a4012-modified"
   },
   "servers": [
     {
@@ -4145,6 +4145,18 @@
           },
           "target": {
             "type": "string"
+          },
+          "related_users": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_access_roles": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_admin_roles": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4451,6 +4463,15 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string"
+          },
+          "related_access_roles": {
+            "type": "string"
+          },
+          "related_admin_roles": {
             "type": "string"
           }
         }

@@ -106,8 +106,6 @@ enum GetRoleResponse {
 enum UpdateRoleResponse {
     #[oai(status = 200)]
     Ok(Json<RoleConfig>),
-    #[oai(status = 403)]
-    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -116,8 +114,6 @@ enum UpdateRoleResponse {
 enum DeleteRoleResponse {
     #[oai(status = 204)]
     Deleted,
-    #[oai(status = 403)]
-    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }

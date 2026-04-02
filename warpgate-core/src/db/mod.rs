@@ -9,7 +9,6 @@ use sea_orm::{
 use tracing::*;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
-use warpgate_db_entities::LogEntry;
 use warpgate_db_migrations::migrate_database;
 
 use crate::recordings::SessionRecordings;

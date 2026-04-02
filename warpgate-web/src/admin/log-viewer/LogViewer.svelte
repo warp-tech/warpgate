@@ -1,5 +1,5 @@
 <script lang="ts">
-import { api, type GetLogsOperationRequest, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
+import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
@@ -15,6 +15,9 @@ interface Props {
     filters?: {
         sessionId?: string,
         target?: string,
+        relatedUsers?: string,
+        relatedAccessRoles?: string,
+        relatedAdminRoles?: string,
     }
 }
 
@@ -159,7 +162,41 @@ interface UserDeleted1 {
     username: string
 }
 
-function parseRichLogEntry(entry: LogEntry): AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | null {
+interface CredentialCreated1 {
+    _type: 'CredentialCreated1'
+    credential_type: string
+    credential_name?: string
+    via: 'admin' | 'self-service'
+    user_id: string
+    username: string
+}
+
+interface CredentialDeleted1 {
+    _type: 'CredentialDeleted1'
+    credential_type: string
+    credential_name?: string
+    via: 'admin' | 'self-service'
+    user_id: string
+    username: string
+}
+
+interface TicketCreated1 {
+    _type: 'TicketCreated1'
+    ticket_id: string
+    username: string
+    target: string
+}
+
+interface TicketDeleted1 {
+    _type: 'TicketDeleted1'
+    ticket_id: string
+    username: string
+    target: string
+}
+
+type RichLogEntry = AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | CredentialCreated1 | CredentialDeleted1 | TicketCreated1 | TicketDeleted1
+
+function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     if (entry.values._type === 'AccessRoleGranted1') {
         return entry.values as AccessRoleGranted1
     } else if (entry.values._type === 'AccessRoleRevoked1') {
@@ -172,6 +209,14 @@ function parseRichLogEntry(entry: LogEntry): AccessRoleGranted1 | AccessRoleRevo
         return entry.values as UserCreated1
     } else if (entry.values._type === 'UserDeleted1') {
         return entry.values as UserDeleted1
+    } else if (entry.values._type === 'CredentialCreated1') {
+        return entry.values as CredentialCreated1
+    } else if (entry.values._type === 'CredentialDeleted1') {
+        return entry.values as CredentialDeleted1
+    } else if (entry.values._type === 'TicketCreated1') {
+        return entry.values as TicketCreated1
+    } else if (entry.values._type === 'TicketDeleted1') {
+        return entry.values as TicketDeleted1
     }
     return null
 }
@@ -218,38 +263,76 @@ function parseRichLogEntry(entry: LogEntry): AccessRoleGranted1 | AccessRoleRevo
                                 Granted
                                 <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
                                 access role to
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} color="success" />
+                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
                             </div>
                             {:else if richEntry?._type === 'AccessRoleRevoked1'}
                             <div class="rich-entry">
                                 Revoked
                                 <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
                                 access role from
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} color="danger" />
+                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
                             </div>
                             {:else if richEntry?._type === 'AdminRoleGranted1'}
                             <div class="rich-entry">
                                 Granted
                                 <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
                                 admin role to
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} color="success" />
+                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
                             </div>
                             {:else if richEntry?._type === 'AdminRoleRevoked1'}
                             <div class="rich-entry">
                                 Revoked
                                 <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
                                 admin role from
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} color="danger" />
+                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
                             </div>
                             {:else if richEntry?._type === 'UserCreated1'}
                             <div class="rich-entry">
                                 Created user
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} color="success" />
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
                             </div>
                             {:else if richEntry?._type === 'UserDeleted1'}
                             <div class="rich-entry">
                                 Deleted user
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} color="danger" />
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                            </div>
+                            {:else if richEntry?._type === 'CredentialCreated1'}
+                            <div class="rich-entry">
+                                Added {richEntry.credential_type} credential
+                                {#if richEntry.credential_name}
+                                    <strong>{richEntry.credential_name}</strong>
+                                {/if}
+                                for
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                {#if richEntry.via === 'self-service'}
+                                    <span class="badge bg-secondary">self-service</span>
+                                {/if}
+                            </div>
+                            {:else if richEntry?._type === 'CredentialDeleted1'}
+                            <div class="rich-entry">
+                                Removed {richEntry.credential_type} credential
+                                {#if richEntry.credential_name}
+                                    <strong>{richEntry.credential_name}</strong>
+                                {/if}
+                                from
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                {#if richEntry.via === 'self-service'}
+                                    <span class="badge bg-secondary">self-service</span>
+                                {/if}
+                            </div>
+                            {:else if richEntry?._type === 'TicketCreated1'}
+                            <div class="rich-entry">
+                                Created ticket for
+                                <strong>{richEntry.username}</strong>
+                                to target
+                                <strong>{richEntry.target}</strong>
+                            </div>
+                            {:else if richEntry?._type === 'TicketDeleted1'}
+                            <div class="rich-entry">
+                                Deleted ticket for
+                                <strong>{richEntry.username}</strong>
+                                targeting
+                                <strong>{richEntry.target}</strong>
                             </div>
                             {:else}
                                 <span class="text">

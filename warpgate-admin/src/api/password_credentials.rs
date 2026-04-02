@@ -6,7 +6,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, Secret, UserPasswordCredential, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::PasswordCredential;
+use warpgate_core::logging::{format_related_ids, AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{PasswordCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -37,6 +38,8 @@ enum GetPasswordCredentialsResponse {
 enum CreatePasswordCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingPasswordCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 pub struct ListApi;
@@ -95,6 +98,20 @@ impl ListApi {
         .await
         .map_err(WarpgateError::from)?;
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreatePasswordCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialCreated {
+            credential_type: "password".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+        }
+        .emit();
+
         Ok(CreatePasswordCredentialResponse::Created(Json(
             object.into(),
         )))
@@ -138,6 +155,21 @@ impl DetailApi {
         };
 
         model.delete(&*db).await?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "password".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

@@ -63,7 +63,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             }
 
             if let Some(ticket) = ticket_value {
-                if let Some((ticket_model, _user_info)) = {
+                if let Some((ticket_model, user_info)) = {
                     let ticket_secret = Secret::new(ticket);
                     if let Some((ticket, user_info)) =
                         authorize_ticket(&ctx.services.db, &ticket_secret).await?
@@ -75,6 +75,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     }
                 } {
                     session.set_auth(SessionAuthorization::Ticket {
+                        user_id: user_info.id,
                         username: ticket_model.username,
                         target_name: ticket_model.target,
                     });

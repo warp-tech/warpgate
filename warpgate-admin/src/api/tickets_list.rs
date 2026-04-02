@@ -9,6 +9,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{format_related_ids, AuditEvent};
 use warpgate_db_entities::Ticket;
 
 use super::AnySecurityScheme;
@@ -95,6 +96,14 @@ impl Api {
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;
+
+        AuditEvent::TicketCreated {
+            ticket_id: ticket.id,
+            username: ticket.username.clone(),
+            target: ticket.target.clone(),
+            related_users: format_related_ids(&[ticket.id, ctx.auth.user_id()]),
+        }
+        .emit();
 
         Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
             secret: secret.expose_secret().to_string(),

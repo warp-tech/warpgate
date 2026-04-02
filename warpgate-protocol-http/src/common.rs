@@ -112,9 +112,9 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
     }
 
     let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User(username)) => username,
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
-        RequestAuthorization::UserToken { username } => username,
+        RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
@@ -242,7 +242,10 @@ pub async fn authorize_session(
         .await
         .set_user_info(user_info.clone())
         .await?;
-    session.set_auth(SessionAuthorization::User(user_info.username));
+    session.set_auth(SessionAuthorization::User {
+        user_id: user_info.id,
+        username: user_info.username,
+    });
 
     Ok(())
 }
@@ -303,6 +306,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                     .await?
                 {
                     Some(RequestAuthorization::UserToken {
+                        user_id: user.id,
                         username: user.username,
                     })
                 } else {

@@ -28,6 +28,24 @@
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte') as any,
         }),
+        '/log/user/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'user',
+            },
+        }),
+        '/log/access-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'access-role',
+            },
+        }),
+        '/log/admin-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'admin-role',
+            },
+        }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte') as any,
         }),

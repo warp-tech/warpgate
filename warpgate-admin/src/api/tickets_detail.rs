@@ -5,6 +5,7 @@ use sea_orm::{EntityTrait, ModelTrait};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{format_related_ids, AuditEvent};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -42,6 +43,14 @@ impl Api {
 
         match ticket {
             Some(ticket) => {
+                AuditEvent::TicketDeleted {
+                    ticket_id: ticket.id,
+                    username: ticket.username.clone(),
+                    target: ticket.target.clone(),
+                    related_users: format_related_ids(&[ticket.id, ctx.auth.user_id()]),
+                }
+                .emit();
+
                 ticket.delete(&*db).await?;
                 Ok(DeleteTicketResponse::Deleted)
             }

@@ -183,6 +183,10 @@
         {/if}
 
         <div class="d-flex mt-3">
+            <a href="/log/admin-role/{params.id}" use:link class="btn btn-secondary">
+                Audit log
+            </a>
+
             <AsyncButton
                 color="primary"
                 disabled={disabled}
