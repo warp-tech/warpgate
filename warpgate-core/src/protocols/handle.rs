@@ -3,10 +3,12 @@ use std::sync::Arc;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
+use tracing::{info_span, Instrument};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
+use crate::logging::AuditEvent;
 use crate::rate_limiting::{stack_rate_limiters, RateLimiterRegistry};
 use crate::{SessionState, State};
 
@@ -77,11 +79,18 @@ impl WarpgateServerHandle {
 
     pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
-        {
+        let previous_target = {
             let mut state = self.session_state.lock().await;
-            state.target = Some(target.clone());
-            state.emit_change()
-        }
+            let previous_target = std::mem::replace(&mut state.target, Some(target.clone()));
+            state.emit_change();
+            previous_target
+        };
+
+        let Some(user_info) = self.session_state.lock().await.user_info.clone() else {
+            return Err(WarpgateError::InconsistentState(
+                "set_target called before set_user_info".into(),
+            ));
+        };
 
         let db = self.db.lock().await;
 
@@ -97,6 +106,17 @@ impl WarpgateServerHandle {
             .await?;
 
         drop(db);
+
+        if previous_target.map(|x| x.id) != Some(target.id) {
+            AuditEvent::TargetSessionStarted {
+                session_id: self.id,
+                target_id: target.id,
+                target_name: target.name.clone(),
+                user_id: user_info.id,
+                username: user_info.username.clone(),
+            }
+            .emit();
+        }
 
         self.update_rate_limiters().await?;
 
@@ -130,8 +150,18 @@ impl Drop for WarpgateServerHandle {
     fn drop(&mut self) {
         let id = self.id;
         let state = self.state.clone();
+        let session_state = self.session_state.clone();
         tokio::spawn(async move {
-            state.lock().await.remove_session(id).await;
+            // session ID from the span is needed for the audit log to get stored in the DB
+            let username = session_state
+                .lock()
+                .await
+                .user_info
+                .as_ref()
+                .map(|x| x.username.clone())
+                .unwrap_or_else(|| "".to_string());
+            let span = info_span!("SSH", session=%id, session_username=%username);
+            state.lock().await.remove_session(id).instrument(span).await;
         });
     }
 }

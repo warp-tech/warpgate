@@ -71,17 +71,16 @@ impl Api {
             }
         }
         if let Some(ref related_user) = body.related_users {
-            q = q.filter(LogEntry::Column::RelatedUsers.contains(&format!("${}$", related_user)));
+            q = q.filter(LogEntry::Column::RelatedUsers.contains(format!("${}$", related_user)));
         }
         if let Some(ref related_access_role) = body.related_access_roles {
             q = q.filter(
-                LogEntry::Column::RelatedAccessRoles
-                    .contains(&format!("${}$", related_access_role)),
+                LogEntry::Column::RelatedAccessRoles.contains(format!("${}$", related_access_role)),
             );
         }
         if let Some(ref related_admin_role) = body.related_admin_roles {
             q = q.filter(
-                LogEntry::Column::RelatedAdminRoles.contains(&format!("${}$", related_admin_role)),
+                LogEntry::Column::RelatedAdminRoles.contains(format!("${}$", related_admin_role)),
             );
         }
         if let Some(ref search) = body.search {

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::logging::{format_related_ids, AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
 
 use super::AnySecurityScheme;
@@ -159,7 +159,7 @@ impl ListApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -265,7 +265,7 @@ impl DetailApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[*user_id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 

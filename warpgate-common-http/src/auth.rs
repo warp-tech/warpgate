@@ -79,7 +79,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken => Uuid::nil().into(),
+            Self::AdminToken => Uuid::nil(),
         }
     }
 }

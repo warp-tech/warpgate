@@ -9,7 +9,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
-use warpgate_core::logging::{format_related_ids, AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
     self as entities, CertificateCredential, Parameters, PasswordCredential, PublicKeyCredential,
 };
@@ -344,7 +344,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -389,7 +389,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -434,7 +434,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -482,7 +482,7 @@ impl Api {
         );
 
         let user = entities::User::ActiveModel::try_from(user_cfg)?;
-        let user = user.update(&*db).await?;
+        user.update(&*db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),
@@ -490,7 +490,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id,
             username,
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -533,7 +533,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -586,7 +586,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -643,7 +643,7 @@ impl Api {
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 

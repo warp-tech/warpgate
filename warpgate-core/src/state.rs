@@ -11,6 +11,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
+use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
 
@@ -91,7 +92,19 @@ impl State {
     }
 
     pub async fn remove_session(&mut self, id: SessionId) {
-        self.sessions.remove(&id);
+        if let Some(session_state) = self.sessions.remove(&id) {
+            let state_guard = session_state.lock().await;
+            if let (Some(user_info), Some(target)) = (&state_guard.user_info, &state_guard.target) {
+                AuditEvent::TargetSessionEnded {
+                    session_id: id,
+                    target_id: target.id,
+                    target_name: target.name.clone(),
+                    user_id: user_info.id,
+                    username: user_info.username.clone(),
+                }
+                .emit();
+            }
+        }
 
         if let Err(error) = self.mark_session_complete(id).await {
             error!(%error, %id, "Could not update session in the DB");

@@ -33,8 +33,8 @@ pub enum WarpgateError {
     ExternalHostNotWhitelisted(String, Vec<String>),
     #[error("URL contains no host")]
     NoHostInUrl,
-    #[error("Inconsistent state error")]
-    InconsistentState,
+    #[error("Inconsistent state: {0}")]
+    InconsistentState(String),
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]

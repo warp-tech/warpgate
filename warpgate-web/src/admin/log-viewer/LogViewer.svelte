@@ -10,6 +10,7 @@ import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 import UserBadge from './UserBadge.svelte'
 import AccessRoleBadge from './AccessRoleBadge.svelte'
 import AdminRoleBadge from './AdminRoleBadge.svelte'
+import TargetBadge from './TargetBadge.svelte'
 
 interface Props {
     filters?: {
@@ -180,6 +181,24 @@ interface CredentialDeleted1 {
     username: string
 }
 
+interface TargetSessionStarted1 {
+    _type: 'TargetSessionStarted1'
+    session_id: string
+    target_id: string
+    target_name: string
+    user_id: string
+    username: string
+}
+
+interface TargetSessionEnded1 {
+    _type: 'TargetSessionEnded1'
+    session_id: string
+    target_id: string
+    target_name: string
+    user_id: string
+    username: string
+}
+
 interface TicketCreated1 {
     _type: 'TicketCreated1'
     ticket_id: string
@@ -194,7 +213,7 @@ interface TicketDeleted1 {
     target: string
 }
 
-type RichLogEntry = AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | CredentialCreated1 | CredentialDeleted1 | TicketCreated1 | TicketDeleted1
+type RichLogEntry = AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | TargetSessionStarted1 | TargetSessionEnded1 | CredentialCreated1 | CredentialDeleted1 | TicketCreated1 | TicketDeleted1
 
 function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     if (entry.values._type === 'AccessRoleGranted1') {
@@ -209,6 +228,10 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
         return entry.values as UserCreated1
     } else if (entry.values._type === 'UserDeleted1') {
         return entry.values as UserDeleted1
+    } else if (entry.values._type === 'TargetSessionStarted1') {
+        return entry.values as TargetSessionStarted1
+    } else if (entry.values._type === 'TargetSessionEnded1') {
+        return entry.values as TargetSessionEnded1
     } else if (entry.values._type === 'CredentialCreated1') {
         return entry.values as CredentialCreated1
     } else if (entry.values._type === 'CredentialDeleted1') {
@@ -295,6 +318,20 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                             <div class="rich-entry">
                                 Deleted user
                                 <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                            </div>
+                            {:else if richEntry?._type === 'TargetSessionStarted1'}
+                            <div class="rich-entry">
+                                Target session started for
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                on target
+                                <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
+                            </div>
+                            {:else if richEntry?._type === 'TargetSessionEnded1'}
+                            <div class="rich-entry">
+                                Target session ended for
+                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                on target
+                                <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
                             </div>
                             {:else if richEntry?._type === 'CredentialCreated1'}
                             <div class="rich-entry">

@@ -111,7 +111,7 @@ impl ListApi {
         AuditEvent::UserCreated {
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -257,7 +257,7 @@ impl DetailApi {
         AuditEvent::UserDeleted {
             user_id: user.id,
             username: user.username.clone(),
-            related_users: format_related_ids(&[user.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
         }
         .emit();
 
@@ -509,7 +509,7 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             role_id: role.id,
             role_name: role.name.clone(),
-            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
             related_access_roles: format_related_ids(&[role.id]),
         }
         .emit();
@@ -558,7 +558,7 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             role_id: role.id,
             role_name: role.name.clone(),
-            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
             related_access_roles: format_related_ids(&[role.id]),
         }
         .emit();
@@ -646,7 +646,7 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             admin_role_id: role.id,
             admin_role_name: role.name.clone(),
-            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
             related_admin_roles: format_related_ids(&[role.id]),
         }
         .emit();
@@ -697,7 +697,7 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             admin_role_id: role.id,
             admin_role_name: role.name.clone(),
-            related_users: format_related_ids(&[grantee.id, ctx.auth.user_id()]),
+            actor_user_id: ctx.auth.user_id(),
             related_admin_roles: format_related_ids(&[role.id]),
         }
         .emit();

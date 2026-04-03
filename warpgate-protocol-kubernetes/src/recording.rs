@@ -152,6 +152,7 @@ pub async fn start_recording_exec(
 
 pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
     let path = target_url.path();
+    #[allow(clippy::unwrap_used, reason = "static regex")]
     let exec_url_regex =
         Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
     if let Some(captures) = exec_url_regex.captures(path) {

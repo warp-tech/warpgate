@@ -3,6 +3,8 @@ use std::fmt::Display;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::logging::format_related_ids;
+
 #[derive(Clone)]
 pub enum CredentialChangedVia {
     Admin,
@@ -26,7 +28,7 @@ pub enum AuditEvent {
         via: CredentialChangedVia,
         user_id: Uuid,
         username: String,
-        related_users: String,
+        actor_user_id: Uuid,
     },
     CredentialDeleted {
         credential_type: String,
@@ -34,24 +36,38 @@ pub enum AuditEvent {
         via: CredentialChangedVia,
         user_id: Uuid,
         username: String,
-        related_users: String,
+        actor_user_id: Uuid,
     },
     UserCreated {
         user_id: Uuid,
         username: String,
-        related_users: String,
+        actor_user_id: Uuid,
     },
     UserDeleted {
         user_id: Uuid,
         username: String,
-        related_users: String,
+        actor_user_id: Uuid,
+    },
+    TargetSessionStarted {
+        session_id: Uuid,
+        target_name: String,
+        target_id: Uuid,
+        user_id: Uuid,
+        username: String,
+    },
+    TargetSessionEnded {
+        session_id: Uuid,
+        target_name: String,
+        target_id: Uuid,
+        user_id: Uuid,
+        username: String,
     },
     AccessRoleGranted {
         grantee_id: Uuid,
         grantee_username: String,
         role_id: Uuid,
         role_name: String,
-        related_users: String,
+        actor_user_id: Uuid,
         related_access_roles: String,
     },
     AccessRoleRevoked {
@@ -59,7 +75,7 @@ pub enum AuditEvent {
         grantee_username: String,
         role_id: Uuid,
         role_name: String,
-        related_users: String,
+        actor_user_id: Uuid,
         related_access_roles: String,
     },
     AdminRoleGranted {
@@ -67,7 +83,7 @@ pub enum AuditEvent {
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        related_users: String,
+        actor_user_id: Uuid,
         related_admin_roles: String,
     },
     AdminRoleRevoked {
@@ -75,20 +91,22 @@ pub enum AuditEvent {
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        related_users: String,
+        actor_user_id: Uuid,
         related_admin_roles: String,
     },
     TicketCreated {
         ticket_id: Uuid,
+        user_id: Uuid,
         username: String,
         target: String,
-        related_users: String,
+        actor_user_id: Uuid,
     },
     TicketDeleted {
         ticket_id: Uuid,
+        user_id: Uuid,
         username: String,
         target: String,
-        related_users: String,
+        actor_user_id: Uuid,
     },
 }
 
@@ -101,7 +119,7 @@ impl AuditEvent {
                 via,
                 user_id,
                 username,
-                related_users,
+                actor_user_id,
             } => {
                 if let Some(credential_name) = credential_name {
                     info!(
@@ -112,7 +130,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                         "Created credential"
                     );
                 } else {
@@ -123,7 +141,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                         "Created credential"
                     );
                 }
@@ -134,7 +152,7 @@ impl AuditEvent {
                 via,
                 user_id,
                 username,
-                related_users,
+                actor_user_id,
             } => {
                 if let Some(credential_name) = credential_name {
                     info!(
@@ -145,7 +163,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                         "Deleted credential"
                     );
                 } else {
@@ -156,7 +174,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                         "Deleted credential"
                     );
                 }
@@ -164,28 +182,28 @@ impl AuditEvent {
             AuditEvent::UserCreated {
                 user_id,
                 username,
-                related_users,
+                actor_user_id,
             } => {
                 info!(
                     target: "audit",
                     _type = "UserCreated1",
                     user_id = %user_id,
                     username = %username,
-                    ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Created user"
                 );
             }
             AuditEvent::UserDeleted {
                 user_id,
                 username,
-                related_users,
+                actor_user_id,
             } => {
                 info!(
                     target: "audit",
                     _type = "UserDeleted1",
                     user_id = %user_id,
                     username = %username,
-                    ?related_users,
+                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted user"
                 );
             }
@@ -194,7 +212,7 @@ impl AuditEvent {
                 grantee_username,
                 role_id,
                 role_name,
-                related_users,
+                actor_user_id,
                 related_access_roles,
             } => {
                 info!(
@@ -204,7 +222,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                    ?related_users,
+                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Granted access role"
                 );
@@ -214,7 +232,7 @@ impl AuditEvent {
                 grantee_username,
                 role_id,
                 role_name,
-                related_users,
+                actor_user_id,
                 related_access_roles,
             } => {
                 info!(
@@ -224,7 +242,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                    ?related_users,
+                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Revoked access role"
                 );
@@ -234,7 +252,7 @@ impl AuditEvent {
                 grantee_username,
                 admin_role_id,
                 admin_role_name,
-                related_users,
+                actor_user_id,
                 related_admin_roles,
             } => {
                 info!(
@@ -244,7 +262,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                    ?related_users,
+                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_admin_roles,
                     "Granted admin role"
                 );
@@ -254,7 +272,7 @@ impl AuditEvent {
                 grantee_username,
                 admin_role_id,
                 admin_role_name,
-                related_users,
+                actor_user_id,
                 related_admin_roles,
             } => {
                 info!(
@@ -264,16 +282,55 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                    ?related_users,
+                    related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_admin_roles,
                     "Revoked admin role"
                 );
             }
+            AuditEvent::TargetSessionStarted {
+                session_id,
+                target_id,
+                target_name,
+                user_id,
+                username,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetSessionStarted1",
+                    session_id = %session_id,
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    user_id = %user_id,
+                    username = %username,
+                    related_users = ?format_related_ids(&[*user_id]),
+                    "Target session started"
+                );
+            }
+            AuditEvent::TargetSessionEnded {
+                session_id,
+                target_id,
+                target_name,
+                user_id,
+                username,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetSessionEnded1",
+                    session_id = %session_id,
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    user_id = %user_id,
+                    username = %username,
+                    related_users = ?format_related_ids(&[*user_id]),
+                    "Target session ended"
+                );
+            }
             AuditEvent::TicketCreated {
                 ticket_id,
+                user_id,
                 username,
                 target,
-                related_users,
+                actor_user_id,
             } => {
                 info!(
                     target: "audit",
@@ -281,15 +338,16 @@ impl AuditEvent {
                     ticket_id = %ticket_id,
                     username = %username,
                     target = %target,
-                    ?related_users,
+                    related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Created ticket"
                 );
             }
             AuditEvent::TicketDeleted {
                 ticket_id,
+                user_id,
                 username,
                 target,
-                related_users,
+                actor_user_id,
             } => {
                 info!(
                     target: "audit",
@@ -297,7 +355,7 @@ impl AuditEvent {
                     ticket_id = %ticket_id,
                     username = %username,
                     target = %target,
-                    ?related_users,
+                    related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted ticket"
                 );
             }

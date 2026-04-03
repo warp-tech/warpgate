@@ -332,7 +332,9 @@ async fn run_websocket_recording(mut recorder: TerminalRecorder, mut rx: mpsc::R
         if data.is_empty() {
             continue;
         }
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let msg_type = data[0];
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let data = data[1..].to_vec();
 
         let result = match msg_type {

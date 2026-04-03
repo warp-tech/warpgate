@@ -195,7 +195,9 @@ pub async fn get_auth_state_for_request(
     }
 
     if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
+        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
+            "unknown auth state id".into(),
+        ))?;
 
         let existing_matched = state.lock().await.user_info().username == username;
         if existing_matched {
