@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-17-g75b5fc29-modified"
+    "version": "v0.22.0-beta.4-18-g75b5fc29-modified"
   },
   "servers": [
     {
@@ -4926,15 +4926,41 @@
           },
           {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
-            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetCertificateAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetPasswordAuth": {
         "allOf": [
@@ -5015,6 +5041,10 @@
             "type": "string"
           }
         }
+      },
+      "SshTargetCertificateAuth": {
+        "type": "object",
+        "title": "SshTargetCertificateAuth"
       },
       "SshTargetPasswordAuth": {
         "type": "object",

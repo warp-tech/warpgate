@@ -49,6 +49,18 @@
             </div>
         {/each}
     </div>
+    <h2>Warpgate's own Certificate Authority</h2>
+    <Alert color="info">Add theses keys to the file referrenced by your targets' <code>TrustedUserCAKeys</code></Alert>
+    <div class="list-group list-group-flush">
+        {#each ownKeys as key (key)}
+            <div class="list-group-item d-flex">
+                <pre>{key.kind} {key.publicKeyBase64}</pre>
+                <div class="ms-auto">
+                    <CopyButton class="ms-3 px-0" text={key.kind + ' ' + key.publicKeyBase64} />
+                </div>
+            </div>
+        {/each}
+    </div>
 {/if}
 
 <div class="mb-3"></div>
