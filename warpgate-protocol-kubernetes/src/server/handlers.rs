@@ -78,8 +78,8 @@ pub async fn handle_api_request(
     let (session_id, log_span) = {
         let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
             handle.lock().await;
-        handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
+        handle.set_target(&target).await?;
         (
             handle.id(),
             span_for_request(req, &ctx.services, Some(&*handle)).await?,
