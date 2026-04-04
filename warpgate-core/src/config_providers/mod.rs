@@ -77,7 +77,7 @@ pub trait ConfigProvider {
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
-) -> Result<Option<(e::Ticket::Model, AuthStateUserInfo)>, WarpgateError> {
+) -> Result<Option<(e::Ticket::Model, e::Target::Model, AuthStateUserInfo)>, WarpgateError> {
     let db = db.lock().await;
     let ticket = {
         e::Ticket::Entity::find()
@@ -99,17 +99,26 @@ pub async fn authorize_ticket(
                 }
             }
 
-            // TODO maybe Ticket could properly reference the user model and then
-            // AuthStateUserInfo could be constructed from it
-            let Some(ticket_user) = e::User::Entity::find()
-                .filter(e::User::Column::Username.eq(ticket.username.clone()))
+            let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id)
                 .one(&*db)
                 .await?
             else {
-                return Err(WarpgateError::UserNotFound(ticket.username.clone()));
+                return Err(WarpgateError::UserNotFound(ticket.user_id.to_string()));
             };
 
-            Ok(Some((ticket, (&User::try_from(ticket_user)?).into())))
+            let Some(ticket_target) = e::Target::Entity::find_by_id(ticket.target_id)
+                .one(&*db)
+                .await?
+            else {
+                warn!("Ticket target not found: {}", &ticket.target_id);
+                return Ok(None);
+            };
+
+            Ok(Some((
+                ticket,
+                ticket_target,
+                (&User::try_from(ticket_user)?).into(),
+            )))
         }
         None => {
             warn!("Ticket not found: {}", &secret.expose_secret());

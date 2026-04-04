@@ -81,7 +81,7 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
         let previous_target = {
             let mut state = self.session_state.lock().await;
-            let previous_target = std::mem::replace(&mut state.target, Some(target.clone()));
+            let previous_target = state.target.replace(target.clone());
             state.emit_change();
             previous_target
         };
