@@ -727,7 +727,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
     async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
         let db = self.db.lock().await;
-        let Some(ticket) = entities::ApiToken::Entity::find()
+        let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
                 entities::ApiToken::Column::Secret
                     .eq(token)
@@ -739,7 +739,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let Some(user) = ticket
+        let Some(user) = api_token
             .find_related(entities::User::Entity)
             .one(&*db)
             .await?
