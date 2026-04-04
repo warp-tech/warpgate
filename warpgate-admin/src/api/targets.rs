@@ -14,7 +14,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -270,6 +270,11 @@ impl DetailApi {
 
         TargetRoleAssignment::Entity::delete_many()
             .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
+            .exec(&*db)
+            .await?;
+
+        Ticket::Entity::delete_many()
+            .filter(Ticket::Column::TargetId.eq(target.id))
             .exec(&*db)
             .await?;
 
