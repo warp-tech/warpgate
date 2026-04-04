@@ -744,7 +744,9 @@ impl ConfigProvider for DatabaseConfigProvider {
             .one(&*db)
             .await?
         else {
-            return Err(WarpgateError::InconsistentState);
+            return Err(WarpgateError::InconsistentState(
+                "No user matching the ticket username".into(),
+            ));
         };
 
         Ok(Some(user.try_into()?))

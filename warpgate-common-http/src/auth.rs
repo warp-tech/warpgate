@@ -7,8 +7,12 @@ pub struct AuthStateId(pub Uuid);
 /// Represents the source of authentication of a session
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum SessionAuthorization {
-    User(String),
+    User {
+        user_id: Uuid,
+        username: String,
+    },
     Ticket {
+        user_id: Uuid,
         username: String,
         target_name: String,
     },
@@ -17,8 +21,15 @@ pub enum SessionAuthorization {
 impl SessionAuthorization {
     pub fn username(&self) -> &String {
         match self {
-            Self::User(username) => username,
+            Self::User { username, .. } => username,
             Self::Ticket { username, .. } => username,
+        }
+    }
+
+    pub fn user_id(&self) -> Uuid {
+        match self {
+            Self::User { user_id, .. } => *user_id,
+            Self::Ticket { user_id, .. } => *user_id,
         }
     }
 }
@@ -27,7 +38,7 @@ impl SessionAuthorization {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
-    UserToken { username: String },
+    UserToken { user_id: Uuid, username: String },
     AdminToken,
 }
 
@@ -58,8 +69,17 @@ impl RequestAuthorization {
     pub fn username(&self) -> Option<&String> {
         match self {
             Self::Session(auth) => Some(auth.username()),
-            Self::UserToken { username } => Some(username),
+            Self::UserToken { username, .. } => Some(username),
             Self::AdminToken => None,
+        }
+    }
+
+    /// Returns a user ID if present in the authorization context.
+    pub fn user_id(&self) -> Uuid {
+        match self {
+            Self::Session(auth) => auth.user_id(),
+            Self::UserToken { user_id, .. } => *user_id,
+            Self::AdminToken => Uuid::nil(),
         }
     }
 }

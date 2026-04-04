@@ -6,7 +6,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserTotpCredential, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::OtpCredential;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{OtpCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -45,6 +46,8 @@ enum GetOtpCredentialsResponse {
 enum CreateOtpCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingOtpCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 pub struct ListApi;
@@ -101,6 +104,20 @@ impl ListApi {
         .await
         .map_err(WarpgateError::from)?;
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreateOtpCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialCreated {
+            credential_type: "otp".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
 }
@@ -142,6 +159,21 @@ impl DetailApi {
         };
 
         role.delete(&*db).await?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "otp".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

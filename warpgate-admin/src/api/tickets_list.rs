@@ -4,12 +4,13 @@ use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, EntityTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::Ticket;
+use warpgate_core::logging::AuditEvent;
+use warpgate_db_entities::{Ticket, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -69,7 +70,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateTicketRequest>,
         _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<CreateTicketResponse> {
+    ) -> Result<CreateTicketResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
 
         use warpgate_db_entities::Ticket;
@@ -82,6 +83,14 @@ impl Api {
         }
 
         let db = ctx.services.db.lock().await;
+        let Some(user) = User::Entity::find()
+            .filter(User::Column::Username.eq(body.username.clone()))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(CreateTicketResponse::BadRequest(Json("username".into())));
+        };
+
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -95,6 +104,15 @@ impl Api {
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;
+
+        AuditEvent::TicketCreated {
+            ticket_id: ticket.id,
+            user_id: user.id,
+            username: ticket.username.clone(),
+            target: ticket.target.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
             secret: secret.expose_secret().to_string(),

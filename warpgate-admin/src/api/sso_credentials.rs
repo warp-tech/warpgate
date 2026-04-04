@@ -6,7 +6,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, ModelTrait, Que
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::SsoCredential;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{SsoCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -53,6 +54,8 @@ enum GetSsoCredentialsResponse {
 enum CreateSsoCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingSsoCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -116,6 +119,21 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreateSsoCredentialResponse::NotFound);
+        };
+
+        let credential_name = body.email.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "sso".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateSsoCredentialResponse::Created(Json(object.into())))
     }
@@ -189,7 +207,25 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
+        let user = match User::Entity::find_by_id(*user_id).one(&*db).await? {
+            Some(user) => user,
+            None => return Ok(DeleteCredentialResponse::NotFound),
+        };
+
+        let credential_name = role.email.clone();
+
         role.delete(&*db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "sso".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

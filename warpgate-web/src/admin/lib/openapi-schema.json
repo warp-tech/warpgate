@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.2-1-g389616d3-modified"
+    "version": "v0.22.0-beta.4-12-g918a4012-modified"
   },
   "servers": [
     {
@@ -2098,6 +2098,9 @@
           },
           "409": {
             "description": ""
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2229,6 +2232,9 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         },
@@ -4136,6 +4142,21 @@
           },
           "search": {
             "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_access_roles": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_admin_roles": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4416,6 +4437,7 @@
         "required": [
           "id",
           "text",
+          "target",
           "values",
           "timestamp",
           "session_id"
@@ -4428,6 +4450,9 @@
           "text": {
             "type": "string"
           },
+          "target": {
+            "type": "string"
+          },
           "values": {},
           "timestamp": {
             "type": "string",
@@ -4438,6 +4463,15 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string"
+          },
+          "related_access_roles": {
+            "type": "string"
+          },
+          "related_admin_roles": {
             "type": "string"
           }
         }

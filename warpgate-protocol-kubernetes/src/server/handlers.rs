@@ -78,8 +78,8 @@ pub async fn handle_api_request(
     let (session_id, log_span) = {
         let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
             handle.lock().await;
-        handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
+        handle.set_target(&target).await?;
         (
             handle.id(),
             span_for_request(req, &ctx.services, Some(&*handle)).await?,
@@ -332,7 +332,9 @@ async fn run_websocket_recording(mut recorder: TerminalRecorder, mut rx: mpsc::R
         if data.is_empty() {
             continue;
         }
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let msg_type = data[0];
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let data = data[1..].to_vec();
 
         let result = match msg_type {

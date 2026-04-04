@@ -9,6 +9,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
     self as entities, CertificateCredential, Parameters, PasswordCredential, PublicKeyCredential,
 };
@@ -248,31 +249,31 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
         };
 
-        let user = User::try_from(user_model.clone())?;
+        let user_cfg = User::try_from(user.clone())?;
 
-        let otp_creds = user_model
+        let otp_creds = user
             .find_related(entities::OtpCredential::Entity)
             .all(&*db)
             .await?;
-        let password_creds = user_model
+        let password_creds = user
             .find_related(entities::PasswordCredential::Entity)
             .all(&*db)
             .await?;
-        let sso_creds = user_model
+        let sso_creds = user
             .find_related(entities::SsoCredential::Entity)
             .all(&*db)
             .await?;
 
-        let pk_creds = user_model
+        let pk_creds = user
             .find_related(entities::PublicKeyCredential::Entity)
             .all(&*db)
             .await?;
 
-        let cert_creds = user_model
+        let cert_creds = user
             .find_related(entities::CertificateCredential::Entity)
             .all(&*db)
             .await?;
@@ -287,8 +288,8 @@ impl Api {
             public_keys: pk_creds.into_iter().map(Into::into).collect(),
             certificates: cert_creds.into_iter().map(Into::into).collect(),
             sso: sso_creds.into_iter().map(Into::into).collect(),
-            credential_policy: user.credential_policy.unwrap_or_default(),
-            ldap_linked: user_model.ldap_server_id.is_some(),
+            credential_policy: user_cfg.credential_policy.unwrap_or_default(),
+            ldap_linked: user.ldap_server_id.is_some(),
         })))
     }
 
@@ -307,19 +308,19 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
         entities::PasswordCredential::Entity::delete_many()
-            .filter(entities::PasswordCredential::Column::UserId.eq(user_model.id))
+            .filter(entities::PasswordCredential::Column::UserId.eq(user.id))
             .exec(&*db)
             .await
             .map_err(WarpgateError::from)?;
 
         let new_credential = entities::PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
-            user_id: Set(user_model.id),
+            user_id: Set(user.id),
             ..PasswordCredential::ActiveModel::from(UserPasswordCredential::from_password(
                 &body.password.clone().into(),
             ))
@@ -331,11 +332,21 @@ impl Api {
         entities::PasswordCredential::Entity::find()
             .filter(
                 entities::PasswordCredential::Column::UserId
-                    .eq(user_model.id)
+                    .eq(user.id)
                     .and(entities::PasswordCredential::Column::Id.ne(new_credential.id)),
             )
             .all(&*db)
             .await?;
+
+        AuditEvent::CredentialCreated {
+            credential_type: "password".to_string(),
+            credential_name: Some("password".to_string()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(ChangePasswordResponse::Done(Json(PasswordState::Set)))
     }
@@ -355,13 +366,13 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
-            user_id: Set(user_model.id),
+            user_id: Set(user.id),
             date_added: Set(Some(Utc::now())),
             last_used: Set(None),
             label: Set(body.label.clone()),
@@ -370,6 +381,17 @@ impl Api {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let credential_name = body.label.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "public_key".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreatePublicKeyCredentialResponse::Created(Json(
             object.into(),
@@ -391,11 +413,11 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
-        let Some(model) = user_model
+        let Some(model) = user
             .find_related(entities::PublicKeyCredential::Entity)
             .filter(entities::PublicKeyCredential::Column::Id.eq(id.0))
             .one(&*db)
@@ -405,6 +427,17 @@ impl Api {
         };
 
         model.delete(&*db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "public_key".to_string(),
+            credential_name: Some("public_key".to_string()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 
@@ -423,31 +456,43 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
         };
 
-        let mut user: User = user_model.clone().try_into()?;
+        let user_id = user.id;
+        let username = user.username.clone();
+        let mut user_cfg: User = user.clone().try_into()?;
 
         let object = entities::OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
-            user_id: Set(user_model.id),
+            user_id: Set(user_id),
             secret_key: Set(body.secret_key.clone()),
         }
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user_model.load_details(&db).await?;
-        user.credential_policy = Some(
-            user.credential_policy
+        let details = user.load_details(&db).await?;
+        user_cfg.credential_policy = Some(
+            user_cfg
+                .credential_policy
                 .unwrap_or_default()
                 .upgrade_to_otp(details.credentials.as_slice()),
         );
 
-        entities::User::ActiveModel::try_from(user)?
-            .update(&*db)
-            .await?;
+        let user = entities::User::ActiveModel::try_from(user_cfg)?;
+        user.update(&*db).await?;
+
+        AuditEvent::CredentialCreated {
+            credential_type: "otp".to_string(),
+            credential_name: Some("otp".to_string()),
+            via: CredentialChangedVia::SelfService,
+            user_id,
+            username,
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
@@ -467,11 +512,11 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
-        let Some(model) = user_model
+        let Some(model) = user
             .find_related(entities::OtpCredential::Entity)
             .filter(entities::OtpCredential::Column::Id.eq(id.0))
             .one(&*db)
@@ -481,6 +526,17 @@ impl Api {
         };
 
         model.delete(&*db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "otp".to_string(),
+            credential_name: Some("otp".to_string()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 
@@ -498,7 +554,7 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(IssueCertificateCredentialResponse::Unauthorized);
         };
 
@@ -507,17 +563,13 @@ impl Api {
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
-        let client_cert = warpgate_ca::issue_client_certificate(
-            &ca,
-            &user_model.username,
-            public_key_pem,
-            user_model.id,
-        )?;
+        let client_cert =
+            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id)?;
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
-            user_id: Set(user_model.id),
+            user_id: Set(user.id),
             date_added: Set(Some(Utc::now())),
             last_used: Set(None),
             label: Set(body.label.clone()),
@@ -526,6 +578,17 @@ impl Api {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let credential_name = body.label.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -549,11 +612,11 @@ impl Api {
         let auth = &ctx.auth;
         let db = ctx.services.db.lock().await;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCertificateCredentialResponse::Unauthorized);
         };
 
-        let Some(model) = user_model
+        let Some(model) = user
             .find_related(entities::CertificateCredential::Entity)
             .filter(entities::CertificateCredential::Column::Id.eq(id.0))
             .one(&*db)
@@ -573,6 +636,17 @@ impl Api {
         .await?;
 
         model.delete(&*db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "certificate".to_string(),
+            credential_name: Some("certificate".to_string()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCertificateCredentialResponse::Ok)
     }
 }

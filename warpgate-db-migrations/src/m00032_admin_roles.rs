@@ -196,6 +196,7 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 
+    #[allow(clippy::panic)]
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         panic!("This migration cannot be reversed");
     }

@@ -50,6 +50,9 @@ where
         // Record event fields
         event.record(&mut RecordVisitor::new(&mut values));
 
+        // Hide _type from console output (rich JSON field marker, not user-facing)
+        values.remove("_type");
+
         // Extract message before moving values
         let message = values.remove("message").unwrap_or_default();
 
