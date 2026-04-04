@@ -69,6 +69,7 @@ jobs:
           cargo install --locked just
           cargo install --locked cargo-deny@0.18.9
           cargo install --locked cargo-cyclonedx@^0.5
+          cargo install --locked cargo-cranky@0.3.0
           rm -rf ~/.cargo/registry
 
       - name: Install CycloneDX
