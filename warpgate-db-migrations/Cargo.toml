@@ -2,8 +2,8 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-migrations"
-publish = false
 version = "0.22.0-beta.4"
+publish = false
 
 [lib]
 
