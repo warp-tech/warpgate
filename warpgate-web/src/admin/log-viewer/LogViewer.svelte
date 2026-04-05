@@ -3,16 +3,18 @@ import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
-import { onDestroy, onMount } from 'svelte'
-import { get } from 'svelte/store'
-import { createVirtualizer, measureElement } from '@tanstack/svelte-virtual'
+import { onDestroy, onMount, untrack } from 'svelte'
+import { createVirtualizer } from '@tanstack/svelte-virtual'
 import { stringifyError } from 'common/errors'
 import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-
 import UserBadge from './UserBadge.svelte'
 import AccessRoleBadge from './AccessRoleBadge.svelte'
 import AdminRoleBadge from './AdminRoleBadge.svelte'
 import TargetBadge from './TargetBadge.svelte'
+import AsyncButton from 'common/AsyncButton.svelte'
+import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+import Fa from 'svelte-fa'
+import { faRotateRight } from '@fortawesome/free-solid-svg-icons'
 
 interface Props {
     filters?: {
@@ -41,31 +43,34 @@ let reloadInterval: ReturnType<typeof setInterval>
 let searchQuery = $state('')
 let scrollEl: HTMLDivElement|undefined = $state()
 
-const virtualizerStore = createVirtualizer<HTMLDivElement, HTMLDivElement>({
+let virtualizerStore = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: 0,
     getScrollElement: () => scrollEl ?? null,
     estimateSize: () => 48,
     overscan: 12,
-    measureElement,
 })
+
+let virtualItems = $derived($virtualizerStore.getVirtualItems())
+
+function rowMeasure (node: HTMLDivElement) {
+    $virtualizerStore.measureElement(node)
+    return {
+        destroy () {
+            $virtualizerStore.measureElement(null)
+        },
+    }
+}
 
 $effect(() => {
     const list = visibleItems
     const count = list?.length ?? 0
-    get(virtualizerStore).setOptions({
-        count,
-        getItemKey: (index) => String(list?.[index]?.id ?? index),
+    untrack(() => {
+        $virtualizerStore.setOptions({
+            count,
+            getItemKey: (index) => String(list?.[index]?.id ?? index),
+        })
     })
 })
-
-function rowMeasure (node: HTMLDivElement) {
-    get(virtualizerStore).measureElement(node)
-    return {
-        destroy () {
-            get(virtualizerStore).measureElement(null)
-        },
-    }
-}
 
 function addItems (newItems: LogEntry[]) {
     const existingIds = new Set(items?.map(i => i.id) ?? [])
@@ -134,13 +139,15 @@ async function loadOlder (searchMode = false) {
     }
 }
 
-function clearUiLogs () {
+async function clearAndReload () {
     items = []
     visibleItems = []
     endReached = false
-    loadOlder(true).catch(async e => {
+    try {
+        await loadOlder(true)
+    } catch (e) {
         error = await stringifyError(e)
-    })
+    }
 }
 
 function search () {
@@ -297,7 +304,7 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     <Alert color="danger">{error}</Alert>
 {/if}
 
-<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+<div class="d-flex align-items-stretch gap-2 mb-2">
     <input
         placeholder="Search..."
         type="text"
@@ -305,15 +312,18 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
         style="min-width: 12rem"
         bind:value={searchQuery}
         onkeyup={() => search()} />
-    <button
-        type="button"
-        class="btn btn-sm btn-outline-secondary"
-        onclick={() => clearUiLogs()}
+    <AsyncButton
+    id = "clearAndReloadButton"
+        color="link"
+        click={clearAndReload}
+        size="sm"
         disabled={loading}
-        title="Clear on-screen logs and reload the latest page from the server (does not delete stored logs)"
     >
-        Clear UI logs
-    </button>
+        <Fa icon={faRotateRight} fw />
+    </AsyncButton>
+    <Tooltip target="clearAndReloadButton" delay={500}>
+        Clear view and reload latest log
+    </Tooltip>
 </div>
 
 {#if visibleItems}
@@ -324,31 +334,36 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
         >
             <div
                 class="virtual-inner"
-                style="height: {$virtualizerStore.getTotalSize()}px"
+                class:session-context={!!filters?.sessionId}
             >
-                {#each $virtualizerStore.getVirtualItems() as row (row.key)}
+                <div class="log-header">
+                    <div class="timestamp">Time</div>
+                    {#if !filters?.sessionId}
+                        <div class="username">User</div>
+                        <div class="session">Session</div>
+                    {/if}
+                    <div class="content">Event</div>
+                </div>
+                <div class="virtual-spacer" style="height: {virtualItems[0]?.start ?? 0}px"></div>
+                {#each virtualItems as row (row.key)}
                     {@const item = visibleItems[row.index]}
                     {#if item}
                         {@const richEntry = parseRichLogEntry(item)}
                         <div
                             class="log-row"
-                            style="transform: translateY({row.start}px)"
+                            data-index={row.index}
                             use:rowMeasure
                         >
-                            <div
-                                class="log-row-grid"
-                                class:session-context={!!filters?.sessionId}
-                            >
-                                <div class="timestamp pe-4">
+                                <div class="timestamp">
                                     {stringifyDate(item.timestamp)}
                                 </div>
                                 {#if !filters?.sessionId}
-                                    <div class="username pe-4">
+                                    <div class="username">
                                         {#if item.username}
                                             {item.username}
                                         {/if}
                                     </div>
-                                    <div class="session pe-4">
+                                    <div class="session">
                                         {#if item.sessionId}
                                             <a href="/sessions/{item.sessionId}" use:link>
                                                 {item.sessionId}
@@ -457,22 +472,22 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                                         {/each}
                                     {/if}
                                 </div>
-                            </div>
                         </div>
                     {/if}
                 {/each}
+                <div class="virtual-spacer" style="height: {Math.max(0, $virtualizerStore.getTotalSize() - (virtualItems.at(-1)?.end ?? 0))}px"></div>
             </div>
             {#if !endReached}
                 {#if !loading}
                     <div class="load-older-footer">
                         <IntersectionObserver element={loadOlderButton} on:observe={event => {
-                            if (!loading && event.detail.isIntersecting) {
+                            if (!loading && !error && event.detail.isIntersecting) {
                                 loadOlder()
                             }
                         }}>
                             <button
                                 bind:this={loadOlderButton}
-                                class="btn btn-light"
+                                class="btn btn-secondary"
                                 onclick={() => loadOlder()}
                                 disabled={loading}
                             >
@@ -492,44 +507,66 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     @import "../../theme/vars.light";
 
     .table-wrapper {
+        flex: 1 0 0;
+        min-height: 300px;
         max-width: 100%;
         overflow-x: auto;
+        position: relative;
     }
 
     .log-scroll {
-        max-height: min(70vh, 56rem);
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
         overflow-y: auto;
         overflow-x: auto;
         contain: strict;
     }
 
     .virtual-inner {
-        position: relative;
-        width: 100%;
-    }
-
-    .log-row {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        box-sizing: border-box;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-    }
-
-    .log-row-grid {
         display: grid;
         grid-template-columns: min-content min-content min-content minmax(0, 1fr);
-        align-items: start;
-        gap: 0 1rem;
-        font-family: $font-family-monospace;
-        font-size: 0.75rem;
-        padding: 0.35rem 0;
-        white-space: nowrap;
+        column-gap: 1rem;
+        min-width: 100%;
 
         &.session-context {
             grid-template-columns: min-content minmax(0, 1fr);
         }
+    }
+
+    .virtual-spacer {
+        grid-column: 1 / -1;
+    }
+
+    .log-header {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--bs-body-bg, #fff);
+        font-family: $font-family-monospace;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0;
+        border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+        white-space: nowrap;
+    }
+
+    .log-row {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        align-items: start;
+        box-sizing: border-box;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        font-family: $font-family-monospace;
+        font-size: 0.75rem;
+        padding: 0.1rem 0;
+        white-space: nowrap;
 
         .timestamp {
             opacity: .75;
