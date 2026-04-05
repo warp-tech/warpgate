@@ -467,8 +467,10 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                                             {item.text}
                                         </span>
                                         {#each Object.entries(item.values ?? {}) as pair (pair[0])}
+                                        <span class="key-value">
                                             <span class="key">{pair[0]}:</span>
                                             <span class="value">{pair[1]}</span>
+                                        </span>
                                         {/each}
                                     {/if}
                                 </div>
@@ -584,15 +586,19 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                 margin-right: 0.6em;
             }
 
-            .key {
-                margin-left: 0.5em;
-                margin-right: 0.3em;
-                opacity: .5;
-                font-style: italic;
-            }
+            .key-value {
+                white-space: nowrap;
 
-            .value {
-                font-style: italic;
+                .key {
+                    margin-left: 0.5em;
+                    margin-right: 0.3em;
+                    opacity: .5;
+                    font-style: italic;
+                }
+
+                .value {
+                    font-style: italic;
+                }
             }
         }
 
