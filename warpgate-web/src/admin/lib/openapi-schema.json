@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-12-g918a4012-modified"
+    "version": "v0.22.0-beta.4-13-g5aaf080f-modified"
   },
   "servers": [
     {
@@ -452,9 +452,6 @@
               }
             }
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -485,9 +482,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -893,6 +887,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2366,6 +2363,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2498,6 +2498,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2690,6 +2693,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           },
           "403": {
             "description": "",
@@ -2912,6 +2918,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3518,6 +3527,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3963,13 +3975,17 @@
       "CreateTicketRequest": {
         "type": "object",
         "title": "CreateTicketRequest",
-        "required": [
-          "username",
-          "target_name"
-        ],
         "properties": {
           "username": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target_name": {
             "type": "string"
@@ -5310,8 +5326,10 @@
         "title": "Ticket",
         "required": [
           "id",
+          "user_id",
           "username",
           "description",
+          "target_id",
           "target",
           "created"
         ],
@@ -5320,11 +5338,19 @@
             "type": "string",
             "format": "uuid"
           },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "username": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target": {
             "type": "string"

@@ -1,12 +1,12 @@
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{EntityTrait, ModelTrait};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::AuditEvent;
-use warpgate_db_entities::User;
+use warpgate_db_entities::{Target, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -44,18 +44,18 @@ impl Api {
             return Ok(DeleteTicketResponse::NotFound);
         };
 
-        let user = User::Entity::find()
-            .filter(User::Column::Username.eq(&ticket.username))
+        let user = User::Entity::find_by_id(ticket.user_id).one(&*db).await?;
+
+        let target = Target::Entity::find_by_id(ticket.target_id)
             .one(&*db)
             .await?;
 
-        // TODO: link tickets to users via IDs
-        if let Some(user) = user {
+        if let (Some(user), Some(target)) = (user, target) {
             AuditEvent::TicketDeleted {
                 ticket_id: ticket.id,
                 user_id: user.id,
-                username: ticket.username.clone(),
-                target: ticket.target.clone(),
+                username: user.username.clone(),
+                target: target.name.clone(),
                 actor_user_id: ctx.auth.user_id(),
             }
             .emit();
