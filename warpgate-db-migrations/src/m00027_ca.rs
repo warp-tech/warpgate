@@ -63,7 +63,7 @@ impl MigrationTrait for Migration {
 
         info!("Generating root CA certificate");
         let (cert_pem, pk_pem) = warpgate_ca::generate_root_certificate_rcgen()
-            .map_err(|e| DbErr::Custom(format!("Failed to generate CA certificate: {}", e)))?;
+            .map_err(|e| DbErr::Custom(format!("Failed to generate CA certificate: {e}")))?;
 
         let db = manager.get_connection();
 
@@ -74,8 +74,8 @@ impl MigrationTrait for Migration {
                     id: Set(Uuid::new_v4()),
                     allow_own_credential_management: Set(true),
                     rate_limit_bytes_per_second: Set(None),
-                    ca_certificate_pem: Set("".into()),
-                    ca_private_key_pem: Set("".into()),
+                    ca_certificate_pem: Set(String::new()),
+                    ca_private_key_pem: Set(String::new()),
                 }
                 .insert(db)
                 .await

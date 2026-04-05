@@ -214,7 +214,7 @@ impl DetailApi {
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
-        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         let user = model.update(&*db).await?;
 
         drop(db);
@@ -223,7 +223,7 @@ impl DetailApi {
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *ctx.services.state.lock().await)
+            .apply_new_rate_limits(&*ctx.services.state.lock().await)
             .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
@@ -310,9 +310,9 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AutoLinkUserToLdapResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
-
         use warpgate_db_entities::LdapServer;
+
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
         let db = ctx.services.db.lock().await;
 
@@ -352,10 +352,9 @@ impl DetailApi {
                     ldap_object_uuid = Some(ldap_user.object_uuid);
                     break;
                 }
-                Ok(None) => continue,
+                Ok(None) => (),
                 Err(e) => {
                     warn!("Error searching for LDAP user in {}: {e}", ldap_server.name);
-                    continue;
                 }
             }
         }
@@ -457,7 +456,7 @@ impl RolesApi {
         };
 
         Ok(GetUserRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
+            roles.into_iter().map(Into::into).collect(),
         )))
     }
 
@@ -592,7 +591,7 @@ impl RolesApi {
         };
 
         Ok(GetUserAdminRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
+            roles.into_iter().map(Into::into).collect(),
         )))
     }
 

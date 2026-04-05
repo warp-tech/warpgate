@@ -48,15 +48,15 @@ impl From<Model> for StrictModel {
     fn from(model: Model) -> Self {
         Self {
             id: model.id,
-            credential: model.clone().into(),
+            credential: model.into(),
         }
     }
 }
 
 impl From<Model> for UserPasswordCredential {
     fn from(credential: Model) -> Self {
-        UserPasswordCredential {
-            hash: credential.argon_hash.to_owned().into(),
+        Self {
+            hash: credential.argon_hash.into(),
         }
     }
 }

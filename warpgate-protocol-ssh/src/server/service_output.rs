@@ -32,7 +32,7 @@ impl ServiceOutput {
                         _ = abort_rx.recv() => {
                             return;
                         }
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        () = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
                             if progress_visible.load(std::sync::atomic::Ordering::Relaxed) {
                                 tick_index = (tick_index + 1) % ticks.len();
                                 #[allow(clippy::indexing_slicing)]
@@ -46,14 +46,14 @@ impl ServiceOutput {
             }
         });
 
-        ServiceOutput {
+        Self {
             progress_visible,
             abort_tx,
             output_tx,
         }
     }
 
-    pub fn show_progress(&mut self) {
+    pub fn show_progress(&self) {
         self.progress_visible
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }

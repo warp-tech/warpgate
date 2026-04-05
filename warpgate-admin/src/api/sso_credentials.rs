@@ -127,10 +127,10 @@ impl ListApi {
         let credential_name = body.email.clone();
         AuditEvent::CredentialCreated {
             credential_type: "sso".to_string(),
-            credential_name: Some(credential_name.clone()),
+            credential_name: Some(credential_name),
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username.clone(),
+            username: user.username,
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();
@@ -207,9 +207,8 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        let user = match User::Entity::find_by_id(*user_id).one(&*db).await? {
-            Some(user) => user,
-            None => return Ok(DeleteCredentialResponse::NotFound),
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
         };
 
         let credential_name = role.email.clone();

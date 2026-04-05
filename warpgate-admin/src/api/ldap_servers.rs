@@ -160,7 +160,7 @@ struct CreateLdapServerRequest {
     uuid_attribute: String,
 }
 
-fn default_port() -> i32 {
+const fn default_port() -> i32 {
     389
 }
 
@@ -168,23 +168,23 @@ fn default_user_filter() -> String {
     "(objectClass=person)".to_string()
 }
 
-fn default_tls_mode() -> TlsMode {
+const fn default_tls_mode() -> TlsMode {
     TlsMode::Preferred
 }
 
-fn default_tls_verify() -> bool {
+const fn default_tls_verify() -> bool {
     true
 }
 
-fn default_enabled() -> bool {
+const fn default_enabled() -> bool {
     true
 }
 
-fn default_auto_link_sso_users() -> bool {
+const fn default_auto_link_sso_users() -> bool {
     false
 }
 
-fn default_username_attribute() -> LdapUsernameAttribute {
+const fn default_username_attribute() -> LdapUsernameAttribute {
     LdapUsernameAttribute::Cn
 }
 
@@ -192,7 +192,7 @@ fn default_ssh_key_attribute() -> String {
     "sshPublicKey".to_string()
 }
 
-fn default_uuid_attribute() -> String {
+const fn default_uuid_attribute() -> String {
     String::new()
 }
 
@@ -446,7 +446,7 @@ impl ListApi {
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {}", e),
+                        message: format!("Connection failed: {e}"),
                         base_dns: None,
                     },
                 ))),
@@ -566,11 +566,10 @@ impl DetailApi {
             host: body.host.clone(),
             port: body.port as u16,
             bind_dn: body.bind_dn.clone(),
-            bind_password: body
-                .bind_password
-                .as_ref()
-                .map(|p| p.expose_secret().clone())
-                .unwrap_or_else(|| model.bind_password.clone().unwrap()),
+            bind_password: body.bind_password.as_ref().map_or_else(
+                || model.bind_password.clone().unwrap(),
+                |p| p.expose_secret().clone(),
+            ),
             tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
@@ -661,8 +660,7 @@ impl QueryApi {
             Ok(users) => users,
             Err(e) => {
                 return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
-                    "Failed to query users: {}",
-                    e
+                    "Failed to query users: {e}"
                 ))))
             }
         };

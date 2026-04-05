@@ -4,12 +4,12 @@ mod deadlock_detecting_mutex {
     use std::collections::HashMap;
     use std::ops::{Deref, DerefMut};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::LazyLock;
 
-    use once_cell::sync::Lazy;
     use tokio::task::Id;
 
-    static LOCK_IDENTITIES: Lazy<std::sync::Mutex<HashMap<Option<Id>, Vec<String>>>> =
-        Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+    static LOCK_IDENTITIES: LazyLock<std::sync::Mutex<HashMap<Option<Id>, Vec<String>>>> =
+        LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
     fn log_state() {
         eprintln!("Tokio task: {:?}", tokio::task::try_id());
@@ -17,7 +17,7 @@ mod deadlock_detecting_mutex {
         let ids = LOCK_IDENTITIES.lock().unwrap();
         let identities = ids.get(&tokio::task::try_id()).cloned().unwrap_or_default();
         if !identities.is_empty() {
-            eprintln!("* Held locks: {:?}", identities);
+            eprintln!("* Held locks: {identities:?}");
         }
     }
 
@@ -32,17 +32,17 @@ mod deadlock_detecting_mutex {
             #[allow(clippy::unwrap_used)]
             let mut ids = LOCK_IDENTITIES.lock().unwrap();
             let identities = ids.entry(tokio::task::try_id()).or_default();
-            let id = this.identity();
+            let id = Self::identity();
             identities.push(id);
             // eprintln!("Locking {} @ {:?}", this.identity(), tokio::task::try_id());
             this
         }
 
-        fn identity(&self) -> String {
+        fn identity() -> String {
             format!(
                 "{:?}@{}",
                 type_name::<T>(),
-                tokio::task::try_id().map_or("unknown".to_string(), |id| id.to_string())
+                tokio::task::try_id().map_or_else(|| "unknown".to_string(), |id| id.to_string())
             )
         }
     }
@@ -63,7 +63,7 @@ mod deadlock_detecting_mutex {
 
     impl<T> Drop for MutexGuard<'_, T> {
         fn drop(&mut self) {
-            let self_id = self.identity();
+            let self_id = Self::identity();
             // eprintln!("Unlocking {} @ {:?}", self.identity(), tokio::task::try_id());
 
             #[allow(clippy::panic)]
@@ -95,16 +95,16 @@ mod deadlock_detecting_mutex {
         }
 
         pub async fn lock(&self) -> MutexGuard<'_, T> {
-            self._lock().await
+            self.lock_inner().await
         }
 
         #[allow(clippy::panic)]
-        async fn _lock(&self) -> MutexGuard<'_, T> {
+        async fn lock_inner(&self) -> MutexGuard<'_, T> {
             use std::time::Duration;
 
             tokio::select! {
                 res = self.inner.lock() => MutexGuard::new(res, &self.poisoned),
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                () = tokio::time::sleep(Duration::from_secs(5)) => {
                     self.poisoned.store(true, Ordering::Relaxed);
                     eprintln!("[!!] Mutex lock took too long");
                     log_state();

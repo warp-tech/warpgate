@@ -3,6 +3,7 @@ edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
 version = "0.22.0-beta.4"
+publish = false
 
 [dependencies]
 warpgate-common = { path = "../warpgate-common" }
@@ -14,14 +15,12 @@ anyhow.workspace = true
 argon2 = "0.5"
 async-trait = "0.1"
 bytes.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
 dialoguer.workspace = true
 enum_dispatch.workspace = true
 humantime-serde = "1.1"
 futures.workspace = true
 ldap3.workspace = true
-once_cell = "1.17"
 packet = "0.1"
 password-hash.workspace = true
 poem.workspace = true
@@ -33,6 +32,7 @@ russh.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }

@@ -35,7 +35,7 @@ struct PendingWait {
 }
 
 impl PendingWait {
-    pub fn new(direction: RateLimiterDirection) -> Self {
+    pub const fn new(direction: RateLimiterDirection) -> Self {
         Self {
             state: PendingWaitState::Empty(0),
             direction,
@@ -72,13 +72,13 @@ impl PendingWait {
                         self.state = PendingWaitState::Empty(0);
                         return Poll::Ready(Err(io::Error::other(e.to_string())));
                     }
-                };
-            };
+                }
+            }
             match self.state {
                 PendingWaitState::Empty(_) => unreachable!(),
                 PendingWaitState::Waiting(len, ref mut fut) => match fut.as_mut().poll(cx) {
                     Poll::Pending => return Poll::Pending,
-                    Poll::Ready(_) => {
+                    Poll::Ready(()) => {
                         // !!
                         // Since we did not consume any cells
                         // we need to try again and maybe wait
@@ -112,7 +112,7 @@ pub struct RateLimitedStream<T> {
 }
 
 impl<T: Send> RateLimitedStream<T> {
-    pub fn new(inner: T, limiter: SwappableLimiterCell) -> Self {
+    pub const fn new(inner: T, limiter: SwappableLimiterCell) -> Self {
         Self {
             inner,
             limiter,
@@ -162,10 +162,7 @@ impl<T: AsyncWrite + Unpin + Send> RateLimitedStream<T> {
         let ret = Pin::new(&mut self.inner).poll_write(cx, data);
         if let Poll::Ready(result) = &ret {
             // Write completed, reset waiter
-            self.write_wait.reset(match result {
-                Ok(bytes_written) => *bytes_written,
-                Err(_) => 0,
-            });
+            self.write_wait.reset(*result.as_ref().unwrap_or(&0));
         }
         ret
     }

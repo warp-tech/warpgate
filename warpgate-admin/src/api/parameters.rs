@@ -87,7 +87,7 @@ impl Api {
 
         parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
         parameters.rate_limit_bytes_per_second =
-            Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+            Set(body.rate_limit_bytes_per_second.map(i64::from));
         parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
         parameters.ssh_client_auth_password = body.ssh_client_auth_password.map_or(NotSet, Set);
         parameters.ssh_client_auth_keyboard_interactive = body
@@ -102,7 +102,7 @@ impl Api {
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .apply_new_rate_limits(&*services.state.lock().await)
             .await?;
 
         Ok(UpdateParametersResponse::Done)

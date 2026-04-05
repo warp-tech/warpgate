@@ -214,6 +214,8 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
+        use warpgate_db_entities::Target;
+
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
         let db = ctx.services.db.lock().await;
@@ -224,7 +226,6 @@ impl DetailApi {
         };
 
         // First, unassign all targets from this group by setting their group_id to NULL
-        use warpgate_db_entities::Target;
         Target::Entity::update_many()
             .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
             .filter(Target::Column::GroupId.eq(id.0))

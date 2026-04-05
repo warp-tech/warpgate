@@ -113,7 +113,7 @@ impl ListApi {
             credential_name: None,
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username.clone(),
+            username: user.username,
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();
@@ -169,7 +169,7 @@ impl DetailApi {
             credential_name: None,
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username.clone(),
+            username: user.username,
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();

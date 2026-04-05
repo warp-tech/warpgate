@@ -2,7 +2,7 @@ use bytes::{Bytes, BytesMut};
 use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::proto::codec::PacketCodec;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::*;
+use tracing::trace;
 use warpgate_database_protocols::io::Encode;
 use warpgate_tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
@@ -16,8 +16,7 @@ pub enum MySqlStreamError {
 
 pub struct MySqlStream<S, TS>
 where
-    S: UpgradableStream<TS>,
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: UpgradableStream<TS> + AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
     stream: MaybeTlsStream<S, TS>,
@@ -28,8 +27,7 @@ where
 
 impl<S, TS> MySqlStream<S, TS>
 where
-    S: UpgradableStream<TS>,
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: UpgradableStream<TS> + AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
     pub fn new(stream: S) -> Self {
@@ -90,11 +88,10 @@ where
         Ok(self)
     }
 
-    pub fn is_tls(&self) -> bool {
+    pub const fn is_tls(&self) -> bool {
         match self.stream {
-            MaybeTlsStream::Raw(_) => false,
             MaybeTlsStream::Tls(_) => true,
-            MaybeTlsStream::Upgrading => false,
+            MaybeTlsStream::Raw(_) | MaybeTlsStream::Upgrading => false,
         }
     }
 }

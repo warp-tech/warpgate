@@ -159,9 +159,7 @@ impl From<TlsPrivateKey> for Vec<u8> {
 
 impl From<TlsCertificateAndPrivateKey> for RustlsCertificate {
     fn from(val: TlsCertificateAndPrivateKey) -> Self {
-        RustlsCertificate::new()
-            .cert(val.certificate)
-            .key(val.private_key)
+        Self::new().cert(val.certificate).key(val.private_key)
     }
 }
 
@@ -169,7 +167,7 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
     fn from(val: TlsCertificateAndPrivateKey) -> Self {
         let cert = val.certificate;
         let key = val.private_key;
-        CertifiedKey {
+        Self {
             cert: cert.certificates,
             key: key.key,
             ocsp: None,

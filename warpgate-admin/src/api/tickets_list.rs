@@ -1,10 +1,10 @@
 use anyhow::Context;
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::{AdminPermission, WarpgateError};
@@ -27,8 +27,8 @@ pub struct TicketModel {
     pub target_id: Uuid,
     pub target: String, // TODO rename to target_name
     pub uses_left: Option<i16>,
-    pub expiry: Option<DateTime<Utc>>,
-    pub created: DateTime<Utc>,
+    pub expiry: Option<OffsetDateTime>,
+    pub created: OffsetDateTime,
 }
 
 impl TicketModel {
@@ -73,7 +73,7 @@ struct CreateTicketRequest {
     user_id: Option<Uuid>,
     target_id: Option<Uuid>,
     target_name: Option<String>,
-    expiry: Option<DateTime<Utc>>,
+    expiry: Option<OffsetDateTime>,
     number_of_uses: Option<i16>,
     description: Option<String>,
 }
@@ -104,9 +104,9 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
         use warpgate_db_entities::Ticket;
+
+        require_admin_permission(&ctx, None).await?;
 
         let db = ctx.services.db.lock().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
@@ -167,10 +167,10 @@ impl Api {
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),
-            secret: Set(secret.expose_secret().to_string()),
+            secret: Set(secret.expose_secret().clone()),
             user_id: Set(user.id),
             target_id: Set(target.id),
-            created: Set(chrono::Utc::now()),
+            created: Set(OffsetDateTime::now_utc()),
             expiry: Set(body.expiry),
             uses_left: Set(body.number_of_uses),
             description: Set(body.description.clone().unwrap_or_default()),
@@ -188,7 +188,7 @@ impl Api {
         .emit();
 
         Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
-            secret: secret.expose_secret().to_string(),
+            secret: secret.expose_secret().clone(),
             ticket: TicketModel::from_entity(ticket, &db).await?,
         })))
     }

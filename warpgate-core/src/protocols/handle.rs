@@ -26,27 +26,27 @@ pub struct WarpgateServerHandle {
 }
 
 impl WarpgateServerHandle {
-    pub fn new(
+    pub const fn new(
         id: SessionId,
         db: Arc<Mutex<DatabaseConnection>>,
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<SessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
-    ) -> Result<Self, WarpgateError> {
-        Ok(WarpgateServerHandle {
+    ) -> Self {
+        Self {
             id,
             db,
             state,
             session_state,
             rate_limiters_registry,
-        })
+        }
     }
 
-    pub fn id(&self) -> SessionId {
+    pub const fn id(&self) -> SessionId {
         self.id
     }
 
-    pub fn session_state(&self) -> &Arc<Mutex<SessionState>> {
+    pub const fn session_state(&self) -> &Arc<Mutex<SessionState>> {
         &self.session_state
     }
 
@@ -56,7 +56,7 @@ impl WarpgateServerHandle {
         {
             let mut state = self.session_state.lock().await;
             state.user_info = Some(user_info.clone());
-            state.emit_change()
+            state.emit_change();
         }
 
         let db = self.db.lock().await;
@@ -124,15 +124,15 @@ impl WarpgateServerHandle {
     }
 
     pub async fn wrap_stream(
-        &mut self,
+        &self,
         stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send, WarpgateError> {
-        let (stream, mut handle) = stack_rate_limiters(stream);
+        let (stream, handle) = stack_rate_limiters(stream);
         let mut ss = self.session_state.lock().await;
         self.rate_limiters_registry
             .lock()
             .await
-            .update_rate_limiters(&ss, &mut handle)
+            .update_rate_limiters(&ss, &handle)
             .await?;
         ss.rate_limiter_handles.push(handle);
         Ok(stream)
@@ -158,8 +158,7 @@ impl Drop for WarpgateServerHandle {
                 .await
                 .user_info
                 .as_ref()
-                .map(|x| x.username.clone())
-                .unwrap_or_else(|| "".to_string());
+                .map_or_else(String::new, |x| x.username.clone());
             let span = info_span!("SSH", session=%id, session_username=%username);
             state.lock().await.remove_session(id).instrument(span).await;
         });

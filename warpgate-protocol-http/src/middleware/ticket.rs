@@ -12,8 +12,8 @@ use crate::common::SessionExt;
 pub struct TicketMiddleware {}
 
 impl TicketMiddleware {
-    pub fn new() -> Self {
-        TicketMiddleware {}
+    pub const fn new() -> Self {
+        Self {}
     }
 }
 
@@ -48,10 +48,8 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         {
             let params: QueryParams = req.params()?;
 
-            let mut ticket_value = None;
-            if let Some(t) = params.ticket {
-                ticket_value = Some(t);
-            }
+            let mut ticket_value = params.ticket;
+
             for h in req.headers().get_all(http::header::AUTHORIZATION) {
                 let header_value = h.to_str().unwrap_or("").to_string();
                 if let Some((token_type, token_value)) = header_value.split_once(' ') {

@@ -13,7 +13,7 @@ pub struct SSHSessionHandle {
 impl SSHSessionHandle {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<SessionHandleCommand>) {
         let (sender, receiver) = mpsc::unbounded_channel();
-        (SSHSessionHandle { sender }, receiver)
+        (Self { sender }, receiver)
     }
 }
 

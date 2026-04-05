@@ -285,7 +285,7 @@ impl DetailApi {
         };
         let users: Vec<warpgate_common::User> = users
             .into_iter()
-            .map(|x| x.try_into())
+            .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(GetAdminRoleUsersResponse::Ok(Json(users)))
     }

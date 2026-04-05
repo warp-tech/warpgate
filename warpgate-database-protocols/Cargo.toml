@@ -10,6 +10,7 @@ authors = [
     "Chloe Ross <orangesnowfox@gmail.com>",
     "Daniel Akhterov <akhterovd@gmail.com>",
 ]
+publish = false
 
 [dependencies]
 tokio.workspace = true

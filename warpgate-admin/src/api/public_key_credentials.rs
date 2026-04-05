@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -7,6 +6,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
     Set,
 };
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -24,9 +24,7 @@ async fn check_user_ldap_linked(
 
     let maybe_user = User::Entity::find_by_id(user_id).one(db).await?;
 
-    Ok(maybe_user
-        .map(|u| u.ldap_server_id.is_some())
-        .unwrap_or(false))
+    Ok(maybe_user.is_some_and(|u| u.ldap_server_id.is_some()))
 }
 
 /// Checks if a user is LDAP-linked and returns an error message if they are.
@@ -43,8 +41,8 @@ async fn verify_user_not_ldap_linked(db: &DatabaseConnection, user_id: Uuid) -> 
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
-    date_added: Option<DateTime<Utc>>,
-    last_used: Option<DateTime<Utc>>,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
     openssh_public_key: String,
 }
 
@@ -164,7 +162,7 @@ impl ListApi {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
             ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
@@ -176,7 +174,7 @@ impl ListApi {
         let credential_name = body.label.clone();
         AuditEvent::CredentialCreated {
             credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name.clone()),
+            credential_name: Some(credential_name),
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
@@ -222,9 +220,8 @@ impl DetailApi {
         let db = ctx.services.db.lock().await;
 
         // Ensure user exists and is not LDAP-linked
-        let _ = match User::Entity::find_by_id(*user_id).one(&*db).await? {
-            Some(user) => user,
-            None => return Ok(UpdatePublicKeyCredentialResponse::NotFound),
+        let Some(_) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
@@ -234,7 +231,7 @@ impl DetailApi {
         let model = PublicKeyCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             label: Set(body.label.clone()),
             ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }
@@ -282,9 +279,8 @@ impl DetailApi {
         let credential_name = model.label.clone();
         model.delete(&*db).await?;
 
-        let user = match User::Entity::find_by_id(*user_id).one(&*db).await? {
-            Some(user) => user,
-            None => return Ok(DeleteCredentialResponse::NotFound),
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
         };
 
         AuditEvent::CredentialDeleted {
@@ -292,7 +288,7 @@ impl DetailApi {
             credential_name: Some(credential_name.clone()),
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username.clone(),
+            username: user.username,
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();

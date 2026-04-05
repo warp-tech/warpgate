@@ -53,6 +53,6 @@ impl PostgresError {
 
 impl From<ErrorResponse> for PostgresError {
     fn from(e: ErrorResponse) -> Self {
-        PostgresError::RemoteError(e)
+        Self::RemoteError(e)
     }
 }

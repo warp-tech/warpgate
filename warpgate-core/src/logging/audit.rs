@@ -14,8 +14,8 @@ pub enum CredentialChangedVia {
 impl Display for CredentialChangedVia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CredentialChangedVia::Admin => write!(f, "admin"),
-            CredentialChangedVia::SelfService => write!(f, "self-service"),
+            Self::Admin => write!(f, "admin"),
+            Self::SelfService => write!(f, "self-service"),
         }
     }
 }
@@ -113,7 +113,7 @@ pub enum AuditEvent {
 impl AuditEvent {
     pub fn emit(&self) {
         match self {
-            AuditEvent::CredentialCreated {
+            Self::CredentialCreated {
                 credential_type,
                 credential_name,
                 via,
@@ -146,7 +146,7 @@ impl AuditEvent {
                     );
                 }
             }
-            AuditEvent::CredentialDeleted {
+            Self::CredentialDeleted {
                 credential_type,
                 credential_name,
                 via,
@@ -179,7 +179,7 @@ impl AuditEvent {
                     );
                 }
             }
-            AuditEvent::UserCreated {
+            Self::UserCreated {
                 user_id,
                 username,
                 actor_user_id,
@@ -193,7 +193,7 @@ impl AuditEvent {
                     "Created user"
                 );
             }
-            AuditEvent::UserDeleted {
+            Self::UserDeleted {
                 user_id,
                 username,
                 actor_user_id,
@@ -207,7 +207,7 @@ impl AuditEvent {
                     "Deleted user"
                 );
             }
-            AuditEvent::AccessRoleGranted {
+            Self::AccessRoleGranted {
                 grantee_id,
                 grantee_username,
                 role_id,
@@ -227,7 +227,7 @@ impl AuditEvent {
                     "Granted access role"
                 );
             }
-            AuditEvent::AccessRoleRevoked {
+            Self::AccessRoleRevoked {
                 grantee_id,
                 grantee_username,
                 role_id,
@@ -247,7 +247,7 @@ impl AuditEvent {
                     "Revoked access role"
                 );
             }
-            AuditEvent::AdminRoleGranted {
+            Self::AdminRoleGranted {
                 grantee_id,
                 grantee_username,
                 admin_role_id,
@@ -267,7 +267,7 @@ impl AuditEvent {
                     "Granted admin role"
                 );
             }
-            AuditEvent::AdminRoleRevoked {
+            Self::AdminRoleRevoked {
                 grantee_id,
                 grantee_username,
                 admin_role_id,
@@ -287,7 +287,7 @@ impl AuditEvent {
                     "Revoked admin role"
                 );
             }
-            AuditEvent::TargetSessionStarted {
+            Self::TargetSessionStarted {
                 session_id,
                 target_id,
                 target_name,
@@ -306,7 +306,7 @@ impl AuditEvent {
                     "Target session started"
                 );
             }
-            AuditEvent::TargetSessionEnded {
+            Self::TargetSessionEnded {
                 session_id,
                 target_id,
                 target_name,
@@ -325,7 +325,7 @@ impl AuditEvent {
                     "Target session ended"
                 );
             }
-            AuditEvent::TicketCreated {
+            Self::TicketCreated {
                 ticket_id,
                 user_id,
                 username,
@@ -342,7 +342,7 @@ impl AuditEvent {
                     "Created ticket"
                 );
             }
-            AuditEvent::TicketDeleted {
+            Self::TicketDeleted {
                 ticket_id,
                 user_id,
                 username,
