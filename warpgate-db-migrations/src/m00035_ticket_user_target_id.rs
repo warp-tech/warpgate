@@ -4,6 +4,7 @@ use sea_orm_migration::sea_orm::ConnectionTrait;
 
 mod ticket {
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -17,8 +18,8 @@ mod ticket {
         pub description: String,
         pub target_id: Uuid,
         pub uses_left: Option<i16>,
-        pub expiry: Option<DateTimeUtc>,
-        pub created: DateTimeUtc,
+        pub expiry: Option<OffsetDateTime>,
+        pub created: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -139,7 +140,7 @@ impl MigrationTrait for Migration {
             DbBackend::MySql => {
                 db.execute_unprepared("SET FOREIGN_KEY_CHECKS=1").await?;
             }
-            _ => {}
+            DbBackend::Postgres => {}
         }
 
         Ok(())

@@ -35,9 +35,10 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTicketResponse, WarpgateError> {
+        use warpgate_db_entities::Ticket;
+
         require_admin_permission(&ctx, Some(AdminPermission::TicketsDelete)).await?;
 
-        use warpgate_db_entities::Ticket;
         let db = ctx.services.db.lock().await;
 
         let Some(ticket) = Ticket::Entity::find_by_id(id.0).one(&*db).await? else {
@@ -54,8 +55,8 @@ impl Api {
             AuditEvent::TicketDeleted {
                 ticket_id: ticket.id,
                 user_id: user.id,
-                username: user.username.clone(),
-                target: target.name.clone(),
+                username: user.username,
+                target: target.name,
                 actor_user_id: ctx.auth.user_id(),
             }
             .emit();

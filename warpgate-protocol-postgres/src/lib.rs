@@ -16,7 +16,7 @@ use rustls::ServerConfig;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
-use tracing::*;
+use tracing::{error, info, warn, Instrument};
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
@@ -28,10 +28,10 @@ pub struct PostgresProtocolServer {
 }
 
 impl PostgresProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(PostgresProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 
@@ -119,7 +119,7 @@ impl ProtocolServer for PostgresProtocolServer {
                 let span = session.make_logging_span();
                 tokio::select! {
                     result = session.run().instrument(span) => match result {
-                        Ok(_) => info!("Session ended"),
+                        Ok(()) => info!("Session ended"),
                         Err(e) => error!(error=%e, "Session failed"),
                     },
                     _ = abort_rx.recv() => {

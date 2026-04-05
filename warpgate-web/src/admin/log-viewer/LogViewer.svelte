@@ -3,14 +3,18 @@ import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
 import { firstBy } from 'thenby'
 import IntersectionObserver from 'svelte-intersection-observer'
 import { link } from 'svelte-spa-router'
-import { onDestroy, onMount } from 'svelte'
+import { onDestroy, onMount, untrack } from 'svelte'
+import { createVirtualizer } from '@tanstack/svelte-virtual'
 import { stringifyError } from 'common/errors'
 import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-
 import UserBadge from './UserBadge.svelte'
 import AccessRoleBadge from './AccessRoleBadge.svelte'
 import AdminRoleBadge from './AdminRoleBadge.svelte'
 import TargetBadge from './TargetBadge.svelte'
+import AsyncButton from 'common/AsyncButton.svelte'
+import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+import Fa from 'svelte-fa'
+import { faRotateRight } from '@fortawesome/free-solid-svg-icons'
 
 interface Props {
     filters?: {
@@ -24,31 +28,71 @@ interface Props {
 
 let { filters }: Props = $props()
 
+/** Cap in-memory log rows (see github.com/warp-tech/warpgate/issues/1836). */
+const MAX_LOGS = 500
+const POLL_INTERVAL_MS = 3000
+const PAGE_SIZE = 500
+
 let error: string|null = $state(null)
 let items: LogEntry[]|undefined
 let visibleItems: LogEntry[]|undefined = $state()
 let loading = $state(true)
 let endReached = $state(false)
 let loadOlderButton: HTMLButtonElement|undefined = $state()
-let reloadInterval: any
+let reloadInterval: ReturnType<typeof setInterval>
 let searchQuery = $state('')
-const PAGE_SIZE = 1000
+let scrollEl: HTMLDivElement|undefined = $state()
+
+let virtualizerStore = createVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: 0,
+    getScrollElement: () => scrollEl ?? null,
+    estimateSize: () => 48,
+    overscan: 12,
+})
+
+let virtualItems = $derived($virtualizerStore.getVirtualItems())
+
+function rowMeasure (node: HTMLDivElement) {
+    $virtualizerStore.measureElement(node)
+    return {
+        destroy () {
+            $virtualizerStore.measureElement(null)
+        },
+    }
+}
+
+$effect(() => {
+    const list = visibleItems
+    const count = list?.length ?? 0
+    untrack(() => {
+        $virtualizerStore.setOptions({
+            count,
+            getItemKey: (index) => String(list?.[index]?.id ?? index),
+        })
+    })
+})
 
 function addItems (newItems: LogEntry[]) {
-    let existingIds = new Set(items?.map(i => i.id) ?? [])
+    const existingIds = new Set(items?.map(i => i.id) ?? [])
     newItems = newItems.filter(i => !existingIds.has(i.id))
     newItems.sort(firstBy('timestamp', -1))
     if (!newItems.length) {
         return
     }
     items ??= []
-    if ((items?.[0]?.timestamp ?? 0) > newItems[0]!.timestamp) {
+    const prepended = !((items?.[0]?.timestamp ?? 0) > newItems[0]!.timestamp)
+    if (!prepended) {
         items = items.concat(newItems)
     } else {
         items = [
             ...newItems,
             ...items,
         ]
+    }
+    if (items.length > MAX_LOGS) {
+        items = prepended
+            ? items.slice(0, MAX_LOGS)
+            : items.slice(-MAX_LOGS)
     }
 }
 
@@ -95,6 +139,17 @@ async function loadOlder (searchMode = false) {
     }
 }
 
+async function clearAndReload () {
+    items = []
+    visibleItems = []
+    endReached = false
+    try {
+        await loadOlder(true)
+    } catch (e) {
+        error = await stringifyError(e)
+    }
+}
+
 function search () {
     loadOlder(true)
 }
@@ -112,7 +167,7 @@ onMount(() => {
         if (!loading) {
             loadNewer()
         }
-    }, 1000)
+    }, POLL_INTERVAL_MS)
 })
 
 onDestroy(() => {
@@ -249,173 +304,204 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     <Alert color="danger">{error}</Alert>
 {/if}
 
-<input
-    placeholder="Search..."
-    type="text"
-    class="form-control form-control-sm mb-2"
-    bind:value={searchQuery}
-    onkeyup={() => search()} />
+<div class="d-flex align-items-stretch gap-2 mb-2">
+    <input
+        placeholder="Search..."
+        type="text"
+        class="form-control form-control-sm flex-grow-1"
+        style="min-width: 12rem"
+        bind:value={searchQuery}
+        onkeyup={() => search()} />
+    <AsyncButton
+    id = "clearAndReloadButton"
+        color="link"
+        click={clearAndReload}
+        size="sm"
+        disabled={loading}
+    >
+        <Fa icon={faRotateRight} fw />
+    </AsyncButton>
+    <Tooltip target="clearAndReloadButton" delay={500}>
+        Clear view and reload latest log
+    </Tooltip>
+</div>
 
 {#if visibleItems}
     <div class="table-wrapper">
-        <table class="w-100">
-            <tbody>
-                {#each visibleItems as item (item.id)}
-                    {@const richEntry = parseRichLogEntry(item)}
-                    <tr>
-                        <td class="timestamp pe-4">
-                            {stringifyDate(item.timestamp)}
-                        </td>
-                        {#if !filters?.sessionId}
-                            <td class="username pe-4">
-                                {#if item.username}
-                                    {item.username}
-                                {/if}
-                            </td>
-                            <td class="session pe-4">
-                                {#if item.sessionId}
-                                    <a href="/sessions/{item.sessionId}" use:link>
-                                        {item.sessionId}
-                                    </a>
-                                {/if}
-                            </td>
-                        {/if}
-                        <td class="content">
-                            {#if richEntry?._type === 'AccessRoleGranted1'}
-                            <div class="rich-entry">
-                                Granted
-                                <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
-                                access role to
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
-                            </div>
-                            {:else if richEntry?._type === 'AccessRoleRevoked1'}
-                            <div class="rich-entry">
-                                Revoked
-                                <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
-                                access role from
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
-                            </div>
-                            {:else if richEntry?._type === 'AdminRoleGranted1'}
-                            <div class="rich-entry">
-                                Granted
-                                <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
-                                admin role to
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
-                            </div>
-                            {:else if richEntry?._type === 'AdminRoleRevoked1'}
-                            <div class="rich-entry">
-                                Revoked
-                                <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
-                                admin role from
-                                <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
-                            </div>
-                            {:else if richEntry?._type === 'UserCreated1'}
-                            <div class="rich-entry">
-                                Created user
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                            </div>
-                            {:else if richEntry?._type === 'UserDeleted1'}
-                            <div class="rich-entry">
-                                Deleted user
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                            </div>
-                            {:else if richEntry?._type === 'TargetSessionStarted1'}
-                            <div class="rich-entry">
-                                Target session started for
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                                on target
-                                <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
-                            </div>
-                            {:else if richEntry?._type === 'TargetSessionEnded1'}
-                            <div class="rich-entry">
-                                Target session ended for
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                                on target
-                                <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
-                            </div>
-                            {:else if richEntry?._type === 'CredentialCreated1'}
-                            <div class="rich-entry">
-                                Added {richEntry.credential_type} credential
-                                {#if richEntry.credential_name}
-                                    <strong>{richEntry.credential_name}</strong>
-                                {/if}
-                                for
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                                {#if richEntry.via === 'self-service'}
-                                    <span class="badge bg-secondary">self-service</span>
-                                {/if}
-                            </div>
-                            {:else if richEntry?._type === 'CredentialDeleted1'}
-                            <div class="rich-entry">
-                                Removed {richEntry.credential_type} credential
-                                {#if richEntry.credential_name}
-                                    <strong>{richEntry.credential_name}</strong>
-                                {/if}
-                                from
-                                <UserBadge id={richEntry.user_id} name={richEntry.username} />
-                                {#if richEntry.via === 'self-service'}
-                                    <span class="badge bg-secondary">self-service</span>
-                                {/if}
-                            </div>
-                            {:else if richEntry?._type === 'TicketCreated1'}
-                            <div class="rich-entry">
-                                Created ticket for
-                                <strong>{richEntry.username}</strong>
-                                to target
-                                <strong>{richEntry.target}</strong>
-                            </div>
-                            {:else if richEntry?._type === 'TicketDeleted1'}
-                            <div class="rich-entry">
-                                Deleted ticket for
-                                <strong>{richEntry.username}</strong>
-                                targeting
-                                <strong>{richEntry.target}</strong>
-                            </div>
-                            {:else}
-                                <span class="text">
-                                    {item.text}
-                                </span>
-                                {#each Object.entries(item.values ?? {}) as pair (pair[0])}
-                                    <span class="key">{pair[0]}:</span>
-                                    <span class="value">{pair[1]}</span>
-                                {/each}
-                            {/if}
-                        </td>
-                    </tr>
-                {/each}
-                {#if !endReached}
-                    {#if !loading}
-                        <tr>
-                            <td colspan="3">
-                                <IntersectionObserver element={loadOlderButton} on:observe={event => {
-                                    if (!loading && event.detail.isIntersecting) {
-                                        loadOlder()
-                                    }
-                                }}>
-                                    <button
-                                        bind:this={loadOlderButton}
-                                        class="btn btn-light"
-                                        onclick={() => loadOlder()}
-                                        disabled={loading}
-                                    >
-                                        Load older
-                                    </button>
-                                </IntersectionObserver>
-                            </td>
-                        </tr>
+        <div
+            class="log-scroll"
+            bind:this={scrollEl}
+        >
+            <div
+                class="virtual-inner"
+                class:session-context={!!filters?.sessionId}
+            >
+                <div class="log-header">
+                    <div class="timestamp">Time</div>
+                    {#if !filters?.sessionId}
+                        <div class="username">User</div>
+                        <div class="session">Session</div>
                     {/if}
-                {:else}
-                    <tr>
-                        <td></td>
-                        {#if !filters?.sessionId}
-                            <td></td>
-                            <td></td>
-                        {/if}
-                        <td class="text">End of the log</td>
-                    </tr>
+                    <div class="content">Event</div>
+                </div>
+                <div class="virtual-spacer" style="height: {virtualItems[0]?.start ?? 0}px"></div>
+                {#each virtualItems as row (row.key)}
+                    {@const item = visibleItems[row.index]}
+                    {#if item}
+                        {@const richEntry = parseRichLogEntry(item)}
+                        <div
+                            class="log-row"
+                            data-index={row.index}
+                            use:rowMeasure
+                        >
+                                <div class="timestamp">
+                                    {stringifyDate(item.timestamp)}
+                                </div>
+                                {#if !filters?.sessionId}
+                                    <div class="username">
+                                        {#if item.username}
+                                            {item.username}
+                                        {/if}
+                                    </div>
+                                    <div class="session">
+                                        {#if item.sessionId}
+                                            <a href="/sessions/{item.sessionId}" use:link>
+                                                {item.sessionId}
+                                            </a>
+                                        {/if}
+                                    </div>
+                                {/if}
+                                <div class="content">
+                                    {#if richEntry?._type === 'AccessRoleGranted1'}
+                                    <div class="rich-entry">
+                                        Granted
+                                        <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
+                                        access role to
+                                        <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'AccessRoleRevoked1'}
+                                    <div class="rich-entry">
+                                        Revoked
+                                        <AccessRoleBadge id={richEntry.role_id} name={richEntry.role_name} />
+                                        access role from
+                                        <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'AdminRoleGranted1'}
+                                    <div class="rich-entry">
+                                        Granted
+                                        <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
+                                        admin role to
+                                        <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'AdminRoleRevoked1'}
+                                    <div class="rich-entry">
+                                        Revoked
+                                        <AdminRoleBadge id={richEntry.admin_role_id} name={richEntry.admin_role_name} />
+                                        admin role from
+                                        <UserBadge id={richEntry.grantee_id} name={richEntry.grantee_username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'UserCreated1'}
+                                    <div class="rich-entry">
+                                        Created user
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'UserDeleted1'}
+                                    <div class="rich-entry">
+                                        Deleted user
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                    </div>
+                                    {:else if richEntry?._type === 'TargetSessionStarted1'}
+                                    <div class="rich-entry">
+                                        Target session started for
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        on target
+                                        <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
+                                    </div>
+                                    {:else if richEntry?._type === 'TargetSessionEnded1'}
+                                    <div class="rich-entry">
+                                        Target session ended for
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        on target
+                                        <TargetBadge id={richEntry.target_id} name={richEntry.target_name} />
+                                    </div>
+                                    {:else if richEntry?._type === 'CredentialCreated1'}
+                                    <div class="rich-entry">
+                                        Added {richEntry.credential_type} credential
+                                        {#if richEntry.credential_name}
+                                            <strong>{richEntry.credential_name}</strong>
+                                        {/if}
+                                        for
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        {#if richEntry.via === 'self-service'}
+                                            <span class="badge bg-secondary">self-service</span>
+                                        {/if}
+                                    </div>
+                                    {:else if richEntry?._type === 'CredentialDeleted1'}
+                                    <div class="rich-entry">
+                                        Removed {richEntry.credential_type} credential
+                                        {#if richEntry.credential_name}
+                                            <strong>{richEntry.credential_name}</strong>
+                                        {/if}
+                                        from
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        {#if richEntry.via === 'self-service'}
+                                            <span class="badge bg-secondary">self-service</span>
+                                        {/if}
+                                    </div>
+                                    {:else if richEntry?._type === 'TicketCreated1'}
+                                    <div class="rich-entry">
+                                        Created ticket for
+                                        <strong>{richEntry.username}</strong>
+                                        to target
+                                        <strong>{richEntry.target}</strong>
+                                    </div>
+                                    {:else if richEntry?._type === 'TicketDeleted1'}
+                                    <div class="rich-entry">
+                                        Deleted ticket for
+                                        <strong>{richEntry.username}</strong>
+                                        targeting
+                                        <strong>{richEntry.target}</strong>
+                                    </div>
+                                    {:else}
+                                        <span class="text">
+                                            {item.text}
+                                        </span>
+                                        {#each Object.entries(item.values ?? {}) as pair (pair[0])}
+                                        <span class="key-value">
+                                            <span class="key">{pair[0]}:</span>
+                                            <span class="value">{pair[1]}</span>
+                                        </span>
+                                        {/each}
+                                    {/if}
+                                </div>
+                        </div>
+                    {/if}
+                {/each}
+                <div class="virtual-spacer" style="height: {Math.max(0, $virtualizerStore.getTotalSize() - (virtualItems.at(-1)?.end ?? 0))}px"></div>
+            </div>
+            {#if !endReached}
+                {#if !loading}
+                    <div class="load-older-footer">
+                        <IntersectionObserver element={loadOlderButton} on:observe={event => {
+                            if (!loading && !error && event.detail.isIntersecting) {
+                                loadOlder()
+                            }
+                        }}>
+                            <button
+                                bind:this={loadOlderButton}
+                                class="btn btn-secondary"
+                                onclick={() => loadOlder()}
+                                disabled={loading}
+                            >
+                                Load older
+                            </button>
+                        </IntersectionObserver>
+                    </div>
                 {/if}
-            </tbody>
-        </table>
+            {:else}
+                <div class="end-of-log text-muted small py-2">End of the log</div>
+            {/if}
+        </div>
     </div>
 {/if}
 
@@ -423,50 +509,114 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     @import "../../theme/vars.light";
 
     .table-wrapper {
+        flex: 1 0 0;
+        min-height: 300px;
         max-width: 100%;
         overflow-x: auto;
+        position: relative;
     }
 
-    tr {
-        td {
-            font-family: $font-family-monospace;
-            font-size: 0.75rem;
-            white-space: nowrap;
+    .log-scroll {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: auto;
+        contain: strict;
+    }
+
+    .virtual-inner {
+        display: grid;
+        grid-template-columns: min-content min-content min-content minmax(0, 1fr);
+        column-gap: 1rem;
+        min-width: 100%;
+
+        &.session-context {
+            grid-template-columns: min-content minmax(0, 1fr);
         }
+    }
+
+    .virtual-spacer {
+        grid-column: 1 / -1;
+    }
+
+    .log-header {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--bs-body-bg, #fff);
+        font-family: $font-family-monospace;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0;
+        border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+        white-space: nowrap;
+    }
+
+    .log-row {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        align-items: start;
+        box-sizing: border-box;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        font-family: $font-family-monospace;
+        font-size: 0.75rem;
+        padding: 0.1rem 0;
+        white-space: nowrap;
 
         .timestamp {
             opacity: .75;
         }
 
-        td:not(:last-child) {
-            padding-right: 1em;
-        }
-
         .content {
             display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            min-width: 0;
+            white-space: normal;
 
             .text {
                 font-weight: bold;
                 margin-right: 0.6em;
             }
 
-            .key {
-                margin-left: 0.5em;
-                margin-right: 0.3em;
-                opacity: .5;
-                font-style: italic;
-            }
+            .key-value {
+                white-space: nowrap;
 
-            .value {
-                font-style: italic;
+                .key {
+                    margin-left: 0.5em;
+                    margin-right: 0.3em;
+                    opacity: .5;
+                    font-style: italic;
+                }
+
+                .value {
+                    font-style: italic;
+                }
             }
         }
 
         .rich-entry {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 0.5em;
         }
+    }
+
+    .load-older-footer {
+        padding: 0.75rem 0;
+    }
+
+    .end-of-log {
+        font-family: $font-family-monospace;
+        font-size: 0.75rem;
     }
 
 </style>

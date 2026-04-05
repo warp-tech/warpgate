@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use tokio::net::TcpStream;
-use tracing::*;
+use tracing::{debug, info, trace, warn};
 use warpgate_common::TargetMySqlOptions;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -31,7 +31,7 @@ pub struct ConnectionOptions {
 
 impl Default for ConnectionOptions {
     fn default() -> Self {
-        ConnectionOptions {
+        Self {
             collation: 33,
             database: None,
             max_packet_size: 0xffff_ffff,

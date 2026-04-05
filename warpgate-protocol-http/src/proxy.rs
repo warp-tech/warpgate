@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
-use tracing::*;
+use tracing::{debug, error, warn};
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
@@ -127,7 +128,7 @@ fn copy_client_response<R: SomeResponse>(
     server_response: &mut poem::Response,
 ) {
     let mut headers = client_response.headers().clone();
-    for h in client_response.headers().iter() {
+    for h in client_response.headers() {
         if DONT_FORWARD_HEADERS.contains(h.0) {
             if let http::header::Entry::Occupied(e) = headers.entry(h.0) {
                 e.remove_entry();
@@ -183,8 +184,8 @@ fn rewrite_response(
                 cookie.set_expires(cookie::Expiration::Session);
                 *value = cookie.to_string().parse()?;
             } catch (error: anyhow::Error) {
-                warn!(?error, header=?value, "Failed to parse response cookie")
-            })
+                warn!(?error, header=?value, "Failed to parse response cookie");
+            });
         }
     }
 
@@ -254,7 +255,7 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    if let TlsMode::Required = options.tls.mode {
+    if options.tls.mode == TlsMode::Required {
         client = client.https_only(true);
     }
 
@@ -310,7 +311,7 @@ pub async fn proxy_normal_request(
         req.method(),
         req.original_uri(),
         get_client_ip(req, &ctx.services).await.as_deref(),
-        &status,
+        status,
     );
 
     rewrite_response(&mut response, options, &uri)?;
@@ -321,7 +322,9 @@ async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
 ) -> Result<()> {
-    if response.content_type().map(|c| c.starts_with("text/html")) == Some(true)
+    if response
+        .content_type()
+        .is_some_and(|c| c.starts_with("text/html"))
         && response.status() == 200
     {
         copy_client_body_and_embed(client_response, response).await?;
@@ -349,7 +352,10 @@ async fn copy_client_body_and_embed(
         script_manifest.file
     );
     for css_file in script_manifest.css.unwrap_or_default() {
-        inject += &format!(r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#,);
+        let _ = write!(
+            &mut inject,
+            r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#
+        );
     }
 
     let before = "</head>";

@@ -1,8 +1,8 @@
 use bytes::BytesMut;
-use chrono::format::SecondsFormat;
-use chrono::Local;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio::net::UnixDatagram;
-use tracing::*;
+use tracing::{error, Subscriber};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use warpgate_common::WarpgateConfig;
@@ -33,10 +33,14 @@ where
         if !got_socket || values.contains_key(&SKIP_KEY) {
             return;
         }
-        values.insert("target", target.clone());
+        values.insert("target", target);
+        #[allow(clippy::unwrap_used, reason = "never fails")]
         values.insert(
             "timestamp",
-            Local::now().to_rfc3339_opts(SecondsFormat::Nanos, false),
+            OffsetDateTime::now_local()
+                .unwrap()
+                .format(&Rfc3339)
+                .unwrap(),
         );
         let _ = tx.try_send(values);
     });

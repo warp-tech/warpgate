@@ -13,13 +13,13 @@ pub enum LdapUsernameAttribute {
 }
 
 impl LdapUsernameAttribute {
-    pub fn attribute_name(&self) -> &'static str {
+    pub const fn attribute_name(self) -> &'static str {
         match self {
-            LdapUsernameAttribute::Cn => "cn",
-            LdapUsernameAttribute::Uid => "uid",
-            LdapUsernameAttribute::Email => "mail",
-            LdapUsernameAttribute::UserPrincipalName => "userPrincipalName",
-            LdapUsernameAttribute::SamAccountName => "sAMAccountName",
+            Self::Cn => "cn",
+            Self::Uid => "uid",
+            Self::Email => "mail",
+            Self::UserPrincipalName => "userPrincipalName",
+            Self::SamAccountName => "sAMAccountName",
         }
     }
 }

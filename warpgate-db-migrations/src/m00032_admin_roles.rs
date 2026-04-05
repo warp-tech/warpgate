@@ -1,5 +1,7 @@
 use sea_orm::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Schema, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PrimaryKeyTrait, QueryFilter, Schema, Set,
+};
 use sea_orm_migration::prelude::*;
 use uuid::Uuid;
 
@@ -7,7 +9,7 @@ use crate::m00007_targets_and_roles::{target, target_role_assignment};
 use crate::m00008_users::user_role_assignment;
 use crate::m00022_user_ldap_link::user;
 
-pub(crate) mod admin_role {
+pub mod admin_role {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -43,7 +45,7 @@ pub(crate) mod admin_role {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub(crate) mod user_admin_role {
+pub mod user_admin_role {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]

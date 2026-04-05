@@ -17,9 +17,9 @@ pub use error::CaError;
 
 impl From<KeyRejected> for CaError {
     fn from(err: KeyRejected) -> Self {
-        CaError::Other(Box::new(std::io::Error::new(
+        Self::Other(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("Key rejected: {:?}", err),
+            format!("Key rejected: {err:?}"),
         )))
     }
 }
@@ -99,7 +99,7 @@ pub fn deserialize_ca(
     let key_pem = pem::parse(private_key_pem).map_err(|e| {
         CaError::Other(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("Failed to parse private key PEM: {:?}", e),
+            format!("Failed to parse private key PEM: {e:?}"),
         )))
     })?;
 

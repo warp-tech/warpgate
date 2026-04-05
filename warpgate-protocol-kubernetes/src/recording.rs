@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use url::Url;
 use warpgate_common::SessionId;
@@ -16,7 +16,7 @@ use warpgate_db_entities::Recording::RecordingKind;
 #[derive(Debug, Object)]
 #[oai(rename = "KubernetesRecordingItem")]
 pub struct KubernetesRecordingItemApiObject {
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: OffsetDateTime,
     pub request_method: String,
     pub request_path: String,
     pub request_body: serde_json::Value,
@@ -26,7 +26,7 @@ pub struct KubernetesRecordingItemApiObject {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KubernetesRecordingItem {
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: OffsetDateTime,
     pub request_method: String,
     pub request_path: String,
     pub request_headers: std::collections::HashMap<String, String>,
@@ -38,7 +38,7 @@ pub struct KubernetesRecordingItem {
 
 impl From<KubernetesRecordingItem> for KubernetesRecordingItemApiObject {
     fn from(item: KubernetesRecordingItem) -> Self {
-        KubernetesRecordingItemApiObject {
+        Self {
             timestamp: item.timestamp,
             request_method: item.request_method,
             request_path: item.request_path,
@@ -59,7 +59,7 @@ pub struct KubernetesRecorder {
 
 impl KubernetesRecorder {
     async fn write_item(
-        &mut self,
+        &self,
         item: &KubernetesRecordingItem,
     ) -> Result<(), warpgate_core::recordings::Error> {
         let mut serialized_item =
@@ -70,7 +70,7 @@ impl KubernetesRecorder {
     }
 
     pub async fn record_response(
-        &mut self,
+        &self,
         method: &str,
         path: &str,
         headers: std::collections::HashMap<String, String>,
@@ -79,7 +79,7 @@ impl KubernetesRecorder {
         response_body: &[u8],
     ) -> Result<(), warpgate_core::recordings::Error> {
         self.write_item(&KubernetesRecordingItem {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             request_method: method.to_string(),
             request_path: path.to_string(),
             request_headers: headers,
@@ -97,7 +97,7 @@ impl Recorder for KubernetesRecorder {
     }
 
     fn new(writer: RecordingWriter) -> Self {
-        KubernetesRecorder { writer }
+        Self { writer }
     }
 }
 
@@ -127,7 +127,7 @@ pub async fn start_recording_api(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> anyhow::Result<KubernetesRecorder> {
-    let mut recordings = recordings.lock().await;
+    let recordings = recordings.lock().await;
     recordings
         .start::<KubernetesRecorder, _>(
             session_id,
@@ -143,7 +143,7 @@ pub async fn start_recording_exec(
     recordings: &Arc<Mutex<SessionRecordings>>,
     metadata: Option<SessionRecordingMetadata>,
 ) -> anyhow::Result<TerminalRecorder> {
-    let mut recordings = recordings.lock().await;
+    let recordings = recordings.lock().await;
     recordings
         .start::<TerminalRecorder, _>(session_id, None, metadata)
         .await
@@ -164,12 +164,12 @@ pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordi
         let command = parsed_query
             .get("command")
             .cloned()
-            .unwrap_or("unknown".into())
+            .unwrap_or_else(|| "unknown".into())
             .into();
         let container = parsed_query
             .get("container")
             .cloned()
-            .unwrap_or("unknown".into())
+            .unwrap_or_else(|| "unknown".into())
             .into();
         return match operation {
             "exec" => Some(SessionRecordingMetadata::Exec {

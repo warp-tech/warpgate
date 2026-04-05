@@ -240,6 +240,7 @@ class ProcessManager:
                 "server",
                 "--disable",
                 "traefik",
+                "--disable-cloud-controller",
             ]
         )
 

@@ -8,7 +8,7 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
-use tracing::*;
+use tracing::{debug, info, warn};
 use warpgate_common::TargetPostgresOptions;
 use warpgate_tls::{configure_tls_connector, TlsMode};
 
@@ -27,7 +27,7 @@ pub struct ConnectionOptions {
 
 impl Default for ConnectionOptions {
     fn default() -> Self {
-        ConnectionOptions {
+        Self {
             protocol_number_major: 3,
             protocol_number_minor: 0,
             parameters: BTreeMap::new(),
@@ -161,18 +161,12 @@ impl PostgresClient {
                     }
                     pgwire::messages::startup::Authentication::SASL(mechanisms) => {
                         let password = get_password()?;
-                        PostgresClient::run_sasl_auth(
-                            &mut stream,
-                            mechanisms,
-                            &target.username,
-                            password,
-                        )
-                        .await?;
+                        Self::run_sasl_auth(&mut stream, mechanisms, &target.username, password)
+                            .await?;
                     }
                     x => {
                         return Err(PostgresError::ProtocolError(format!(
-                            "Unsupported authentication method: {:?}",
-                            x
+                            "Unsupported authentication method: {x:?}"
                         )));
                     }
                 },
@@ -230,7 +224,7 @@ impl PostgresClient {
                     is_first_response = false;
                 } else {
                     stream.push(pgwire::messages::startup::SASLResponse::new(data.into()))?;
-                };
+                }
                 stream.flush().await?;
             }
 
@@ -243,12 +237,8 @@ impl PostgresClient {
             match payload.0 {
                 PgWireBackendMessage::ErrorResponse(response) => return Err(response.into()),
                 PgWireBackendMessage::Authentication(
-                    pgwire::messages::startup::Authentication::SASLContinue(msg),
-                ) => {
-                    data = Some(msg.to_vec());
-                }
-                PgWireBackendMessage::Authentication(
-                    pgwire::messages::startup::Authentication::SASLFinal(msg),
+                    pgwire::messages::startup::Authentication::SASLContinue(msg)
+                    | pgwire::messages::startup::Authentication::SASLFinal(msg),
                 ) => {
                     data = Some(msg.to_vec());
                 }

@@ -5,7 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use tracing::*;
+use tracing::{debug, info};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
@@ -74,7 +74,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = req.header("host").map(|h| h.to_string());
+        let return_host = req.header("host").map(ToString::to_string);
 
         let url = sso_req.auth_url().to_string();
         session.set(

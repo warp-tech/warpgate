@@ -55,7 +55,7 @@ impl CredentialPolicy for AllCredentialsPolicy {
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
         let valid_credential_types: HashSet<CredentialKind> =
-            valid_credentials.iter().map(|x| x.kind()).collect();
+            valid_credentials.iter().map(AuthCredential::kind).collect();
 
         if !valid_credential_types.is_empty()
             && valid_credential_types.is_superset(&self.required_credential_types)
@@ -65,7 +65,7 @@ impl CredentialPolicy for AllCredentialsPolicy {
             CredentialPolicyResponse::Need(
                 self.required_credential_types
                     .difference(&valid_credential_types)
-                    .cloned()
+                    .copied()
                     .collect(),
             )
         }
@@ -78,10 +78,9 @@ impl CredentialPolicy for PerProtocolCredentialPolicy {
         protocol: &str,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
-        if let Some(policy) = self.protocols.get(protocol) {
-            policy.is_sufficient(protocol, valid_credentials)
-        } else {
-            self.default.is_sufficient(protocol, valid_credentials)
-        }
+        self.protocols
+            .get(protocol)
+            .unwrap_or(&self.default)
+            .is_sufficient(protocol, valid_credentials)
     }
 }

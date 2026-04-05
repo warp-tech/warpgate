@@ -68,12 +68,10 @@ pub enum WarpgateError {
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
         match self {
-            WarpgateError::InvalidTicket(_)
-            | WarpgateError::UserNotFound(_)
-            | WarpgateError::RoleNotFound(_) => poem::http::StatusCode::UNAUTHORIZED,
-            WarpgateError::NoAdminAccess | WarpgateError::NoAdminPermission(_) => {
-                poem::http::StatusCode::FORBIDDEN
+            Self::InvalidTicket(_) | Self::UserNotFound(_) | Self::RoleNotFound(_) => {
+                poem::http::StatusCode::UNAUTHORIZED
             }
+            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -91,6 +89,6 @@ impl ApiResponse for WarpgateError {
     }
 
     fn register(registry: &mut poem_openapi::registry::Registry) {
-        poem::error::Error::register(registry)
+        poem::error::Error::register(registry);
     }
 }

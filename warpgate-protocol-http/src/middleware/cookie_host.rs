@@ -13,7 +13,7 @@ impl CookieHostMiddleware {
     /// If `base_domain` is Some(".example.com"), the session cookie will be
     /// scoped to that domain (works across subdomains). If None, it falls
     /// back to the request host (previous behavior).
-    pub fn new(base_domain: Option<String>) -> Self {
+    pub const fn new(base_domain: Option<String>) -> Self {
         Self { base_domain }
     }
 }
@@ -41,13 +41,16 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         let host = req
             .header(http::header::HOST)
             .map(|h| h.split(':').next().unwrap_or(h).to_string())
-            .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+            .or_else(|| {
+                req.original_uri()
+                    .host()
+                    .map(std::string::ToString::to_string)
+            });
 
         let scheme_https = req.original_uri().scheme() == Some(&Scheme::HTTPS);
         let header_https = req
             .header("x-forwarded-proto")
-            .map(|h| h == "https")
-            .unwrap_or(false);
+            .is_some_and(|h| h == "https");
         let is_https = scheme_https || header_https;
 
         let mut resp = self.inner.call(req).await?.into_response();
@@ -60,7 +63,7 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     .get_all(http::header::SET_COOKIE)
                     .iter()
                     .filter_map(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect()
             };
 

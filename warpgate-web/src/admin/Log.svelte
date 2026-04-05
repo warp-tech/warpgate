@@ -55,5 +55,5 @@ let filters = $derived({
 </div>
 
 {#key `${$target}-${filterKind}-${params?.id}`}
-<LogViewer filters={filters} />
+    <LogViewer filters={filters} />
 {/key}

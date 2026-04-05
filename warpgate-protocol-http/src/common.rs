@@ -84,7 +84,7 @@ impl SessionExt for Session {
     }
 
     fn clear_auth_state(&self) {
-        self.remove(AUTH_STATE_ID_SESSION_KEY)
+        self.remove(AUTH_STATE_ID_SESSION_KEY);
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
@@ -94,7 +94,7 @@ impl SessionExt for Session {
 
     fn set_sso_login_state(&self, state: SsoLoginState) {
         if let Ok(json) = serde_json::to_string(&state) {
-            self.set(AUTH_SSO_LOGIN_STATE, json)
+            self.set(AUTH_SSO_LOGIN_STATE, json);
         }
     }
 }
@@ -107,14 +107,14 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
     let services = &ctx.services;
 
     // Admin tokens bypass the database check and are always full administrators.
-    if let RequestAuthorization::AdminToken = ctx.auth {
+    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
         return Ok(true);
     }
 
     let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => username,
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. })
+        | RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
-        RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
@@ -163,8 +163,7 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
         let err_resp = gateway_redirect(&req).into_response();
         Ok(_inner_auth(ep, req)
             .await?
-            .map(IntoResponse::into_response)
-            .unwrap_or(err_resp))
+            .map_or(err_resp, IntoResponse::into_response))
     })
 }
 
@@ -172,8 +171,7 @@ pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "".into());
+        .map_or_else(String::new, ToString::to_string);
 
     let path = format!(
         "/@warpgate#/login?next={}",
@@ -190,7 +188,7 @@ pub async fn get_auth_state_for_request(
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     if let Some(id) = session.get_auth_state_id() {
         if !store.contains_key(&id.0) {
-            session.remove(AUTH_STATE_ID_SESSION_KEY)
+            session.remove(AUTH_STATE_ID_SESSION_KEY);
         }
     }
 
@@ -267,13 +265,13 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 let request_host = req
                     .header(HOST)
                     .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+                    .or_else(|| req.original_uri().host().map(ToString::to_string));
 
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost
                     let is_localhost = is_localhost_host(&host);
                     let is_authorized = host == base_host
-                        || host.ends_with(&format!(".{}", base_host))
+                        || host.ends_with(&format!(".{base_host}"))
                         || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
 
                     if !is_authorized {

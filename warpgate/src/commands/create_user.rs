@@ -10,36 +10,35 @@ use warpgate_db_entities::{
 
 use crate::config::load_config;
 
-pub(crate) async fn command(
+pub async fn command(
     params: &GlobalParams,
     username: &str,
     password: &Secret<String>,
-    role: &Option<String>,
+    role: Option<&String>,
 ) -> anyhow::Result<()> {
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
 
     let db = services.db.lock().await;
 
-    let db_user = match User::Entity::find()
+    let db_user = if let Some(x) = User::Entity::find()
         .filter(User::Column::Username.eq(username))
         .all(&*db)
         .await?
         .first()
     {
-        Some(x) => x.to_owned(),
-        None => {
-            let values = User::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                username: Set(username.to_owned()),
-                description: Set("".into()),
-                credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
-                rate_limit_bytes_per_second: Set(None),
-                ldap_server_id: Set(None),
-                ldap_object_uuid: Set(None),
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?
-        }
+        x.to_owned()
+    } else {
+        let values = User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(username.to_owned()),
+            description: Set("".into()),
+            credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
+            rate_limit_bytes_per_second: Set(None),
+            ldap_server_id: Set(None),
+            ldap_object_uuid: Set(None),
+        };
+        values.insert(&*db).await.map_err(WarpgateError::from)?
     };
 
     PasswordCredential::ActiveModel {

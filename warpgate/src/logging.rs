@@ -35,7 +35,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     // Determine effective log format (CLI overrides config)
     let log_format = cli
         .log_format
-        .or(config.map(|c| c.store.log.format))
+        .or_else(|| config.map(|c| c.store.log.format))
         .unwrap_or_default();
 
     let registry = tracing_subscriber::registry();

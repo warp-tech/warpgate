@@ -32,7 +32,7 @@ impl ChannelWriter {
                 }
             }
         });
-        ChannelWriter { tx }
+        Self { tx }
     }
 
     pub fn write<D: Into<Vec<u8>>>(&self, handle: Handle, channel: ChannelId, data: D) {

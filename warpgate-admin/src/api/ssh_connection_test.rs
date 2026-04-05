@@ -55,10 +55,10 @@ impl Api {
             RCCommand::Connect(TargetSSHOptions {
                 host: body.host.clone(),
                 port: body.port,
-                username: "".into(),
+                username: String::new(),
                 allow_insecure_algos: None,
                 auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
-                    password: "".to_string().into(),
+                    password: String::new().into(),
                 }),
             }),
             None,

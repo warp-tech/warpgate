@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -6,6 +5,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set,
 };
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
@@ -26,8 +26,8 @@ fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateErro
 struct ExistingCertificateCredential {
     id: Uuid,
     label: String,
-    date_added: Option<DateTime<Utc>>,
-    last_used: Option<DateTime<Utc>>,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
     fingerprint: String,
 }
 
@@ -143,7 +143,7 @@ impl ListApi {
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
             certificate_pem: Set(client_cert_pem.clone()),
@@ -155,7 +155,7 @@ impl ListApi {
         let credential_name = body.label.clone();
         AuditEvent::CredentialCreated {
             credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name.clone()),
+            credential_name: Some(credential_name),
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
@@ -246,7 +246,7 @@ impl DetailApi {
 
         CertificateRevocation::ActiveModel {
             id: Set(Uuid::new_v4()),
-            date_added: Set(Utc::now()),
+            date_added: Set(OffsetDateTime::now_utc()),
             serial_number_base64: Set(serialize_certificate_serial(&cert)),
         }
         .insert(&*db)
@@ -264,7 +264,7 @@ impl DetailApi {
             credential_name: Some(credential_name.clone()),
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username.clone(),
+            username: user.username,
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();

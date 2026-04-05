@@ -163,7 +163,7 @@ where
     ret
 }
 
-pub(crate) async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
+pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
         let db = services.db.lock().await;
         Parameters::Entity::get(&db).await?

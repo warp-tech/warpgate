@@ -74,6 +74,7 @@
     }
   },
   "dependencies": {
+    "@tanstack/svelte-virtual": "^3.13.23",
     "natural-orderby": "^5.0.0"
   }
 }
