@@ -170,7 +170,7 @@ impl DatabaseConfigProvider {
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
-            description: Set(String::new()),
+            description: Set("".into()),
             credential_policy: Set(default_credential_policy.unwrap_or_else(|| {
                 serde_json::to_value(UserRequireCredentialsPolicy::default()).unwrap_or_default()
             })),

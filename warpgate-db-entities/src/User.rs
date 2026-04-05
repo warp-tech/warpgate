@@ -163,35 +163,35 @@ impl Model {
                 .all(db)
                 .await?
                 .into_iter()
-                .map(std::convert::Into::into),
+                .map(Into::into),
         );
         credentials.extend(
             self.find_related(PasswordCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(std::convert::Into::into),
+                .map(Into::into),
         );
         credentials.extend(
             self.find_related(SsoCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(std::convert::Into::into),
+                .map(Into::into),
         );
         credentials.extend(
             self.find_related(PublicKeyCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(std::convert::Into::into),
+                .map(Into::into),
         );
         credentials.extend(
             self.find_related(CertificateCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(std::convert::Into::into),
+                .map(Into::into),
         );
 
         Ok(warpgate_common::UserDetails {

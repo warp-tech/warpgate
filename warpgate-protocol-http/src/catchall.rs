@@ -74,11 +74,7 @@ async fn get_target_for_request(
     let request_host = req
         .header(HOST)
         .map(|h| h.split(':').next().unwrap_or(h).to_string())
-        .or_else(|| {
-            req.original_uri()
-                .host()
-                .map(std::string::ToString::to_string)
-        });
+        .or_else(|| req.original_uri().host().map(ToString::to_string));
 
     let host_based_target_name = if let Some(host) = request_host {
         let found = ctx

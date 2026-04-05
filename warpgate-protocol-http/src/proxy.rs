@@ -202,8 +202,8 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
             req.headers()
                 .get_all(k)
                 .iter()
-                .map(|v| v.to_str().map(std::string::ToString::to_string))
-                .filter_map(std::result::Result::ok)
+                .map(|v| v.to_str().map(|x| x.to_string()))
+                .filter_map(|x| x.ok())
                 .collect::<Vec<_>>()
                 .join("; "),
         );

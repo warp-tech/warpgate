@@ -54,10 +54,8 @@ impl CredentialPolicy for AllCredentialsPolicy {
         _protocol: &str,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
-        let valid_credential_types: HashSet<CredentialKind> = valid_credentials
-            .iter()
-            .map(AuthCredential::kind)
-            .collect();
+        let valid_credential_types: HashSet<CredentialKind> =
+            valid_credentials.iter().map(AuthCredential::kind).collect();
 
         if !valid_credential_types.is_empty()
             && valid_credential_types.is_superset(&self.required_credential_types)

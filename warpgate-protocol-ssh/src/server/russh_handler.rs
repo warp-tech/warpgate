@@ -303,7 +303,7 @@ impl russh::server::Handler for ServerHandler {
         self.send_event(ServerHandlerEvent::WindowChangeRequest(
             ServerChannelId(channel),
             PtyRequest {
-                term: String::new(),
+                term: "".into(),
                 col_width,
                 row_height,
                 pix_width,

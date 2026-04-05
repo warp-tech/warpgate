@@ -379,8 +379,8 @@ impl Default for HttpConfig {
             listen: _default_http_listen(),
             external_port: None,
             external_host: None,
-            certificate: String::new(),
-            key: String::new(),
+            certificate: "".into(),
+            key: "".into(),
             trust_x_forwarded_headers: false,
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
@@ -447,8 +447,8 @@ impl Default for MySqlConfig {
             listen: _default_mysql_listen(),
             external_port: None,
             external_host: None,
-            certificate: String::new(),
-            key: String::new(),
+            certificate: "".into(),
+            key: "".into(),
         }
     }
 }
@@ -495,8 +495,8 @@ impl Default for KubernetesConfig {
             listen: _default_kubernetes_listen(),
             external_port: None,
             external_host: None,
-            certificate: String::new(),
-            key: String::new(),
+            certificate: "".into(),
+            key: "".into(),
             session_max_age: _default_session_max_age(),
         }
     }
@@ -540,8 +540,8 @@ impl Default for PostgresConfig {
             listen: _default_postgres_listen(),
             external_port: None,
             external_host: None,
-            certificate: String::new(),
-            key: String::new(),
+            certificate: "".into(),
+            key: "".into(),
         }
     }
 }

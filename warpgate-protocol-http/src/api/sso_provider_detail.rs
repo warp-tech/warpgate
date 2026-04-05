@@ -74,7 +74,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = req.header("host").map(std::string::ToString::to_string);
+        let return_host = req.header("host").map(ToString::to_string);
 
         let url = sso_req.auth_url().to_string();
         session.set(

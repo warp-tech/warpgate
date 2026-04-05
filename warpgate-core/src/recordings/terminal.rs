@@ -72,7 +72,7 @@ impl From<TerminalRecordingItem> for AsciiCast {
                 version: 2,
                 width: cols,
                 height: rows,
-                title: String::new(),
+                title: "".into(),
             },
         }
     }

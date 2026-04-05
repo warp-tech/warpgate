@@ -168,7 +168,7 @@ async fn _handle_normal_request_inner(
         if DONT_FORWARD_HEADERS.contains(name) && name != http::header::ACCEPT_ENCODING {
             continue;
         }
-        if let Ok(mut value_str) = value.to_str().map(std::string::ToString::to_string) {
+        if let Ok(mut value_str) = value.to_str().map(ToString::to_string) {
             if name == http::header::ACCEPT {
                 let values = value
                     .to_str()

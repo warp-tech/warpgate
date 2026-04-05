@@ -109,7 +109,7 @@ pub async fn api_get_sessions_changes_stream(
             let (mut sink, _) = socket.split();
 
             while receiver.recv().await.is_ok() {
-                sink.send(Message::Text(String::new())).await?;
+                sink.send(Message::Text("".into())).await?;
             }
 
             Ok::<(), anyhow::Error>(())

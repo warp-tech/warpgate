@@ -94,7 +94,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         self.username = username.clone();
         self.database = startup.parameters.get("database").cloned();
 
-        self.run_authorization(startup, &username.unwrap_or(String::new()))
+        self.run_authorization(startup, &username.unwrap_or_else(|| "".into()))
             .await
     }
 

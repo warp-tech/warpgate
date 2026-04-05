@@ -171,7 +171,7 @@ pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
-        .map_or_else(String::new, std::string::ToString::to_string);
+        .map_or_else(String::new, ToString::to_string);
 
     let path = format!(
         "/@warpgate#/login?next={}",
@@ -265,11 +265,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 let request_host = req
                     .header(HOST)
                     .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| {
-                        req.original_uri()
-                            .host()
-                            .map(std::string::ToString::to_string)
-                    });
+                    .or_else(|| req.original_uri().host().map(ToString::to_string));
 
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost

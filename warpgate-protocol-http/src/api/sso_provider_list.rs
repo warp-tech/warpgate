@@ -13,7 +13,7 @@ use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
-use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
+use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
 use crate::api::common::logout;
@@ -271,7 +271,7 @@ impl Api {
                 } else {
                     mappings
                         .get("*")
-                        .map(warpgate_sso::RoleMapping::roles)
+                        .map(RoleMapping::roles)
                         .unwrap_or_default()
                 };
 
@@ -301,11 +301,9 @@ impl Api {
             let admin_map = provider_config.provider.admin_role_mappings();
 
             // compute managed list from mapping values (or all role names if no mapping provided)
-            let managed_admin_names: Option<Vec<String>> = admin_map.as_ref().map(|m| {
-                m.values()
-                    .flat_map(warpgate_sso::RoleMapping::roles)
-                    .collect()
-            });
+            let managed_admin_names: Option<Vec<String>> = admin_map
+                .as_ref()
+                .map(|m| m.values().flat_map(RoleMapping::roles).collect());
 
             let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
                 remote_admins
@@ -313,7 +311,7 @@ impl Api {
                     .flat_map(|r| {
                         mappings
                             .get(r)
-                            .map(warpgate_sso::RoleMapping::roles)
+                            .map(RoleMapping::roles)
                             .into_iter()
                             .flatten()
                     })
