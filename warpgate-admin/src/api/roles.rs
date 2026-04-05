@@ -72,9 +72,9 @@ impl ListApi {
         body: Json<RoleDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesCreate)).await?;
-
         use warpgate_db_entities::Role;
+
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesCreate)).await?;
 
         if body.name.is_empty() {
             return Ok(CreateRoleResponse::BadRequest(Json("name".into())));

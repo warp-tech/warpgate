@@ -15,7 +15,7 @@ impl<C> ValuesLogLayer<C>
 where
     C: Fn(SerializedRecordValues, String),
 {
-    pub fn new(callback: C) -> Self {
+    pub const fn new(callback: C) -> Self {
         Self { callback }
     }
 }

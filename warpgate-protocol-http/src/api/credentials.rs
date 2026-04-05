@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use http::StatusCode;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
@@ -6,6 +5,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
@@ -87,8 +87,8 @@ struct NewPublicKeyCredential {
 struct ExistingPublicKeyCredential {
     id: Uuid,
     label: String,
-    date_added: Option<DateTime<Utc>>,
-    last_used: Option<DateTime<Utc>>,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
     abbreviated: String,
 }
 
@@ -162,8 +162,8 @@ enum CreateOtpCredentialResponse {
 struct ExistingCertificateCredential {
     id: Uuid,
     label: String,
-    date_added: Option<DateTime<Utc>>,
-    last_used: Option<DateTime<Utc>>,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
     fingerprint: String,
 }
 
@@ -373,7 +373,7 @@ impl Api {
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
@@ -385,7 +385,7 @@ impl Api {
         let credential_name = body.label.clone();
         AuditEvent::CredentialCreated {
             credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name.clone()),
+            credential_name: Some(credential_name),
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
@@ -570,7 +570,7 @@ impl Api {
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
             certificate_pem: Set(client_cert_pem.clone()),
@@ -582,7 +582,7 @@ impl Api {
         let credential_name = body.label.clone();
         AuditEvent::CredentialCreated {
             credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name.clone()),
+            credential_name: Some(credential_name),
             via: CredentialChangedVia::SelfService,
             user_id: user.id,
             username: user.username.clone(),
@@ -592,7 +592,7 @@ impl Api {
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
-                credential: object.clone().into(),
+                credential: object.into(),
                 certificate_pem: client_cert_pem,
             },
         )))
@@ -629,7 +629,7 @@ impl Api {
         let cert = warpgate_ca::deserialize_certificate(&model.certificate_pem)?;
         entities::CertificateRevocation::ActiveModel {
             id: Set(Uuid::new_v4()),
-            date_added: Set(Utc::now()),
+            date_added: Set(OffsetDateTime::now_utc()),
             serial_number_base64: Set(warpgate_ca::serialize_certificate_serial(&cert)),
         }
         .insert(&*db)

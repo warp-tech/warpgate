@@ -1,8 +1,9 @@
 use std::io::{self, Write};
 
-use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -55,10 +56,10 @@ where
 
         // Extract message before moving values
         let message = values.remove("message").unwrap_or_default();
-
+        #[allow(clippy::unwrap_used, reason = "never fails")]
         let entry = JsonLogEntry {
-            timestamp: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            level: level_to_str(event.metadata().level()),
+            timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
+            level: level_to_str(*event.metadata().level()),
             target: event.metadata().target().to_string(),
             message,
             fields: values,
@@ -77,7 +78,7 @@ where
             .to_string(),
         };
 
-        let _ = writeln!(io::stdout(), "{}", json);
+        let _ = writeln!(io::stdout(), "{json}");
     }
 
     fn on_new_span(
@@ -105,8 +106,8 @@ where
     JsonConsoleLayer
 }
 
-fn level_to_str(level: &Level) -> &'static str {
-    match *level {
+const fn level_to_str(level: Level) -> &'static str {
+    match level {
         Level::TRACE => "trace",
         Level::DEBUG => "debug",
         Level::INFO => "info",

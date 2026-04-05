@@ -4,10 +4,10 @@ use sea_orm_migration::prelude::*;
 use super::m00008_users::user as User;
 
 pub mod api_tokens {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
     use sea_orm::sea_query::ForeignKeyAction;
     use serde::Serialize;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize)]
@@ -18,8 +18,8 @@ pub mod api_tokens {
         pub user_id: Uuid,
         pub label: String,
         pub secret: String,
-        pub created: DateTime<Utc>,
-        pub expiry: DateTime<Utc>,
+        pub created: OffsetDateTime,
+        pub expiry: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter)]

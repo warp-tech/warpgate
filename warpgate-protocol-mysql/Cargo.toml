@@ -27,4 +27,3 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 webpki = { version = "0.22", default-features = false }
-once_cell = { version = "1.17", default-features = false }

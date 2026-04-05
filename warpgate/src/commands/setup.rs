@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
-use tracing::*;
+use tracing::{error, info};
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
@@ -21,7 +21,7 @@ use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
 use crate::{Cli, Commands};
 
-fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
+fn prompt_endpoint(prompt: &str, default: &ListenEndpoint) -> ListenEndpoint {
     loop {
         let v = dialoguer::Input::with_theme(&ColorfulTheme::default())
             .default(format!("{default:?}"))
@@ -37,13 +37,13 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
                 }
             },
             Err(err) => {
-                error!("Failed to resolve this endpoint: {err}")
+                error!("Failed to resolve this endpoint: {err}");
             }
         }
     }
 }
 
-pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
+pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
@@ -137,7 +137,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
                 "Endpoint to listen for HTTP connections on",
-                HttpConfig::default().listen,
+                &HttpConfig::default().listen,
             );
         }
     }
@@ -165,7 +165,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             if store.ssh.enable {
                 store.ssh.listen = prompt_endpoint(
                     "Endpoint to listen for SSH connections on",
-                    SshConfig::default().listen,
+                    &SshConfig::default().listen,
                 );
             }
         }
@@ -189,7 +189,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             if store.mysql.enable {
                 store.mysql.listen = prompt_endpoint(
                     "Endpoint to listen for MySQL connections on",
-                    MySqlConfig::default().listen,
+                    &MySqlConfig::default().listen,
                 );
             }
         }
@@ -215,7 +215,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             if store.postgres.enable {
                 store.postgres.listen = prompt_endpoint(
                     "Endpoint to listen for PostgreSQL connections on",
-                    PostgresConfig::default().listen,
+                    &PostgresConfig::default().listen,
                 );
             }
         }
@@ -244,7 +244,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             if store.kubernetes.enable {
                 store.kubernetes.listen = prompt_endpoint(
                     "Endpoint to listen for Kubernetes connections on",
-                    KubernetesConfig::default().listen,
+                    &KubernetesConfig::default().listen,
                 );
             }
         }
@@ -336,7 +336,7 @@ pub(crate) async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         params,
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
-        &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
+        Some(&BUILTIN_ADMIN_ROLE_NAME.to_string()),
     )
     .await?;
 

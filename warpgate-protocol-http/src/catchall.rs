@@ -7,7 +7,7 @@ use poem::web::{Data, FromRequest, Redirect};
 use poem::{handler, Body, IntoResponse, Request, Response};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{debug, info_span, Instrument};
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -74,7 +74,11 @@ async fn get_target_for_request(
     let request_host = req
         .header(HOST)
         .map(|h| h.split(':').next().unwrap_or(h).to_string())
-        .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+        .or_else(|| {
+            req.original_uri()
+                .host()
+                .map(std::string::ToString::to_string)
+        });
 
     let host_based_target_name = if let Some(host) = request_host {
         let found = ctx
@@ -143,11 +147,10 @@ async fn get_target_for_request(
                 .await?
                 .iter()
                 .filter(|t| t.name == target_name)
-                .filter_map(|t| match t.options {
+                .find_map(|t| match t.options {
                     TargetOptions::Http(ref options) => Some((t, options)),
                     _ => None,
                 })
-                .next()
                 .map(|(t, o)| (t.clone(), o.clone()))
         };
 

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
@@ -11,7 +10,7 @@ use warpgate_common::{SessionId, WarpgateError};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
-pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));
+pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
 
 struct AuthCompletionSignal {
     sender: broadcast::Sender<AuthResult>,
@@ -63,7 +62,7 @@ impl AuthStateStore {
                     continue;
                 }
             }
-            results.push(auth.0.clone())
+            results.push(auth.0.clone());
         }
         results
     }
@@ -154,7 +153,7 @@ impl AuthStateStore {
         }
     }
 
-    pub async fn vacuum(&mut self) {
+    pub fn vacuum(&mut self) {
         self.store
             .retain(|_, (_, started_at)| started_at.elapsed() < *TIMEOUT);
 

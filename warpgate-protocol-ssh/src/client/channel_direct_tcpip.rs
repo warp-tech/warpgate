@@ -19,14 +19,14 @@ pub struct DirectTCPIPChannel {
 }
 
 impl DirectTCPIPChannel {
-    pub fn new(
+    pub const fn new(
         client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: UnboundedSender<RCEvent>,
         session_id: SessionId,
     ) -> Self {
-        DirectTCPIPChannel {
+        Self {
             client_channel,
             channel_id,
             ops_rx,
@@ -46,8 +46,7 @@ impl DirectTCPIPChannel {
                         Some(ChannelOperation::Eof) => {
                             self.client_channel.eof().await?;
                         },
-                        Some(ChannelOperation::Close) => break,
-                        None => break,
+                        Some(ChannelOperation::Close)|None => break,
                         Some(operation) => {
                             warn!(client_channel=%self.channel_id, ?operation, session=%self.session_id, "unexpected client_channel operation");
                         }

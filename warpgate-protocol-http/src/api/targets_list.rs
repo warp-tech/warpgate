@@ -77,10 +77,8 @@ impl Api {
             targets.retain(|t| {
                 let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
                 t.name.to_lowercase().contains(&search)
-                    || group
-                        .map(|g| g.name.to_lowercase().contains(&search))
-                        .unwrap_or(false)
-            })
+                    || group.is_some_and(|g| g.name.to_lowercase().contains(&search))
+            });
         }
 
         let auth_clone = ctx.auth.clone();
@@ -90,21 +88,21 @@ impl Api {
                 let auth = auth_clone.clone();
                 let name = t.name.clone();
                 async move {
-                    match auth {
-                        RequestAuthorization::Session(SessionAuthorization::Ticket {
-                            target_name,
-                            ..
-                        }) => target_name == name,
-                        _ => {
-                            let mut config_provider = services.config_provider.lock().await;
-                            let Some(username) = auth.username() else {
-                                return false;
-                            };
-                            matches!(
-                                config_provider.authorize_target(username, &name).await,
-                                Ok(true)
-                            )
-                        }
+                    if let RequestAuthorization::Session(SessionAuthorization::Ticket {
+                        target_name,
+                        ..
+                    }) = auth
+                    {
+                        target_name == name
+                    } else {
+                        let mut config_provider = services.config_provider.lock().await;
+                        let Some(username) = auth.username() else {
+                            return false;
+                        };
+                        matches!(
+                            config_provider.authorize_target(username, &name).await,
+                            Ok(true)
+                        )
                     }
                 }
             })

@@ -8,19 +8,19 @@ publish = false
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 cookie = "0.18"
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
 http = { version = "1.0", default-features = false }
-once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 reqwest.workspace = true
+reqwest.features = ["json"]
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true

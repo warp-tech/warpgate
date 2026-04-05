@@ -14,7 +14,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -94,7 +94,7 @@ impl ListApi {
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
 
         let targets: Result<Vec<TargetConfig>, _> =
-            targets.into_iter().map(|t| t.try_into()).collect();
+            targets.into_iter().map(TryInto::try_into).collect();
         let targets = targets.map_err(WarpgateError::from)?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))
@@ -231,7 +231,7 @@ impl DetailApi {
         model.description = Set(body.description.clone().unwrap_or_default());
         model.options =
             Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
-        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
         let target = model.update(&*db).await?;
 
@@ -241,7 +241,7 @@ impl DetailApi {
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .apply_new_rate_limits(&*services.state.lock().await)
             .await?;
 
         Ok(UpdateTargetResponse::Ok(Json(
@@ -273,13 +273,18 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        Ticket::Entity::delete_many()
+            .filter(Ticket::Column::TargetId.eq(target.id))
+            .exec(&*db)
+            .await?;
+
         if target.kind == TargetKind::Ssh {
             let options: TargetOptions = serde_json::from_value(target.options.clone())?;
             if let TargetOptions::Ssh(ssh_options) = options {
                 use warpgate_db_entities::KnownHost;
                 KnownHost::Entity::delete_many()
                     .filter(KnownHost::Column::Host.eq(&ssh_options.host))
-                    .filter(KnownHost::Column::Port.eq(ssh_options.port as i32))
+                    .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
                     .exec(&*db)
                     .await?;
             }
@@ -382,7 +387,7 @@ impl RolesApi {
         };
 
         Ok(GetTargetRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
+            roles.into_iter().map(Into::into).collect(),
         )))
     }
 

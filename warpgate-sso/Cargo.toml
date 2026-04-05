@@ -16,9 +16,9 @@ openidconnect = { version = "4.0", default-features = false, features = [
 ] }
 yup-oauth2 = "12"
 reqwest_12.workspace = true
+reqwest_12.features = ["json"]
 serde.workspace = true
 serde_json.workspace = true
-once_cell = { version = "1.17", default-features = false }
 jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 data-encoding.workspace = true
 futures.workspace = true

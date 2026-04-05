@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
-use tracing::*;
+use tracing::info;
 use warpgate_common::ListenEndpoint;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
@@ -67,13 +67,13 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
     .with_safe_default_protocol_versions()
-    .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {}", e))?
+    .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {e}"))?
     .with_client_cert_verifier(Arc::new(AcceptAnyClientCert))
     .with_cert_resolver(Arc::new(SingleCertResolver::new(
         certificate_and_key.clone(),
     )));
 
-    let tcp_acceptor = address.poem_listener().await?.into_acceptor().await?;
+    let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
     let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
 
     Server::new_with_acceptor(cert_capturing_acceptor)

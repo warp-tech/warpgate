@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, mpsc, Mutex};
-use tracing::*;
+use tracing::error;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{try_block, GlobalParams};
@@ -63,7 +64,7 @@ impl RecordingWriter {
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
-                    if Instant::now() - last_flush > Duration::from_secs(5) {
+                    if last_flush.elapsed() > Duration::from_secs(5) {
                         last_flush = Instant::now();
                         writer.flush().await?;
                     }
@@ -74,7 +75,7 @@ impl RecordingWriter {
                             }
                             None => break,
                         },
-                        _ = tokio::time::sleep(Duration::from_millis(5000)) => ()
+                        () = tokio::time::sleep(Duration::from_millis(5000)) => ()
                     }
                 }
                 Ok::<(), anyhow::Error>(())
@@ -83,9 +84,10 @@ impl RecordingWriter {
             });
 
             try_block!(async {
+                use sea_orm::ActiveValue::Set;
+
                 writer.flush().await?;
 
-                use sea_orm::ActiveValue::Set;
                 let id = model.id;
                 let db = db.lock().await;
                 let recording = Recording::Entity::find_by_id(id)
@@ -93,7 +95,7 @@ impl RecordingWriter {
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
                 let mut model: Recording::ActiveModel = recording.into();
-                model.ended = Set(Some(chrono::Utc::now()));
+                model.ended = Set(Some(OffsetDateTime::now_utc()));
                 model.update(&*db).await?;
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
@@ -101,14 +103,14 @@ impl RecordingWriter {
             });
         });
 
-        Ok(RecordingWriter {
+        Ok(Self {
             sender,
             live_sender,
             drop_signal,
         })
     }
 
-    pub async fn write(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn write(&self, data: &[u8]) -> Result<()> {
         let data = Bytes::from(data.to_vec());
         self.sender
             .send(data.clone())

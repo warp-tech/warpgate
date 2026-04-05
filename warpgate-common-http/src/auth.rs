@@ -19,17 +19,15 @@ pub enum SessionAuthorization {
 }
 
 impl SessionAuthorization {
-    pub fn username(&self) -> &String {
+    pub const fn username(&self) -> &String {
         match self {
-            Self::User { username, .. } => username,
-            Self::Ticket { username, .. } => username,
+            Self::User { username, .. } | Self::Ticket { username, .. } => username,
         }
     }
 
-    pub fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> Uuid {
         match self {
-            Self::User { user_id, .. } => *user_id,
-            Self::Ticket { user_id, .. } => *user_id,
+            Self::User { user_id, .. } | Self::Ticket { user_id, .. } => *user_id,
         }
     }
 }
@@ -66,7 +64,7 @@ pub struct AuthenticatedRequestContext {
 
 impl RequestAuthorization {
     /// Returns a username if one is present (admin token has none)
-    pub fn username(&self) -> Option<&String> {
+    pub const fn username(&self) -> Option<&String> {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
@@ -75,7 +73,7 @@ impl RequestAuthorization {
     }
 
     /// Returns a user ID if present in the authorization context.
-    pub fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> Uuid {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,

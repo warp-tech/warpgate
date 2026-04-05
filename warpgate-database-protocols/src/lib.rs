@@ -1,3 +1,4 @@
+#![allow(clippy::pedantic)]
 #![allow(dead_code, clippy::indexing_slicing)]
 pub mod io;
 pub mod mysql;

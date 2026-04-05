@@ -39,8 +39,8 @@ async function create () {
     try {
         result = await api.createTicket({
             createTicketRequest: {
-                username: selectedUser.username,
-                targetName: selectedTarget.name,
+                userId: selectedUser.id,
+                targetId: selectedTarget.id,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
                 numberOfUses: selectedNumberOfUses,
                 description: selectedDescription,

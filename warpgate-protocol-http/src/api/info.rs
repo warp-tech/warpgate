@@ -41,7 +41,7 @@ pub struct SetupState {
 }
 
 impl SetupState {
-    pub fn completed(&self) -> bool {
+    pub const fn completed(&self) -> bool {
         self.has_targets && self.has_users
     }
 }
@@ -111,7 +111,7 @@ impl Api {
             .construct_external_url(Some(req), None)
             .ok()
             .as_ref()
-            .and_then(|x| x.host())
+            .and_then(url::Url::host)
             .map(|x| x.to_string());
 
         let parameters = {
@@ -137,10 +137,10 @@ impl Api {
                     has_targets: targets.len() > 1,
                     has_users: users.len() > 1,
                 };
-                if !state.completed() {
-                    Some(state)
-                } else {
+                if state.completed() {
                     None
+                } else {
+                    Some(state)
                 }
             } else {
                 None

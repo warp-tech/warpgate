@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dialoguer::theme::ColorfulTheme;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
-use tracing::*;
+use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{GlobalParams, Secret, User as UserConfig, UserPasswordCredential};
@@ -11,7 +11,7 @@ use warpgate_db_entities::{PasswordCredential, User};
 use crate::commands::common::assert_interactive_terminal;
 use crate::config::load_config;
 
-pub(crate) async fn command(params: &GlobalParams, username: &Option<String>) -> Result<()> {
+pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result<()> {
     assert_interactive_terminal();
 
     let config = load_config(params, true)?;
@@ -27,7 +27,10 @@ pub(crate) async fn command(params: &GlobalParams, username: &Option<String>) ->
         .all(&*db)
         .await?;
 
-    let users: Result<Vec<UserConfig>, _> = users.into_iter().map(|t| t.try_into()).collect();
+    let users: Result<Vec<UserConfig>, _> = users
+        .into_iter()
+        .map(std::convert::TryInto::try_into)
+        .collect();
     let mut users = users?;
     let usernames = users.iter().map(|x| x.username.clone()).collect::<Vec<_>>();
 

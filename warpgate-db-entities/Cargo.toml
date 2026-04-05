@@ -7,17 +7,16 @@ publish = false
 
 [dependencies]
 bytes = { version = "1.4", default-features = false }
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 poem-openapi.workspace = true
 sqlx.workspace = true
 sea-orm = { workspace = true, features = [
     "macros",
-    "with-chrono",
     "with-uuid",
     "with-json",
 ], default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 uuid.workspace = true
 warpgate-common = { path = "../warpgate-common", default-features = false }
 secrecy = "0.10"

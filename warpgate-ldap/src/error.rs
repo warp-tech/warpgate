@@ -41,6 +41,6 @@ pub enum LdapError {
 
 impl From<String> for LdapError {
     fn from(s: String) -> Self {
-        LdapError::Other(s)
+        Self::Other(s)
     }
 }

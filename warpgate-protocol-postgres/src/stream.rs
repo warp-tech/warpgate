@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::*;
+use tracing::trace;
 use warpgate_tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
 #[derive(thiserror::Error, Debug)]
@@ -15,20 +15,20 @@ pub enum PostgresStreamError {
     Io(#[from] std::io::Error),
 }
 
-pub(crate) trait PostgresEncode {
+pub trait PostgresEncode {
     fn encode(&self, buf: &mut BytesMut) -> PgWireResult<()>
     where
         Self: Sized;
 }
 
-pub(crate) trait PostgresDecode {
+pub trait PostgresDecode {
     fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>>
     where
         Self: Sized;
 }
 
 #[derive(Debug)]
-pub(crate) enum PgWireStartupOrSslRequest {
+pub enum PgWireStartupOrSslRequest {
     Startup(pgwire::messages::startup::Startup),
     SslRequest(pgwire::messages::startup::SslRequest),
 }
@@ -43,10 +43,10 @@ impl PostgresDecode for PgWireStartupOrSslRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct PgWireGenericFrontendMessage(pub PgWireFrontendMessage);
+pub struct PgWireGenericFrontendMessage(pub PgWireFrontendMessage);
 
 #[derive(Debug)]
-pub(crate) struct PgWireGenericBackendMessage(pub PgWireBackendMessage);
+pub struct PgWireGenericBackendMessage(pub PgWireBackendMessage);
 
 impl PostgresDecode for PgWireGenericFrontendMessage {
     fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
@@ -84,7 +84,7 @@ impl<T: pgwire::messages::Message> PostgresEncode for T {
     }
 }
 
-pub(crate) struct PostgresStream<S, TS>
+pub struct PostgresStream<S, TS>
 where
     S: UpgradableStream<TS>,
     S: AsyncRead + AsyncWrite + Send + Unpin,
@@ -109,6 +109,7 @@ where
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn push<M: PostgresEncode + Debug>(
         &mut self,
         message: M,
@@ -132,7 +133,7 @@ where
             if let Some(message) = T::decode(&mut self.inbound_buffer)? {
                 trace!(?message, "received");
                 return Ok(Some(message));
-            };
+            }
 
             let read_bytes = self.stream.read_buf(&mut self.inbound_buffer).await?;
             if read_bytes == 0 {

@@ -12,7 +12,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::*;
+use tracing::error;
 use uuid::Uuid;
 use warpgate_common::AdminPermission;
 use warpgate_common_http::AuthenticatedRequestContext;

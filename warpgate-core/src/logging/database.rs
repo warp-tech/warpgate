@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use once_cell::sync::OnceCell;
 use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{error, Subscriber};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use uuid::Uuid;
@@ -13,8 +13,8 @@ use warpgate_db_entities::LogEntry;
 use super::layer::ValuesLogLayer;
 use super::values::SerializedRecordValues;
 
-static LOG_SENDER: OnceCell<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
-    OnceCell::new();
+static LOG_SENDER: OnceLock<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
+    OnceLock::new();
 
 pub fn make_database_logger_layer<S>() -> impl Layer<S>
 where
@@ -65,6 +65,8 @@ fn values_to_log_entry_data(
     mut values: SerializedRecordValues,
     target: String,
 ) -> Option<LogEntry::ActiveModel> {
+    use sea_orm::ActiveValue::Set;
+
     let session_id = (*values).remove("session");
     let username = (*values).remove("session_username");
     let related_users = (*values).remove("related_users");
@@ -72,7 +74,6 @@ fn values_to_log_entry_data(
     let related_admin_roles = (*values).remove("related_admin_roles");
     let message = (*values).remove("message").unwrap_or_default();
 
-    use sea_orm::ActiveValue::Set;
     let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok())?;
 
     Some(LogEntry::ActiveModel {
@@ -89,6 +90,6 @@ fn values_to_log_entry_data(
         related_users: Set(related_users),
         related_access_roles: Set(related_access_roles),
         related_admin_roles: Set(related_admin_roles),
-        timestamp: Set(chrono::Utc::now()),
+        timestamp: Set(OffsetDateTime::now_utc()),
     })
 }

@@ -11,14 +11,16 @@ pub async fn has_admin_permission(
 ) -> Result<bool, WarpgateError> {
     // Admin tokens have all permissions
     let auth = &ctx.auth;
-    if let RequestAuthorization::AdminToken = auth {
+    if matches!(auth, RequestAuthorization::AdminToken) {
         return Ok(true);
     }
 
     let username = match auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => username,
-        RequestAuthorization::Session(SessionAuthorization::Ticket { username, .. }) => username,
-        RequestAuthorization::UserToken { username, .. } => username,
+        RequestAuthorization::Session(
+            SessionAuthorization::User { username, .. }
+            | SessionAuthorization::Ticket { username, .. },
+        )
+        | RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::AdminToken => unreachable!(),
     };
 

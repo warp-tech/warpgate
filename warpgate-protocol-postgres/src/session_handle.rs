@@ -8,7 +8,7 @@ pub struct PostgresSessionHandle {
 impl PostgresSessionHandle {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<()>) {
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
-        (PostgresSessionHandle { abort_tx }, abort_rx)
+        (Self { abort_tx }, abort_rx)
     }
 }
 

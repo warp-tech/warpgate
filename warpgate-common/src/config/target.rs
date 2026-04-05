@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
-use super::defaults::*;
+use super::defaults::{
+    _default_empty_string, _default_empty_vec, _default_mysql_port,
+    _default_postgres_idle_timeout_str, _default_ssh_port, _default_true, _default_username,
+};
 use crate::Secret;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -56,7 +59,7 @@ pub struct SshTargetPublicKeyAuth {}
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {
-        SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())
+        Self::PublicKey(SshTargetPublicKeyAuth::default())
     }
 }
 
@@ -168,7 +171,7 @@ pub struct KubernetesTargetTokenAuth {
 
 impl Default for KubernetesTargetAuth {
     fn default() -> Self {
-        KubernetesTargetAuth::Certificate(KubernetesTargetCertificateAuth::default())
+        Self::Certificate(KubernetesTargetCertificateAuth::default())
     }
 }
 

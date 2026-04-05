@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use chrono::Utc;
 use data_encoding::BASE64;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     QueryOrder, Set,
 };
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
@@ -30,7 +30,7 @@ pub struct DatabaseConfigProvider {
 }
 
 impl DatabaseConfigProvider {
-    pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
     }
 
@@ -92,7 +92,7 @@ impl DatabaseConfigProvider {
                 entities::PublicKeyCredential::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     user_id: Set(user_id),
-                    date_added: Set(Some(Utc::now())),
+                    date_added: Set(Some(OffsetDateTime::now_utc())),
                     last_used: Set(None),
                     label: Set("Public key synchronized from LDAP".to_string()),
                     ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
@@ -170,7 +170,7 @@ impl DatabaseConfigProvider {
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
-            description: Set("".into()),
+            description: Set(String::new()),
             credential_policy: Set(default_credential_policy.unwrap_or_else(|| {
                 serde_json::to_value(UserRequireCredentialsPolicy::default()).unwrap_or_default()
             })),
@@ -214,7 +214,10 @@ impl ConfigProvider for DatabaseConfigProvider {
             .all(&*db)
             .await?;
 
-        let users: Result<Vec<User>, _> = users.into_iter().map(|t| t.try_into()).collect();
+        let users: Result<Vec<User>, _> = users
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect();
 
         users
     }
@@ -227,7 +230,10 @@ impl ConfigProvider for DatabaseConfigProvider {
             .all(&*db)
             .await?;
 
-        let targets: Result<Vec<Target>, _> = targets.into_iter().map(|t| t.try_into()).collect();
+        let targets: Result<Vec<Target>, _> = targets
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect();
 
         Ok(targets?)
     }
@@ -254,7 +260,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let mut available_credential_types = user
             .credentials
             .iter()
-            .map(|x| x.kind())
+            .map(UserAuthCredential::kind)
             .collect::<HashSet<_>>();
         available_credential_types.insert(CredentialKind::WebUserApproval);
 
@@ -272,7 +278,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             supported_credential_types: if supported_credential_types.len() > 1 {
                 supported_credential_types
                     .iter()
-                    .cloned()
+                    .copied()
                     .filter(|x| x != &CredentialKind::WebUserApproval)
                     .collect()
             } else {
@@ -362,7 +368,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             let user = cred.find_related(entities::User::Entity).one(&*db).await?;
 
             if let Some(user) = user {
-                return Ok(Some(user.username.clone()));
+                return Ok(Some(user.username));
             }
         }
 
@@ -481,7 +487,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 provider: client_provider,
                 email: client_email,
             } => {
-                for credential in user_details.credentials.iter() {
+                for credential in &user_details.credentials {
                     if let UserAuthCredential::Sso(UserSsoCredential {
                         ref provider,
                         ref email,
@@ -574,7 +580,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 .collect(),
         };
 
-        for role_name in managed_role_names.into_iter() {
+        for role_name in managed_role_names {
             let Some(role) = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
                 .one(&*db)
@@ -636,7 +642,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 .collect(),
         };
 
-        for role_name in managed_admin_role_names.into_iter() {
+        for role_name in managed_admin_role_names {
             let role = entities::AdminRole::Entity::find()
                 .filter(entities::AdminRole::Column::Name.eq(role_name.clone()))
                 .one(&*db)
@@ -715,7 +721,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         // Update the `last_used` (last used) timestamp
         let mut active_model: entities::PublicKeyCredential::ActiveModel =
             public_key_credential.into();
-        active_model.last_used = Set(Some(Utc::now()));
+        active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
 
         active_model.update(&*db).await.map_err(|e| {
             error!("Failed to update last_used for public key: {:?}", e);
@@ -727,11 +733,11 @@ impl ConfigProvider for DatabaseConfigProvider {
 
     async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
         let db = self.db.lock().await;
-        let Some(ticket) = entities::ApiToken::Entity::find()
+        let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
                 entities::ApiToken::Column::Secret
                     .eq(token)
-                    .and(entities::ApiToken::Column::Expiry.gt(Utc::now())),
+                    .and(entities::ApiToken::Column::Expiry.gt(OffsetDateTime::now_utc())),
             )
             .one(&*db)
             .await?
@@ -739,7 +745,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let Some(user) = ticket
+        let Some(user) = api_token
             .find_related(entities::User::Entity)
             .one(&*db)
             .await?

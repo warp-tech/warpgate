@@ -114,7 +114,7 @@ where
             let original_remote_addr_str = match &remote_addr.0 {
                 Addr::SocketAddr(addr) => addr.to_string(),
                 Addr::Unix(_) => remote_addr.to_string(),
-                Addr::Custom(_, _) => "".into(),
+                Addr::Custom(_, _) => String::new(),
             };
             RemoteAddr(Addr::Custom(
                 "captured-cert",

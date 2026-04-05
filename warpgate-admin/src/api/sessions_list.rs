@@ -41,9 +41,9 @@ impl Api {
         logged_in_only: Query<Option<bool>>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
-
         use warpgate_db_entities::Session;
+
+        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
         let db = ctx.services.db.lock().await;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
@@ -109,7 +109,7 @@ pub async fn api_get_sessions_changes_stream(
             let (mut sink, _) = socket.split();
 
             while receiver.recv().await.is_ok() {
-                sink.send(Message::Text("".to_string())).await?;
+                sink.send(Message::Text(String::new())).await?;
             }
 
             Ok::<(), anyhow::Error>(())

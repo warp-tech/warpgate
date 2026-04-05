@@ -135,7 +135,7 @@ impl TryFrom<Model> for User {
     type Error = WarpgateError;
 
     fn try_from(model: Model) -> Result<Self, WarpgateError> {
-        Ok(User {
+        Ok(Self {
             id: model.id,
             username: model.username,
             credential_policy: serde_json::from_value(model.credential_policy)?,
@@ -163,35 +163,35 @@ impl Model {
                 .all(db)
                 .await?
                 .into_iter()
-                .map(|x| x.into()),
+                .map(std::convert::Into::into),
         );
         credentials.extend(
             self.find_related(PasswordCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(|x| x.into()),
+                .map(std::convert::Into::into),
         );
         credentials.extend(
             self.find_related(SsoCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(|x| x.into()),
+                .map(std::convert::Into::into),
         );
         credentials.extend(
             self.find_related(PublicKeyCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(|x| x.into()),
+                .map(std::convert::Into::into),
         );
         credentials.extend(
             self.find_related(CertificateCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
-                .map(|x| x.into()),
+                .map(std::convert::Into::into),
         );
 
         Ok(warpgate_common::UserDetails {
