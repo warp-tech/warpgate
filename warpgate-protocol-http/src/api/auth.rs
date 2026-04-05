@@ -305,7 +305,7 @@ impl Api {
         let services = &ctx.services;
         let store = services.auth_state_store.lock().await;
 
-        let RequestAuthorization::Session(SessionAuthorization::User(ref username)) = ctx.auth
+        let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
         else {
             return Ok(AuthStateListResponse::NotFound);
         };
@@ -407,7 +407,8 @@ async fn get_auth_state(
 ) -> Option<Arc<Mutex<AuthState>>> {
     let store = ctx.services.auth_state_store.lock().await;
 
-    let RequestAuthorization::Session(SessionAuthorization::User(username)) = &ctx.auth else {
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    else {
         return None;
     };
 
@@ -457,8 +458,10 @@ pub async fn api_get_web_auth_requests_stream(
     let services = &ctx.services;
     let auth_state_store = services.auth_state_store.clone();
 
-    let username = match ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User(ref username)) => username.clone(),
+    let username = match &ctx.auth {
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
+            username.clone()
+        }
         _ => bail!("Only session-based user auth is supported for this endpoint"),
     };
 

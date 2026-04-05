@@ -111,12 +111,14 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
         async move {
             loop {
                 let retention = { services.config.lock().await.store.log.retention };
-                let interval = retention / 10;
+                let audit_retention = { services.config.lock().await.store.log.audit_retention };
+                let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
                     &mut *services.db.lock().await,
                     &mut *services.recordings.lock().await,
                     &retention,
+                    &audit_retention,
                 )
                 .await
                 {

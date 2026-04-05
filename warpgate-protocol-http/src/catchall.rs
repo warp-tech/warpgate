@@ -107,12 +107,13 @@ async fn get_target_for_request(
         RequestAuthorization::Session(SessionAuthorization::Ticket {
             target_name,
             username,
+            ..
         }) => {
             selected_target_name = Some(target_name.clone());
             need_role_auth = false;
             username
         }
-        RequestAuthorization::Session(SessionAuthorization::User(username)) => {
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
             need_role_auth = true;
 
             selected_target_name = if let Some(ref rebound_target) = host_based_target_name {

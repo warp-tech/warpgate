@@ -90,6 +90,10 @@
     {/if}
 
     <div class="d-flex">
+        <a href="/log/access-role/{params.id}" use:link class="btn btn-secondary">
+            Audit log
+        </a>
+
         <AsyncButton
         color="primary"
             disabled={!$adminPermissions.accessRolesEdit}

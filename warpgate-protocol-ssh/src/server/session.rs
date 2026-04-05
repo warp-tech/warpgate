@@ -289,7 +289,9 @@ impl ServerSession {
         self.channel_map
             .get_by_left(ch)
             .cloned()
-            .ok_or(WarpgateError::InconsistentState)
+            .ok_or(WarpgateError::InconsistentState(
+                "Tried to map unknown channel ID".into(),
+            ))
     }
 
     fn map_channel_reverse(&self, ch: &Uuid) -> Result<ServerChannelId> {
@@ -1757,10 +1759,10 @@ impl ServerSession {
             }
             AuthSelector::Ticket { secret } => {
                 match authorize_ticket(&self.services.db, secret).await? {
-                    Some((ticket, user_info)) => {
-                        info!("Authorized for {} with a ticket", ticket.target);
+                    Some((ticket, target, user_info)) => {
+                        info!("Authorized for {} with a ticket", target.name);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(user_info.clone(), &ticket.target).await?;
+                        self._auth_accept(user_info.clone(), &target.name).await?;
 
                         Ok(AuthResult::Accepted { user_info })
                     }

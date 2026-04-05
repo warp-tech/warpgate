@@ -880,7 +880,9 @@ def test_all_openapi_admin_operations_permission_enforcement(
     resources["target_name"] = target.name
 
     ticket = admin_client.create_ticket(
-        sdk.CreateTicketRequest(username="test", target_name=resources["target_name"])
+        sdk.CreateTicketRequest(
+            username=resources["username"], target_name=resources["target_name"]
+        )
     )
     resources["ticket_id"] = ticket.ticket.id
 

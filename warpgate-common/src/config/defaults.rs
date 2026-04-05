@@ -65,6 +65,11 @@ pub(crate) fn _default_retention() -> Duration {
 }
 
 #[inline]
+pub(crate) fn _default_audit_retention() -> Duration {
+    Duration::from_secs(60 * 60 * 24 * 365)
+}
+
+#[inline]
 pub(crate) fn _default_session_max_age() -> Duration {
     Duration::from_secs(60 * 30)
 }

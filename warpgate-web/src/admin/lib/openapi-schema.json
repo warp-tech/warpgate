@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.2-2-ga94d17d2-modified"
+    "version": "v0.22.0-beta.4-13-g5aaf080f-modified"
   },
   "servers": [
     {
@@ -462,9 +462,6 @@
               }
             }
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -495,9 +492,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -903,6 +897,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2178,6 +2175,9 @@
           },
           "409": {
             "description": ""
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2425,6 +2425,9 @@
           },
           "409": {
             "description": ""
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2555,6 +2558,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2687,6 +2693,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2879,6 +2888,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           },
           "403": {
             "description": "",
@@ -3101,6 +3113,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3707,6 +3722,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -4164,13 +4182,17 @@
       "CreateTicketRequest": {
         "type": "object",
         "title": "CreateTicketRequest",
-        "required": [
-          "username",
-          "target_name"
-        ],
         "properties": {
           "username": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target_name": {
             "type": "string"
@@ -4343,6 +4365,21 @@
           },
           "search": {
             "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_access_roles": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_admin_roles": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4623,6 +4660,7 @@
         "required": [
           "id",
           "text",
+          "target",
           "values",
           "timestamp",
           "session_id"
@@ -4635,6 +4673,9 @@
           "text": {
             "type": "string"
           },
+          "target": {
+            "type": "string"
+          },
           "values": {},
           "timestamp": {
             "type": "string",
@@ -4645,6 +4686,15 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string"
+          },
+          "related_access_roles": {
+            "type": "string"
+          },
+          "related_admin_roles": {
             "type": "string"
           }
         }
@@ -5483,8 +5533,10 @@
         "title": "Ticket",
         "required": [
           "id",
+          "user_id",
           "username",
           "description",
+          "target_id",
           "target",
           "created"
         ],
@@ -5493,11 +5545,19 @@
             "type": "string",
             "format": "uuid"
           },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "username": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target": {
             "type": "string"

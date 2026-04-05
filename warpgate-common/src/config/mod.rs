@@ -574,6 +574,10 @@ pub struct LogConfig {
     #[schemars(with = "String")]
     pub retention: Duration,
 
+    #[serde(default = "_default_audit_retention", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub audit_retention: Duration,
+
     #[serde(default)]
     pub send_to: Option<String>,
 
@@ -585,6 +589,7 @@ impl Default for LogConfig {
     fn default() -> Self {
         Self {
             retention: _default_retention(),
+            audit_retention: _default_audit_retention(),
             send_to: None,
             format: LogFormat::default(),
         }

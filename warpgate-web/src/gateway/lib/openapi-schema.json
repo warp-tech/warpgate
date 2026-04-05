@@ -1,0 +1,1551 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Warpgate HTTP proxy",
+    "version": "v0.22.0-beta.4-13-g5aaf080f-modified"
+  },
+  "servers": [
+    {
+      "url": "/@warpgate/api"
+    }
+  ],
+  "tags": [],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "login"
+      }
+    },
+    "/auth/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginFailureResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "otpLogin"
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "operationId": "logout"
+      }
+    },
+    "/auth/state": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_default_auth_state"
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "cancel_default_auth"
+      }
+    },
+    "/auth/web-auth-requests": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuthStateResponseInternal"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_web_auth_requests"
+      }
+    },
+    "/auth/state/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "get_auth_state"
+      }
+    },
+    "/auth/state/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_auth"
+      }
+    },
+    "/auth/state/{id}/reject": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStateResponseInternal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "reject_auth"
+      }
+    },
+    "/info": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Info"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_info"
+      }
+    },
+    "/targets": {
+      "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetSnapshot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_targets"
+      }
+    },
+    "/sso/providers": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SsoProviderDescription"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_sso_providers"
+      }
+    },
+    "/sso/return": {
+      "get": {
+        "parameters": [
+          {
+            "name": "code",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": ""
+          }
+        },
+        "operationId": "return_to_sso"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/html; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "return_to_sso_with_form_data"
+      }
+    },
+    "/sso/logout": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSloResponseParams"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "initiate_sso_logout"
+      }
+    },
+    "/sso/providers/{name}/start": {
+      "get": {
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "next",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSsoResponseParams"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "start_sso"
+      }
+    },
+    "/profile/credentials": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_my_credentials"
+      }
+    },
+    "/profile/credentials/password": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "change_my_password"
+      }
+    },
+    "/profile/credentials/public-keys": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublicKeyCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_my_public_key"
+      }
+    },
+    "/profile/credentials/public-keys/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_my_public_key"
+      }
+    },
+    "/profile/credentials/otp": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOtpCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingOtpCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_my_otp"
+      }
+    },
+    "/profile/credentials/otp/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_my_otp"
+      }
+    },
+    "/profile/credentials/certificates": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueCertificateCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedCertificateCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "issue_my_certificate"
+      }
+    },
+    "/profile/credentials/certificates/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "revoke_my_certificate"
+      }
+    },
+    "/profile/api-tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingApiToken"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "get_my_api_tokens"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/NewApiToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenAndSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "operationId": "create_api_token"
+      }
+    },
+    "/profile/api-tokens/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "delete_my_api_token"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminPermissions": {
+        "type": "object",
+        "title": "AdminPermissions",
+        "required": [
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ApiAuthState": {
+        "type": "string",
+        "enum": [
+          "NotStarted",
+          "Failed",
+          "PasswordNeeded",
+          "OtpNeeded",
+          "SsoNeeded",
+          "WebUserApprovalNeeded",
+          "PublicKeyNeeded",
+          "Success"
+        ]
+      },
+      "AuthStateResponseInternal": {
+        "type": "object",
+        "title": "AuthStateResponseInternal",
+        "required": [
+          "id",
+          "protocol",
+          "started",
+          "state",
+          "identification_string"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
+          },
+          "identification_string": {
+            "type": "string"
+          }
+        }
+      },
+      "BootstrapThemeColor": {
+        "type": "string",
+        "enum": [
+          "Primary",
+          "Secondary",
+          "Success",
+          "Danger",
+          "Warning",
+          "Info",
+          "Light",
+          "Dark"
+        ]
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "title": "ChangePasswordRequest",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "CredentialKind": {
+        "type": "string",
+        "enum": [
+          "Password",
+          "PublicKey",
+          "Certificate",
+          "Totp",
+          "Sso",
+          "WebUserApproval"
+        ]
+      },
+      "CredentialsState": {
+        "type": "object",
+        "title": "CredentialsState",
+        "required": [
+          "password",
+          "otp",
+          "public_keys",
+          "certificates",
+          "sso",
+          "credential_policy",
+          "ldap_linked"
+        ],
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/PasswordState"
+          },
+          "otp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingOtpCredential"
+            }
+          },
+          "public_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingPublicKeyCredential"
+            }
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingCertificateCredential"
+            }
+          },
+          "sso": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingSsoCredential"
+            }
+          },
+          "credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "ldap_linked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExistingApiToken": {
+        "type": "object",
+        "title": "ExistingApiToken",
+        "required": [
+          "id",
+          "label",
+          "created",
+          "expiry"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExistingCertificateCredential": {
+        "type": "object",
+        "title": "ExistingCertificateCredential",
+        "required": [
+          "id",
+          "label",
+          "fingerprint"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        }
+      },
+      "ExistingOtpCredential": {
+        "type": "object",
+        "title": "ExistingOtpCredential",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExistingPublicKeyCredential": {
+        "type": "object",
+        "title": "ExistingPublicKeyCredential",
+        "required": [
+          "id",
+          "label",
+          "abbreviated"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "abbreviated": {
+            "type": "string"
+          }
+        }
+      },
+      "ExistingSsoCredential": {
+        "type": "object",
+        "title": "ExistingSsoCredential",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "ExternalHostsInfo": {
+        "type": "object",
+        "title": "ExternalHostsInfo",
+        "properties": {
+          "ssh": {
+            "type": "string"
+          },
+          "http": {
+            "type": "string"
+          },
+          "mysql": {
+            "type": "string"
+          },
+          "postgres": {
+            "type": "string"
+          },
+          "kubernetes": {
+            "type": "string"
+          }
+        }
+      },
+      "GroupInfo": {
+        "type": "object",
+        "title": "GroupInfo",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/BootstrapThemeColor"
+          }
+        }
+      },
+      "Info": {
+        "type": "object",
+        "title": "Info",
+        "required": [
+          "ports",
+          "minimize_password_login",
+          "authorized_via_ticket",
+          "authorized_via_sso_with_single_logout",
+          "own_credential_management_allowed",
+          "has_ldap"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "selected_target": {
+            "type": "string"
+          },
+          "external_host": {
+            "type": "string"
+          },
+          "external_hosts": {
+            "$ref": "#/components/schemas/ExternalHostsInfo"
+          },
+          "ports": {
+            "$ref": "#/components/schemas/PortsInfo"
+          },
+          "minimize_password_login": {
+            "type": "boolean"
+          },
+          "authorized_via_ticket": {
+            "type": "boolean"
+          },
+          "authorized_via_sso_with_single_logout": {
+            "type": "boolean"
+          },
+          "own_credential_management_allowed": {
+            "type": "boolean"
+          },
+          "has_ldap": {
+            "type": "boolean"
+          },
+          "setup_state": {
+            "$ref": "#/components/schemas/SetupState"
+          },
+          "admin_permissions": {
+            "$ref": "#/components/schemas/AdminPermissions"
+          }
+        }
+      },
+      "IssueCertificateCredentialRequest": {
+        "type": "object",
+        "title": "IssueCertificateCredentialRequest",
+        "required": [
+          "label",
+          "public_key_pem"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "public_key_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "IssuedCertificateCredential": {
+        "type": "object",
+        "title": "IssuedCertificateCredential",
+        "required": [
+          "credential",
+          "certificate_pem"
+        ],
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ExistingCertificateCredential"
+          },
+          "certificate_pem": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginFailureResponse": {
+        "type": "object",
+        "title": "LoginFailureResponse",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ApiAuthState"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "title": "LoginRequest",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "NewApiToken": {
+        "type": "object",
+        "title": "NewApiToken",
+        "required": [
+          "label",
+          "expiry"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NewOtpCredential": {
+        "type": "object",
+        "title": "NewOtpCredential",
+        "required": [
+          "secret_key"
+        ],
+        "properties": {
+          "secret_key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8"
+            }
+          }
+        }
+      },
+      "NewPublicKeyCredential": {
+        "type": "object",
+        "title": "NewPublicKeyCredential",
+        "required": [
+          "label",
+          "openssh_public_key"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "openssh_public_key": {
+            "type": "string"
+          }
+        }
+      },
+      "OtpLoginRequest": {
+        "type": "object",
+        "title": "OtpLoginRequest",
+        "required": [
+          "otp"
+        ],
+        "properties": {
+          "otp": {
+            "type": "string"
+          }
+        }
+      },
+      "PasswordState": {
+        "type": "string",
+        "enum": [
+          "Unset",
+          "Set",
+          "MultipleSet"
+        ]
+      },
+      "PortsInfo": {
+        "type": "object",
+        "title": "PortsInfo",
+        "properties": {
+          "ssh": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "http": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "mysql": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "postgres": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "kubernetes": {
+            "type": "integer",
+            "format": "uint16"
+          }
+        }
+      },
+      "SetupState": {
+        "type": "object",
+        "title": "SetupState",
+        "required": [
+          "has_targets",
+          "has_users"
+        ],
+        "properties": {
+          "has_targets": {
+            "type": "boolean"
+          },
+          "has_users": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SsoProviderDescription": {
+        "type": "object",
+        "title": "SsoProviderDescription",
+        "required": [
+          "name",
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SsoProviderKind"
+          }
+        }
+      },
+      "SsoProviderKind": {
+        "type": "string",
+        "enum": [
+          "Google",
+          "Apple",
+          "Azure",
+          "Custom"
+        ]
+      },
+      "StartSloResponseParams": {
+        "type": "object",
+        "title": "StartSloResponseParams",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "StartSsoResponseParams": {
+        "type": "object",
+        "title": "StartSsoResponseParams",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "Http",
+          "Kubernetes",
+          "MySql",
+          "Ssh",
+          "Postgres"
+        ]
+      },
+      "TargetSnapshot": {
+        "type": "object",
+        "title": "TargetSnapshot",
+        "required": [
+          "name",
+          "description",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          },
+          "external_host": {
+            "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupInfo"
+          },
+          "default_database_name": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenAndSecret": {
+        "type": "object",
+        "title": "TokenAndSecret",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/ExistingApiToken"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRequireCredentialsPolicy": {
+        "type": "object",
+        "title": "UserRequireCredentialsPolicy",
+        "properties": {
+          "http": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "kubernetes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "ssh": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mysql": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "CookieSecurityScheme": {
+        "type": "apiKey",
+        "name": "warpgate-http-session",
+        "in": "cookie"
+      },
+      "TokenSecurityScheme": {
+        "type": "apiKey",
+        "name": "X-Warpgate-Token",
+        "in": "header"
+      }
+    }
+  }
+}

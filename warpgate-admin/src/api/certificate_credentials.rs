@@ -10,6 +10,7 @@ use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
 
 use super::AnySecurityScheme;
@@ -70,6 +71,8 @@ enum GetCertificateCredentialsResponse {
 enum IssueCertificateCredentialResponse {
     #[oai(status = 201)]
     Issued(Json<IssuedCertificateCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -127,10 +130,9 @@ impl ListApi {
         let params = Parameters::Entity::get(&db).await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
-        let user = User::Entity::find_by_id(*user_id)
-            .one(&*db)
-            .await?
-            .ok_or(WarpgateError::UserNotFound(user_id.to_string()))?;
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(IssueCertificateCredentialResponse::NotFound);
+        };
 
         let public_key_pem = body.public_key_pem.trim();
         let client_cert =
@@ -149,6 +151,17 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let credential_name = body.label.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -239,7 +252,23 @@ impl DetailApi {
         .insert(&*db)
         .await?;
 
+        let credential_name = model.label.clone();
         model.delete(&*db).await?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(RevokeCertificateCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(RevokeCertificateCredentialResponse::Revoked)
     }
 }

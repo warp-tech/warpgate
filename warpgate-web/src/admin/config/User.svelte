@@ -2,16 +2,16 @@
     import { api, type Role, type User, type UserRoleAssignmentResponse, type SessionSnapshot, type AdminRole } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { replace } from 'svelte-spa-router'
     import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter, Collapse, Card, CardBody } from '@sveltestrap/sveltestrap'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+    import { replace, link } from 'svelte-spa-router'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from '../CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import Fa from 'svelte-fa'
-    import { faCaretDown, faLink, faUnlink, faClock, faUser, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp, faRedo } from '@fortawesome/free-solid-svg-icons'
+    import { faCaretDown, faLink, faUnlink, faClock, faHistory, faTerminal, faDatabase, faGlobe, faChevronDown, faChevronUp, faRedo } from '@fortawesome/free-solid-svg-icons'
     import RelativeDate from '../RelativeDate.svelte'
     import { onMount, onDestroy } from 'svelte'
     import { adminPermissions } from 'admin/lib/store'
@@ -700,6 +700,10 @@
     {/if}
 
     <div class="d-flex">
+        <a href="/log/user/{params.id}" use:link class="btn btn-secondary">
+            Audit log
+        </a>
+
         <AsyncButton
             color="primary"
             class="ms-auto"
