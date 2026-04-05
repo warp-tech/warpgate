@@ -214,10 +214,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .all(&*db)
             .await?;
 
-        let users: Result<Vec<User>, _> = users
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect();
+        let users: Result<Vec<User>, _> = users.into_iter().map(TryInto::try_into).collect();
 
         users
     }
@@ -230,10 +227,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .all(&*db)
             .await?;
 
-        let targets: Result<Vec<Target>, _> = targets
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect();
+        let targets: Result<Vec<Target>, _> = targets.into_iter().map(TryInto::try_into).collect();
 
         Ok(targets?)
     }
