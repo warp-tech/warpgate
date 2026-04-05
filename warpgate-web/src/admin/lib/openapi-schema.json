@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-13-g5aaf080f-modified"
+    "version": "v0.22.0-beta.4-17-g75b5fc29-modified"
   },
   "servers": [
     {
@@ -2233,11 +2233,8 @@
           }
         ],
         "operationId": "delete_user_role"
-      }
-    },
-    "/users/{id}/roles/{role_id}/expiry": {
+      },
       "put": {
-        "summary": "Update expiry for a user role assignment",
         "parameters": [
           {
             "name": "id",
@@ -2266,7 +2263,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateUserRoleExpiryRequest"
+                "$ref": "#/components/schemas/UpdateUserRoleRequest"
               }
             }
           },
@@ -2295,58 +2292,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "update_user_role_expiry"
-      },
-      "delete": {
-        "summary": "Remove expiry from a user role assignment (make permanent)",
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          },
-          {
-            "name": "role_id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
-        "operationId": "remove_user_role_expiry"
+        "operationId": "update_user_role"
       }
     },
     "/users/{id}/admin-roles": {
@@ -5691,9 +5637,9 @@
           }
         }
       },
-      "UpdateUserRoleExpiryRequest": {
+      "UpdateUserRoleRequest": {
         "type": "object",
-        "title": "UpdateUserRoleExpiryRequest",
+        "title": "UpdateUserRoleRequest",
         "description": "Request to update user role expiry",
         "properties": {
           "expires_at": {
@@ -5801,7 +5747,6 @@
           "id",
           "name",
           "description",
-          "granted_at",
           "is_expired",
           "is_active"
         ],
@@ -5823,15 +5768,6 @@
             "type": "string",
             "format": "date-time",
             "description": "When the role was granted"
-          },
-          "granted_by": {
-            "type": "string",
-            "format": "uuid",
-            "description": "ID of the user who granted this role"
-          },
-          "granted_by_username": {
-            "type": "string",
-            "description": "Username of the user who granted this role"
           },
           "expires_at": {
             "type": "string",

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue::Set;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -12,16 +13,70 @@ pub struct Model {
     pub id: i32,
     pub user_id: Uuid,
     pub role_id: Uuid,
-    /// When this role assignment was granted (nullable in DB for SQLite compat, but always set by app)
+    /// When this role assignment was granted
     pub granted_at: Option<DateTime<Utc>>,
-    /// Who granted this role assignment (admin user ID, null for system/SSO)
-    pub granted_by: Option<Uuid>,
     /// When this role assignment expires (null = never)
     pub expires_at: Option<DateTime<Utc>>,
     /// When this role assignment was revoked (null = not revoked)
     pub revoked_at: Option<DateTime<Utc>>,
-    /// Who revoked this role assignment
-    pub revoked_by: Option<Uuid>,
+}
+
+impl Model {
+    pub fn expired(&self) -> bool {
+        self.expires_at
+            .is_some_and(|expires_at| expires_at <= Utc::now())
+    }
+    pub fn active(&self) -> bool {
+        self.revoked_at.is_none() && !self.expired()
+    }
+}
+
+impl Entity {
+    pub fn find_active() -> Select<Self> {
+        Self::find().filter(
+            Column::ExpiresAt
+                .is_null()
+                .or(Column::ExpiresAt.gt(Utc::now()))
+                .and(Column::RevokedAt.is_null()),
+        )
+    }
+
+    pub async fn idempotent_grant(
+        db: &DatabaseConnection,
+        user_id: Uuid,
+        role_id: Uuid,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<Model, DbErr> {
+        let existing = Entity::find()
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::RoleId.eq(role_id))
+            .one(&*db)
+            .await?;
+
+        let now = Utc::now();
+
+        Ok(if let Some(existing) = existing {
+            if existing.active() {
+                return Ok(existing);
+            }
+            // Re-activate a revoked/expired assignment
+            let mut model: ActiveModel = existing.into();
+            model.granted_at = Set(Some(now));
+            model.expires_at = Set(expires_at);
+            model.revoked_at = Set(None);
+            model.update(&*db).await?
+        } else {
+            let values = ActiveModel {
+                user_id: Set(user_id),
+                role_id: Set(role_id),
+                granted_at: Set(Some(now)),
+                expires_at: Set(expires_at),
+                revoked_at: Set(None),
+                ..Default::default()
+            };
+            values.insert(&*db).await?
+        })
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

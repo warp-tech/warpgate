@@ -198,32 +198,19 @@
                     roleId: pendingRole.id,
                     addUserRoleRequest: { expiresAt },
                 })
-            } else if (isNewAssignment && editingRole) {
+            } else if (editingRole) {
                 // Re-enabling an expired assignment
                 if (expiresAt) {
-                    await api.updateUserRoleExpiry({
+                    await api.updateUserRole({
                         id: user!.id,
                         roleId: editingRole.id,
-                        updateUserRoleExpiryRequest: { expiresAt },
+                        updateUserRoleRequest: { expiresAt },
                     })
                 } else {
-                    await api.removeUserRoleExpiry({
+                    await api.updateUserRole({
                         id: user!.id,
                         roleId: editingRole.id,
-                    })
-                }
-            } else if (editingRole) {
-                // Editing expiry on an existing active assignment
-                if (expiresAt) {
-                    await api.updateUserRoleExpiry({
-                        id: user!.id,
-                        roleId: editingRole.id,
-                        updateUserRoleExpiryRequest: { expiresAt },
-                    })
-                } else {
-                    await api.removeUserRoleExpiry({
-                        id: user!.id,
-                        roleId: editingRole.id,
+                        updateUserRoleRequest: { expiresAt: undefined },
                     })
                 }
             }

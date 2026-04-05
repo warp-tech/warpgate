@@ -29,18 +29,6 @@ pub struct DatabaseConfigProvider {
     db: Arc<Mutex<DatabaseConnection>>,
 }
 
-fn is_user_role_active(assignment: &entities::UserRoleAssignment::Model) -> bool {
-    if assignment.revoked_at.is_some() {
-        return false;
-    }
-    if let Some(expires_at) = assignment.expires_at {
-        if expires_at <= Utc::now() {
-            return false;
-        }
-    }
-    true
-}
-
 impl DatabaseConfigProvider {
     pub async fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
         Self { db: db.clone() }
@@ -548,16 +536,12 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(|x| x.name)
             .collect();
 
-        let user_assignments = entities::UserRoleAssignment::Entity::find()
+        let user_assignments = entities::UserRoleAssignment::Entity::find_active()
             .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
             .all(&*db)
             .await?;
 
-        let user_role_ids: HashSet<Uuid> = user_assignments
-            .iter()
-            .filter(|a| is_user_role_active(a))
-            .map(|a| a.role_id)
-            .collect();
+        let user_role_ids: HashSet<Uuid> = user_assignments.iter().map(|a| a.role_id).collect();
 
         let user_roles: HashSet<String> = entities::Role::Entity::find()
             .filter(entities::Role::Column::Id.is_in(user_role_ids))
@@ -607,7 +591,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 continue;
             };
 
-            let assignment = entities::UserRoleAssignment::Entity::find()
+            let assignment = entities::UserRoleAssignment::Entity::find_active()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserRoleAssignment::Column::RoleId.eq(role.id))
                 .one(&*db)
@@ -616,19 +600,15 @@ impl ConfigProvider for DatabaseConfigProvider {
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
-                    let values = entities::UserRoleAssignment::ActiveModel {
-                        user_id: Set(user.id),
-                        role_id: Set(role.id),
-                        ..Default::default()
-                    };
-
-                    values.insert(&*db).await?;
+                    entities::UserRoleAssignment::Entity::idempotent_grant(
+                        &*db, user.id, role.id, None,
+                    )
+                    .await?;
                 }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
                     model.revoked_at = Set(Some(Utc::now()));
-                    model.revoked_by = Set(None);
                     model.update(&*db).await?;
                 }
                 _ => (),
