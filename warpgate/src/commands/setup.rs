@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, EntityTrait};
 use tracing::{error, info};
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
@@ -16,6 +18,8 @@ use warpgate_common::{
     Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
+use warpgate_core::db::connect_to_db;
+use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
@@ -338,6 +342,29 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         &admin_password,
         Some(&BUILTIN_ADMIN_ROLE_NAME.to_string()),
     )
+    .await?;
+
+    let db = connect_to_db(&config, params).await?;
+
+    #[allow(clippy::expect_used)]
+    let user = User::Entity::find()
+        .one(&db)
+        .await?
+        .expect("Admin user should exist");
+
+    let access_role = Role::ActiveModel {
+        name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
+        ..Default::default()
+    }
+    .insert(&db)
+    .await?;
+
+    UserRoleAssignment::ActiveModel {
+        user_id: Set(user.id),
+        role_id: Set(access_role.id),
+        ..Default::default()
+    }
+    .insert(&db)
     .await?;
 
     {

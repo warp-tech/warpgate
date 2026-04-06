@@ -1,6 +1,6 @@
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use sea_orm_migration::prelude::*;
-use tracing::{error, info};
+use tracing::error;
 
 mod target {
     use sea_orm::entity::prelude::*;
@@ -90,7 +90,6 @@ impl MigrationTrait for Migration {
             model.update(db).await?;
         }
 
-        info!("Migrated database target options to use auth enum");
         Ok(())
     }
 

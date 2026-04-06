@@ -83,7 +83,7 @@
 <div class="container-max-md">
     <Loadable promise={init()}>
     {#if target}
-        <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false}>
+        <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false} size="lg">
             <ModalHeader>
                 Access instructions
             </ModalHeader>

@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls", "rt-tokio"] }
 aws-sdk-ec2 = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
 aws-sdk-ec2instanceconnect = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
 aws-sdk-eks = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
