@@ -1,0 +1,68 @@
+[bumpver]
+current_version = "0.22.0-beta.4"
+version_pattern = "MAJOR.MINOR.PATCH[-TAG[.INC0]]"
+commit = true
+tag = true
+push = false
+
+[bumpver.file_patterns]
+"warpgate/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-admin/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-ca/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-common/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-common-http/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-core/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-database-protocols/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-db-entities/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-db-migrations/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-protocol-kubernetes/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-ldap/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-protocol-http/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-protocol-mysql/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-protocol-postgres/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-protocol-ssh/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-tls/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-sso/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-web/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"helm/warpgate/Chart.yaml" = [
+    'appVersion: "{version}"'
+]
+"helm/warpgate/values.yaml" = [
+    'tag: "{version}"'
+]
