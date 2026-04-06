@@ -813,6 +813,17 @@ def admin_client(shared_wg: WarpgateProcess):
 
 
 @pytest.fixture(scope="session")
+def shared_ssh_port(processes, wg_c_ed25519_pubkey):
+    """Shared SSH server for tests that don't need their own instance.
+
+    Used by test_role_expiry to avoid starting separate Docker containers.
+    """
+    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
+    wait_port(port)
+    return port
+
+
+@pytest.fixture(scope="session")
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / "ssh-keys/wg/client-ed25519.pub"
 

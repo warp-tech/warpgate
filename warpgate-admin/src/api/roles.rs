@@ -10,7 +10,7 @@ use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::{Role, Target, User};
+use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -195,6 +195,17 @@ impl DetailApi {
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
+
+        // Clean up referencing assignments before deleting the role
+        UserRoleAssignment::Entity::delete_many()
+            .filter(UserRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
+
+        TargetRoleAssignment::Entity::delete_many()
+            .filter(TargetRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
 
         role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)

@@ -37,6 +37,7 @@ mod m00032_admin_roles;
 mod m00033_add_log_target;
 mod m00034_add_log_related_fields;
 mod m00035_ticket_user_target_id;
+mod m00036_user_role_expiry_history;
 
 pub struct Migrator;
 
@@ -79,6 +80,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00033_add_log_target::Migration),
             Box::new(m00034_add_log_related_fields::Migration),
             Box::new(m00035_ticket_user_target_id::Migration),
+            Box::new(m00036_user_role_expiry_history::Migration),
         ]
     }
 }

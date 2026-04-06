@@ -56,20 +56,8 @@ pub async fn command(
             .one(&*db)
             .await?
         {
-            if UserRoleAssignment::Entity::find()
-                .filter(UserRoleAssignment::Column::UserId.eq(db_user.id))
-                .filter(UserRoleAssignment::Column::RoleId.eq(db_role.id))
-                .all(&*db)
-                .await?
-                .is_empty()
-            {
-                let values = UserRoleAssignment::ActiveModel {
-                    user_id: Set(db_user.id),
-                    role_id: Set(db_role.id),
-                    ..Default::default()
-                };
-                values.insert(&*db).await.map_err(WarpgateError::from)?;
-            }
+            UserRoleAssignment::Entity::idempotent_grant(&*db, db_user.id, db_role.id, None)
+                .await?;
         }
 
         // admin role

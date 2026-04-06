@@ -650,6 +650,6 @@ class TestHTTPUserAuthOIDC:
 
         with admin_client(wg_url2) as api:
             user_roles = api.get_user_roles(user.id)
-            role_names = {r.name for r in user_roles}
-            assert "role-keep" in role_names
-            assert "role-remove" not in role_names
+            active_role_names = {r.name for r in user_roles if r.is_active}
+            assert "role-keep" in active_role_names
+            assert "role-remove" not in active_role_names
