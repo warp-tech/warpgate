@@ -103,7 +103,7 @@ impl Default for Tls {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum DatabaseTargetAuth {
     #[serde(rename = "password")]

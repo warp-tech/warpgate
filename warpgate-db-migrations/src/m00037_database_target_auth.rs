@@ -75,11 +75,11 @@ impl MigrationTrait for Migration {
             // Build the new auth object
             let auth = match password {
                 Some(serde_json::Value::String(pw)) => serde_json::json!({
-                    "kind": "Password",
+                    "kind": "password",
                     "password": pw
                 }),
                 _ => serde_json::json!({
-                    "kind": "Password"
+                    "kind": "password"
                 }),
             };
 

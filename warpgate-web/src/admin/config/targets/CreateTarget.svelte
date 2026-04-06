@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type TargetOptions, type TargetGroup, TlsMode, DatabaseTargetAuth } from 'admin/lib/api'
+    import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
     import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
