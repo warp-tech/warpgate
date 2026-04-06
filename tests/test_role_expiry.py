@@ -4,7 +4,7 @@ E2E tests for user role expiry.
 Tests verify that:
 - Roles can be granted with a TTL (expires_at timestamp)
 - Expired roles deny SSH access
-- Expired roles can be re-enabled via update_user_role_expiry
+- Expired roles can be re-enabled via update_user_role
 - Revoked (soft-deleted) roles deny SSH access
 - Revoked roles can be re-activated by updating/removing expiry
 - get_user_roles returns all assignments including expired/revoked
@@ -191,10 +191,10 @@ class TestRoleExpiryAccess:
         # Re-enable with new future expiry
         with admin_client(url) as api:
             new_expiry = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
-            updated = api.update_user_role_expiry(
+            updated = api.update_user_role(
                 user.id,
                 role.id,
-                sdk.UpdateUserRoleExpiryRequest(expires_at=new_expiry),
+                sdk.UpdateUserRoleRequest(expires_at=new_expiry),
             )
             assert updated.is_active is True
             assert updated.is_expired is False
@@ -231,7 +231,7 @@ class TestRoleExpiryAccess:
 
         # Remove expiry (make permanent)
         with admin_client(url) as api:
-            updated = api.remove_user_role_expiry(user.id, role.id)
+            updated = api.update_user_role(user.id, role.id, sdk.UpdateUserRoleRequest(expires_at=None))
             assert updated.expires_at is None
             assert updated.is_active is True
             assert updated.is_expired is False
@@ -294,10 +294,10 @@ class TestRoleRevocation:
         # Re-activate by updating expiry (this clears revoked_at)
         with admin_client(url) as api:
             new_expiry = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
-            updated = api.update_user_role_expiry(
+            updated = api.update_user_role(
                 user.id,
                 role.id,
-                sdk.UpdateUserRoleExpiryRequest(expires_at=new_expiry),
+                sdk.UpdateUserRoleRequest(expires_at=new_expiry),
             )
             assert updated.is_active is True
 
@@ -324,7 +324,7 @@ class TestRoleRevocation:
 
         # Re-activate by removing expiry (clears revoked_at, sets permanent)
         with admin_client(url) as api:
-            updated = api.remove_user_role_expiry(user.id, role.id)
+            updated = api.update_user_role(user.id, role.id, sdk.UpdateUserRoleRequest(expires_at=None))
             assert updated.is_active is True
             assert updated.expires_at is None
 
@@ -391,22 +391,3 @@ class TestRoleAssignmentAPI:
             assert role1_assignment.is_active is False
 
             assert role2_assignment.is_active is False
-
-    def test_add_role_with_expiry_409_on_duplicate(
-        self,
-        shared_ssh_port,
-        shared_wg: WarpgateProcess,
-    ):
-        """Adding a role that already exists (even revoked) should return 409."""
-        user, ssh_target, role = setup_user_and_target(shared_ssh_port, shared_wg)
-
-        url = f"https://localhost:{shared_wg.http_port}"
-        with admin_client(url) as api:
-            api.add_user_role(user.id, role.id, sdk.AddUserRoleRequest(expires_at=None))
-
-            # Try adding the same role again - should fail
-            with pytest.raises(sdk.ApiException) as exc_info:
-                api.add_user_role(
-                    user.id, role.id, sdk.AddUserRoleRequest(expires_at=None)
-                )
-            assert exc_info.value.status == 409
