@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -7,6 +6,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
@@ -386,9 +386,9 @@ struct UserRoleAssignmentResponse {
     /// Role description
     description: String,
     /// When the role was granted
-    granted_at: Option<DateTime<Utc>>,
+    granted_at: Option<OffsetDateTime>,
     /// When this role assignment expires (null = permanent)
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<OffsetDateTime>,
     /// Whether this assignment has expired
     is_expired: bool,
     /// Whether this assignment is currently active (not expired, not revoked)
@@ -399,14 +399,14 @@ struct UserRoleAssignmentResponse {
 #[derive(Object, Serialize, Deserialize, Clone, Debug)]
 struct AddUserRoleRequest {
     #[oai(default)]
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<OffsetDateTime>,
 }
 
 /// Request to update user role expiry
 #[derive(Object, Serialize, Deserialize, Clone, Debug)]
 struct UpdateUserRoleRequest {
     /// The new expiry timestamp, or null to remove expiry (make permanent)
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<OffsetDateTime>,
 }
 
 #[derive(ApiResponse)]
@@ -532,9 +532,7 @@ impl RolesApi {
             results.push(build_assignment_response(&assignment, &role));
         }
 
-        Ok(GetUserRolesResponse::Ok(Json(
-            roles.into_iter().map(Into::into).collect(),
-        )))
+        Ok(GetUserRolesResponse::Ok(Json(results)))
     }
 
     /// Get a single user role assignment with details
@@ -652,7 +650,7 @@ impl RolesApi {
         };
 
         // Soft delete - set revoked_at
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let mut model: UserRoleAssignment::ActiveModel = model.into();
         model.revoked_at = Set(Some(now));
         model.update(&*db).await?;

@@ -608,7 +608,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
-                    model.revoked_at = Set(Some(Utc::now()));
+                    model.revoked_at = Set(Some(OffsetDateTime::now_utc()));
                     model.update(&*db).await?;
                 }
                 _ => (),

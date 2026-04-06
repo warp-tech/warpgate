@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -14,17 +14,17 @@ pub struct Model {
     pub user_id: Uuid,
     pub role_id: Uuid,
     /// When this role assignment was granted
-    pub granted_at: Option<DateTime<Utc>>,
+    pub granted_at: Option<OffsetDateTime>,
     /// When this role assignment expires (null = never)
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<OffsetDateTime>,
     /// When this role assignment was revoked (null = not revoked)
-    pub revoked_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<OffsetDateTime>,
 }
 
 impl Model {
     pub fn expired(&self) -> bool {
         self.expires_at
-            .is_some_and(|expires_at| expires_at <= Utc::now())
+            .is_some_and(|expires_at| expires_at <= OffsetDateTime::now_utc())
     }
     pub fn active(&self) -> bool {
         self.revoked_at.is_none() && !self.expired()
@@ -36,7 +36,7 @@ impl Entity {
         Self::find().filter(
             Column::ExpiresAt
                 .is_null()
-                .or(Column::ExpiresAt.gt(Utc::now()))
+                .or(Column::ExpiresAt.gt(OffsetDateTime::now_utc()))
                 .and(Column::RevokedAt.is_null()),
         )
     }
@@ -45,7 +45,7 @@ impl Entity {
         db: &DatabaseConnection,
         user_id: Uuid,
         role_id: Uuid,
-        expires_at: Option<DateTime<Utc>>,
+        expires_at: Option<OffsetDateTime>,
     ) -> Result<Model, DbErr> {
         let existing = Entity::find()
             .filter(Column::UserId.eq(user_id))
@@ -53,7 +53,7 @@ impl Entity {
             .one(&*db)
             .await?;
 
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         Ok(if let Some(existing) = existing {
             if existing.active() {
