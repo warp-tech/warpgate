@@ -117,6 +117,24 @@ impl MySqlClient {
             username: target.username.clone(),
         };
 
+        // Resolve the effective password (may be an IAM-generated token or legacy field)
+        let effective_password = match &target.auth {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => {
+                auth.password.clone()
+                    .or_else(|| target.password.clone())
+                    .unwrap_or_default()
+            }
+            warpgate_common::DatabaseTargetAuth::IamRole(_) => {
+                warpgate_aws::generate_rds_auth_token(
+                    &target.host,
+                    target.port,
+                    &target.username,
+                )
+                .await
+                .map_err(|e| MySqlError::ProtocolError(format!("RDS IAM auth token generation failed: {e}")))?
+            }
+        };
+
         if handshake.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
             let scramble_bytes = [
                 &handshake.auth_plugin_data.first_ref()[..],
@@ -133,7 +151,7 @@ impl MySqlClient {
                         BytesMut::from(
                             compute_auth_challenge_response(
                                 scramble,
-                                target.password.as_deref().unwrap_or(""),
+                                &effective_password,
                             )
                             .map_err(MySqlError::other)?
                             .as_bytes(),

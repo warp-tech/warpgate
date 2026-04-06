@@ -120,15 +120,31 @@ impl PostgresClient {
         stream.push(startup)?;
         stream.flush().await?;
 
+        // Resolve effective password (may be an IAM-generated token or legacy field)
+        let effective_password: Option<String> = match &target.auth {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => {
+                auth.password.clone().or_else(|| target.password.clone())
+            }
+            warpgate_common::DatabaseTargetAuth::IamRole(_) => {
+                let token = warpgate_aws::generate_rds_auth_token(
+                    &target.host,
+                    target.port,
+                    &target.username,
+                )
+                .await
+                .map_err(|e| PostgresError::ProtocolError(format!("RDS IAM auth token generation failed: {e}")))?;
+                Some(token)
+            }
+        };
+
         loop {
             let Some(payload) = stream.recv::<PgWireGenericBackendMessage>().await? else {
                 return Err(PostgresError::Eof);
             };
 
-            let get_password = || {
-                target
-                    .password
-                    .as_ref()
+            let get_password = || -> Result<&str, PostgresError> {
+                effective_password
+                    .as_deref()
                     .ok_or(PostgresError::PasswordRequired)
             };
 

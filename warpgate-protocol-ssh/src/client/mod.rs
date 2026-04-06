@@ -621,6 +621,66 @@ impl RemoteClient {
                                 auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
                             }
                         }
+                        SSHTargetAuth::IamRole(_) => {
+                            // EC2 Instance Connect: push Warpgate's public key then authenticate
+                            info!("Using IAM role authentication via EC2 Instance Connect");
+
+                            // Find the EC2 instance by IP
+                            let instance_info = warpgate_aws::find_instance_by_ip(&ssh_options.host)
+                                .await
+                                .map_err(|e| {
+                                    error!(error = %e, host = %ssh_options.host, "Failed to find EC2 instance by IP");
+                                    ConnectionError::Authentication
+                                })?;
+
+                            // Load Warpgate's client keys
+                            #[allow(clippy::explicit_auto_deref)]
+                            let keys = load_keys(
+                                &*self.services.config.lock().await,
+                                &self.services.global_params,
+                                "client"
+                            )?;
+
+                            for key in &keys {
+                                let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+
+                                // Push the public key via EC2 Instance Connect
+                                if let Err(e) = warpgate_aws::send_ssh_public_key(
+                                    &instance_info.instance_id,
+                                    &instance_info.availability_zone,
+                                    &instance_info.region,
+                                    &ssh_options.username,
+                                    &pub_key_str,
+                                ).await {
+                                    warn!(error = %e, "Failed to push SSH key via EC2 Instance Connect, trying next key");
+                                    continue;
+                                }
+
+                                // Now authenticate with this key (key is valid for 60 seconds)
+                                let key = Arc::new(key.clone());
+                                let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                                let response = session
+                                    .authenticate_publickey(
+                                        ssh_options.username.clone(),
+                                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                                    )
+                                    .await?;
+
+                                auth_result = self._handle_auth_result(
+                                    &mut session,
+                                    ssh_options.username.clone(),
+                                    response
+                                ).await.unwrap_or(false);
+
+                                if auth_result {
+                                    debug!(username=&ssh_options.username[..], "Authenticated via EC2 Instance Connect");
+                                    break;
+                                }
+                            }
+                            if !auth_result {
+                                auth_error_msg = Some("EC2 Instance Connect authentication was rejected by the SSH target".into());
+                            }
+                        }
                     }
 
                     if !auth_result {

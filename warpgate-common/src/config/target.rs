@@ -47,6 +47,8 @@ pub enum SSHTargetAuth {
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(SshTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -56,6 +58,9 @@ pub struct SshTargetPasswordAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetPublicKeyAuth {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetIamRoleAuth {}
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {
@@ -97,6 +102,40 @@ impl Default for Tls {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(untagged)]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum DatabaseTargetAuth {
+    #[serde(rename = "password")]
+    Password(DatabaseTargetPasswordAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(DatabaseTargetIamRoleAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetPasswordAuth {
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetIamRoleAuth {}
+
+impl Default for DatabaseTargetAuth {
+    fn default() -> Self {
+        Self::Password(DatabaseTargetPasswordAuth::default())
+    }
+}
+
+impl DatabaseTargetAuth {
+    pub fn password(&self) -> Option<&str> {
+        match self {
+            Self::Password(auth) => auth.password.as_deref(),
+            Self::IamRole(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
@@ -109,6 +148,11 @@ pub struct TargetMySqlOptions {
     pub username: String,
 
     #[serde(default)]
+    pub auth: DatabaseTargetAuth,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(skip)]
     pub password: Option<String>,
 
     #[serde(default)]
@@ -130,6 +174,11 @@ pub struct TargetPostgresOptions {
     pub username: String,
 
     #[serde(default)]
+    pub auth: DatabaseTargetAuth,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(skip)]
     pub password: Option<String>,
 
     #[serde(default)]
@@ -162,12 +211,17 @@ pub enum KubernetesTargetAuth {
     Token(KubernetesTargetTokenAuth),
     #[serde(rename = "certificate")]
     Certificate(KubernetesTargetCertificateAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(KubernetesTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetTokenAuth {
     pub token: Secret<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct KubernetesTargetIamRoleAuth {}
 
 impl Default for KubernetesTargetAuth {
     fn default() -> Self {

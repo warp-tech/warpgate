@@ -1,0 +1,24 @@
+[package]
+edition = "2021"
+license = "Apache-2.0"
+name = "warpgate-aws"
+version = "0.22.0-beta.5"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-ec2 = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-ec2instanceconnect = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-eks = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sigv4 = { version = "1", default-features = false }
+aws-credential-types = { version = "1", default-features = false }
+aws-smithy-runtime-api = { version = "1", default-features = false }
+dashmap = { version = "6.0", default-features = false }
+http = "1"
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url = { version = "2.4", default-features = false }
+data-encoding.workspace = true

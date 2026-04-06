@@ -112,7 +112,7 @@ pub async fn authenticate_and_get_target(
     ))
 }
 
-pub fn create_authenticated_client(
+pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
     _auth_user: Option<&String>,
     _services: &Services,
@@ -162,6 +162,24 @@ pub fn create_authenticated_client(
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
                 .context("Invalid client certificate/key for Kubernetes upstream")?;
             client_builder = client_builder.identity(identity);
+        }
+        warpgate_common::KubernetesTargetAuth::IamRole(_) => {
+            // EKS IAM role authentication: generate a token from the cluster URL
+            let (cluster_name, region) = warpgate_aws::find_eks_cluster_by_url(&k8s_options.cluster_url)
+                .await
+                .context("Failed to find EKS cluster matching the configured URL")?;
+
+            let token = warpgate_aws::generate_eks_token(&cluster_name, &region)
+                .await
+                .context("Failed to generate EKS authentication token")?;
+
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+                    .context("setting Authorization header for EKS token")?,
+            );
+            client_builder = client_builder.default_headers(headers);
         }
     }
 

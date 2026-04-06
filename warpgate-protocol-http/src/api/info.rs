@@ -88,6 +88,7 @@ pub struct Info {
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
+    running_on_ec2: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -290,6 +291,11 @@ impl Api {
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
+            running_on_ec2: if auth_ctx.is_some() {
+                Some(warpgate_aws::check_ec2().await)
+            } else {
+                None
+            },
         })))
     }
 }
