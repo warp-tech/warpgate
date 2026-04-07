@@ -1,13 +1,6 @@
-use std::time::SystemTime;
-
-use anyhow::{Context, Result};
-use aws_credential_types::provider::ProvideCredentials;
+use anyhow::Result;
 use aws_sdk_rds::auth_token::AuthTokenGenerator;
-use aws_sigv4::http_request::{
-    sign, SignableBody, SignableRequest, SignatureLocation, SigningSettings,
-};
-use aws_sigv4::sign::v4;
-use tracing::debug;
+use warpgate_common::WarpgateError;
 
 use crate::region::parse_rds_region;
 
@@ -29,10 +22,14 @@ pub async fn generate_rds_auth_token(host: &str, port: u16, username: &str) -> R
         aws_sdk_rds::auth_token::Config::builder()
             .hostname(host)
             .port(port as u64)
-            .username(user)
-            .build()?,
+            .username(username)
+            .build()
+            .map_err(WarpgateError::from)?,
     );
-    let token = generator.auth_token(&config).await?;
+    let token = generator
+        .auth_token(&config)
+        .await
+        .map_err(WarpgateError::from)?;
 
     Ok(token.to_string())
 }

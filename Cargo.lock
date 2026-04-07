@@ -7201,6 +7201,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "warpgate-common",
 ]
 
 [[package]]

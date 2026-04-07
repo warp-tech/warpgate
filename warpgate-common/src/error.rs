@@ -77,6 +77,12 @@ impl ResponseError for WarpgateError {
     }
 }
 
+impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
+    fn from(err: Box<dyn Error + Send + Sync + 'static>) -> Self {
+        Self::Other(err)
+    }
+}
+
 impl WarpgateError {
     pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
         Self::Other(Box::new(err))
