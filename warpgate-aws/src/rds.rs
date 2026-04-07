@@ -34,5 +34,5 @@ pub async fn generate_rds_auth_token(host: &str, port: u16, username: &str) -> R
     );
     let token = generator.auth_token(&config).await?;
 
-    Ok(token)
+    Ok(token.to_string())
 }
