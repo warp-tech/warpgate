@@ -522,6 +522,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-rds"
+version = "1.130.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adf504300ce52abfe00276b1496d72ce762a2fc9b20908ae24db33905c1da51a"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-sigv4",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "aws-sdk-sts"
 version = "1.101.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -709,6 +736,7 @@ dependencies = [
  "base64-simd",
  "bytes",
  "bytes-utils",
+ "futures-core",
  "http 0.2.12",
  "http 1.4.0",
  "http-body 0.4.6",
@@ -721,6 +749,8 @@ dependencies = [
  "ryu",
  "serde",
  "time",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -7160,6 +7190,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-sdk-ec2instanceconnect",
  "aws-sdk-eks",
+ "aws-sdk-rds",
  "aws-sdk-sts",
  "aws-sigv4",
  "aws-smithy-runtime-api",

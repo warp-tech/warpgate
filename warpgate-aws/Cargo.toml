@@ -22,3 +22,4 @@ tokio.workspace = true
 tracing.workspace = true
 url = { version = "2.4", default-features = false }
 data-encoding.workspace = true
+aws-sdk-rds = "1.130.0"
