@@ -24,6 +24,8 @@ pub struct Model {
     pub ldap_server_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub ldap_object_uuid: Option<Uuid>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub allowed_ip_range: Option<String>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -142,6 +144,7 @@ impl TryFrom<Model> for User {
             description: model.description,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
             ldap_server_id: model.ldap_server_id,
+            allowed_ip_range: model.allowed_ip_range,
         })
     }
 }
@@ -214,6 +217,7 @@ impl TryFrom<User> for ActiveModel {
             rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_range: Set(user.allowed_ip_range),
         })
     }
 }

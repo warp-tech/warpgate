@@ -888,6 +888,7 @@
           "SsoNeeded",
           "WebUserApprovalNeeded",
           "PublicKeyNeeded",
+          "IpRejected",
           "Success"
         ]
       },

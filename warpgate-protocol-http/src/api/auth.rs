@@ -46,6 +46,7 @@ enum ApiAuthState {
     WebUserApprovalNeeded,
     PublicKeyNeeded,
     Success,
+    IpRejected,
 }
 
 #[derive(Object)]
@@ -141,17 +142,24 @@ impl Api {
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let services = &ctx.services;
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let mut auth_state_store = services.auth_state_store.lock().await;
         let state_arc = match get_auth_state_for_request(
             &body.username,
             session,
             &mut auth_state_store,
+            remote_ip,
         )
         .await
         {
             Err(WarpgateError::UserNotFound(_)) => {
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::Failed,
+                })))
+            }
+            Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    state: ApiAuthState::IpRejected,
                 })))
             }
             x => x,

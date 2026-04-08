@@ -1,4 +1,5 @@
 use core::str;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -185,6 +186,7 @@ pub async fn get_auth_state_for_request(
     username: &str,
     session: &Session,
     store: &mut AuthStateStore,
+    remote_ip: Option<IpAddr>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     if let Some(id) = session.get_auth_state_id() {
         if !store.contains_key(&id.0) {
@@ -213,6 +215,7 @@ pub async fn get_auth_state_for_request(
                 CredentialKind::Sso,
                 CredentialKind::Totp,
             ],
+            remote_ip,
         )
         .await?;
     session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));

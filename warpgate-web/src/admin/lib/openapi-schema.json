@@ -5678,6 +5678,9 @@
           "ldap_server_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "allowed_ip_range": {
+            "type": "string"
           }
         }
       },
@@ -5700,6 +5703,9 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "allowed_ip_range": {
+            "type": "string"
           }
         }
       },

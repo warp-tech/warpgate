@@ -19,6 +19,12 @@
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
 
+    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$|^[0-9a-fA-F:]+\/\d{1,3}$/
+    function isValidCidr (value: string | undefined | null): boolean {
+        if (!value?.trim()) return true
+        return cidrRegex.test(value.trim())
+    }
+
     interface Props {
         params: { id: string };
     }
@@ -451,12 +457,30 @@
         </div>
 
         <h4 class="mt-4">Traffic</h4>
-        <FormGroup class="mb-5">
+        <FormGroup class="mb-3">
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput
                 id="rateLimitBytesPerSecond"
                 bind:value={user.rateLimitBytesPerSecond}
             />
+        </FormGroup>
+
+        <h4 class="mt-4">Access restrictions</h4>
+        <FormGroup floating label="Allowed IP range (CIDR)" class="mb-5">
+            <Input
+                placeholder="e.g. 192.168.1.0/24"
+                bind:value={user.allowedIpRange}
+                invalid={!!user.allowedIpRange?.trim() && !isValidCidr(user.allowedIpRange)}
+            />
+            {#if user.allowedIpRange?.trim() && !isValidCidr(user.allowedIpRange)}
+                <small class="form-text text-danger">
+                    Invalid CIDR notation. Use a format like 192.168.1.0/24 or 10.0.0.1/32.
+                </small>
+            {:else}
+                <small class="form-text text-muted">
+                    If set, only connections from this IP range will be allowed. Use CIDR notation (e.g. 10.0.0.0/8, 192.168.1.0/24, or a single IP like 1.2.3.4/32). Leave empty to allow all IPs.
+                </small>
+            {/if}
         </FormGroup>
         {/if}
     </Loadable>

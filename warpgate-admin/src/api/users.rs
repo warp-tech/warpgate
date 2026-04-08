@@ -20,6 +20,22 @@ use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserR
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
 
+fn normalize_ip_range(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+fn validate_ip_range(value: &Option<String>) -> Result<(), String> {
+    if let Some(ref cidr) = normalize_ip_range(value) {
+        cidr.parse::<ipnet::IpNet>()
+            .map_err(|_| format!("Invalid CIDR notation: {cidr}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Object)]
 struct CreateUserRequest {
     username: String,
@@ -32,6 +48,7 @@ struct UserDataRequest {
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
+    allowed_ip_range: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -106,6 +123,7 @@ impl ListApi {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_range: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -137,6 +155,8 @@ enum UpdateUserResponse {
     Ok(Json<UserConfig>),
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -211,12 +231,18 @@ impl DetailApi {
         };
 
         let mut model: User::ActiveModel = user.into();
+
+        if let Err(msg) = validate_ip_range(&body.allowed_ip_range) {
+            return Ok(UpdateUserResponse::BadRequest(Json(msg)));
+        }
+
         model.username = Set(body.username.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
+        model.allowed_ip_range = Set(normalize_ip_range(&body.allowed_ip_range));
         let user = model.update(&*db).await?;
 
         drop(db);

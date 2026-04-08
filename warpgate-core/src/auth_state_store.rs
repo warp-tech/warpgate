@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,61 @@ use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
 pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
+
+/// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
+/// extract the inner IPv4 address. Otherwise return as-is.
+fn normalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => ip,
+        },
+        _ => ip,
+    }
+}
+
+/// Checks whether the given IP is allowed by the user's `allowed_ip_range` setting.
+/// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
+fn check_ip_allowed(
+    allowed_ip_range: &Option<String>,
+    remote_ip: Option<IpAddr>,
+    username: &str,
+) -> Result<(), WarpgateError> {
+    let cidr_str = allowed_ip_range
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let (Some(cidr_str), Some(raw_ip)) = (cidr_str, remote_ip) {
+        let ip = normalize_ip(raw_ip);
+        if let Ok(network) = cidr_str.parse::<ipnet::IpNet>() {
+            if !network.contains(&ip) {
+                // Print the IP, allowed range and username in the log
+                tracing::warn!(
+                    "Access denied for IP '{}' (not in allowed range '{}' for user '{}')",
+                    ip,
+                    cidr_str,
+                    username
+                );
+
+                return Err(WarpgateError::IpAddrNotAllowed(
+                    ip.to_string(),
+                    username.into(),
+                ));
+            }
+        } else {
+            tracing::warn!(
+                "Invalid allowed_ip_range '{}' for user '{}', denying access",
+                cidr_str,
+                username
+            );
+            return Err(WarpgateError::IpAddrNotAllowed(
+                ip.to_string(),
+                username.into(),
+            ));
+        }
+    }
+    Ok(())
+}
 
 struct AuthCompletionSignal {
     sender: broadcast::Sender<AuthResult>,
@@ -81,6 +137,7 @@ impl AuthStateStore {
         username: &str,
         protocol: &str,
         supported_credential_types: &[CredentialKind],
+        remote_ip: Option<IpAddr>,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
 
@@ -96,6 +153,8 @@ impl AuthStateStore {
         else {
             return Err(WarpgateError::UserNotFound(username.into()));
         };
+
+        check_ip_allowed(&user.allowed_ip_range, remote_ip, username)?;
 
         let policy = self
             .config_provider
@@ -159,5 +218,104 @@ impl AuthStateStore {
 
         self.completion_signals
             .retain(|_, signal| !signal.is_expired());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ip_allowed_no_restriction() {
+        let ip: IpAddr = "10.0.0.5".parse().unwrap();
+        assert!(check_ip_allowed(&None, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_no_remote_ip() {
+        let range = Some("10.0.0.0/8".to_string());
+        assert!(check_ip_allowed(&range, None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_within_range() {
+        let range = Some("192.168.1.0/24".to_string());
+        let ip: IpAddr = "192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_outside_range() {
+        let range = Some("192.168.1.0/24".to_string());
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let err = check_ip_allowed(&range, Some(ip), "testuser").unwrap_err();
+        assert!(matches!(err, WarpgateError::IpAddrNotAllowed(addr, user) if addr == "10.0.0.1" && user == "testuser"));
+    }
+
+    #[test]
+    fn ip_allowed_exact_match() {
+        let range = Some("10.20.30.40/32".to_string());
+        let ip: IpAddr = "10.20.30.40".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_exact_mismatch() {
+        let range = Some("10.20.30.40/32".to_string());
+        let ip: IpAddr = "10.20.30.41".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ip_denied_invalid_cidr() {
+        let range = Some("not-a-cidr".to_string());
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ipv6_allowed_within_range() {
+        let range = Some("fd00::/8".to_string());
+        let ip: IpAddr = "fd12:3456::1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv6_denied_outside_range() {
+        let range = Some("fd00::/8".to_string());
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ip_allowed_both_none() {
+        assert!(check_ip_allowed(&None, None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_empty_string_treated_as_no_restriction() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&Some("".to_string()), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_whitespace_string_treated_as_no_restriction() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&Some("  ".to_string()), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_matches_ipv4_range() {
+        let range = Some("192.168.1.0/24".to_string());
+        // ::ffff:192.168.1.42 is the IPv4-mapped IPv6 form of 192.168.1.42
+        let ip: IpAddr = "::ffff:192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_denied_outside_ipv4_range() {
+        let range = Some("192.168.1.0/24".to_string());
+        let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
     }
 }
