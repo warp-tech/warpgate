@@ -305,7 +305,15 @@ pub async fn proxy_normal_request(
     let mut response: Response = "".into();
 
     copy_client_response(&client_response, &mut response);
-    copy_client_body(client_response, &mut response).await?;
+
+    let embed_session_menu = {
+        let db = ctx.services.db.lock().await;
+        warpgate_db_entities::Parameters::Entity::get(&db)
+            .await
+            .map(|p| p.show_session_menu)
+            .unwrap_or(true)
+    };
+    copy_client_body(client_response, &mut response, embed_session_menu).await?;
 
     log_request_result(
         req.method(),
@@ -321,10 +329,12 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
+    embed_session_menu: bool,
 ) -> Result<()> {
-    if response
-        .content_type()
-        .is_some_and(|c| c.starts_with("text/html"))
+    if embed_session_menu
+        && response
+            .content_type()
+            .is_some_and(|c| c.starts_with("text/html"))
         && response.status() == 200
     {
         copy_client_body_and_embed(client_response, response).await?;

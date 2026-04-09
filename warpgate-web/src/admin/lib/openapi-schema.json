@@ -4754,6 +4754,9 @@
           },
           "minimize_password_login": {
             "type": "boolean"
+          },
+          "show_session_menu": {
+            "type": "boolean"
           }
         }
       },
@@ -4765,7 +4768,8 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login"
+          "minimize_password_login",
+          "show_session_menu"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4785,6 +4789,9 @@
             "type": "boolean"
           },
           "minimize_password_login": {
+            "type": "boolean"
+          },
+          "show_session_menu": {
             "type": "boolean"
           }
         }
