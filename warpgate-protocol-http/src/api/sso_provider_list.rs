@@ -95,7 +95,14 @@ impl Api {
         &self,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> Result<GetSsoProvidersResponse, WarpgateError> {
-        let mut providers = ctx.services().config.lock().await.store.sso_providers.clone();
+        let mut providers = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
@@ -200,7 +207,14 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let providers_config = ctx.services().config.lock().await.store.sso_providers.clone();
+        let providers_config = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         let mut iter = providers_config.iter();
         let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
             return Ok(Err(format!("No provider matching {}", context.provider)));

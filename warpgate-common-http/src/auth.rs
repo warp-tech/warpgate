@@ -63,12 +63,12 @@ impl UnauthenticatedRequestContext {
             .http
             .trust_x_forwarded_headers;
         Self {
-            should_trust_x_forwarded,
             services,
+            should_trust_x_forwarded,
         }
     }
 
-    pub fn services(&self) -> &warpgate_core::Services {
+    pub const fn services(&self) -> &warpgate_core::Services {
         &self.services
     }
 

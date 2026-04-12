@@ -60,7 +60,8 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) = authenticate_and_get_target(req, &target_name, ctx.services()).await?;
+    let (user_info, target) =
+        authenticate_and_get_target(req, &target_name, ctx.services()).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(

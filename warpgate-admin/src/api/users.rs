@@ -598,7 +598,7 @@ impl RolesApi {
         };
 
         let assignment =
-            UserRoleAssignment::Entity::idempotent_grant(&*db, id.0, role_id.0, expires_at).await?;
+            UserRoleAssignment::Entity::idempotent_grant(&db, id.0, role_id.0, expires_at).await?;
 
         AuditEvent::AccessRoleGranted {
             grantee_id: grantee.id,

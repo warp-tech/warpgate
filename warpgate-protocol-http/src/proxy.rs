@@ -211,11 +211,11 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
-async fn inject_forwarding_headers<B: SomeRequestBuilder>(
+fn inject_forwarding_headers<B: SomeRequestBuilder>(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     mut target: B,
-) -> Result<B> {
+) -> B {
     if let Some(host) = ctx.trusted_host_header(req) {
         target = target.header(X_FORWARDED_HOST.clone(), host);
     }
@@ -223,7 +223,7 @@ async fn inject_forwarding_headers<B: SomeRequestBuilder>(
     if let Some(addr) = req.remote_addr().as_socket_addr() {
         target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
     }
-    Ok(target)
+    target
 }
 
 async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
@@ -286,7 +286,7 @@ pub async fn proxy_normal_request(
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, ctx, client_request).await?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     if let Some(authorization_header) = authorization_header {
@@ -453,7 +453,7 @@ async fn proxy_ws_inner(
     }
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, ctx, client_request).await?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
