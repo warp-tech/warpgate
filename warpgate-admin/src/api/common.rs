@@ -24,7 +24,7 @@ pub async fn has_admin_permission(
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
-    let db = ctx.services.db.lock().await;
+    let db = ctx.services().db.lock().await;
 
     let Some(user_model) = User::Entity::find()
         .filter(User::Column::Username.eq(username))

@@ -46,7 +46,7 @@ impl Api {
 
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let mut q = LogEntry::Entity::find()
             .order_by_desc(LogEntry::Column::Timestamp)
             .limit(body.limit.unwrap_or(100));
