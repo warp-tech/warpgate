@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use http::header::HOST;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
@@ -50,7 +49,7 @@ pub async fn catchall_endpoint(
     let span = info_span!("", target=%target.name);
 
     Ok(match ws {
-        Some(ws) => proxy_websocket_request(req, ws, &options)
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, &options)
             .instrument(span)
             .await?
             .into_response(),
@@ -71,14 +70,11 @@ async fn get_target_for_request(
     let selected_target_name;
     let need_role_auth;
 
-    let request_host = req
-        .header(HOST)
-        .map(|h| h.split(':').next().unwrap_or(h).to_string())
-        .or_else(|| req.original_uri().host().map(ToString::to_string));
+    let request_host = ctx.trusted_hostname(req);
 
     let host_based_target_name = if let Some(host) = request_host {
         let found = ctx
-            .services
+            .services()
             .config_provider
             .lock()
             .await
@@ -135,7 +131,7 @@ async fn get_target_for_request(
 
     if let Some(target_name) = final_target_name {
         let target = {
-            ctx.services
+            ctx.services()
                 .config_provider
                 .lock()
                 .await
@@ -153,7 +149,7 @@ async fn get_target_for_request(
         if let Some(target) = target {
             if need_role_auth
                 && !ctx
-                    .services
+                    .services()
                     .config_provider
                     .lock()
                     .await

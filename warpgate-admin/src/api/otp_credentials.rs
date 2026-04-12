@@ -67,7 +67,7 @@ impl ListApi {
     ) -> Result<GetOtpCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let objects = OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(*user_id))
@@ -93,7 +93,7 @@ impl ListApi {
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let object = OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -148,7 +148,7 @@ impl DetailApi {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = OtpCredential::Entity::find_by_id(id.0)
             .filter(OtpCredential::Column::UserId.eq(*user_id))

@@ -253,9 +253,9 @@ impl ProtocolServer for HTTPProtocolServer {
                 let span = match handle {
                     Some(ref handle) => {
                         let handle = handle.lock().await;
-                        span_for_request(&req, &ctx.services, Some(&*handle)).await?
+                        span_for_request(&req, ctx.services(), Some(&*handle)).await?
                     }
-                    None => span_for_request(&req, &ctx.services, None).await?,
+                    None => span_for_request(&req, ctx.services(), None).await?,
                 };
 
                 ep.call(req).instrument(span).await
@@ -273,9 +273,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
-            .data(UnauthenticatedRequestContext {
-                services: self.services.clone(),
-            })
+            .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(session_store.clone())
             .data(session_storage);
 

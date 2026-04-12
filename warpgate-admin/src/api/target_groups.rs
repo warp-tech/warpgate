@@ -56,7 +56,7 @@ impl ListApi {
     ) -> Result<GetTargetGroupsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let groups = TargetGroup::Entity::find()
             .order_by_asc(TargetGroup::Column::Name)
             .all(&*db)
@@ -82,7 +82,7 @@ impl ListApi {
             return Ok(CreateTargetGroupResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -150,7 +150,7 @@ impl DetailApi {
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         match group {
@@ -177,7 +177,7 @@ impl DetailApi {
             return Ok(UpdateTargetGroupResponse::BadRequest);
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         let Some(group) = group else {
@@ -218,7 +218,7 @@ impl DetailApi {
 
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
 
         let Some(group) = group else {

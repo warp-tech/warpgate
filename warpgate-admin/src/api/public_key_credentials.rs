@@ -122,7 +122,7 @@ impl ListApi {
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
@@ -148,7 +148,7 @@ impl ListApi {
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         // Ensure user exists and is not LDAP-linked
         let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
@@ -217,7 +217,7 @@ impl DetailApi {
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         // Ensure user exists and is not LDAP-linked
         let Some(_) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
@@ -261,7 +261,7 @@ impl DetailApi {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         // Check if user is LDAP-linked
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {

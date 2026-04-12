@@ -29,9 +29,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
         .at("/:target_name/*path", handle_api_request)
         .with(poem::middleware::Cors::new())
         .with(CertificateExtractorMiddleware)
-        .data(UnauthenticatedRequestContext {
-            services: services.clone(),
-        })
+        .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator);
 
     info!(?address, "Kubernetes protocol listening");

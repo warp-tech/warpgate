@@ -108,7 +108,7 @@ impl Api {
 
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let tickets = Ticket::Entity::find().all(&*db).await?;
         let tickets = futures::future::join_all(
             tickets
@@ -132,7 +132,7 @@ impl Api {
 
         require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = (if let Some(user_id) = body.user_id {
             User::Entity::find_by_id(user_id).one(&*db).await?
