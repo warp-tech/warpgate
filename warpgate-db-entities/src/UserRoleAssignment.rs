@@ -47,10 +47,10 @@ impl Entity {
         role_id: Uuid,
         expires_at: Option<OffsetDateTime>,
     ) -> Result<Model, DbErr> {
-        let existing = Entity::find()
+        let existing = Self::find()
             .filter(Column::UserId.eq(user_id))
             .filter(Column::RoleId.eq(role_id))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let now = OffsetDateTime::now_utc();
@@ -64,7 +64,7 @@ impl Entity {
             model.granted_at = Set(Some(now));
             model.expires_at = Set(expires_at);
             model.revoked_at = Set(None);
-            model.update(&*db).await?
+            model.update(db).await?
         } else {
             let values = ActiveModel {
                 user_id: Set(user_id),
@@ -74,7 +74,7 @@ impl Entity {
                 revoked_at: Set(None),
                 ..Default::default()
             };
-            values.insert(&*db).await?
+            values.insert(db).await?
         })
     }
 }

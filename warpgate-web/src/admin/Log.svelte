@@ -29,31 +29,42 @@ let filters = $derived({
 })
 </script>
 
-<div class="page-summary-bar d-flex align-items-center justify-content-between">
-    <h1>
-    {#if filterKind === 'user'}
-        user audit log: UID <code>{params?.id}</code>
-    {:else if filterKind === 'access-role'}
-        access role audit log: ID <code>{params?.id}</code>
-    {:else if filterKind === 'admin-role'}
-        admin role audit log: ID <code>{params?.id}</code>
-    {:else}
-        log
-    {/if}
-    </h1>
-    <div class="d-flex align-items-center gap-3">
-        {#if !filterKind}
-            <Input
-                type="switch"
-                id="auditOnlyToggle"
-                label="Audit log only"
-                checked={$target === 'audit'}
-                on:change={toggleTarget}
-            />
+<div class="log-page">
+    <div class="page-summary-bar d-flex align-items-center justify-content-between">
+        <h1>
+        {#if filterKind === 'user'}
+            user audit log: UID <code>{params?.id}</code>
+        {:else if filterKind === 'access-role'}
+            access role audit log: ID <code>{params?.id}</code>
+        {:else if filterKind === 'admin-role'}
+            admin role audit log: ID <code>{params?.id}</code>
+        {:else}
+            log
         {/if}
+        </h1>
+        <div class="d-flex align-items-center gap-3">
+            {#if !filterKind}
+                <Input
+                    type="switch"
+                    id="auditOnlyToggle"
+                    label="Audit log only"
+                    checked={$target === 'audit'}
+                    on:change={toggleTarget}
+                />
+            {/if}
+        </div>
     </div>
+
+    {#key `${$target}-${filterKind}-${params?.id}`}
+        <LogViewer filters={filters} />
+    {/key}
 </div>
 
-{#key `${$target}-${filterKind}-${params?.id}`}
-    <LogViewer filters={filters} />
-{/key}
+<style lang="scss">
+    .log-page {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+    }
+</style>

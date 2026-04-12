@@ -60,7 +60,8 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) = authenticate_and_get_target(req, &target_name, &ctx.services).await?;
+    let (user_info, target) =
+        authenticate_and_get_target(req, &target_name, ctx.services()).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
@@ -82,7 +83,7 @@ pub async fn handle_api_request(
         handle.set_target(&target).await?;
         (
             handle.id(),
-            span_for_request(req, &ctx.services, Some(&*handle)).await?,
+            span_for_request(req, ctx.services(), Some(&*handle)).await?,
         )
     };
 
@@ -95,7 +96,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
@@ -107,14 +108,14 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
             .context("handling Kubernetes API request")
         };
 
-        let client_ip = get_client_ip(req, &ctx.services).await;
+        let client_ip = get_client_ip(req, ctx.services()).await;
         let response = response.inspect_err(|e| {
             log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;

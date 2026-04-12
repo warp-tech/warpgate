@@ -2,7 +2,6 @@ use core::str;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::header::HOST;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::error::InternalServerError;
@@ -105,7 +104,7 @@ pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
     // A user is considered an administrator if they have any admin role assigned.
-    let services = &ctx.services;
+    let services = ctx.services();
 
     // Admin tokens bypass the database check and are always full administrators.
     if matches!(ctx.auth, RequestAuthorization::AdminToken) {
@@ -260,13 +259,10 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         if let Ok(base_url) = config.construct_external_url(None, None) {
             if let Some(base_host) = base_url.host_str() {
-                let request_host = req
-                    .header(HOST)
-                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| req.original_uri().host().map(ToString::to_string));
+                let request_host = ctx.trusted_hostname(&req);
 
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost
@@ -297,7 +293,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
                 if ctx
-                    .services
+                    .services()
                     .admin_token
                     .lock()
                     .await
@@ -309,7 +305,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 {
                     Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = ctx
-                    .services
+                    .services()
                     .config_provider
                     .lock()
                     .await

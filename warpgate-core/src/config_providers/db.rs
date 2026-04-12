@@ -601,7 +601,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
                     entities::UserRoleAssignment::Entity::idempotent_grant(
-                        &*db, user.id, role.id, None,
+                        &db, user.id, role.id, None,
                     )
                     .await?;
                 }
