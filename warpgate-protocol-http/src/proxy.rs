@@ -211,15 +211,15 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
-fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
-    #[allow(clippy::unwrap_used)]
-    if let Some(host) = req.headers().get(http::header::HOST) {
-        target = target.header(
-            X_FORWARDED_HOST.clone(),
-            host.to_str()?.split(':').next().unwrap(),
-        );
+async fn inject_forwarding_headers<B: SomeRequestBuilder>(
+    req: &Request,
+    ctx: &AuthenticatedRequestContext,
+    mut target: B,
+) -> Result<B> {
+    if let Some(host) = ctx.trusted_host_header(req) {
+        target = target.header(X_FORWARDED_HOST.clone(), host);
     }
-    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str());
+    target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
     if let Some(addr) = req.remote_addr().as_socket_addr() {
         target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
     }
@@ -286,7 +286,7 @@ pub async fn proxy_normal_request(
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request).await?;
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     if let Some(authorization_header) = authorization_header {
@@ -310,7 +310,7 @@ pub async fn proxy_normal_request(
     log_request_result(
         req.method(),
         req.original_uri(),
-        get_client_ip(req, &ctx.services).await.as_deref(),
+        get_client_ip(req, ctx.services()).await.as_deref(),
         status,
     );
 
@@ -380,10 +380,11 @@ async fn copy_client_body_and_embed(
 pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, options, true)?;
-    proxy_ws_inner(req, ws, uri.clone(), options)
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options)
         .await
         .map_err(|error| {
             tracing::error!(?uri, ?error, "WebSocket proxy failed");
@@ -425,6 +426,7 @@ async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let (authorization_header, uri) = extract_basic_auth(uri)?;
@@ -451,7 +453,7 @@ async fn proxy_ws_inner(
     }
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request).await?;
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 

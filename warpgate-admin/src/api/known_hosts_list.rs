@@ -56,7 +56,7 @@ impl Api {
         PublicKey::from_openssh(&format!("{} {}", body.key_type, body.key_base64))
             .context("parsing key")?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let model = KnownHost::ActiveModel {
             id: Set(Uuid::new_v4()),
             host: Set(body.host.clone()),
@@ -81,7 +81,7 @@ impl Api {
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let hosts = KnownHost::Entity::find().all(&*db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }
