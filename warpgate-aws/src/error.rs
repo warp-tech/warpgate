@@ -33,6 +33,6 @@ pub enum AwsError {
 
 impl AwsError {
     pub fn sdk_error<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        AwsError::Other(Box::new(err))
+        Self::Other(Box::new(err))
     }
 }

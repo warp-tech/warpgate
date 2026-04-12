@@ -32,6 +32,7 @@ enum CloseAllSessionsResponse {
 #[OpenApi]
 impl Api {
     #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
+    #[allow(clippy::too_many_arguments)]
     async fn api_get_all_sessions(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,

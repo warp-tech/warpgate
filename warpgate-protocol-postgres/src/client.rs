@@ -9,7 +9,7 @@ use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 use tracing::{debug, info, warn};
-use warpgate_common::TargetPostgresOptions;
+use warpgate_common::{TargetPostgresOptions, WarpgateError};
 use warpgate_tls::{configure_tls_connector, TlsMode};
 
 use crate::error::PostgresError;
@@ -132,11 +132,7 @@ impl PostgresClient {
                     &target.username,
                 )
                 .await
-                .map_err(|e| {
-                    PostgresError::ProtocolError(format!(
-                        "RDS IAM auth token generation failed: {e}"
-                    ))
-                })?;
+                .map_err(WarpgateError::Aws)?;
                 Some(token)
             }
         };

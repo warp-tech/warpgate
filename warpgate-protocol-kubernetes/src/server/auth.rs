@@ -169,16 +169,16 @@ pub async fn create_authenticated_client(
             let EksClusterInfo { name, region } =
                 warpgate_aws::find_eks_cluster_by_url(&k8s_options.cluster_url)
                     .await
-                    .context("Failed to find EKS cluster matching the configured URL")?;
+                    .context("EKS cluster lookup")?;
 
             let token = warpgate_aws::generate_eks_token(&name, &region)
                 .await
-                .context("Failed to generate EKS authentication token")?;
+                .context("EKS token generation")?;
 
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
                     .context("setting Authorization header for EKS token")?,
             );
             client_builder = client_builder.default_headers(headers);

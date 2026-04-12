@@ -12,8 +12,8 @@ pub fn parse_eks_region(url: &str) -> Option<String> {
     // Find "eks" and "amazonaws" in the parts
     if let Some(eks_pos) = parts.iter().position(|&p| p == "eks") {
         if eks_pos >= 1 {
+            #[allow(clippy::indexing_slicing)] // known index
             let region = parts[eks_pos - 1];
-            // Validate it looks like a region (contains dashes)
             if region.contains('-') {
                 return Some(region.to_string());
             }
@@ -32,6 +32,7 @@ pub fn parse_rds_region(host: &str) -> Option<String> {
     // Find "rds" and "amazonaws" in the parts
     if let Some(rds_pos) = parts.iter().position(|&p| p == "rds") {
         if rds_pos >= 1 {
+            #[allow(clippy::indexing_slicing)] // known index
             let region = parts[rds_pos - 1];
             if region.contains('-') {
                 return Some(region.to_string());

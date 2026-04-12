@@ -23,7 +23,7 @@ pub async fn generate_rds_auth_token(
     let generator = AuthTokenGenerator::new(
         aws_sdk_rds::auth_token::Config::builder()
             .hostname(host)
-            .port(port as u64)
+            .port(u64::from(port))
             .username(username)
             .build()
             .map_err(AwsError::from)?,

@@ -38,7 +38,7 @@ pub async fn find_eks_cluster_by_url(cluster_url: &str) -> Result<EksClusterInfo
                     if endpoint.trim_end_matches('/') == normalized_url {
                         info!(cluster_name, "Matched EKS cluster by endpoint URL");
                         return Ok(EksClusterInfo {
-                            name: cluster_name.to_string(),
+                            name: cluster_name.clone(),
                             region: region_name,
                         });
                     }
@@ -79,7 +79,7 @@ pub async fn generate_eks_token(cluster_name: &str, region: &str) -> Result<Stri
         .provide_credentials()
         .await?;
 
-    let identity = aws_credential_types::Credentials::from(credentials).into();
+    let identity = credentials.into();
 
     // Build the presigned URL for STS GetCallerIdentity
     let mut signing_settings = SigningSettings::default();

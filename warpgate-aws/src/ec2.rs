@@ -13,12 +13,11 @@ pub struct Ec2InstanceInfo {
 
 /// Detect if running on EC2 by querying the IMDS endpoint with a 1s timeout.
 pub async fn is_running_on_ec2() -> bool {
-    let client = match reqwest::Client::builder()
+    let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_secs(1))
         .build()
-    {
-        Ok(c) => c,
-        Err(_) => return false,
+    else {
+        return false;
     };
 
     // Try IMDSv2 token endpoint
@@ -63,7 +62,7 @@ pub async fn find_instance_by_ip(ip: &str) -> Result<Ec2InstanceInfo, AwsError> 
 
     for handle in handles {
         if let Ok(Ok(Some(info))) = handle.await {
-            instance_cache().insert(ip.to_string(), info.clone());
+            instance_cache().insert(ip.clone(), info.clone());
             return Ok(info);
         }
     }
