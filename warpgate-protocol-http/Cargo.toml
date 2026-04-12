@@ -34,6 +34,7 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-web = { path = "../warpgate-web", default-features = false }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
+subtle = "2"
 uuid.workspace = true
 regex.workspace = true
 url = { version = "2.4", default-features = false }
