@@ -10,6 +10,7 @@ use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
@@ -291,7 +292,17 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 let token_from_header = token_from_header
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
-                if Some(token_from_header) == ctx.services().admin_token.lock().await.as_deref() {
+                if ctx
+                    .services()
+                    .admin_token
+                    .lock()
+                    .await
+                    .as_deref()
+                    .is_some_and(|admin_token| {
+                        // Use constant time comparison to prevent timing attacks
+                        admin_token.as_bytes().ct_eq(token_from_header.as_bytes()).into()
+                    })
+                {
                     Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = ctx
                     .services()
