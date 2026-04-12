@@ -7184,7 +7184,6 @@ dependencies = [
 name = "warpgate-aws"
 version = "0.22.0-beta.5"
 dependencies = [
- "anyhow",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-ec2",
@@ -7198,10 +7197,10 @@ dependencies = [
  "data-encoding",
  "http 1.4.0",
  "reqwest 0.13.2",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "url",
- "warpgate-common",
 ]
 
 [[package]]
@@ -7268,6 +7267,7 @@ dependencies = [
  "tracing-core",
  "url",
  "uuid",
+ "warpgate-aws",
  "warpgate-ca",
  "warpgate-ldap",
  "warpgate-sso",

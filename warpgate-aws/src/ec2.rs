@@ -1,8 +1,8 @@
 use std::time::Duration;
-use anyhow::{Context, Result};
+
 use tracing::{debug, info};
 
-use crate::instance_cache;
+use crate::{instance_cache, AwsError};
 
 #[derive(Debug, Clone)]
 pub struct Ec2InstanceInfo {
@@ -22,14 +22,17 @@ pub async fn is_running_on_ec2() -> bool {
     };
 
     // Try IMDSv2 token endpoint
-    let result = client
-        .put("http://169.254.169.254/latest/api/token")
-        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        .send()
-        .await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        client
+            .put("http://169.254.169.254/latest/api/token")
+            .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+            .send(),
+    )
+    .await;
 
     match result {
-        Ok(resp) if resp.status().is_success() => {
+        Ok(Ok(resp)) if resp.status().is_success() => {
             info!("Detected EC2 environment via IMDS");
             true
         }
@@ -40,23 +43,21 @@ pub async fn is_running_on_ec2() -> bool {
     }
 }
 
-/// Look up an EC2 instance by IP address across all regions.
-/// Results are cached in a static DashMap.
-pub async fn find_instance_by_ip(ip: &str) -> Result<Ec2InstanceInfo> {
-    // Check cache first
+/// Look up an EC2 instance by IP address across all regions (cached)
+pub async fn find_instance_by_ip(ip: &str) -> Result<Ec2InstanceInfo, AwsError> {
     if let Some(entry) = instance_cache().get(ip) {
         return Ok(entry.value().clone());
     }
 
     let regions = list_all_regions().await?;
+    let ip = ip.to_string();
 
     // Query all regions in parallel
-    let ip_owned = ip.to_string();
     let mut handles = Vec::new();
     for region_name in regions {
-        let ip_clone = ip_owned.clone();
+        let ip = ip.clone();
         handles.push(tokio::spawn(async move {
-            find_instance_in_region(&ip_clone, &region_name).await
+            find_instance_in_region(&ip, &region_name).await
         }));
     }
 
@@ -67,10 +68,13 @@ pub async fn find_instance_by_ip(ip: &str) -> Result<Ec2InstanceInfo> {
         }
     }
 
-    anyhow::bail!("EC2 instance with IP {ip} not found in any region")
+    Err(AwsError::RegionUnknown(ip))
 }
 
-async fn find_instance_in_region(ip: &str, region_name: &str) -> Result<Option<Ec2InstanceInfo>> {
+async fn find_instance_in_region(
+    ip: &str,
+    region_name: &str,
+) -> Result<Option<Ec2InstanceInfo>, AwsError> {
     let region = aws_sdk_ec2::config::Region::new(region_name.to_string());
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(region)
@@ -114,7 +118,7 @@ async fn find_instance_in_region(ip: &str, region_name: &str) -> Result<Option<E
     Ok(None)
 }
 
-async fn list_all_regions() -> Result<Vec<String>> {
+async fn list_all_regions() -> Result<Vec<String>, AwsError> {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .load()
         .await;
@@ -125,7 +129,7 @@ async fn list_all_regions() -> Result<Vec<String>> {
         .all_regions(true)
         .send()
         .await
-        .context("Failed to list AWS regions")?;
+        .map_err(AwsError::sdk_error)?;
 
     Ok(output
         .regions()
@@ -141,14 +145,14 @@ pub async fn send_ssh_public_key(
     region: &str,
     os_user: &str,
     ssh_public_key: &str,
-) -> Result<()> {
+) -> Result<(), AwsError> {
     let region_obj = aws_sdk_ec2instanceconnect::config::Region::new(region.to_string());
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(region_obj)
         .load()
         .await;
-    let client = aws_sdk_ec2instanceconnect::Client::new(&config);
 
+    let client = aws_sdk_ec2instanceconnect::Client::new(&config);
     client
         .send_ssh_public_key()
         .instance_id(instance_id)
@@ -157,7 +161,7 @@ pub async fn send_ssh_public_key(
         .availability_zone(availability_zone)
         .send()
         .await
-        .context("SendSSHPublicKey API call failed")?;
+        .map_err(AwsError::sdk_error)?;
 
     info!(
         instance_id,

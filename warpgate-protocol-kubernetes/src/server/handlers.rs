@@ -143,7 +143,8 @@ async fn _handle_normal_request_inner(
     services: &Services,
 ) -> Result<Response, WarpgateError> {
     let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services).await?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .build()
             .context("building reqwest client")?;
 
@@ -387,7 +388,8 @@ async fn _handle_websocket_request_inner(
     }
 
     let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services).await?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .http1_only()
             .build()?;
 

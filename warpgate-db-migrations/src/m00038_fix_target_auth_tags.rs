@@ -57,7 +57,18 @@ impl MigrationTrait for Migration {
                 continue;
             };
 
-            let Some(auth) = options_obj.get("auth").and_then(|v| v.as_object()) else {
+            // Options are wrapped under a protocol key, e.g. {"ssh": {"auth": {}, ...}}
+            let kind_key = match t.kind {
+                target::TargetKind::Ssh => "ssh",
+                target::TargetKind::Kubernetes => "kubernetes",
+                _ => continue,
+            };
+
+            let Some(proto_obj) = options_obj.get(kind_key).and_then(|v| v.as_object()) else {
+                continue;
+            };
+
+            let Some(auth) = proto_obj.get("auth").and_then(|v| v.as_object()) else {
                 continue;
             };
 
@@ -84,13 +95,16 @@ impl MigrationTrait for Migration {
                 _ => continue,
             };
 
-            let mut new_options = options_obj.clone();
+            let mut new_proto = proto_obj.clone();
             let mut new_auth = auth.clone();
             new_auth.insert(
                 "kind".to_string(),
                 serde_json::Value::String(kind_value.to_string()),
             );
-            new_options.insert("auth".to_string(), serde_json::Value::Object(new_auth));
+            new_proto.insert("auth".to_string(), serde_json::Value::Object(new_auth));
+
+            let mut new_options = options_obj.clone();
+            new_options.insert(kind_key.to_string(), serde_json::Value::Object(new_proto));
 
             let mut model: target::ActiveModel = t.into();
             model.options = Set(serde_json::Value::Object(new_options));

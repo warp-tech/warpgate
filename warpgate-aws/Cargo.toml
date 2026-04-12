@@ -6,7 +6,6 @@ version = "0.22.0-beta.5"
 publish = false
 
 [dependencies]
-anyhow.workspace = true
 aws-config = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rustls",
@@ -39,4 +38,4 @@ tracing.workspace = true
 url = { version = "2.4", default-features = false }
 data-encoding.workspace = true
 aws-sdk-rds = "1.130.0"
-warpgate-common = { path = "../warpgate-common" }
+thiserror.workspace = true

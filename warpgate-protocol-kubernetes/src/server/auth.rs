@@ -3,6 +3,7 @@ use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
+use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetKubernetesOptions, TargetOptions, User};
@@ -165,11 +166,12 @@ pub async fn create_authenticated_client(
         }
         warpgate_common::KubernetesTargetAuth::IamRole(_) => {
             // EKS IAM role authentication: generate a token from the cluster URL
-            let (cluster_name, region) = warpgate_aws::find_eks_cluster_by_url(&k8s_options.cluster_url)
-                .await
-                .context("Failed to find EKS cluster matching the configured URL")?;
+            let EksClusterInfo { name, region } =
+                warpgate_aws::find_eks_cluster_by_url(&k8s_options.cluster_url)
+                    .await
+                    .context("Failed to find EKS cluster matching the configured URL")?;
 
-            let token = warpgate_aws::generate_eks_token(&cluster_name, &region)
+            let token = warpgate_aws::generate_eks_token(&name, &region)
                 .await
                 .context("Failed to generate EKS authentication token")?;
 

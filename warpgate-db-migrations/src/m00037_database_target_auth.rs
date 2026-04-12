@@ -67,10 +67,22 @@ impl MigrationTrait for Migration {
                 continue;
             };
 
-            let mut new_options = options_obj.clone();
+            // Options are wrapped under a protocol key, e.g. {"mysql": {"password": "...", ...}}
+            let kind_key = match t.kind {
+                target::TargetKind::MySql => "mysql",
+                target::TargetKind::Postgres => "postgres",
+                _ => continue,
+            };
+
+            let Some(proto_obj) = options_obj.get(kind_key).and_then(|v| v.as_object()) else {
+                error!(target_id = %t.id, "Target options missing protocol key, skipping");
+                continue;
+            };
+
+            let mut new_proto = proto_obj.clone();
 
             // Extract the old password field
-            let password = new_options.remove("password");
+            let password = new_proto.remove("password");
 
             // Build the new auth object
             let auth = match password {
@@ -83,7 +95,10 @@ impl MigrationTrait for Migration {
                 }),
             };
 
-            new_options.insert("auth".to_string(), auth);
+            new_proto.insert("auth".to_string(), auth);
+
+            let mut new_options = options_obj.clone();
+            new_options.insert(kind_key.to_string(), serde_json::Value::Object(new_proto));
 
             let mut model: target::ActiveModel = t.into();
             model.options = Set(serde_json::Value::Object(new_options));

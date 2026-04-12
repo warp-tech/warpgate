@@ -1,16 +1,19 @@
+use std::sync::OnceLock;
+
+use dashmap::DashMap;
+use tokio::sync::OnceCell;
+
 mod ec2;
+mod error;
 mod eks;
 mod rds;
 mod region;
 
-pub use ec2::{is_running_on_ec2, find_instance_by_ip, send_ssh_public_key, Ec2InstanceInfo};
-pub use eks::{find_eks_cluster_by_url, generate_eks_token};
+pub use error::AwsError;
+pub use ec2::{find_instance_by_ip, is_running_on_ec2, send_ssh_public_key, Ec2InstanceInfo};
+pub use eks::{find_eks_cluster_by_url, generate_eks_token, EksClusterInfo};
 pub use rds::generate_rds_auth_token;
-pub use region::{parse_eks_region, parse_rds_region, get_imds_region};
-
-use std::sync::OnceLock;
-use dashmap::DashMap;
-use tokio::sync::OnceCell;
+pub use region::{get_imds_region, parse_eks_region, parse_rds_region};
 
 /// Cached EC2 detection result
 static EC2_DETECTION: OnceCell<bool> = OnceCell::const_new();
@@ -18,7 +21,7 @@ static EC2_DETECTION: OnceCell<bool> = OnceCell::const_new();
 /// Cached IMDS region
 static IMDS_REGION: OnceCell<Option<String>> = OnceCell::const_new();
 
-/// Cached IP -> (instance_id, availability_zone, region)
+/// Cached IP -> Ec2InstanceInfo
 static INSTANCE_CACHE: OnceLock<DashMap<String, Ec2InstanceInfo>> = OnceLock::new();
 
 fn instance_cache() -> &'static DashMap<String, Ec2InstanceInfo> {

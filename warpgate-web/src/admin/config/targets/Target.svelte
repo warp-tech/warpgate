@@ -221,7 +221,7 @@
                         <select class="form-control" bind:value={target.options.auth.kind}>
                             <option value="Password">Password</option>
                             {#if $serverInfo?.runningOnEc2}
-                                <option value="IamRole">IAM Role (RDS)</option>
+                                <option value="IamRole">IAM Role (experimental)</option>
                             {/if}
                         </select>
                     </FormGroup>
@@ -248,7 +248,7 @@
                     <option value="Certificate">Certificate</option>
                     <option value="Token">Token</option>
                     {#if $serverInfo?.runningOnEc2}
-                        <option value="IamRole">IAM Role (EKS)</option>
+                        <option value="IamRole">IAM Role (experimental)</option>
                     {/if}
                 </select>
             </FormGroup>

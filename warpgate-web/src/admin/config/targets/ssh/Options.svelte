@@ -64,7 +64,7 @@
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
             {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role (EC2 Instance Connect)</option>
+                <option value="IamRole">IAM Role (experimental)</option>
             {/if}
         </select>
     </FormGroup>

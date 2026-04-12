@@ -3,6 +3,7 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
@@ -63,6 +64,8 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("AWS: {0}")]
+    Aws(AwsError),
 }
 
 impl ResponseError for WarpgateError {

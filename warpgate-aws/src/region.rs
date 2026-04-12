@@ -1,4 +1,5 @@
 use std::time::Duration;
+
 use tracing::debug;
 
 /// Parse the AWS region from an EKS cluster API URL.

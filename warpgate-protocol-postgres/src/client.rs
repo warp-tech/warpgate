@@ -132,7 +132,11 @@ impl PostgresClient {
                     &target.username,
                 )
                 .await
-                .map_err(|e| PostgresError::ProtocolError(format!("RDS IAM auth token generation failed: {e}")))?;
+                .map_err(|e| {
+                    PostgresError::ProtocolError(format!(
+                        "RDS IAM auth token generation failed: {e}"
+                    ))
+                })?;
                 Some(token)
             }
         };
