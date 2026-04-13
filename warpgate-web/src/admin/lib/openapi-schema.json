@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.4-17-g75b5fc29-modified"
+    "version": "v0.22.0-beta.5-2-g1fc7f399-modified"
   },
   "servers": [
     {
@@ -4182,6 +4182,81 @@
           "WebUserApproval"
         ]
       },
+      "DatabaseTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth",
+            "IamRole": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        }
+      },
+      "DatabaseTargetAuth_DatabaseTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetIamRoleAuth"
+          }
+        ]
+      },
+      "DatabaseTargetAuth_DatabaseTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetPasswordAuth"
+          }
+        ]
+      },
+      "DatabaseTargetIamRoleAuth": {
+        "type": "object",
+        "title": "DatabaseTargetIamRoleAuth"
+      },
+      "DatabaseTargetPasswordAuth": {
+        "type": "object",
+        "title": "DatabaseTargetPasswordAuth",
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
       "ExistingCertificateCredential": {
         "type": "object",
         "title": "ExistingCertificateCredential",
@@ -4413,13 +4488,17 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Token": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetTokenAuth",
-            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth",
+            "IamRole": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         }
       },
@@ -4442,6 +4521,28 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetCertificateAuth"
+          }
+        ]
+      },
+      "KubernetesTargetAuth_KubernetesTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetIamRoleAuth"
           }
         ]
       },
@@ -4482,6 +4583,10 @@
             "type": "string"
           }
         }
+      },
+      "KubernetesTargetIamRoleAuth": {
+        "type": "object",
+        "title": "KubernetesTargetIamRoleAuth"
       },
       "KubernetesTargetTokenAuth": {
         "type": "object",
@@ -4926,15 +5031,41 @@
           },
           {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
-            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetIamRoleAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetPasswordAuth": {
         "allOf": [
@@ -5015,6 +5146,10 @@
             "type": "string"
           }
         }
+      },
+      "SshTargetIamRoleAuth": {
+        "type": "object",
+        "title": "SshTargetIamRoleAuth"
       },
       "SshTargetPasswordAuth": {
         "type": "object",
@@ -5193,6 +5328,7 @@
           "host",
           "port",
           "username",
+          "auth",
           "tls"
         ],
         "properties": {
@@ -5206,8 +5342,8 @@
           "username": {
             "type": "string"
           },
-          "password": {
-            "type": "string"
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -5364,6 +5500,7 @@
           "host",
           "port",
           "username",
+          "auth",
           "tls"
         ],
         "properties": {
@@ -5377,8 +5514,8 @@
           "username": {
             "type": "string"
           },
-          "password": {
-            "type": "string"
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"

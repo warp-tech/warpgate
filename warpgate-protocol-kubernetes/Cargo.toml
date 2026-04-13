@@ -31,6 +31,7 @@ time.workspace = true
 tracing.workspace = true
 url = { version = "2.0", default-features = false }
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }

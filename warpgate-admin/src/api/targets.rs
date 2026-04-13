@@ -124,12 +124,24 @@ impl ListApi {
             )));
         }
 
+        let mut options = body.options.clone();
+
+        match &mut options {
+            TargetOptions::MySql(opts) => {
+                opts.normalize();
+            }
+            TargetOptions::Postgres(opts) => {
+                opts.normalize();
+            }
+            _ => {}
+        }
+
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
-            kind: Set((&body.options).into()),
-            options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            kind: Set((&options).into()),
+            options: Set(serde_json::to_value(options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
         };

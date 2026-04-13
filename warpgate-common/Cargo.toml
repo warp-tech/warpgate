@@ -50,6 +50,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing.workspace = true
 url = { version = "2.2", default-features = false }
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
