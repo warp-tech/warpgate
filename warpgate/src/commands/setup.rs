@@ -11,6 +11,7 @@ use rcgen::generate_simple_self_signed;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, EntityTrait};
 use tracing::{error, info};
+use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
@@ -353,6 +354,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         .expect("Admin user should exist");
 
     let access_role = Role::ActiveModel {
+        id: Set(Uuid::new_v4()),
         name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
         ..Default::default()
     }

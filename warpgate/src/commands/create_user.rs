@@ -56,8 +56,7 @@ pub async fn command(
             .one(&*db)
             .await?
         {
-            UserRoleAssignment::Entity::idempotent_grant(&db, db_user.id, db_role.id, None)
-                .await?;
+            UserRoleAssignment::Entity::idempotent_grant(&db, db_user.id, db_role.id, None).await?;
         }
 
         // admin role
