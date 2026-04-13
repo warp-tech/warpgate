@@ -23,6 +23,7 @@ time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }

@@ -6,6 +6,7 @@
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { adminPermissions } from 'admin/lib/store'
+    import { serverInfo } from 'gateway/lib/store'
 
     interface Props {
         id: string,
@@ -62,6 +63,9 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            {#if $serverInfo?.runningOnEc2}
+                <option value="IamRole">IAM Role (experimental)</option>
+            {/if}
         </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}

@@ -38,7 +38,9 @@ mod m00033_add_log_target;
 mod m00034_add_log_related_fields;
 mod m00035_ticket_user_target_id;
 mod m00036_user_role_expiry_history;
-mod m00037_show_session_menu;
+mod m00037_database_target_auth;
+mod m00038_fix_target_auth_tags;
+mod m00039_show_session_menu;
 
 pub struct Migrator;
 
@@ -82,7 +84,9 @@ impl MigratorTrait for Migrator {
             Box::new(m00034_add_log_related_fields::Migration),
             Box::new(m00035_ticket_user_target_id::Migration),
             Box::new(m00036_user_role_expiry_history::Migration),
-            Box::new(m00037_show_session_menu::Migration),
+            Box::new(m00037_database_target_auth::Migration),
+            Box::new(m00038_fix_target_auth_tags::Migration),
+            Box::new(m00039_show_session_menu::Migration),
         ]
     }
 }
