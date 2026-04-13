@@ -121,10 +121,8 @@ impl PostgresClient {
         stream.flush().await?;
 
         // Resolve effective password (may be an IAM-generated token or legacy field)
-        let effective_password: Option<String> = match &target.auth {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => {
-                auth.password.clone().or_else(|| target.password.clone())
-            }
+        let effective_password = match &target.effective_auth() {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 let token = warpgate_aws::generate_rds_auth_token(
                     &target.host,
@@ -133,19 +131,13 @@ impl PostgresClient {
                 )
                 .await
                 .map_err(WarpgateError::Aws)?;
-                Some(token)
+                token
             }
         };
 
         loop {
             let Some(payload) = stream.recv::<PgWireGenericBackendMessage>().await? else {
                 return Err(PostgresError::Eof);
-            };
-
-            let get_password = || -> Result<&str, PostgresError> {
-                effective_password
-                    .as_deref()
-                    .ok_or(PostgresError::PasswordRequired)
             };
 
             match payload.0 {
@@ -158,17 +150,15 @@ impl PostgresClient {
                         break;
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
-                        let password = get_password()?;
                         let password_message =
-                            pgwire::messages::startup::Password::new(password.into());
+                            pgwire::messages::startup::Password::new(effective_password.clone());
                         stream.push(password_message)?;
                         stream.flush().await?;
                     }
                     pgwire::messages::startup::Authentication::MD5Password(scramble) => {
-                        let password = get_password()?;
                         let hashed = pgwire::api::auth::md5pass::hash_md5_password(
                             &target.username,
-                            password,
+                            &effective_password,
                             &scramble,
                         );
                         let password_message = pgwire::messages::startup::Password::new(hashed);
@@ -176,9 +166,13 @@ impl PostgresClient {
                         stream.flush().await?;
                     }
                     pgwire::messages::startup::Authentication::SASL(mechanisms) => {
-                        let password = get_password()?;
-                        Self::run_sasl_auth(&mut stream, mechanisms, &target.username, password)
-                            .await?;
+                        Self::run_sasl_auth(
+                            &mut stream,
+                            mechanisms,
+                            &target.username,
+                            &effective_password,
+                        )
+                        .await?;
                     }
                     x => {
                         return Err(PostgresError::ProtocolError(format!(

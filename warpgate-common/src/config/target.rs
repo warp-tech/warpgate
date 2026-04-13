@@ -115,7 +115,7 @@ pub enum DatabaseTargetAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct DatabaseTargetPasswordAuth {
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -130,7 +130,7 @@ impl Default for DatabaseTargetAuth {
 impl DatabaseTargetAuth {
     pub fn password(&self) -> Option<&str> {
         match self {
-            Self::Password(auth) => auth.password.as_deref(),
+            Self::Password(auth) => Some(auth.password.as_str()),
             Self::IamRole(_) => None,
         }
     }
@@ -148,18 +148,38 @@ pub struct TargetMySqlOptions {
     pub username: String,
 
     #[serde(default)]
-    pub auth: DatabaseTargetAuth,
+    auth: Option<DatabaseTargetAuth>,
 
     /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
     #[serde(default, skip_serializing)]
-    #[oai(skip)]
-    pub password: Option<String>,
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+}
+
+impl TargetMySqlOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: password,
+            }));
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -174,12 +194,12 @@ pub struct TargetPostgresOptions {
     pub username: String,
 
     #[serde(default)]
-    pub auth: DatabaseTargetAuth,
+    auth: Option<DatabaseTargetAuth>,
 
     /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
     #[serde(default, skip_serializing)]
-    #[oai(skip)]
-    pub password: Option<String>,
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
@@ -189,6 +209,26 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+}
+
+impl TargetPostgresOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: password,
+            }));
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
