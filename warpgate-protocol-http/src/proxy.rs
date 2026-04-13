@@ -307,7 +307,7 @@ pub async fn proxy_normal_request(
     copy_client_response(&client_response, &mut response);
 
     let embed_session_menu = {
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         warpgate_db_entities::Parameters::Entity::get(&db)
             .await
             .map(|p| p.show_session_menu)
