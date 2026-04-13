@@ -1,6 +1,7 @@
 pub mod fs;
 pub mod hash;
 pub mod locks;
+pub mod net;
 pub mod otp;
 pub mod rng;
 pub mod serde_base64;
