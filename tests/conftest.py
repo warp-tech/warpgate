@@ -597,6 +597,7 @@ class ProcessManager:
         stderr=None,
         stdout=None,
         http_port=None,
+        database_url=None,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
@@ -658,24 +659,27 @@ class ProcessManager:
             )
 
         if not share_with:
+            setup_args = [
+                "unattended-setup",
+                "--ssh-port",
+                str(ssh_port),
+                "--http-port",
+                str(http_port),
+                "--mysql-port",
+                str(mysql_port),
+                "--postgres-port",
+                str(postgres_port),
+                "--kubernetes-port",
+                str(kubernetes_port),
+                "--data-path",
+                data_dir,
+                "--external-host",
+                "external-host",
+            ]
+            if database_url:
+                setup_args += ["--database-url", database_url]
             p = run(
-                [
-                    "unattended-setup",
-                    "--ssh-port",
-                    str(ssh_port),
-                    "--http-port",
-                    str(http_port),
-                    "--mysql-port",
-                    str(mysql_port),
-                    "--postgres-port",
-                    str(postgres_port),
-                    "--kubernetes-port",
-                    str(kubernetes_port),
-                    "--data-path",
-                    data_dir,
-                    "--external-host",
-                    "external-host",
-                ],
+                setup_args,
                 env={"WARPGATE_ADMIN_PASSWORD": "123"},
             )
             p.communicate()
