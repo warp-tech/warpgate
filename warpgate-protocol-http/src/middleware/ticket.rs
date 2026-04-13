@@ -64,9 +64,9 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                 if let Some((_ticket_model, target, user_info)) = {
                     let ticket_secret = Secret::new(ticket);
                     if let Some((ticket, target, user_info)) =
-                        authorize_ticket(&ctx.services.db, &ticket_secret).await?
+                        authorize_ticket(&ctx.services().db, &ticket_secret).await?
                     {
-                        consume_ticket(&ctx.services.db, &ticket.id).await?;
+                        consume_ticket(&ctx.services().db, &ticket.id).await?;
                         Some((ticket, target, user_info))
                     } else {
                         None

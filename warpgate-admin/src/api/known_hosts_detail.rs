@@ -35,7 +35,7 @@ impl Api {
     ) -> Result<DeleteSSHKnownHostResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let known_host = KnownHost::Entity::find_by_id(id.0).one(&*db).await?;
 
