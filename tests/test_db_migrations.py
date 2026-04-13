@@ -23,9 +23,9 @@ class TestPostgresMigrations:
 
 class TestMysqlMigrations:
     def test_mysql_migrations(self, processes: ProcessManager, timeout):
-        db_port = processes.start_plain_mysql_server()
+        db_port = processes.start_mysql_server()
         wait_mysql_port(db_port)
         wg = processes.start_wg(
-            database_url=f"mysql://root:123@localhost:{db_port}/warpgate",
+            database_url=f"mysql://root:123@localhost:{db_port}/db",
         )
         _check_info_endpoint(wg, timeout)
