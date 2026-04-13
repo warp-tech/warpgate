@@ -32,6 +32,7 @@ struct UserDataRequest {
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
+    allowed_ip_ranges: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
@@ -106,6 +107,7 @@ impl ListApi {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -211,12 +213,23 @@ impl DetailApi {
         };
 
         let mut model: User::ActiveModel = user.into();
+
         model.username = Set(body.username.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
+        model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
+            Some(ranges) => serde_json::to_value(
+                ranges
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(WarpgateError::from)?,
+            None => serde_json::Value::Null,
+        });
         let user = model.update(&*db).await?;
 
         drop(db);
