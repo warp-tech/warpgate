@@ -6,6 +6,7 @@ version = "0.22.0-beta.5"
 publish = false
 
 [dependencies]
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }

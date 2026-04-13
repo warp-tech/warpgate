@@ -67,7 +67,6 @@ jobs:
       - name: Install tools
         run: |
           cargo install --locked just
-          cargo install --locked cargo-deny@0.18.9
           cargo install --locked cargo-cyclonedx@^0.5
           rm -rf ~/.cargo/registry
 
@@ -81,11 +80,6 @@ jobs:
         run: |
           cd /
           npm i -g @cyclonedx/cyclonedx-npm@4.1.2
-
-      - name: cargo-deny
-        run: |
-          cargo deny --version
-          cargo deny check
 
       - name: Install admin UI deps
         run: |

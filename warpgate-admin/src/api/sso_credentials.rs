@@ -83,7 +83,7 @@ impl ListApi {
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
@@ -109,7 +109,7 @@ impl ListApi {
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let object = SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -166,7 +166,7 @@ impl DetailApi {
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let model = SsoCredential::ActiveModel {
             id: Set(id.0),
@@ -197,7 +197,7 @@ impl DetailApi {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))

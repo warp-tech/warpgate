@@ -57,3 +57,12 @@ pub fn load_keys(
         load_secret_key(path.join(format!("{prefix}-rsa")), None)?,
     ])
 }
+
+pub fn load_preferred_key(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+    prefix: &str,
+) -> Result<PrivateKey, russh::keys::Error> {
+    let path = get_keys_path(config, params);
+    load_secret_key(path.join(format!("{prefix}-ed25519")), None)
+}

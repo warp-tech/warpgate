@@ -31,15 +31,6 @@ impl From<&TargetOptions> for TargetKind {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
-pub enum SshAuthKind {
-    #[sea_orm(string_value = "password")]
-    Password,
-    #[sea_orm(string_value = "publickey")]
-    PublicKey,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "targets")]
 #[oai(rename = "Target")]

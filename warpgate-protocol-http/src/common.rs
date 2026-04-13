@@ -3,7 +3,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::header::HOST;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::error::InternalServerError;
@@ -12,6 +11,7 @@ use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
@@ -105,7 +105,7 @@ pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
     // A user is considered an administrator if they have any admin role assigned.
-    let services = &ctx.services;
+    let services = ctx.services();
 
     // Admin tokens bypass the database check and are always full administrators.
     if matches!(ctx.auth, RequestAuthorization::AdminToken) {
@@ -262,13 +262,10 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         if let Ok(base_url) = config.construct_external_url(None, None) {
             if let Some(base_host) = base_url.host_str() {
-                let request_host = req
-                    .header(HOST)
-                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| req.original_uri().host().map(ToString::to_string));
+                let request_host = ctx.trusted_hostname(&req);
 
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost
@@ -298,10 +295,23 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 let token_from_header = token_from_header
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
-                if Some(token_from_header) == ctx.services.admin_token.lock().await.as_deref() {
+                if ctx
+                    .services()
+                    .admin_token
+                    .lock()
+                    .await
+                    .as_deref()
+                    .is_some_and(|admin_token| {
+                        // Use constant time comparison to prevent timing attacks
+                        admin_token
+                            .as_bytes()
+                            .ct_eq(token_from_header.as_bytes())
+                            .into()
+                    })
+                {
                     Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = ctx
-                    .services
+                    .services()
                     .config_provider
                     .lock()
                     .await

@@ -1,6 +1,8 @@
 use cookie::Cookie;
 use http::uri::Scheme;
-use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
+use poem::web::Data;
+use poem::{Endpoint, FromRequest, IntoResponse, Middleware, Request, Response};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 
 use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
 
@@ -38,20 +40,9 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
-        let host = req
-            .header(http::header::HOST)
-            .map(|h| h.split(':').next().unwrap_or(h).to_string())
-            .or_else(|| {
-                req.original_uri()
-                    .host()
-                    .map(std::string::ToString::to_string)
-            });
-
-        let scheme_https = req.original_uri().scheme() == Some(&Scheme::HTTPS);
-        let header_https = req
-            .header("x-forwarded-proto")
-            .is_some_and(|h| h == "https");
-        let is_https = scheme_https || header_https;
+        let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+        let host = ctx.trusted_hostname(&req);
+        let is_https = ctx.trusted_proto(&req) == Scheme::HTTPS;
 
         let mut resp = self.inner.call(req).await?.into_response();
 
