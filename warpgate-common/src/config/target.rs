@@ -40,13 +40,15 @@ pub struct TargetSSHOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum SSHTargetAuth {
     #[serde(rename = "password")]
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "certificate")]
+    Certificate(SshTargetCertificateAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -56,6 +58,9 @@ pub struct SshTargetPasswordAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetPublicKeyAuth {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetCertificateAuth {}
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {

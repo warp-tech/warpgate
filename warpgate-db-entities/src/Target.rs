@@ -38,6 +38,8 @@ pub enum SshAuthKind {
     Password,
     #[sea_orm(string_value = "publickey")]
     PublicKey,
+    #[sea_orm(string_value = "certificate")]
+    Certificate,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
