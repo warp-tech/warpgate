@@ -57,7 +57,7 @@ impl Api {
     ) -> Result<GetParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -84,7 +84,7 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let services = &ctx.services;
+        let services = ctx.services();
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 

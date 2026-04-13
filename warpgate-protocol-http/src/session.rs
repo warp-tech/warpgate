@@ -109,7 +109,7 @@ impl SessionStore {
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 
         let server_handle = State::register_session(
-            &ctx.services.state,
+            &ctx.services().state,
             &PROTOCOL_NAME,
             SessionStateInit {
                 remote_address: remote_address.0.as_socket_addr().copied(),

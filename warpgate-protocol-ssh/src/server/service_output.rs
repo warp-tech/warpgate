@@ -1,12 +1,21 @@
+use std::io::Write as _;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use ansi_term::Colour;
 use bytes::Bytes;
+use termcolor::{Buffer, Color, ColorSpec, WriteColor as _};
 use tokio::sync::{broadcast, mpsc};
 
 pub const ERASE_PROGRESS_SPINNER: &str = "\r                        \r";
 pub const ERASE_PROGRESS_SPINNER_BUF: &[u8] = ERASE_PROGRESS_SPINNER.as_bytes();
+
+pub(super) fn ansi_paint(fg: Color, bg: Color, text: &str) -> String {
+    let mut buf = Buffer::ansi();
+    let _ = buf.set_color(ColorSpec::new().set_fg(Some(fg)).set_bg(Some(bg)));
+    let _ = write!(buf, "{text}");
+    let _ = buf.reset();
+    String::from_utf8_lossy(buf.as_slice()).to_string()
+}
 
 #[derive(Clone)]
 pub struct ServiceOutput {
@@ -37,7 +46,7 @@ impl ServiceOutput {
                                 tick_index = (tick_index + 1) % ticks.len();
                                 #[allow(clippy::indexing_slicing)]
                                 let tick = ticks[tick_index];
-                                let badge = Colour::Black.on(Colour::Blue).paint(format!(" {tick} Warpgate connecting ")).to_string();
+                                let badge = ansi_paint(Color::Black, Color::Blue, &format!(" {tick} Warpgate connecting "));
                                 let _ = output_tx.send(Bytes::from([ERASE_PROGRESS_SPINNER_BUF, badge.as_bytes()].concat()));
                             }
                         }

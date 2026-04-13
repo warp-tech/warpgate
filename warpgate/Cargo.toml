@@ -6,7 +6,6 @@ version = "0.22.0-beta.5"
 publish = false
 
 [dependencies]
-ansi_term = { version = "0.12", default-features = false }
 anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true

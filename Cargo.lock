@@ -120,15 +120,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi_term"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1683,9 +1674,9 @@ checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
 name = "fastrand"
-version = "2.4.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a043dc74da1e37d6afe657061213aa6f425f855399a11d3463c6ecccc4dfda1f"
+checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ff"
@@ -2896,9 +2887,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.26"
+version = "1.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786a7c68b5bbe177567d237ec4940d11666206e97b20a983421b251092f24d7d"
+checksum = "fc3a226e576f50782b3305c5ccf458698f92798987f551c6a02efe8276721e22"
 dependencies = [
  "cc",
  "pkg-config",
@@ -5906,6 +5897,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6554,7 +6554,6 @@ dependencies = [
 name = "warpgate"
 version = "0.22.0-beta.5"
 dependencies = [
- "ansi_term",
  "anyhow",
  "async-trait",
  "bytes",
@@ -6844,6 +6843,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "subtle",
  "time",
  "tokio",
  "tokio-tungstenite",
@@ -6954,7 +6954,6 @@ dependencies = [
 name = "warpgate-protocol-ssh"
 version = "0.22.0-beta.5"
 dependencies = [
- "ansi_term",
  "anyhow",
  "async-trait",
  "bimap",
@@ -6966,6 +6965,7 @@ dependencies = [
  "russh",
  "sea-orm",
  "serde",
+ "termcolor",
  "thiserror 2.0.18",
  "time",
  "tokio",

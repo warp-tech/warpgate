@@ -52,7 +52,7 @@ impl Api {
         name: Path<String>,
         next: Query<Option<String>>,
     ) -> Result<StartSsoResponse, WarpgateError> {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
 
         let name = name.0;
 
@@ -74,7 +74,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = req.header("host").map(ToString::to_string);
+        let return_host = ctx.trusted_host_header(req);
 
         let url = sso_req.auth_url().to_string();
         session.set(
