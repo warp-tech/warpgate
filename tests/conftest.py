@@ -176,6 +176,24 @@ class ProcessManager:
         )
         return port
 
+    def start_plain_mysql_server(self):
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:3306",
+                "-e",
+                "MYSQL_ROOT_PASSWORD=123",
+                "-e",
+                "MYSQL_DATABASE=warpgate",
+                "mysql:8.0",
+            ]
+        )
+        return port
+
     def start_postgres_server(self):
         port = alloc_port()
         container_name = f"warpgate-e2e-postgres-server-{uuid.uuid4()}"
