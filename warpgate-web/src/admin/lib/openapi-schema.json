@@ -5679,8 +5679,11 @@
             "type": "string",
             "format": "uuid"
           },
-          "allowed_ip_range": {
-            "type": "string"
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5704,8 +5707,11 @@
             "type": "integer",
             "format": "uint32"
           },
-          "allowed_ip_range": {
-            "type": "string"
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

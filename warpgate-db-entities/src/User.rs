@@ -144,7 +144,16 @@ impl TryFrom<Model> for User {
             description: model.description,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
             ldap_server_id: model.ldap_server_id,
-            allowed_ip_range: model.allowed_ip_range,
+            allowed_ip_ranges: model.allowed_ip_range
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                .or_else(|| {
+                    model.allowed_ip_range
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| vec![s.to_string()])
+                }),
         })
     }
 }
@@ -217,7 +226,11 @@ impl TryFrom<User> for ActiveModel {
             rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
-            allowed_ip_range: Set(user.allowed_ip_range),
+            allowed_ip_range: Set(
+                user.allowed_ip_ranges
+                    .filter(|v| !v.is_empty())
+                    .and_then(|v| serde_json::to_string(&v).ok()),
+            ),
         })
     }
 }

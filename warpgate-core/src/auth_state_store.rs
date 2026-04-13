@@ -25,47 +25,50 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// Checks whether the given IP is allowed by the user's `allowed_ip_range` setting.
+/// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
 fn check_ip_allowed(
-    allowed_ip_range: &Option<String>,
+    allowed_ip_ranges: &Option<Vec<String>>,
     remote_ip: Option<IpAddr>,
     username: &str,
 ) -> Result<(), WarpgateError> {
-    let cidr_str = allowed_ip_range
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let (Some(cidr_str), Some(raw_ip)) = (cidr_str, remote_ip) {
-        let ip = normalize_ip(raw_ip);
-        if let Ok(network) = cidr_str.parse::<ipnet::IpNet>() {
-            if !network.contains(&ip) {
-                // Print the IP, allowed range and username in the log
+    let ranges: Vec<&str> = match allowed_ip_ranges {
+        Some(ref v) => v.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect(),
+        None => return Ok(()),
+    };
+    if ranges.is_empty() {
+        return Ok(());
+    }
+    let Some(raw_ip) = remote_ip else {
+        return Ok(());
+    };
+    let ip = normalize_ip(raw_ip);
+    for cidr_str in &ranges {
+        match cidr_str.parse::<ipnet::IpNet>() {
+            Ok(network) if network.contains(&ip) => return Ok(()),
+            Ok(_) => {}
+            Err(_) => {
                 tracing::warn!(
-                    "Access denied for IP '{}' (not in allowed range '{}' for user '{}')",
-                    ip,
+                    "Invalid allowed_ip_range '{}' for user '{}', denying access",
                     cidr_str,
                     username
                 );
-
                 return Err(WarpgateError::IpAddrNotAllowed(
                     ip.to_string(),
                     username.into(),
                 ));
             }
-        } else {
-            tracing::warn!(
-                "Invalid allowed_ip_range '{}' for user '{}', denying access",
-                cidr_str,
-                username
-            );
-            return Err(WarpgateError::IpAddrNotAllowed(
-                ip.to_string(),
-                username.into(),
-            ));
         }
     }
-    Ok(())
+    tracing::warn!(
+        "Access denied for IP '{}' (not in any allowed range for user '{}')",
+        ip,
+        username
+    );
+    Err(WarpgateError::IpAddrNotAllowed(
+        ip.to_string(),
+        username.into(),
+    ))
 }
 
 struct AuthCompletionSignal {
@@ -154,7 +157,7 @@ impl AuthStateStore {
             return Err(WarpgateError::UserNotFound(username.into()));
         };
 
-        check_ip_allowed(&user.allowed_ip_range, remote_ip, username)?;
+        check_ip_allowed(&user.allowed_ip_ranges, remote_ip, username)?;
 
         let policy = self
             .config_provider

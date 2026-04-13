@@ -158,7 +158,7 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ldap_server_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_ip_range: Option<String>,
+    pub allowed_ip_ranges: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]

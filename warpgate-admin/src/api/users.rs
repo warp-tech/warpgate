@@ -20,18 +20,22 @@ use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserR
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
 
-fn normalize_ip_range(value: &Option<String>) -> Option<String> {
-    value
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
+fn normalize_ip_ranges(value: &Option<Vec<String>>) -> Option<Vec<String>> {
+    value.as_ref().map(|ranges| {
+        ranges
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }).filter(|v: &Vec<String>| !v.is_empty())
 }
 
-fn validate_ip_range(value: &Option<String>) -> Result<(), String> {
-    if let Some(ref cidr) = normalize_ip_range(value) {
-        cidr.parse::<ipnet::IpNet>()
-            .map_err(|_| format!("Invalid CIDR notation: {cidr}"))?;
+fn validate_ip_ranges(value: &Option<Vec<String>>) -> Result<(), String> {
+    if let Some(ref ranges) = normalize_ip_ranges(value) {
+        for cidr in ranges {
+            cidr.parse::<ipnet::IpNet>()
+                .map_err(|_| format!("Invalid CIDR notation: {cidr}"))?;
+        }
     }
     Ok(())
 }
@@ -48,7 +52,7 @@ struct UserDataRequest {
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
-    allowed_ip_range: Option<String>,
+    allowed_ip_ranges: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
@@ -232,7 +236,7 @@ impl DetailApi {
 
         let mut model: User::ActiveModel = user.into();
 
-        if let Err(msg) = validate_ip_range(&body.allowed_ip_range) {
+        if let Err(msg) = validate_ip_ranges(&body.allowed_ip_ranges) {
             return Ok(UpdateUserResponse::BadRequest(Json(msg)));
         }
 
@@ -242,7 +246,12 @@ impl DetailApi {
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_range = Set(normalize_ip_range(&body.allowed_ip_range));
+        let normalized = normalize_ip_ranges(&body.allowed_ip_ranges);
+        model.allowed_ip_range = Set(
+            normalized
+                .filter(|v| !v.is_empty())
+                .and_then(|v| serde_json::to_string(&v).ok()),
+        );
         let user = model.update(&*db).await?;
 
         drop(db);
