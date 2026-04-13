@@ -7,15 +7,16 @@
     import { replace, link } from 'svelte-spa-router'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CredentialEditor from '../CredentialEditor.svelte'
+    import CredentialEditor from './CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
     import Fa from 'svelte-fa'
-    import { faCaretDown, faLink, faUnlink, faWrench, faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
-    import RelativeDate from '../RelativeDate.svelte'
+    import { faCaretDown, faLink, faUnlink, faWrench } from '@fortawesome/free-solid-svg-icons'
+    import RelativeDate from '../../RelativeDate.svelte'
     import { onMount, onDestroy } from 'svelte'
     import { adminPermissions } from 'admin/lib/store'
-    import AdminRolePermissionsBadge from './AdminRolePermissionsBadge.svelte'
+    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
 
@@ -262,22 +263,7 @@
         }
     }
 
-    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$|^[0-9a-fA-F:]+\/\d{1,3}$/
-    function isValidCidr (value: string | undefined | null): boolean {
-        if (!value?.trim()) {return true}
-        return cidrRegex.test(value.trim())
-    }
 
-    function addIpRange () {
-        if (!user) {return}
-        if (!user.allowedIpRanges) {user.allowedIpRanges = []}
-        user.allowedIpRanges = [...user.allowedIpRanges, '']
-    }
-
-    function removeIpRange (index: number) {
-        if (!user?.allowedIpRanges) {return}
-        user.allowedIpRanges = user.allowedIpRanges.filter((_, i) => i !== index)
-    }
 </script>
 
 <div class="container-max-md">
@@ -436,49 +422,7 @@
 
         <h4 class="mt-4">Access restrictions</h4>
         <div class="mb-5">
-            <!-- svelte-ignore a11y_label_has_associated_control -->
-            <label class="form-label">Allowed IP ranges (CIDR)</label>
-            {#if user.allowedIpRanges?.length}
-                {#each user.allowedIpRanges as range, index (index)}
-                    <div class="d-flex align-items-center mb-2 gap-2">
-                        <Input
-                            placeholder="e.g. 192.168.1.0/24"
-                            value={range}
-                            on:input={(e) => {
-                                if (user?.allowedIpRanges) {
-                                    user.allowedIpRanges[index] = e.target.value
-                                    user.allowedIpRanges = [...user.allowedIpRanges]
-                                }
-                            }}
-                            invalid={!!range?.trim() && !isValidCidr(range)}
-                        />
-                        <Button
-                            color="danger"
-                            outline
-                            size="sm"
-                            on:click={() => removeIpRange(index)}
-                        >
-                            <Fa icon={faTrash} />
-                        </Button>
-                    </div>
-                    {#if range?.trim() && !isValidCidr(range)}
-                        <small class="form-text text-danger d-block mb-2" style="margin-top: -0.5rem">
-                            Invalid CIDR notation. Use a format like 192.168.1.0/24 or 10.0.0.1/32.
-                        </small>
-                    {/if}
-                {/each}
-            {/if}
-            <Button
-                color="secondary"
-                outline
-                size="sm"
-                on:click={addIpRange}
-            >
-                <Fa icon={faPlus} class="me-1" />Add IP range
-            </Button>
-            <small class="form-text text-muted d-block mt-2">
-                If set, only connections from these IP ranges will be allowed. Use CIDR notation (e.g. 10.0.0.0/8, 192.168.1.0/24, or a single IP like 1.2.3.4/32). Leave empty to allow all IPs.
-            </small>
+            <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
         </div>
         {/if}
     </Loadable>
