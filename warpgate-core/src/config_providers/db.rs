@@ -177,7 +177,7 @@ impl DatabaseConfigProvider {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
-            allowed_ip_range: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
         }
         .insert(db)
         .await?;

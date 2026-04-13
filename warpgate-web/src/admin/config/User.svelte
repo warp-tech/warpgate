@@ -19,23 +19,6 @@
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
 
-    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$|^[0-9a-fA-F:]+\/\d{1,3}$/
-    function isValidCidr (value: string | undefined | null): boolean {
-        if (!value?.trim()) return true
-        return cidrRegex.test(value.trim())
-    }
-
-    function addIpRange () {
-        if (!user) return
-        if (!user.allowedIpRanges) user.allowedIpRanges = []
-        user.allowedIpRanges = [...user.allowedIpRanges, '']
-    }
-
-    function removeIpRange (index: number) {
-        if (!user?.allowedIpRanges) return
-        user.allowedIpRanges = user.allowedIpRanges.filter((_, i) => i !== index)
-    }
-
     interface Props {
         params: { id: string };
     }
@@ -278,6 +261,23 @@
             error = await stringifyError(err)
         }
     }
+
+    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$|^[0-9a-fA-F:]+\/\d{1,3}$/
+    function isValidCidr (value: string | undefined | null): boolean {
+        if (!value?.trim()) {return true}
+        return cidrRegex.test(value.trim())
+    }
+
+    function addIpRange () {
+        if (!user) {return}
+        if (!user.allowedIpRanges) {user.allowedIpRanges = []}
+        user.allowedIpRanges = [...user.allowedIpRanges, '']
+    }
+
+    function removeIpRange (index: number) {
+        if (!user?.allowedIpRanges) {return}
+        user.allowedIpRanges = user.allowedIpRanges.filter((_, i) => i !== index)
+    }
 </script>
 
 <div class="container-max-md">
@@ -333,48 +333,6 @@
             ldapLinked={!!user.ldapServerId}
         />
         {/if}
-
-        <div class="d-flex align-items-center gap-3">
-            <FormGroup floating label="Username" class="flex-grow-1">
-                <Input bind:value={user.username} disabled={!user.ldapServerId} />
-            </FormGroup>
-
-            {#if $serverInfo?.hasLdap}
-                <Dropdown class="mb-3">
-                    <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
-                        {#if user.ldapServerId}
-                            <Fa icon={faLink} fw />
-                        {/if}
-                        LDAP
-                        <Fa icon={faCaretDown} />
-                    </DropdownToggle>
-                    <DropdownMenu right={true}>
-                        {#if user.ldapServerId}
-                            <DropdownItem on:click={unlinkFromLdap}>
-                                <Fa icon={faUnlink} fw />
-                                Unlink from LDAP
-                            </DropdownItem>
-                        {:else}
-                            <DropdownItem on:click={autoLinkToLdap}>
-                                <Fa icon={faLink} fw />
-                                Auto-link to LDAP
-                            </DropdownItem>
-                        {/if}
-                    </DropdownMenu>
-                </Dropdown>
-            {/if}
-        </div>
-
-        <FormGroup floating label="Description">
-            <Input bind:value={user.description} />
-        </FormGroup>
-
-        <CredentialEditor
-            userId={user.id}
-            username={user.username}
-            bind:credentialPolicy={user.credentialPolicy!}
-            ldapLinked={!!user.ldapServerId}
-        />
 
         <h4 class="mt-4">User roles</h4>
         <div class="list-group list-group-flush mb-3">
@@ -481,7 +439,7 @@
             <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="form-label">Allowed IP ranges (CIDR)</label>
             {#if user.allowedIpRanges?.length}
-                {#each user.allowedIpRanges as range, index}
+                {#each user.allowedIpRanges as range, index (index)}
                     <div class="d-flex align-items-center mb-2 gap-2">
                         <Input
                             placeholder="e.g. 192.168.1.0/24"

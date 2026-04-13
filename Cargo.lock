@@ -7239,6 +7239,7 @@ dependencies = [
  "git-version",
  "governor",
  "humantime-serde",
+ "ipnet",
  "password-hash",
  "poem",
  "poem-openapi",
@@ -7353,6 +7354,7 @@ name = "warpgate-db-entities"
 version = "0.22.0-beta.6"
 dependencies = [
  "bytes",
+ "ipnet",
  "poem-openapi",
  "sea-orm",
  "secrecy",

@@ -68,6 +68,8 @@ pub enum WarpgateError {
     Aws(AwsError),
     #[error("IP address {0} is not in the allowed range for user {1}")]
     IpAddrNotAllowed(String, String),
+    #[error("could not parse IP network address: {0}")]
+    InvalidNetworkAddress(String),
 }
 
 impl ResponseError for WarpgateError {

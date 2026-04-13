@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::{SessionId, WarpgateError};
 
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -28,13 +29,12 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
 /// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
 fn check_ip_allowed(
-    allowed_ip_ranges: &Option<Vec<String>>,
+    allowed_ip_ranges: &Option<Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
     username: &str,
 ) -> Result<(), WarpgateError> {
-    let ranges: Vec<&str> = match allowed_ip_ranges {
-        Some(ref v) => v.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect(),
-        None => return Ok(()),
+    let Some(ranges) = allowed_ip_ranges else {
+        return Ok(());
     };
     if ranges.is_empty() {
         return Ok(());
@@ -43,21 +43,9 @@ fn check_ip_allowed(
         return Ok(());
     };
     let ip = normalize_ip(raw_ip);
-    for cidr_str in &ranges {
-        match cidr_str.parse::<ipnet::IpNet>() {
-            Ok(network) if network.contains(&ip) => return Ok(()),
-            Ok(_) => {}
-            Err(_) => {
-                tracing::warn!(
-                    "Invalid allowed_ip_range '{}' for user '{}', denying access",
-                    cidr_str,
-                    username
-                );
-                return Err(WarpgateError::IpAddrNotAllowed(
-                    ip.to_string(),
-                    username.into(),
-                ));
-            }
+    for network in ranges {
+        if network.contains(&ip) {
+            return Ok(());
         }
     }
     tracing::warn!(
@@ -226,6 +214,10 @@ impl AuthStateStore {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use ipnet::IpNet;
+
     use super::*;
 
     #[test]
@@ -236,56 +228,51 @@ mod tests {
 
     #[test]
     fn ip_allowed_no_remote_ip() {
-        let range = Some("10.0.0.0/8".to_string());
+        let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
         assert!(check_ip_allowed(&range, None, "user").is_ok());
     }
 
     #[test]
     fn ip_allowed_within_range() {
-        let range = Some("192.168.1.0/24".to_string());
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         let ip: IpAddr = "192.168.1.42".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
     }
 
     #[test]
     fn ip_denied_outside_range() {
-        let range = Some("192.168.1.0/24".to_string());
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
         let err = check_ip_allowed(&range, Some(ip), "testuser").unwrap_err();
-        assert!(matches!(err, WarpgateError::IpAddrNotAllowed(addr, user) if addr == "10.0.0.1" && user == "testuser"));
+        assert!(
+            matches!(err, WarpgateError::IpAddrNotAllowed(addr, user) if addr == "10.0.0.1" && user == "testuser")
+        );
     }
 
     #[test]
     fn ip_allowed_exact_match() {
-        let range = Some("10.20.30.40/32".to_string());
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
         let ip: IpAddr = "10.20.30.40".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
     }
 
     #[test]
     fn ip_denied_exact_mismatch() {
-        let range = Some("10.20.30.40/32".to_string());
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
         let ip: IpAddr = "10.20.30.41".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
     }
 
     #[test]
-    fn ip_denied_invalid_cidr() {
-        let range = Some("not-a-cidr".to_string());
-        let ip: IpAddr = "10.0.0.1".parse().unwrap();
-        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
-    }
-
-    #[test]
     fn ipv6_allowed_within_range() {
-        let range = Some("fd00::/8".to_string());
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
         let ip: IpAddr = "fd12:3456::1".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
     }
 
     #[test]
     fn ipv6_denied_outside_range() {
-        let range = Some("fd00::/8".to_string());
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
         let ip: IpAddr = "2001:db8::1".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
     }
@@ -296,20 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn ip_allowed_empty_string_treated_as_no_restriction() {
+    fn ip_allowed_empty_ranges_treated_as_no_restriction() {
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
-        assert!(check_ip_allowed(&Some("".to_string()), Some(ip), "user").is_ok());
-    }
-
-    #[test]
-    fn ip_allowed_whitespace_string_treated_as_no_restriction() {
-        let ip: IpAddr = "10.0.0.1".parse().unwrap();
-        assert!(check_ip_allowed(&Some("  ".to_string()), Some(ip), "user").is_ok());
+        assert!(check_ip_allowed(&Some(vec![]), Some(ip), "user").is_ok());
     }
 
     #[test]
     fn ipv4_mapped_ipv6_matches_ipv4_range() {
-        let range = Some("192.168.1.0/24".to_string());
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         // ::ffff:192.168.1.42 is the IPv4-mapped IPv6 form of 192.168.1.42
         let ip: IpAddr = "::ffff:192.168.1.42".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
@@ -317,7 +298,7 @@ mod tests {
 
     #[test]
     fn ipv4_mapped_ipv6_denied_outside_ipv4_range() {
-        let range = Some("192.168.1.0/24".to_string());
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
         assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
     }

@@ -17,7 +17,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(user::Entity)
-                    .add_column(ColumnDef::new(Alias::new("allowed_ip_range")).text().null())
+                    .add_column(
+                        ColumnDef::new(Alias::new("allowed_ip_ranges"))
+                            .json()
+                            .default("null"),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -29,7 +33,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(user::Entity)
-                    .drop_column(Alias::new("allowed_ip_range"))
+                    .drop_column(Alias::new("allowed_ip_ranges"))
                     .to_owned(),
             )
             .await?;

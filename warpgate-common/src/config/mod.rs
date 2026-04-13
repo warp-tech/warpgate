@@ -26,6 +26,7 @@ use warpgate_tls::IntoTlsCertificateRelativePaths;
 
 use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
+use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
@@ -146,22 +147,18 @@ impl UserRequireCredentialsPolicy {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Clone, Object)]
 pub struct User {
-    #[serde(default)]
     pub id: Uuid,
     pub username: String,
     pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub rate_limit_bytes_per_second: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ldap_server_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_ip_ranges: Option<Vec<String>>,
+    pub allowed_ip_ranges: Option<Vec<WarpgateIpNet>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Clone, Object)]
 pub struct UserDetails {
     pub inner: User,
     pub credentials: Vec<UserAuthCredential>,

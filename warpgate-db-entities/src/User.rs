@@ -1,3 +1,6 @@
+use std::str::FromStr;
+
+use ipnet::IpNet;
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::Set;
@@ -25,7 +28,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
-    pub allowed_ip_range: Option<String>,
+    pub allowed_ip_ranges: serde_json::Value,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -137,6 +140,20 @@ impl TryFrom<Model> for User {
     type Error = WarpgateError;
 
     fn try_from(model: Model) -> Result<Self, WarpgateError> {
+        let allowed_ip_ranges = if model.allowed_ip_ranges.is_null() {
+            None
+        } else {
+            let ranges: Vec<String> = serde_json::from_value(model.allowed_ip_ranges)?;
+            Some(
+                ranges
+                    .into_iter()
+                    .map(|x| {
+                        IpNet::from_str(&x).map_err(|_| WarpgateError::InvalidNetworkAddress(x))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        };
+
         Ok(Self {
             id: model.id,
             username: model.username,
@@ -144,16 +161,8 @@ impl TryFrom<Model> for User {
             description: model.description,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second,
             ldap_server_id: model.ldap_server_id,
-            allowed_ip_ranges: model.allowed_ip_range
-                .as_deref()
-                .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-                .or_else(|| {
-                    model.allowed_ip_range
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(|s| vec![s.to_string()])
-                }),
+            allowed_ip_ranges: allowed_ip_ranges
+                .map(|ranges| ranges.into_iter().map(Into::into).collect()),
         })
     }
 }
@@ -226,11 +235,15 @@ impl TryFrom<User> for ActiveModel {
             rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
-            allowed_ip_range: Set(
-                user.allowed_ip_ranges
-                    .filter(|v| !v.is_empty())
-                    .and_then(|v| serde_json::to_string(&v).ok()),
-            ),
+            allowed_ip_ranges: Set(match user.allowed_ip_ranges {
+                Some(ranges) => serde_json::to_value(
+                    ranges
+                        .into_iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>(),
+                )?,
+                None => serde_json::Value::Null,
+            }),
         })
     }
 }
