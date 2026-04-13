@@ -300,7 +300,10 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                     .as_deref()
                     .is_some_and(|admin_token| {
                         // Use constant time comparison to prevent timing attacks
-                        admin_token.as_bytes().ct_eq(token_from_header.as_bytes()).into()
+                        admin_token
+                            .as_bytes()
+                            .ct_eq(token_from_header.as_bytes())
+                            .into()
                     })
                 {
                     Some(RequestAuthorization::AdminToken)
