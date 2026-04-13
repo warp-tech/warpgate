@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.5-2-g1fc7f399-modified"
+    "version": "v0.22.0-beta.5-19-g455819ef-modified"
   },
   "servers": [
     {
@@ -4251,6 +4251,9 @@
       "DatabaseTargetPasswordAuth": {
         "type": "object",
         "title": "DatabaseTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
         "properties": {
           "password": {
             "type": "string"
@@ -4859,6 +4862,9 @@
           },
           "minimize_password_login": {
             "type": "boolean"
+          },
+          "show_session_menu": {
+            "type": "boolean"
           }
         }
       },
@@ -4870,7 +4876,8 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login"
+          "minimize_password_login",
+          "show_session_menu"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4890,6 +4897,9 @@
             "type": "boolean"
           },
           "minimize_password_login": {
+            "type": "boolean"
+          },
+          "show_session_menu": {
             "type": "boolean"
           }
         }
@@ -5328,7 +5338,6 @@
           "host",
           "port",
           "username",
-          "auth",
           "tls"
         ],
         "properties": {
@@ -5344,6 +5353,11 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
+          "password": {
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -5500,7 +5514,6 @@
           "host",
           "port",
           "username",
-          "auth",
           "tls"
         ],
         "properties": {
@@ -5516,6 +5529,11 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
+          "password": {
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
