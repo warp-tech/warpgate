@@ -7102,7 +7102,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7145,7 +7145,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7205,7 +7205,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -7226,7 +7226,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7278,7 +7278,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -7292,7 +7292,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7337,7 +7337,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -7350,7 +7350,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "bytes",
  "poem-openapi",
@@ -7368,7 +7368,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "data-encoding",
  "regex",
@@ -7386,7 +7386,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -7402,7 +7402,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7440,7 +7440,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7479,7 +7479,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7507,7 +7507,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7532,7 +7532,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7560,7 +7560,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -7579,7 +7579,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -7599,7 +7599,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 dependencies = [
  "rust-embed",
  "serde",
