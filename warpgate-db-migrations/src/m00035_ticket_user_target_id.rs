@@ -1,6 +1,7 @@
 use sea_orm::{DbBackend, Schema};
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
+use sea_orm_migration::sea_query::ForeignKey;
 
 mod ticket {
     use sea_orm::entity::prelude::*;
@@ -111,95 +112,116 @@ impl MigrationTrait for Migration {
                 manager
                     .drop_table(Table::drop().table(Alias::new("tickets")).to_owned())
                     .await?;
-                db.execute_unprepared("ALTER TABLE tickets_new RENAME TO tickets")
+                manager
+                    .rename_table(
+                        Table::rename()
+                            .table(Alias::new("tickets_new"), Alias::new("tickets"))
+                            .to_owned(),
+                    )
                     .await?;
                 db.execute_unprepared("PRAGMA foreign_keys=ON").await.ok();
             }
-            DbBackend::MySql => {
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` ADD COLUMN `user_id` binary(16) NULL",
-                )
-                .await?;
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` ADD COLUMN `target_id` binary(16) NULL",
-                )
-                .await?;
+            DbBackend::MySql | DbBackend::Postgres => {
+                // Add the new FK columns as nullable first so we can populate them
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .add_column(ColumnDef::new(Alias::new("user_id")).uuid().null())
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .add_column(ColumnDef::new(Alias::new("target_id")).uuid().null())
+                            .to_owned(),
+                    )
+                    .await?;
+
                 // Rows with no matching user or target are silently dropped (NULL left after UPDATE)
+                match builder {
+                    DbBackend::MySql => {
+                        db.execute_unprepared(
+                            "UPDATE `tickets` t INNER JOIN `users` u ON u.username = t.username SET t.user_id = u.id",
+                        )
+                        .await?;
+                        db.execute_unprepared(
+                            "UPDATE `tickets` t INNER JOIN `targets` tgt ON tgt.name = t.target SET t.target_id = tgt.id",
+                        )
+                        .await?;
+                    }
+                    DbBackend::Postgres => {
+                        db.execute_unprepared(
+                            r#"UPDATE "tickets" SET user_id = u.id FROM "users" u WHERE u.username = "tickets".username"#,
+                        )
+                        .await?;
+                        db.execute_unprepared(
+                            r#"UPDATE "tickets" SET target_id = t.id FROM "targets" t WHERE t.name = "tickets".target"#,
+                        )
+                        .await?;
+                    }
+                    _ => unreachable!(),
+                }
                 db.execute_unprepared(
-                    "UPDATE `tickets` t INNER JOIN `users` u ON u.username = t.username SET t.user_id = u.id",
+                    "DELETE FROM tickets WHERE user_id IS NULL OR target_id IS NULL",
                 )
                 .await?;
-                db.execute_unprepared(
-                    "UPDATE `tickets` t INNER JOIN `targets` tgt ON tgt.name = t.target SET t.target_id = tgt.id",
-                )
-                .await?;
-                db.execute_unprepared(
-                    "DELETE FROM `tickets` WHERE `user_id` IS NULL OR `target_id` IS NULL",
-                )
-                .await?;
-                db.execute_unprepared("ALTER TABLE `tickets` DROP COLUMN `username`")
+
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .drop_column(Alias::new("username"))
+                            .to_owned(),
+                    )
                     .await?;
-                db.execute_unprepared("ALTER TABLE `tickets` DROP COLUMN `target`")
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .drop_column(Alias::new("target"))
+                            .to_owned(),
+                    )
                     .await?;
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` MODIFY COLUMN `user_id` binary(16) NOT NULL",
-                )
-                .await?;
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` MODIFY COLUMN `target_id` binary(16) NOT NULL",
-                )
-                .await?;
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` ADD CONSTRAINT FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)",
-                )
-                .await?;
-                db.execute_unprepared(
-                    "ALTER TABLE `tickets` ADD CONSTRAINT FOREIGN KEY (`target_id`) REFERENCES `targets` (`id`)",
-                )
-                .await?;
-            }
-            DbBackend::Postgres => {
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ADD COLUMN "user_id" uuid NULL"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ADD COLUMN "target_id" uuid NULL"#,
-                )
-                .await?;
-                // Rows with no matching user or target are silently dropped (NULL left after UPDATE)
-                db.execute_unprepared(
-                    r#"UPDATE "tickets" SET user_id = u.id FROM "users" u WHERE u.username = "tickets".username"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"UPDATE "tickets" SET target_id = t.id FROM "targets" t WHERE t.name = "tickets".target"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"DELETE FROM "tickets" WHERE "user_id" IS NULL OR "target_id" IS NULL"#,
-                )
-                .await?;
-                db.execute_unprepared(r#"ALTER TABLE "tickets" DROP COLUMN "username""#)
+
+                // Make the new FK columns non-null now that data is populated
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .modify_column(ColumnDef::new(Alias::new("user_id")).uuid().not_null())
+                            .to_owned(),
+                    )
                     .await?;
-                db.execute_unprepared(r#"ALTER TABLE "tickets" DROP COLUMN "target""#)
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .modify_column(
+                                ColumnDef::new(Alias::new("target_id")).uuid().not_null(),
+                            )
+                            .to_owned(),
+                    )
                     .await?;
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ALTER COLUMN "user_id" SET NOT NULL"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ALTER COLUMN "target_id" SET NOT NULL"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id")"#,
-                )
-                .await?;
-                db.execute_unprepared(
-                    r#"ALTER TABLE "tickets" ADD FOREIGN KEY ("target_id") REFERENCES "targets" ("id")"#,
-                )
-                .await?;
+
+                manager
+                    .create_foreign_key(
+                        ForeignKey::create()
+                            .from(Alias::new("tickets"), Alias::new("user_id"))
+                            .to(Alias::new("users"), Alias::new("id"))
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .create_foreign_key(
+                        ForeignKey::create()
+                            .from(Alias::new("tickets"), Alias::new("target_id"))
+                            .to(Alias::new("targets"), Alias::new("id"))
+                            .to_owned(),
+                    )
+                    .await?;
             }
         }
 
