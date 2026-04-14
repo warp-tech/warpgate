@@ -83,7 +83,7 @@
 <div class="container-max-md">
     <Loadable promise={init()}>
     {#if target}
-        <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false}>
+        <Modal isOpen={connectionsInstructionsModalOpen} toggle={() => connectionsInstructionsModalOpen = false} size="lg">
             <ModalHeader>
                 Access instructions
             </ModalHeader>
@@ -217,11 +217,22 @@
                     </FormGroup>
                 </div>
                 <div class="col">
-                    <FormGroup floating label="Password">
-                        <input class="form-control" type="password" autocomplete="off" bind:value={target.options.password} />
+                    <FormGroup floating label="Authenticate using">
+                        <select class="form-control" bind:value={target.options.auth!.kind}>
+                            <option value="Password">Password</option>
+                            {#if $serverInfo?.runningOnEc2}
+                                <option value="IamRole">IAM Role (experimental)</option>
+                            {/if}
+                        </select>
                     </FormGroup>
                 </div>
             </div>
+
+            {#if target.options.auth!.kind === 'Password'}
+                <FormGroup floating label="Password">
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth!.password} />
+                </FormGroup>
+            {/if}
 
             <TlsConfiguration bind:value={target.options.tls} />
         {/if}
@@ -236,6 +247,9 @@
                 <select class="form-control" bind:value={target.options.auth.kind}>
                     <option value="Certificate">Certificate</option>
                     <option value="Token">Token</option>
+                    {#if $serverInfo?.runningOnEc2}
+                        <option value="IamRole">IAM Role (experimental)</option>
+                    {/if}
                 </select>
             </FormGroup>
 

@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-common"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 publish = false
 
 [[bin]]
@@ -21,6 +21,7 @@ futures.workspace = true
 git-version = { version = "0.3.9", default-features = false }
 governor.workspace = true
 humantime-serde = { version = "1.1", default-features = false }
+ipnet.workspace = true
 password-hash.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
@@ -50,6 +51,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing.workspace = true
 url = { version = "2.2", default-features = false }
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }

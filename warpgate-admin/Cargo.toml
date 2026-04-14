@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-admin"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 publish = false
 
 [dependencies]
@@ -35,4 +35,5 @@ warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
+ipnet = "2"
 regex.workspace = true

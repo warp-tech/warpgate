@@ -2,7 +2,7 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.22.0-beta.5"
+version = "0.22.0-beta.6"
 publish = false
 
 [dependencies]
@@ -20,6 +20,7 @@ dialoguer.workspace = true
 enum_dispatch.workspace = true
 humantime-serde = "1.1"
 futures.workspace = true
+ipnet.workspace = true
 ldap3.workspace = true
 packet = "0.1"
 password-hash.workspace = true

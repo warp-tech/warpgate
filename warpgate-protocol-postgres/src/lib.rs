@@ -17,6 +17,7 @@ use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
 use tracing::{error, info, warn, Instrument};
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
@@ -75,6 +76,10 @@ impl ProtocolServer for PostgresProtocolServer {
             let Some(stream) = listener.try_next().await? else {
                 return Ok(());
             };
+
+            if detect_port_knock(&stream).await {
+                continue;
+            }
 
             let remote_address = stream.peer_addr().context("getting peer address")?;
 
