@@ -66,14 +66,19 @@ pub enum WarpgateError {
     NoAdminPermission(AdminPermission),
     #[error("AWS: {0}")]
     Aws(AwsError),
+    #[error("IP address {0} is not in the allowed range for user {1}")]
+    IpAddrNotAllowed(String, String),
+    #[error("could not parse IP network address: {0}")]
+    InvalidNetworkAddress(String),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
         match self {
-            Self::InvalidTicket(_) | Self::UserNotFound(_) | Self::RoleNotFound(_) => {
-                poem::http::StatusCode::UNAUTHORIZED
-            }
+            Self::InvalidTicket(_)
+            | Self::UserNotFound(_)
+            | Self::RoleNotFound(_)
+            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }

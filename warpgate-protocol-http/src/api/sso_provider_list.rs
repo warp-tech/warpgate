@@ -240,8 +240,22 @@ impl Api {
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let state_arc =
-            get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+            match get_auth_state_for_request(&username, session, &mut auth_state_store, remote_ip)
+                .await
+            {
+                Ok(state) => state,
+                Err(e) => {
+                    if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
+                        return Ok(Err(
+                        "Login denied: your IP address is not in the allowed range for this user"
+                            .to_string(),
+                    ));
+                    }
+                    return Err(e);
+                }
+            };
 
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;

@@ -35,4 +35,5 @@ warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
+ipnet = "2"
 regex.workspace = true

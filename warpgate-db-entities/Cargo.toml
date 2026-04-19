@@ -9,6 +9,7 @@ publish = false
 bytes = { version = "1.4", default-features = false }
 poem-openapi.workspace = true
 sqlx.workspace = true
+ipnet.workspace = true
 sea-orm = { workspace = true, features = [
     "macros",
     "with-uuid",

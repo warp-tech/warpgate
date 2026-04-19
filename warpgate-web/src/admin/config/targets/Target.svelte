@@ -218,7 +218,7 @@
                 </div>
                 <div class="col">
                     <FormGroup floating label="Authenticate using">
-                        <select class="form-control" bind:value={target.options.auth.kind}>
+                        <select class="form-control" bind:value={target.options.auth!.kind}>
                             <option value="Password">Password</option>
                             {#if $serverInfo?.runningOnEc2}
                                 <option value="IamRole">IAM Role (experimental)</option>
@@ -228,9 +228,9 @@
                 </div>
             </div>
 
-            {#if target.options.auth.kind === 'Password'}
+            {#if target.options.auth!.kind === 'Password'}
                 <FormGroup floating label="Password">
-                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth.password} />
+                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth!.password} />
                 </FormGroup>
             {/if}
 

@@ -50,6 +50,7 @@
                     username: 'root',
                     auth: {
                         kind: 'Password' as const,
+                        password: '',
                     },
                 },
                 Postgres: {
@@ -63,6 +64,7 @@
                     username: 'postgres',
                     auth: {
                         kind: 'Password' as const,
+                        password: '',
                     },
                 },
                 Kubernetes: {
