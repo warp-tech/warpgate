@@ -24,7 +24,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get install openssh-client expect
-          cargo install --locked just@1.4.0
+          cargo install --locked just==1.4.0
           # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
           # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
           cargo install --locked cargo-llvm-cov@0.6.15
