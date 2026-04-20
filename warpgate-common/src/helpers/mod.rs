@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod hash;
+pub mod ipnet;
 pub mod locks;
 pub mod net;
 pub mod otp;

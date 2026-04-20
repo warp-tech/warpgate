@@ -7,15 +7,16 @@
     import { replace, link } from 'svelte-spa-router'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CredentialEditor from '../CredentialEditor.svelte'
+    import CredentialEditor from './CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
     import Fa from 'svelte-fa'
     import { faCaretDown, faLink, faUnlink, faWrench } from '@fortawesome/free-solid-svg-icons'
-    import RelativeDate from '../RelativeDate.svelte'
+    import RelativeDate from '../../RelativeDate.svelte'
     import { onMount, onDestroy } from 'svelte'
     import { adminPermissions } from 'admin/lib/store'
-    import AdminRolePermissionsBadge from './AdminRolePermissionsBadge.svelte'
+    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
 
@@ -261,6 +262,8 @@
             error = await stringifyError(err)
         }
     }
+
+
 </script>
 
 <div class="container-max-md">
@@ -316,48 +319,6 @@
             ldapLinked={!!user.ldapServerId}
         />
         {/if}
-
-        <div class="d-flex align-items-center gap-3">
-            <FormGroup floating label="Username" class="flex-grow-1">
-                <Input bind:value={user.username} disabled={!user.ldapServerId} />
-            </FormGroup>
-
-            {#if $serverInfo?.hasLdap}
-                <Dropdown class="mb-3">
-                    <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
-                        {#if user.ldapServerId}
-                            <Fa icon={faLink} fw />
-                        {/if}
-                        LDAP
-                        <Fa icon={faCaretDown} />
-                    </DropdownToggle>
-                    <DropdownMenu right={true}>
-                        {#if user.ldapServerId}
-                            <DropdownItem on:click={unlinkFromLdap}>
-                                <Fa icon={faUnlink} fw />
-                                Unlink from LDAP
-                            </DropdownItem>
-                        {:else}
-                            <DropdownItem on:click={autoLinkToLdap}>
-                                <Fa icon={faLink} fw />
-                                Auto-link to LDAP
-                            </DropdownItem>
-                        {/if}
-                    </DropdownMenu>
-                </Dropdown>
-            {/if}
-        </div>
-
-        <FormGroup floating label="Description">
-            <Input bind:value={user.description} />
-        </FormGroup>
-
-        <CredentialEditor
-            userId={user.id}
-            username={user.username}
-            bind:credentialPolicy={user.credentialPolicy!}
-            ldapLinked={!!user.ldapServerId}
-        />
 
         <h4 class="mt-4">User roles</h4>
         <div class="list-group list-group-flush mb-3">
@@ -451,13 +412,18 @@
         </div>
 
         <h4 class="mt-4">Traffic</h4>
-        <FormGroup class="mb-5">
+        <FormGroup class="mb-3">
             <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
             <RateLimitInput
                 id="rateLimitBytesPerSecond"
                 bind:value={user.rateLimitBytesPerSecond}
             />
         </FormGroup>
+
+        <h4 class="mt-4">Access restrictions</h4>
+        <div class="mb-5">
+            <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
+        </div>
         {/if}
     </Loadable>
 

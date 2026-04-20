@@ -15,7 +15,7 @@ jobs:
 
       - name: Install just
         run: |
-          cargo install just
+          cargo install --locked just@1.4.0
 
       - name: Install npm dependencies
         run: |

@@ -1,6 +1,7 @@
 use sea_orm::{DbBackend, Schema};
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
+use sea_orm_migration::sea_query::ForeignKey;
 
 mod ticket {
     use sea_orm::entity::prelude::*;
@@ -85,62 +86,143 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
         let builder = manager.get_database_backend();
-        let schema = Schema::new(builder);
-
-        let mut create_stmt = schema.create_table_from_entity(ticket::Entity);
-        create_stmt.table(Alias::new("tickets_new")); // renamed
-        manager.create_table(create_stmt).await?;
-
-        // Rows with no matching user or target are silently dropped (INNER JOIN)
-        db.execute_unprepared(
-            "INSERT INTO tickets_new (id, secret, user_id, description, target_id, uses_left, expiry, created)
-             SELECT o.id, o.secret,
-                    u.id,
-                    o.description,
-                    t.id,
-                    o.uses_left, o.expiry, o.created
-             FROM tickets o
-             JOIN users   u ON u.username = o.username
-             JOIN targets t ON t.name     = o.target",
-        )
-        .await?;
 
         match builder {
             DbBackend::Sqlite => {
+                let schema = Schema::new(builder);
+                let mut create_stmt = schema.create_table_from_entity(ticket::Entity);
+                create_stmt.table(Alias::new("tickets_new")); // renamed
+                manager.create_table(create_stmt).await?;
+
+                // Rows with no matching user or target are silently dropped (INNER JOIN)
+                db.execute_unprepared(
+                    "INSERT INTO tickets_new (id, secret, user_id, description, target_id, uses_left, expiry, created)
+                     SELECT o.id, o.secret,
+                            u.id,
+                            o.description,
+                            t.id,
+                            o.uses_left, o.expiry, o.created
+                     FROM tickets o
+                     JOIN users   u ON u.username = o.username
+                     JOIN targets t ON t.name     = o.target",
+                )
+                .await?;
+
                 db.execute_unprepared("PRAGMA foreign_keys=OFF").await.ok();
                 manager
                     .drop_table(Table::drop().table(Alias::new("tickets")).to_owned())
                     .await?;
-            }
-            DbBackend::MySql => {
-                db.execute_unprepared("SET FOREIGN_KEY_CHECKS=0").await?;
                 manager
-                    .drop_table(Table::drop().table(Alias::new("tickets")).to_owned())
+                    .rename_table(
+                        Table::rename()
+                            .table(Alias::new("tickets_new"), Alias::new("tickets"))
+                            .to_owned(),
+                    )
                     .await?;
+                db.execute_unprepared("PRAGMA foreign_keys=ON").await.ok();
             }
-            DbBackend::Postgres => {
+            DbBackend::MySql | DbBackend::Postgres => {
+                // Add the new FK columns as nullable first so we can populate them
                 manager
-                    .drop_table(
-                        Table::drop()
+                    .alter_table(
+                        Table::alter()
                             .table(Alias::new("tickets"))
-                            .cascade()
+                            .add_column(ColumnDef::new(Alias::new("user_id")).uuid().null())
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .add_column(ColumnDef::new(Alias::new("target_id")).uuid().null())
+                            .to_owned(),
+                    )
+                    .await?;
+
+                // Rows with no matching user or target are silently dropped (NULL left after UPDATE)
+                match builder {
+                    DbBackend::MySql => {
+                        db.execute_unprepared(
+                            "UPDATE `tickets` t INNER JOIN `users` u ON u.username = t.username SET t.user_id = u.id",
+                        )
+                        .await?;
+                        db.execute_unprepared(
+                            "UPDATE `tickets` t INNER JOIN `targets` tgt ON tgt.name = t.target SET t.target_id = tgt.id",
+                        )
+                        .await?;
+                    }
+                    DbBackend::Postgres => {
+                        db.execute_unprepared(
+                            r#"UPDATE "tickets" SET user_id = u.id FROM "users" u WHERE u.username = "tickets".username"#,
+                        )
+                        .await?;
+                        db.execute_unprepared(
+                            r#"UPDATE "tickets" SET target_id = t.id FROM "targets" t WHERE t.name = "tickets".target"#,
+                        )
+                        .await?;
+                    }
+                    _ => unreachable!(),
+                }
+                db.execute_unprepared(
+                    "DELETE FROM tickets WHERE user_id IS NULL OR target_id IS NULL",
+                )
+                .await?;
+
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .drop_column(Alias::new("username"))
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .drop_column(Alias::new("target"))
+                            .to_owned(),
+                    )
+                    .await?;
+
+                // Make the new FK columns non-null now that data is populated
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .modify_column(ColumnDef::new(Alias::new("user_id")).uuid().not_null())
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .alter_table(
+                        Table::alter()
+                            .table(Alias::new("tickets"))
+                            .modify_column(
+                                ColumnDef::new(Alias::new("target_id")).uuid().not_null(),
+                            )
+                            .to_owned(),
+                    )
+                    .await?;
+
+                manager
+                    .create_foreign_key(
+                        ForeignKey::create()
+                            .from(Alias::new("tickets"), Alias::new("user_id"))
+                            .to(Alias::new("users"), Alias::new("id"))
+                            .to_owned(),
+                    )
+                    .await?;
+                manager
+                    .create_foreign_key(
+                        ForeignKey::create()
+                            .from(Alias::new("tickets"), Alias::new("target_id"))
+                            .to(Alias::new("targets"), Alias::new("id"))
                             .to_owned(),
                     )
                     .await?;
             }
-        }
-
-        db.execute_unprepared("ALTER TABLE tickets_new RENAME TO tickets")
-            .await?;
-
-        match builder {
-            DbBackend::Sqlite => {
-                db.execute_unprepared("PRAGMA foreign_keys=ON").await.ok();
-            }
-            DbBackend::MySql => {
-                db.execute_unprepared("SET FOREIGN_KEY_CHECKS=1").await?;
-            }
-            DbBackend::Postgres => {}
         }
 
         Ok(())

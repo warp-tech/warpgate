@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.22.0-beta.5-19-g455819ef-modified"
+    "version": "v0.22.0-beta.6-6-gfde9e530-modified"
   },
   "servers": [
     {
@@ -888,7 +888,8 @@
           "SsoNeeded",
           "WebUserApprovalNeeded",
           "PublicKeyNeeded",
-          "Success"
+          "Success",
+          "IpRejected"
         ]
       },
       "AuthStateResponseInternal": {

@@ -16,7 +16,7 @@ jobs:
       - name: Install deps
         run: |
           rustup component add clippy
-          cargo install just
+          cargo install --locked just@1.4.0
           cargo install --locked cargo-cranky@0.3.0
 
       - name: Clippy
