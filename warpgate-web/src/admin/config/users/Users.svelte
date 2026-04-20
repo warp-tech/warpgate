@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Observable, from, map } from 'rxjs'
     import { type LdapServerResponse, type User, api } from 'admin/lib/api'
-    import { adminPermissions } from '../lib/store'
+    import { adminPermissions } from 'admin/lib/store'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link, push } from 'svelte-spa-router'
     import { onMount } from 'svelte'

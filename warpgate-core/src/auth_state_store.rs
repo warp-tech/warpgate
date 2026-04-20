@@ -1,17 +1,63 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::net::IpAddr;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::{SessionId, WarpgateError};
 
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
-pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));
+pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
+
+/// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
+/// extract the inner IPv4 address. Otherwise return as-is.
+fn normalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => ip,
+        },
+        _ => ip,
+    }
+}
+
+/// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
+/// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
+fn check_ip_allowed(
+    allowed_ip_ranges: &Option<Vec<WarpgateIpNet>>,
+    remote_ip: Option<IpAddr>,
+    username: &str,
+) -> Result<(), WarpgateError> {
+    let Some(ranges) = allowed_ip_ranges else {
+        return Ok(());
+    };
+    if ranges.is_empty() {
+        return Ok(());
+    }
+    let Some(raw_ip) = remote_ip else {
+        return Ok(());
+    };
+    let ip = normalize_ip(raw_ip);
+    for network in ranges {
+        if network.contains(&ip) {
+            return Ok(());
+        }
+    }
+    tracing::warn!(
+        "Access denied for IP '{}' (not in any allowed range for user '{}')",
+        ip,
+        username
+    );
+    Err(WarpgateError::IpAddrNotAllowed(
+        ip.to_string(),
+        username.into(),
+    ))
+}
 
 struct AuthCompletionSignal {
     sender: broadcast::Sender<AuthResult>,
@@ -63,7 +109,7 @@ impl AuthStateStore {
                     continue;
                 }
             }
-            results.push(auth.0.clone())
+            results.push(auth.0.clone());
         }
         results
     }
@@ -82,6 +128,7 @@ impl AuthStateStore {
         username: &str,
         protocol: &str,
         supported_credential_types: &[CredentialKind],
+        remote_ip: Option<IpAddr>,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
 
@@ -97,6 +144,8 @@ impl AuthStateStore {
         else {
             return Err(WarpgateError::UserNotFound(username.into()));
         };
+
+        check_ip_allowed(&user.allowed_ip_ranges, remote_ip, username)?;
 
         let policy = self
             .config_provider
@@ -154,11 +203,103 @@ impl AuthStateStore {
         }
     }
 
-    pub async fn vacuum(&mut self) {
+    pub fn vacuum(&mut self) {
         self.store
             .retain(|_, (_, started_at)| started_at.elapsed() < *TIMEOUT);
 
         self.completion_signals
             .retain(|_, signal| !signal.is_expired());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use ipnet::IpNet;
+
+    use super::*;
+
+    #[test]
+    fn ip_allowed_no_restriction() {
+        let ip: IpAddr = "10.0.0.5".parse().unwrap();
+        assert!(check_ip_allowed(&None, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_no_remote_ip() {
+        let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
+        assert!(check_ip_allowed(&range, None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_within_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_outside_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let err = check_ip_allowed(&range, Some(ip), "testuser").unwrap_err();
+        assert!(
+            matches!(err, WarpgateError::IpAddrNotAllowed(addr, user) if addr == "10.0.0.1" && user == "testuser")
+        );
+    }
+
+    #[test]
+    fn ip_allowed_exact_match() {
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
+        let ip: IpAddr = "10.20.30.40".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_exact_mismatch() {
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
+        let ip: IpAddr = "10.20.30.41".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ipv6_allowed_within_range() {
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
+        let ip: IpAddr = "fd12:3456::1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv6_denied_outside_range() {
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ip_allowed_both_none() {
+        assert!(check_ip_allowed(&None, None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_empty_ranges_treated_as_no_restriction() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&Some(vec![]), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_matches_ipv4_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        // ::ffff:192.168.1.42 is the IPv4-mapped IPv6 form of 192.168.1.42
+        let ip: IpAddr = "::ffff:192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_denied_outside_ipv4_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(&range, Some(ip), "user").is_err());
     }
 }

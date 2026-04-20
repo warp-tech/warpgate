@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tokio::sync::{broadcast, mpsc, Mutex};
-use tracing::*;
+use tracing::{error, info, warn};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
 

@@ -12,8 +12,8 @@ use crate::common::SessionExt;
 pub struct TicketMiddleware {}
 
 impl TicketMiddleware {
-    pub fn new() -> Self {
-        TicketMiddleware {}
+    pub const fn new() -> Self {
+        Self {}
     }
 }
 
@@ -48,10 +48,8 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         {
             let params: QueryParams = req.params()?;
 
-            let mut ticket_value = None;
-            if let Some(t) = params.ticket {
-                ticket_value = Some(t);
-            }
+            let mut ticket_value = params.ticket;
+
             for h in req.headers().get_all(http::header::AUTHORIZATION) {
                 let header_value = h.to_str().unwrap_or("").to_string();
                 if let Some((token_type, token_value)) = header_value.split_once(' ') {
@@ -63,20 +61,21 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             }
 
             if let Some(ticket) = ticket_value {
-                if let Some((ticket_model, _user_info)) = {
+                if let Some((_ticket_model, target, user_info)) = {
                     let ticket_secret = Secret::new(ticket);
-                    if let Some((ticket, user_info)) =
-                        authorize_ticket(&ctx.services.db, &ticket_secret).await?
+                    if let Some((ticket, target, user_info)) =
+                        authorize_ticket(&ctx.services().db, &ticket_secret).await?
                     {
-                        consume_ticket(&ctx.services.db, &ticket.id).await?;
-                        Some((ticket, user_info))
+                        consume_ticket(&ctx.services().db, &ticket.id).await?;
+                        Some((ticket, target, user_info))
                     } else {
                         None
                     }
                 } {
                     session.set_auth(SessionAuthorization::Ticket {
-                        username: ticket_model.username,
-                        target_name: ticket_model.target,
+                        user_id: user_info.id,
+                        username: user_info.username,
+                        target_name: target.name,
                     });
                 }
             }

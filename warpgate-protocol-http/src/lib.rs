@@ -23,7 +23,7 @@ use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{debug, Instrument};
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
@@ -49,10 +49,10 @@ pub struct HTTPProtocolServer {
 }
 
 impl HTTPProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(HTTPProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 
@@ -145,7 +145,7 @@ impl ProtocolServer for HTTPProtocolServer {
                         // But NOT for:
                         // - tavahealth.com (parent domain)
                         // - reporting.tavahealth.com (sibling domain)
-                        let domain = format!(".{}", host);
+                        let domain = format!(".{host}");
                         tracing::info!(
                             "Cookie domain configured: {} (base host: {}) - cookies will work for {} and all its subdomains",
                             domain,
@@ -203,7 +203,7 @@ impl ProtocolServer for HTTPProtocolServer {
                         .with(cache_bust()),
                 )
                 .around({
-                    let services = services.clone();
+                    let services = services;
                     move |ep, req| {
                         let services = services.clone();
                         async move {
@@ -219,7 +219,7 @@ impl ProtocolServer for HTTPProtocolServer {
                                 &method,
                                 &url,
                                 client_ip.as_deref(),
-                                &response.status(),
+                                response.status(),
                             );
                             Ok(response)
                         }
@@ -233,9 +233,9 @@ impl ProtocolServer for HTTPProtocolServer {
             .nest_no_strip(
                 "/",
                 page_auth(catchall::catchall_endpoint).around(move |ep, req| async move {
-                    Ok(match ep.call(req).await {
+                    Ok(match Box::pin(ep.call(req)).await {
                         Ok(response) => response.into_response(),
-                        Err(error) => error_page(error).into_response(),
+                        Err(ref error) => error_page(error).into_response(),
                     })
                 }),
             )
@@ -253,9 +253,9 @@ impl ProtocolServer for HTTPProtocolServer {
                 let span = match handle {
                     Some(ref handle) => {
                         let handle = handle.lock().await;
-                        span_for_request(&req, &ctx.services, Some(&*handle)).await?
+                        span_for_request(&req, ctx.services(), Some(&*handle)).await?
                     }
-                    None => span_for_request(&req, &ctx.services, None).await?,
+                    None => span_for_request(&req, ctx.services(), None).await?,
                 };
 
                 ep.call(req).instrument(span).await
@@ -273,15 +273,13 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
-            .data(UnauthenticatedRequestContext {
-                services: self.services.clone(),
-            })
+            .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(session_store.clone())
             .data(session_storage);
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age).await;
+                session_store.lock().await.vacuum(session_max_age);
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
@@ -293,7 +291,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 .context("rustls setup")?
         };
 
-        Server::new(address.poem_listener().await?.rustls(rustls_config))
+        Server::new(address.poem_listener()?.rustls(rustls_config))
             .run(app)
             .await?;
 

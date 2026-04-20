@@ -29,13 +29,13 @@
             asyncComponent: () => import('./CreateUser.svelte') as any,
         }),
         '/users/:id': wrap({
-            asyncComponent: () => import('./User.svelte') as any,
+            asyncComponent: () => import('./users/User.svelte') as any,
+        }),
+        '/users': wrap({
+            asyncComponent: () => import('./users/Users.svelte') as any,
         }),
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte') as any,
-        }),
-        '/users': wrap({
-            asyncComponent: () => import('./Users.svelte') as any,
         }),
         '/access-roles': wrap({
             asyncComponent: () => import('./AccessRoles.svelte') as any,

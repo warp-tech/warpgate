@@ -1,7 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use tracing::*;
+use time::OffsetDateTime;
+use tracing::{debug, warn};
+use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetKubernetesOptions, TargetOptions, User};
@@ -38,17 +40,16 @@ pub async fn authenticate_and_get_target(
                                 .unwrap_or(false)
                             {
                                 return Ok(((&user).into(), target));
-                            } else {
-                                return Err(poem::Error::from_string(
-                                    format!("Access denied to target: {}", target_name),
-                                    poem::http::StatusCode::FORBIDDEN,
-                                ));
                             }
+                            return Err(poem::Error::from_string(
+                                format!("Access denied to target: {target_name}"),
+                                poem::http::StatusCode::FORBIDDEN,
+                            ));
                         }
                     }
 
                     return Err(poem::Error::from_string(
-                        format!("Kubernetes target not found: {}", target_name),
+                        format!("Kubernetes target not found: {target_name}"),
                         poem::http::StatusCode::NOT_FOUND,
                     ));
                 }
@@ -81,17 +82,16 @@ pub async fn authenticate_and_get_target(
                             .unwrap_or(false)
                         {
                             return Ok((user_info, target));
-                        } else {
-                            return Err(poem::Error::from_string(
-                                format!("Access denied to target: {}", target_name),
-                                poem::http::StatusCode::FORBIDDEN,
-                            ));
                         }
+                        return Err(poem::Error::from_string(
+                            format!("Access denied to target: {target_name}"),
+                            poem::http::StatusCode::FORBIDDEN,
+                        ));
                     }
                 }
 
                 return Err(poem::Error::from_string(
-                    format!("Kubernetes target not found: {}", target_name),
+                    format!("Kubernetes target not found: {target_name}"),
                     poem::http::StatusCode::NOT_FOUND,
                 ));
             }
@@ -113,9 +113,9 @@ pub async fn authenticate_and_get_target(
     ))
 }
 
-pub fn create_authenticated_client(
+pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
-    _auth_user: &Option<String>,
+    _auth_user: Option<&String>,
     _services: &Services,
 ) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
@@ -164,6 +164,25 @@ pub fn create_authenticated_client(
                 .context("Invalid client certificate/key for Kubernetes upstream")?;
             client_builder = client_builder.identity(identity);
         }
+        warpgate_common::KubernetesTargetAuth::IamRole(_) => {
+            // EKS IAM role authentication: generate a token from the cluster URL
+            let EksClusterInfo { name, region } =
+                warpgate_aws::find_eks_cluster_by_url(&k8s_options.cluster_url)
+                    .await
+                    .context("EKS cluster lookup")?;
+
+            let token = warpgate_aws::generate_eks_token(&name, &region)
+                .await
+                .context("EKS token generation")?;
+
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                    .context("setting Authorization header for EKS token")?,
+            );
+            client_builder = client_builder.default_headers(headers);
+        }
     }
 
     Ok(client_builder)
@@ -175,7 +194,7 @@ pub async fn validate_client_certificate(
     services: &Services,
 ) -> anyhow::Result<Option<AuthStateUserInfo>> {
     // Convert DER to PEM format for comparison
-    let cert_pem = der_to_pem(cert_der)?;
+    let cert_pem = der_to_pem(cert_der);
 
     let db = services.db.lock().await;
 
@@ -213,7 +232,7 @@ pub async fn validate_client_certificate(
 
                 // Update last_used timestamp
                 let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
-                active_model.last_used = Set(Some(chrono::Utc::now()));
+                active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
                 if let Err(e) = active_model.update(&*db).await {
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
@@ -226,7 +245,7 @@ pub async fn validate_client_certificate(
     Ok(None)
 }
 
-fn der_to_pem(der_bytes: &[u8]) -> Result<String, anyhow::Error> {
+fn der_to_pem(der_bytes: &[u8]) -> String {
     use base64::engine::general_purpose;
     use base64::Engine as _;
     let cert_b64 = general_purpose::STANDARD.encode(der_bytes);
@@ -237,10 +256,10 @@ fn der_to_pem(der_bytes: &[u8]) -> Result<String, anyhow::Error> {
         .map(|chunk| chunk.iter().collect::<String>())
         .collect();
 
-    Ok(format!(
+    format!(
         "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----",
         cert_lines.join("\n")
-    ))
+    )
 }
 
 fn normalize_certificate_pem(pem: &str) -> String {

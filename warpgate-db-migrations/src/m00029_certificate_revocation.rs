@@ -3,9 +3,9 @@ use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
 pub mod certificate_revocation {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
     use serde::Serialize;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     use super::*;
@@ -16,7 +16,7 @@ pub mod certificate_revocation {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
         pub serial_number_base64: String,
-        pub date_added: DateTime<Utc>,
+        pub date_added: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -82,9 +82,9 @@ impl WarpgateRateLimiter {
             }
             Some(bytes) => {
                 let bps = assert_valid_quota(bytes)?;
-                self.inner = Some((new_rate_limiter(bps), bps))
+                self.inner = Some((new_rate_limiter(bps), bps));
             }
-        };
+        }
         Ok(())
     }
 
@@ -97,12 +97,11 @@ impl WarpgateRateLimiter {
         let Some(ref inner) = self.inner else {
             return Ok(None);
         };
-        let bytes = match NonZero::new(bytes as u32) {
-            Some(bytes) => bytes,
-            None => return Ok(None),
+        let Some(bytes) = NonZero::new(bytes as u32) else {
+            return Ok(None);
         };
         match inner.0.check_key_n(&direction, bytes)? {
-            Ok(_) => Ok(None),
+            Ok(()) => Ok(None),
             Err(e) => Ok(Some(e.earliest_possible())),
         }
     }

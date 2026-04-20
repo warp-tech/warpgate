@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.2-1-g389616d3-modified"
+    "version": "v0.22.0-beta.6-6-gfde9e530-modified"
   },
   "servers": [
     {
@@ -50,6 +50,16 @@
             "name": "logged_in_only",
             "schema": {
               "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
             },
             "in": "query",
             "required": false,
@@ -452,9 +462,6 @@
               }
             }
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -485,9 +492,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -893,6 +897,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2024,6 +2031,7 @@
     },
     "/users/{id}/roles": {
       "get": {
+        "summary": "Get all role assignments for a user with expiry information",
         "parameters": [
           {
             "name": "id",
@@ -2045,7 +2053,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Role"
+                    "$ref": "#/components/schemas/UserRoleAssignmentResponse"
                   }
                 }
               }
@@ -2067,7 +2075,8 @@
       }
     },
     "/users/{id}/roles/{role_id}": {
-      "post": {
+      "get": {
+        "summary": "Get a single user role assignment with details",
         "parameters": [
           {
             "name": "id",
@@ -2093,10 +2102,81 @@
           }
         ],
         "responses": {
-          "201": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_role"
+      },
+      "post": {
+        "summary": "Add a role to a user with optional expiry",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserRoleRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
           },
           "409": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         },
@@ -2111,6 +2191,7 @@
         "operationId": "add_user_role"
       },
       "delete": {
+        "summary": "Remove a role from a user (soft delete - sets revoked_at)",
         "parameters": [
           {
             "name": "id",
@@ -2152,6 +2233,66 @@
           }
         ],
         "operationId": "delete_user_role"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_user_role"
       }
     },
     "/users/{id}/admin-roles": {
@@ -2229,6 +2370,9 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         },
@@ -2360,6 +2504,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2492,6 +2639,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2684,6 +2834,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           },
           "403": {
             "description": "",
@@ -2906,6 +3059,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3512,6 +3668,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3655,6 +3814,18 @@
           },
           "key_base64": {
             "type": "string"
+          }
+        }
+      },
+      "AddUserRoleRequest": {
+        "type": "object",
+        "title": "AddUserRoleRequest",
+        "description": "Request to add a user role with optional expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "default": null
           }
         }
       },
@@ -3957,13 +4128,17 @@
       "CreateTicketRequest": {
         "type": "object",
         "title": "CreateTicketRequest",
-        "required": [
-          "username",
-          "target_name"
-        ],
         "properties": {
           "username": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target_name": {
             "type": "string"
@@ -4006,6 +4181,84 @@
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "DatabaseTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth",
+            "IamRole": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        }
+      },
+      "DatabaseTargetAuth_DatabaseTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetIamRoleAuth"
+          }
+        ]
+      },
+      "DatabaseTargetAuth_DatabaseTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetPasswordAuth"
+          }
+        ]
+      },
+      "DatabaseTargetIamRoleAuth": {
+        "type": "object",
+        "title": "DatabaseTargetIamRoleAuth"
+      },
+      "DatabaseTargetPasswordAuth": {
+        "type": "object",
+        "title": "DatabaseTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
       },
       "ExistingCertificateCredential": {
         "type": "object",
@@ -4136,6 +4389,21 @@
           },
           "search": {
             "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_access_roles": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_admin_roles": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4223,13 +4491,17 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Token": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetTokenAuth",
-            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth",
+            "IamRole": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         }
       },
@@ -4252,6 +4524,28 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetCertificateAuth"
+          }
+        ]
+      },
+      "KubernetesTargetAuth_KubernetesTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetIamRoleAuth"
           }
         ]
       },
@@ -4292,6 +4586,10 @@
             "type": "string"
           }
         }
+      },
+      "KubernetesTargetIamRoleAuth": {
+        "type": "object",
+        "title": "KubernetesTargetIamRoleAuth"
       },
       "KubernetesTargetTokenAuth": {
         "type": "object",
@@ -4416,6 +4714,7 @@
         "required": [
           "id",
           "text",
+          "target",
           "values",
           "timestamp",
           "session_id"
@@ -4428,6 +4727,9 @@
           "text": {
             "type": "string"
           },
+          "target": {
+            "type": "string"
+          },
           "values": {},
           "timestamp": {
             "type": "string",
@@ -4438,6 +4740,15 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string"
+          },
+          "related_access_roles": {
+            "type": "string"
+          },
+          "related_admin_roles": {
             "type": "string"
           }
         }
@@ -4551,6 +4862,9 @@
           },
           "minimize_password_login": {
             "type": "boolean"
+          },
+          "show_session_menu": {
+            "type": "boolean"
           }
         }
       },
@@ -4562,7 +4876,8 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login"
+          "minimize_password_login",
+          "show_session_menu"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4582,6 +4897,9 @@
             "type": "boolean"
           },
           "minimize_password_login": {
+            "type": "boolean"
+          },
+          "show_session_menu": {
             "type": "boolean"
           }
         }
@@ -4723,15 +5041,41 @@
           },
           {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
-            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetIamRoleAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetPasswordAuth": {
         "allOf": [
@@ -4812,6 +5156,10 @@
             "type": "string"
           }
         }
+      },
+      "SshTargetIamRoleAuth": {
+        "type": "object",
+        "title": "SshTargetIamRoleAuth"
       },
       "SshTargetPasswordAuth": {
         "type": "object",
@@ -5003,8 +5351,13 @@
           "username": {
             "type": "string"
           },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
           "password": {
-            "type": "string"
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -5174,8 +5527,13 @@
           "username": {
             "type": "string"
           },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
           "password": {
-            "type": "string"
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -5276,8 +5634,10 @@
         "title": "Ticket",
         "required": [
           "id",
+          "user_id",
           "username",
           "description",
+          "target_id",
           "target",
           "created"
         ],
@@ -5286,11 +5646,19 @@
             "type": "string",
             "format": "uuid"
           },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "username": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target": {
             "type": "string"
@@ -5424,6 +5792,18 @@
           }
         }
       },
+      "UpdateUserRoleRequest": {
+        "type": "object",
+        "title": "UpdateUserRoleRequest",
+        "description": "Request to update user role expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The new expiry timestamp, or null to remove expiry (make permanent)"
+          }
+        }
+      },
       "User": {
         "type": "object",
         "title": "User",
@@ -5453,6 +5833,12 @@
           "ldap_server_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5475,6 +5861,12 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5511,6 +5903,51 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          }
+        }
+      },
+      "UserRoleAssignmentResponse": {
+        "type": "object",
+        "title": "UserRoleAssignmentResponse",
+        "description": "Response containing user role assignment with expiry info.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "is_expired",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Role ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Role name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Role description"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the role was granted"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this role assignment expires (null = permanent)"
+          },
+          "is_expired": {
+            "type": "boolean",
+            "description": "Whether this assignment has expired"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether this assignment is currently active (not expired, not revoked)"
           }
         }
       }

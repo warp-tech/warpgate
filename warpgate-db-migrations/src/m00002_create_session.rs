@@ -3,6 +3,7 @@ use sea_orm_migration::prelude::*;
 
 pub mod session {
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     use crate::m00001_create_ticket::ticket;
@@ -15,8 +16,8 @@ pub mod session {
         pub target_snapshot: Option<String>,
         pub username: Option<String>,
         pub remote_address: String,
-        pub started: DateTimeUtc,
-        pub ended: Option<DateTimeUtc>,
+        pub started: OffsetDateTime,
+        pub ended: Option<OffsetDateTime>,
         pub ticket_id: Option<Uuid>,
     }
 

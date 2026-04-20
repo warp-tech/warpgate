@@ -108,7 +108,7 @@ impl ListApi {
     ) -> Result<GetAdminRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let mut roles = AdminRole::Entity::find().order_by_asc(AdminRole::Column::Name);
 
         if let Some(ref search) = *search {
@@ -135,7 +135,7 @@ impl ListApi {
     ) -> Result<CreateAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let values = AdminRole::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
@@ -182,7 +182,7 @@ impl DetailApi {
     ) -> Result<GetAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let role = AdminRole::Entity::find_by_id(id.0).one(&*db).await?;
         Ok(match role {
             Some(r) => GetAdminRoleResponse::Ok(Json(r.into())),
@@ -204,7 +204,7 @@ impl DetailApi {
     ) -> Result<UpdateAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
@@ -246,7 +246,7 @@ impl DetailApi {
     ) -> Result<DeleteAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteAdminRoleResponse::NotFound);
         };
@@ -273,7 +273,7 @@ impl DetailApi {
     ) -> Result<GetAdminRoleUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some((_, users)) = AdminRole::Entity::find_by_id(id.0)
             .find_with_related(User::Entity)
             .all(&*db)
@@ -285,7 +285,7 @@ impl DetailApi {
         };
         let users: Vec<warpgate_common::User> = users
             .into_iter()
-            .map(|x| x.try_into())
+            .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(GetAdminRoleUsersResponse::Ok(Json(users)))
     }

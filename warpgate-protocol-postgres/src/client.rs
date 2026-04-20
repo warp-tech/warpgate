@@ -8,8 +8,8 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
-use tracing::*;
-use warpgate_common::TargetPostgresOptions;
+use tracing::{debug, info, warn};
+use warpgate_common::{TargetPostgresOptions, WarpgateError};
 use warpgate_tls::{configure_tls_connector, TlsMode};
 
 use crate::error::PostgresError;
@@ -27,7 +27,7 @@ pub struct ConnectionOptions {
 
 impl Default for ConnectionOptions {
     fn default() -> Self {
-        ConnectionOptions {
+        Self {
             protocol_number_major: 3,
             protocol_number_minor: 0,
             parameters: BTreeMap::new(),
@@ -120,16 +120,24 @@ impl PostgresClient {
         stream.push(startup)?;
         stream.flush().await?;
 
+        // Resolve effective password (may be an IAM-generated token or legacy field)
+        let effective_password = match &target.effective_auth() {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+            warpgate_common::DatabaseTargetAuth::IamRole(_) => {
+                let token = warpgate_aws::generate_rds_auth_token(
+                    &target.host,
+                    target.port,
+                    &target.username,
+                )
+                .await
+                .map_err(WarpgateError::Aws)?;
+                token
+            }
+        };
+
         loop {
             let Some(payload) = stream.recv::<PgWireGenericBackendMessage>().await? else {
                 return Err(PostgresError::Eof);
-            };
-
-            let get_password = || {
-                target
-                    .password
-                    .as_ref()
-                    .ok_or(PostgresError::PasswordRequired)
             };
 
             match payload.0 {
@@ -142,17 +150,15 @@ impl PostgresClient {
                         break;
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
-                        let password = get_password()?;
                         let password_message =
-                            pgwire::messages::startup::Password::new(password.into());
+                            pgwire::messages::startup::Password::new(effective_password.clone());
                         stream.push(password_message)?;
                         stream.flush().await?;
                     }
                     pgwire::messages::startup::Authentication::MD5Password(scramble) => {
-                        let password = get_password()?;
                         let hashed = pgwire::api::auth::md5pass::hash_md5_password(
                             &target.username,
-                            password,
+                            &effective_password,
                             &scramble,
                         );
                         let password_message = pgwire::messages::startup::Password::new(hashed);
@@ -160,19 +166,17 @@ impl PostgresClient {
                         stream.flush().await?;
                     }
                     pgwire::messages::startup::Authentication::SASL(mechanisms) => {
-                        let password = get_password()?;
-                        PostgresClient::run_sasl_auth(
+                        Self::run_sasl_auth(
                             &mut stream,
                             mechanisms,
                             &target.username,
-                            password,
+                            &effective_password,
                         )
                         .await?;
                     }
                     x => {
                         return Err(PostgresError::ProtocolError(format!(
-                            "Unsupported authentication method: {:?}",
-                            x
+                            "Unsupported authentication method: {x:?}"
                         )));
                     }
                 },
@@ -230,7 +234,7 @@ impl PostgresClient {
                     is_first_response = false;
                 } else {
                     stream.push(pgwire::messages::startup::SASLResponse::new(data.into()))?;
-                };
+                }
                 stream.flush().await?;
             }
 
@@ -243,12 +247,8 @@ impl PostgresClient {
             match payload.0 {
                 PgWireBackendMessage::ErrorResponse(response) => return Err(response.into()),
                 PgWireBackendMessage::Authentication(
-                    pgwire::messages::startup::Authentication::SASLContinue(msg),
-                ) => {
-                    data = Some(msg.to_vec());
-                }
-                PgWireBackendMessage::Authentication(
-                    pgwire::messages::startup::Authentication::SASLFinal(msg),
+                    pgwire::messages::startup::Authentication::SASLContinue(msg)
+                    | pgwire::messages::startup::Authentication::SASLFinal(msg),
                 ) => {
                     data = Some(msg.to_vec());
                 }

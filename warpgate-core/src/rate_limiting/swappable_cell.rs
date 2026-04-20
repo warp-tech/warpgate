@@ -41,9 +41,9 @@ impl SwappableLimiterCell {
     }
 
     fn _maybe_update(&mut self) {
-        let _ref = self.receiver.borrow_and_update();
-        if _ref.has_changed() {
-            self.inner = _ref.as_ref().cloned();
+        let ref_ = self.receiver.borrow_and_update();
+        if ref_.has_changed() {
+            self.inner = ref_.as_ref().cloned();
         }
     }
 

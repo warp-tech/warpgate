@@ -21,15 +21,15 @@ impl GlobalParams {
         })
     }
 
-    pub fn config_path(&self) -> &PathBuf {
+    pub const fn config_path(&self) -> &PathBuf {
         &self.config_path
     }
 
-    pub fn paths_relative_to(&self) -> &PathBuf {
+    pub const fn paths_relative_to(&self) -> &PathBuf {
         &self.paths_relative_to
     }
 
-    pub fn should_secure_files(&self) -> bool {
+    pub const fn should_secure_files(&self) -> bool {
         self.should_secure_files
     }
 }

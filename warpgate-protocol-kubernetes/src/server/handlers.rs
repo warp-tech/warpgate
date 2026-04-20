@@ -10,7 +10,7 @@ use reqwest_websocket::Upgrade;
 use serde::Deserialize;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite;
-use tracing::*;
+use tracing::{debug, error, warn, Instrument};
 use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
@@ -32,7 +32,7 @@ fn construct_target_url(
     path: &str,
     k8s_options: &TargetKubernetesOptions,
 ) -> Result<Url> {
-    let api_path = format!("/{}", path);
+    let api_path = format!("/{path}");
 
     let query = req.uri().query().unwrap_or("");
 
@@ -60,7 +60,8 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) = authenticate_and_get_target(req, &target_name, &ctx.services).await?;
+    let (user_info, target) =
+        authenticate_and_get_target(req, &target_name, ctx.services()).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
@@ -78,11 +79,11 @@ pub async fn handle_api_request(
     let (session_id, log_span) = {
         let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
             handle.lock().await;
-        handle.set_target(&target).await?;
         handle.set_user_info(user_info.clone()).await?;
+        handle.set_target(&target).await?;
         (
             handle.id(),
-            span_for_request(req, &ctx.services, Some(&*handle)).await?,
+            span_for_request(req, ctx.services(), Some(&*handle)).await?,
         )
     };
 
@@ -95,7 +96,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
@@ -107,14 +108,14 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
             .context("handling Kubernetes API request")
         };
 
-        let client_ip = get_client_ip(req, &ctx.services).await;
+        let client_ip = get_client_ip(req, ctx.services()).await;
         let response = response.inspect_err(|e| {
             log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;
@@ -123,7 +124,7 @@ pub async fn handle_api_request(
             req.method(),
             req.original_uri(),
             client_ip.as_deref(),
-            &response.status(),
+            response.status(),
         );
 
         Ok(response)
@@ -143,7 +144,8 @@ async fn _handle_normal_request_inner(
     services: &Services,
 ) -> Result<Response, WarpgateError> {
     let client =
-        create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .build()
             .context("building reqwest client")?;
 
@@ -153,6 +155,7 @@ async fn _handle_normal_request_inner(
         match &k8s_options.auth {
             warpgate_common::KubernetesTargetAuth::Token(_) => "Token",
             warpgate_common::KubernetesTargetAuth::Certificate(_) => "Certificate",
+            warpgate_common::KubernetesTargetAuth::IamRole(_) => "IamRole",
         }
     );
 
@@ -168,18 +171,18 @@ async fn _handle_normal_request_inner(
         if DONT_FORWARD_HEADERS.contains(name) && name != http::header::ACCEPT_ENCODING {
             continue;
         }
-        if let Ok(mut value_str) = value.to_str().map(|s| s.to_string()) {
+        if let Ok(mut value_str) = value.to_str().map(ToString::to_string) {
             if name == http::header::ACCEPT {
                 let values = value
                     .to_str()
                     .unwrap_or_default()
                     .split(',')
-                    .map(|s| s.trim())
+                    .map(str::trim)
                     .filter(|s| *s != "application/vnd.kubernetes.protobuf") // cannot parse protobuf yet
                     .collect::<Vec<_>>();
                 value_str = values.join(", ");
             }
-            headers.insert(name.to_string(), value_str.to_string());
+            headers.insert(name.to_string(), value_str.clone());
         }
     }
 
@@ -215,7 +218,7 @@ async fn _handle_normal_request_inner(
     let mut upstream_headers = HashMap::new();
     for (name, value) in &headers {
         let header_name_lower = name.to_lowercase();
-        if ![
+        if [
             "host",
             "content-length",
             "connection",
@@ -224,15 +227,13 @@ async fn _handle_normal_request_inner(
         ]
         .contains(&header_name_lower.as_str())
         {
-            if let (Ok(header_name), Ok(header_value)) = (
-                http::HeaderName::from_bytes(name.as_bytes()),
-                http::HeaderValue::from_str(value),
-            ) {
-                request_builder = request_builder.header(header_name, header_value);
-                upstream_headers.insert(name.clone(), value.clone());
-            }
-        } else {
             debug!(header = name, "Filtering out header from upstream request");
+        } else if let (Ok(header_name), Ok(header_value)) = (
+            http::HeaderName::from_bytes(name.as_bytes()),
+            http::HeaderValue::from_str(value),
+        ) {
+            request_builder = request_builder.header(header_name, header_value);
+            upstream_headers.insert(name.clone(), value.clone());
         }
     }
 
@@ -278,8 +279,7 @@ async fn _handle_normal_request_inner(
         let is_watch = req
             .uri()
             .query()
-            .map(|q| q.split('&').any(|p| p.starts_with("watch=true")))
-            .unwrap_or(false);
+            .is_some_and(|q| q.split('&').any(|p| p.starts_with("watch=true")));
 
         if transfer_encoding == "chunked" || is_watch {
             (
@@ -316,7 +316,7 @@ async fn _handle_normal_request_inner(
     let mut poem_response = Response::builder().status(status);
 
     // Copy response headers
-    for (name, value) in response_headers.iter() {
+    for (name, value) in &response_headers {
         if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes()) {
             if let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes()) {
                 poem_response = poem_response.header(poem_name, poem_value);
@@ -327,12 +327,14 @@ async fn _handle_normal_request_inner(
     Ok(poem_response.body(response_body))
 }
 
-async fn run_websocket_recording(mut recorder: TerminalRecorder, mut rx: mpsc::Receiver<Vec<u8>>) {
+async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Receiver<Vec<u8>>) {
     while let Some(data) = rx.recv().await {
         if data.is_empty() {
             continue;
         }
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let msg_type = data[0];
+        #[allow(clippy::indexing_slicing, reason = "length checked")]
         let data = data[1..].to_vec();
 
         let result = match msg_type {
@@ -387,7 +389,8 @@ async fn _handle_websocket_request_inner(
     }
 
     let client =
-        create_authenticated_client(k8s_options, &Some(user_info.username.clone()), services)?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .http1_only()
             .build()?;
 

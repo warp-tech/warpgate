@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
-use tracing::*;
+use tracing::error;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, LogFormat, Secret};
 
@@ -164,16 +164,16 @@ async fn _main() -> Result<()> {
                 &params,
                 username,
                 &Secret::new(password.clone()),
-                role,
+                role.as_ref(),
             )
             .await
         }
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
+        Commands::ClientKeys => crate::commands::client_keys::command(&params),
         Commands::RecoverAccess { username } => {
-            crate::commands::recover_access::command(&params, username).await
+            crate::commands::recover_access::command(&params, username.as_ref()).await
         }
         Commands::Healthcheck => crate::commands::healthcheck::command(&params).await,
     }

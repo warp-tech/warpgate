@@ -3,9 +3,9 @@ use std::net::Ipv4Addr;
 use anyhow::Result;
 use bytes::Bytes;
 use packet::Builder;
-use rand::Rng;
+use rand::RngExt;
 use tokio::time::Instant;
-use tracing::*;
+use tracing::debug;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::writer::RecordingWriter;
@@ -30,7 +30,7 @@ pub enum TrafficConnectionParams {
 }
 
 impl TrafficRecorder {
-    pub fn connection(&mut self, params: TrafficConnectionParams) -> ConnectionRecorder {
+    pub fn connection(&self, params: TrafficConnectionParams) -> ConnectionRecorder {
         ConnectionRecorder::new(params, self.writer.clone(), self.started_at)
     }
 }
@@ -41,7 +41,7 @@ impl Recorder for TrafficRecorder {
     }
 
     fn new(writer: RecordingWriter) -> Self {
-        TrafficRecorder {
+        Self {
             writer,
             started_at: Instant::now(),
         }
@@ -62,8 +62,8 @@ impl ConnectionRecorder {
             params,
             writer,
             started_at,
-            seq_rx: rand::thread_rng().gen(),
-            seq_tx: rand::thread_rng().gen(),
+            seq_rx: rand::rng().random(),
+            seq_tx: rand::rng().random(),
         }
     }
 
@@ -81,7 +81,7 @@ impl ConnectionRecorder {
         Ok(())
     }
 
-    async fn write_packet(&mut self, data: Bytes) -> Result<()> {
+    async fn write_packet(&self, data: Bytes) -> Result<()> {
         let ms = Instant::now().duration_since(self.started_at).as_micros();
         self.writer
             .write(&u32::to_le_bytes((ms / 10u128.pow(6)) as u32))

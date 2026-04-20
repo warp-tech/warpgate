@@ -1,8 +1,8 @@
 use core::str;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::header::HOST;
 use http::{HeaderName, StatusCode};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use poem::error::InternalServerError;
@@ -11,6 +11,7 @@ use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
@@ -84,7 +85,7 @@ impl SessionExt for Session {
     }
 
     fn clear_auth_state(&self) {
-        self.remove(AUTH_STATE_ID_SESSION_KEY)
+        self.remove(AUTH_STATE_ID_SESSION_KEY);
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
@@ -94,7 +95,7 @@ impl SessionExt for Session {
 
     fn set_sso_login_state(&self, state: SsoLoginState) {
         if let Ok(json) = serde_json::to_string(&state) {
-            self.set(AUTH_SSO_LOGIN_STATE, json)
+            self.set(AUTH_SSO_LOGIN_STATE, json);
         }
     }
 }
@@ -104,17 +105,17 @@ pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
     // A user is considered an administrator if they have any admin role assigned.
-    let services = &ctx.services;
+    let services = ctx.services();
 
     // Admin tokens bypass the database check and are always full administrators.
-    if let RequestAuthorization::AdminToken = ctx.auth {
+    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
         return Ok(true);
     }
 
     let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User(username)) => username,
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. })
+        | RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
-        RequestAuthorization::UserToken { username } => username,
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
@@ -163,8 +164,7 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
         let err_resp = gateway_redirect(&req).into_response();
         Ok(_inner_auth(ep, req)
             .await?
-            .map(IntoResponse::into_response)
-            .unwrap_or(err_resp))
+            .map_or(err_resp, IntoResponse::into_response))
     })
 }
 
@@ -172,8 +172,7 @@ pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "".into());
+        .map_or_else(String::new, ToString::to_string);
 
     let path = format!(
         "/@warpgate#/login?next={}",
@@ -187,15 +186,18 @@ pub async fn get_auth_state_for_request(
     username: &str,
     session: &Session,
     store: &mut AuthStateStore,
+    remote_ip: Option<IpAddr>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     if let Some(id) = session.get_auth_state_id() {
         if !store.contains_key(&id.0) {
-            session.remove(AUTH_STATE_ID_SESSION_KEY)
+            session.remove(AUTH_STATE_ID_SESSION_KEY);
         }
     }
 
     if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState)?;
+        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
+            "unknown auth state id".into(),
+        ))?;
 
         let existing_matched = state.lock().await.user_info().username == username;
         if existing_matched {
@@ -213,6 +215,7 @@ pub async fn get_auth_state_for_request(
                 CredentialKind::Sso,
                 CredentialKind::Totp,
             ],
+            remote_ip,
         )
         .await?;
     session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
@@ -242,7 +245,10 @@ pub async fn authorize_session(
         .await
         .set_user_info(user_info.clone())
         .await?;
-    session.set_auth(SessionAuthorization::User(user_info.username));
+    session.set_auth(SessionAuthorization::User {
+        user_id: user_info.id,
+        username: user_info.username,
+    });
 
     Ok(())
 }
@@ -256,19 +262,16 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         if let Ok(base_url) = config.construct_external_url(None, None) {
             if let Some(base_host) = base_url.host_str() {
-                let request_host = req
-                    .header(HOST)
-                    .map(|h| h.split(':').next().unwrap_or(h).to_string())
-                    .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+                let request_host = ctx.trusted_hostname(&req);
 
                 if let Some(host) = request_host {
                     // Validate request host matches base host or is a subdomain/localhost
                     let is_localhost = is_localhost_host(&host);
                     let is_authorized = host == base_host
-                        || host.ends_with(&format!(".{}", base_host))
+                        || host.ends_with(&format!(".{base_host}"))
                         || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
 
                     if !is_authorized {
@@ -292,10 +295,23 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 let token_from_header = token_from_header
                     .to_str()
                     .map_err(poem::error::BadRequest)?;
-                if Some(token_from_header) == ctx.services.admin_token.lock().await.as_deref() {
+                if ctx
+                    .services()
+                    .admin_token
+                    .lock()
+                    .await
+                    .as_deref()
+                    .is_some_and(|admin_token| {
+                        // Use constant time comparison to prevent timing attacks
+                        admin_token
+                            .as_bytes()
+                            .ct_eq(token_from_header.as_bytes())
+                            .into()
+                    })
+                {
                     Some(RequestAuthorization::AdminToken)
                 } else if let Some(user) = ctx
-                    .services
+                    .services()
                     .config_provider
                     .lock()
                     .await
@@ -303,6 +319,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                     .await?
                 {
                     Some(RequestAuthorization::UserToken {
+                        user_id: user.id,
                         username: user.username,
                     })
                 } else {

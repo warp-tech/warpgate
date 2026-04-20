@@ -16,7 +16,7 @@ use crate::WarpgateError;
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {
-    pub fn address(&self) -> SocketAddr {
+    pub const fn address(&self) -> SocketAddr {
         self.0
     }
 
@@ -50,7 +50,7 @@ impl ListenEndpoint {
             .await?)
     }
 
-    pub async fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
+    pub fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
         let addrs = self.addresses_to_listen_on()?;
         #[allow(clippy::unwrap_used)] // length known >=1
         let (first, rest) = addrs.split_first().unwrap();
@@ -77,7 +77,7 @@ impl ListenEndpoint {
         .flatten_unordered(None))
     }
 
-    pub fn port(&self) -> u16 {
+    pub const fn port(&self) -> u16 {
         self.0.port()
     }
 }

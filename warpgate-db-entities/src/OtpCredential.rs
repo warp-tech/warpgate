@@ -41,7 +41,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for UserTotpCredential {
     fn from(credential: Model) -> Self {
-        UserTotpCredential {
+        Self {
             key: credential.secret_key.into(),
         }
     }

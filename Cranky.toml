@@ -7,6 +7,29 @@ deny = [
   "clippy::dbg_macro",
 ]
 
+warn = ["clippy::pedantic", "clippy::nursery"]
+
 allow = [
   "clippy::result_large_err",
+  "clippy::must_use_candidate",
+  "clippy::unnecessary_literal_bound",
+  "clippy::missing_errors_doc",
+  "clippy::doc_markdown",
+  "clippy::struct_excessive_bools",
+  "clippy::missing_panics_doc",
+  "clippy::doc_link_with_quotes",
+  "clippy::wildcard_imports",
+  "clippy::significant_drop_tightening",
+  "clippy::cast_sign_loss",
+  "clippy::cast_possible_truncation",
+  "clippy::used_underscore_items",
+  "clippy::too_many_lines",
+  "clippy::too_long_first_doc_paragraph",
+  "clippy::future_not_send",
+  "clippy::option_if_let_else",
+  "clippy::similar_names",
+  "clippy::assigning_clones",
+  "clippy::significant_drop_in_scrutinee",
+  "clippy::redundant_closure_for_method_calls",
+  "clippy::manual_string_new",
 ]

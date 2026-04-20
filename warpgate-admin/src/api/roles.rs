@@ -10,7 +10,7 @@ use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::{Role, Target, User};
+use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -49,7 +49,7 @@ impl ListApi {
         require_admin_permission(&ctx, None).await?;
 
         // listing roles is allowed for any administrator
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
@@ -72,15 +72,15 @@ impl ListApi {
         body: Json<RoleDataRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesCreate)).await?;
-
         use warpgate_db_entities::Role;
+
+        require_admin_permission(&ctx, Some(AdminPermission::AccessRolesCreate)).await?;
 
         if body.name.is_empty() {
             return Ok(CreateRoleResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let values = Role::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -106,8 +106,6 @@ enum GetRoleResponse {
 enum UpdateRoleResponse {
     #[oai(status = 200)]
     Ok(Json<RoleConfig>),
-    #[oai(status = 403)]
-    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -116,8 +114,6 @@ enum UpdateRoleResponse {
 enum DeleteRoleResponse {
     #[oai(status = 204)]
     Deleted,
-    #[oai(status = 403)]
-    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -151,7 +147,7 @@ impl DetailApi {
     ) -> Result<GetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -171,7 +167,7 @@ impl DetailApi {
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
@@ -194,11 +190,22 @@ impl DetailApi {
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
+
+        // Clean up referencing assignments before deleting the role
+        UserRoleAssignment::Entity::delete_many()
+            .filter(UserRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
+
+        TargetRoleAssignment::Entity::delete_many()
+            .filter(TargetRoleAssignment::Column::RoleId.eq(id.0))
+            .exec(&*db)
+            .await?;
 
         role.delete(&*db).await?;
         Ok(DeleteRoleResponse::Deleted)
@@ -217,7 +224,7 @@ impl DetailApi {
     ) -> Result<GetRoleTargetsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleTargetsResponse::NotFound);
@@ -246,7 +253,7 @@ impl DetailApi {
     ) -> Result<GetRoleUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetRoleUsersResponse::NotFound);

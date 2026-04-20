@@ -67,9 +67,10 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    "RUSTSEC-2023-0071",
-    "RUSTSEC-2021-0139", # ansi-term is unmaintained
+    "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
+    "RUSTSEC-2026-0099", # rustls: Name constraints were accepted for certificates asserting a wildcard name
+    "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -83,7 +84,7 @@ ignore = [
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 # Lint level for when multiple versions of the same crate are detected
-# multiple-versions = "warn"
+# multiple-versions = "deny"
 # Lint level for when a crate version requirement is `*`
 wildcards = "warn"
 # The graph highlighting used when creating dotgraphs for crates
@@ -95,7 +96,7 @@ highlight = "all"
 # The default lint level for `default` features for crates that are members of
 # the workspace that is being checked. This can be overridden by allowing/denying
 # `default` on a crate-by-crate basis if desired.
-workspace-default-features = "warn"
+workspace-default-features = "allow"
 # The default lint level for `default` features for external crates that are not
 # members of the workspace. This can be overridden by allowing/denying `default`
 # on a crate-by-crate basis if desired.
@@ -164,15 +165,17 @@ deny = ["rustls-tls-webpki-roots"]
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    "git+https://github.com/Eugeny/rsasl.git?rev=cbf4b0f3e05c73b33ac332718ab6e955eaa58166",
+]
 
 [sources.allow-org]
 # github.com organizations to allow git sources for

@@ -24,7 +24,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get install openssh-client expect
-          cargo install --locked just
+          cargo install --locked just@1.4.0
           # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
           # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
           cargo install --locked cargo-llvm-cov@0.6.15
@@ -70,7 +70,7 @@ jobs:
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
+        uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
