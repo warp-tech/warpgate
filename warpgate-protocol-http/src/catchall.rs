@@ -112,10 +112,10 @@ async fn get_target_for_request(
         RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
             need_role_auth = true;
 
-            selected_target_name = if let Some(ref rebound_target) = host_based_target_name {
-                Some(rebound_target.clone())
-            } else if let Some(warpgate_target) = params.warpgate_target {
+            selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
                 Some(warpgate_target)
+            } else if let Some(ref rebound_target) = host_based_target_name {
+                Some(rebound_target.clone())
             } else {
                 session.get_target_name()
             };
