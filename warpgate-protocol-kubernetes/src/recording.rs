@@ -141,7 +141,7 @@ pub async fn start_recording_api(
 pub async fn start_recording_exec(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
-    metadata: Option<SessionRecordingMetadata>,
+    metadata: SessionRecordingMetadata,
 ) -> anyhow::Result<TerminalRecorder> {
     let recordings = recordings.lock().await;
     recordings
