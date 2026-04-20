@@ -42,7 +42,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for UserSsoCredential {
     fn from(credential: Model) -> Self {
-        UserSsoCredential {
+        Self {
             provider: credential.provider,
             email: credential.email,
         }

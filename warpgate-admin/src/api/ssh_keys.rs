@@ -37,9 +37,9 @@ impl Api {
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         let keys =
-            warpgate_protocol_ssh::load_keys(&config, &ctx.services.global_params, "client")?;
+            warpgate_protocol_ssh::load_keys(&config, &ctx.services().global_params, "client")?;
 
         let keys = keys
             .into_iter()

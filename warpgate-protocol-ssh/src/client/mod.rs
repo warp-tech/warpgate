@@ -23,13 +23,14 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{load_keys, ForwardedStreamlocalParams, ForwardedTcpIpParams};
+use crate::{load_keys, load_preferred_key, ForwardedStreamlocalParams, ForwardedTcpIpParams};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -49,6 +50,9 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Ssh(#[from] russh::Error),
+
+    #[error("AWS: {0}")]
+    Aws(#[from] AwsError),
 
     #[error("Could not resolve address")]
     Resolve,
@@ -173,7 +177,7 @@ impl RemoteClient {
             {
                 async move {
                     while let Some((e, response)) = command_rx.recv().await {
-                        inner_event_tx.send(InnerEvent::RCCommand(e, response))?
+                        inner_event_tx.send(InnerEvent::RCCommand(e, response))?;
                     }
                     Ok::<(), anyhow::Error>(())
                 }
@@ -193,7 +197,7 @@ impl RemoteClient {
     fn set_disconnected(&mut self) {
         self.session = None;
         for (id, op) in self.pending_ops.drain(..) {
-            if let ChannelOperation::OpenShell = op {
+            if matches!(op, ChannelOperation::OpenShell) {
                 let _ = self.tx.send(RCEvent::Close(id));
             }
             if let ChannelOperation::OpenDirectTCPIP { .. } = op {
@@ -248,13 +252,12 @@ impl RemoteClient {
             }
             op => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
-                match channel_pipes.get(&channel_id) {
-                    Some(tx) => {
-                        if tx.send(op).is_err() {
-                            channel_pipes.remove(&channel_id);
-                        }
+                if let Some(tx) = channel_pipes.get(&channel_id) {
+                    if tx.send(op).is_err() {
+                        channel_pipes.remove(&channel_id);
                     }
-                    None => debug!(channel=%channel_id, "operation for unknown channel"),
+                } else {
+                    debug!(channel=%channel_id, "operation for unknown channel");
                 }
             }
         }
@@ -274,7 +277,7 @@ impl RemoteClient {
                                     break
                                 }
                             }
-                            Some(_) = self.abort_rx.recv() => {
+                            Some(()) = self.abort_rx.recv() => {
                                 debug!("Abort requested");
                                 self.disconnect().await;
                                 break
@@ -311,7 +314,7 @@ impl RemoteClient {
                 debug!("Client handler event: {:?}", client_event);
                 match client_event {
                     ClientHandlerEvent::Disconnect => {
-                        self._on_disconnect().await?;
+                        self._on_disconnect();
                     }
                     ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
                         info!("New forwarded connection: {params:?}");
@@ -367,7 +370,7 @@ impl RemoteClient {
     async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
         match cmd {
             RCCommand::Connect(options) => match self.connect(options).await {
-                Ok(_) => {
+                Ok(()) => {
                     self.set_state(RCState::Connected)
                         .map_err(SshClientError::other)?;
                     let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
@@ -529,7 +532,7 @@ impl RemoteClient {
                         _ => {}
                     }
                 }
-                Some(_) = self.abort_rx.recv() => {
+                Some(()) = self.abort_rx.recv() => {
                     info!("Abort requested");
                     self.set_disconnected();
                     return Err(ConnectionError::Aborted)
@@ -578,7 +581,7 @@ impl RemoteClient {
                                 "client"
                             )?;
                             let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
-                            for key in keys.into_iter() {
+                            for key in keys {
                                 let key = Arc::new(key);
                                 if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
                                     info!("Skipping ssh-rsa (SHA1) key authentication since insecure SSH algos are not allowed for this target");
@@ -618,9 +621,52 @@ impl RemoteClient {
                                 if auth_result {
                                     debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
                                     break;
-                                } else {
-                                    auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
                                 }
+                                auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
+                            }
+                        }
+                        SSHTargetAuth::IamRole(_) => {
+                            let instance_info = warpgate_aws::find_instance_by_ip(&ssh_options.host).await?;
+
+                            let key = load_preferred_key(
+                                &*self.services.config.lock().await,
+                                &self.services.global_params,
+                                "client"
+                            )?;
+
+                            let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+
+                            // Push the public key via EC2 Instance Connect
+                            warpgate_aws::send_ssh_public_key(
+                                &instance_info.instance_id,
+                                &instance_info.availability_zone,
+                                &instance_info.region,
+                                &ssh_options.username,
+                                &pub_key_str,
+                            ).await?;
+
+                            // Now authenticate with this key (key is valid for 60 seconds)
+                            let key = Arc::new(key.clone());
+                            let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                            let response = session
+                                .authenticate_publickey(
+                                    ssh_options.username.clone(),
+                                    PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                                )
+                                .await?;
+
+                            auth_result = self._handle_auth_result(
+                                &mut session,
+                                ssh_options.username.clone(),
+                                response
+                            ).await.unwrap_or(false);
+
+                            if auth_result {
+                                debug!(username=&ssh_options.username[..], "Authenticated via EC2 Instance Connect");
+                            }
+
+                            if !auth_result {
+                                auth_error_msg = Some("EC2 Instance Connect authentication was rejected by the SSH target".into());
                             }
                         }
                     }
@@ -643,7 +689,7 @@ impl RemoteClient {
                         async move {
                             while let Some(e) = event_rx.recv().await {
                                 info!("{:?}", e);
-                                inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?
+                                inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?;
                             }
                             Ok::<(), anyhow::Error>(())
                         }
@@ -724,10 +770,9 @@ impl RemoteClient {
                                 debug!("keyboard-interactive challenge failed");
                                 return Ok(false);
                             }
-                            _ => {}
+                            KeyboardInteractiveAuthResponse::InfoRequest { .. } => {}
                         }
                     }
-                    continue;
                 }
             }
         }
@@ -868,9 +913,8 @@ impl RemoteClient {
         }
     }
 
-    async fn _on_disconnect(&mut self) -> Result<()> {
+    fn _on_disconnect(&mut self) {
         self.set_disconnected();
-        Ok(())
     }
 }
 

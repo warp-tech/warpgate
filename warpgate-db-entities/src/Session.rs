@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -10,8 +10,8 @@ pub struct Model {
     pub target_snapshot: Option<String>,
     pub username: Option<String>,
     pub remote_address: String,
-    pub started: DateTime<Utc>,
-    pub ended: Option<DateTime<Utc>>,
+    pub started: OffsetDateTime,
+    pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
     pub protocol: String,
 }

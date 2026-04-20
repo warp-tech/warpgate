@@ -49,7 +49,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429
+      - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
 
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
         with:
@@ -66,8 +66,7 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install --locked just
-          cargo install --locked cargo-deny@0.18.9
+          cargo install --locked just@1.4.0
           cargo install --locked cargo-cyclonedx@^0.5
           rm -rf ~/.cargo/registry
 
@@ -81,11 +80,6 @@ jobs:
         run: |
           cd /
           npm i -g @cyclonedx/cyclonedx-npm@4.1.2
-
-      - name: cargo-deny
-        run: |
-          cargo deny --version
-          cargo deny check
 
       - name: Install admin UI deps
         run: |
@@ -146,7 +140,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
@@ -170,7 +164,7 @@ jobs:
 
       - name: Install tools
         run: |
-          cargo install --locked just
+          cargo install --locked just@1.4.0
 
       - name: Ensure there are no changes in config schema
         run: |

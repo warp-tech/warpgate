@@ -3,6 +3,7 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
@@ -33,8 +34,8 @@ pub enum WarpgateError {
     ExternalHostNotWhitelisted(String, Vec<String>),
     #[error("URL contains no host")]
     NoHostInUrl,
-    #[error("Inconsistent state error")]
-    InconsistentState,
+    #[error("Inconsistent state: {0}")]
+    InconsistentState(String),
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]
@@ -63,19 +64,30 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("AWS: {0}")]
+    Aws(AwsError),
+    #[error("IP address {0} is not in the allowed range for user {1}")]
+    IpAddrNotAllowed(String, String),
+    #[error("could not parse IP network address: {0}")]
+    InvalidNetworkAddress(String),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
         match self {
-            WarpgateError::InvalidTicket(_)
-            | WarpgateError::UserNotFound(_)
-            | WarpgateError::RoleNotFound(_) => poem::http::StatusCode::UNAUTHORIZED,
-            WarpgateError::NoAdminAccess | WarpgateError::NoAdminPermission(_) => {
-                poem::http::StatusCode::FORBIDDEN
-            }
+            Self::InvalidTicket(_)
+            | Self::UserNotFound(_)
+            | Self::RoleNotFound(_)
+            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
+            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
+    fn from(err: Box<dyn Error + Send + Sync + 'static>) -> Self {
+        Self::Other(err)
     }
 }
 
@@ -91,6 +103,6 @@ impl ApiResponse for WarpgateError {
     }
 
     fn register(registry: &mut poem_openapi::registry::Registry) {
-        poem::error::Error::register(registry)
+        poem::error::Error::register(registry);
     }
 }

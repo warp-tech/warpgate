@@ -25,6 +25,6 @@
 
 <style>
     div {
-        line-height: 1;
+        line-height: 1.2;
     }
 </style>

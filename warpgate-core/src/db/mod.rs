@@ -6,10 +6,10 @@ use sea_orm::{
     ConnectOptions, Database, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
     TransactionTrait,
 };
-use tracing::*;
+use time::OffsetDateTime;
+use tracing::error;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
-use warpgate_db_entities::LogEntry;
 use warpgate_db_migrations::migrate_database;
 
 use crate::recordings::SessionRecordings;
@@ -26,7 +26,7 @@ pub async fn connect_to_db(
         abs_path.push("db.sqlite3");
 
         if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent)?
+            std::fs::create_dir_all(parent)?;
         }
 
         url.set_path(
@@ -60,7 +60,7 @@ pub async fn connect_to_db(
 }
 
 pub async fn populate_db(
-    db: &mut DatabaseConnection,
+    db: &DatabaseConnection,
     _config: &mut WarpgateConfig,
 ) -> Result<(), WarpgateError> {
     use sea_orm::ActiveValue::Set;
@@ -68,7 +68,7 @@ pub async fn populate_db(
 
     Recording::Entity::update_many()
         .set(Recording::ActiveModel {
-            ended: Set(Some(chrono::Utc::now())),
+            ended: Set(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         })
         .filter(Expr::col(Recording::Column::Ended).is_null())
@@ -78,7 +78,7 @@ pub async fn populate_db(
 
     Session::Entity::update_many()
         .set(Session::ActiveModel {
-            ended: Set(Some(chrono::Utc::now())),
+            ended: Set(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         })
         .filter(Expr::col(Session::Column::Ended).is_null())
@@ -90,21 +90,30 @@ pub async fn populate_db(
 }
 
 pub async fn cleanup_db(
-    db: &mut DatabaseConnection,
-    recordings: &mut SessionRecordings,
+    db: &DatabaseConnection,
+    recordings: &SessionRecordings,
     retention: &Duration,
+    audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{Recording, Session};
-    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
+    use warpgate_db_entities::{LogEntry, Recording, Session};
+    let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
+    let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
     LogEntry::Entity::delete_many()
-        .filter(Expr::col(LogEntry::Column::Timestamp).lt(cutoff))
+        .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(audit_cutoff))
+        .exec(db)
+        .await?;
+
+    LogEntry::Entity::delete_many()
+        .filter(Expr::col(LogEntry::Column::Target).ne("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(recording_cutoff))
         .exec(db)
         .await?;
 
     let recordings_to_delete = Recording::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .all(db)
         .await?;
 
@@ -120,7 +129,7 @@ pub async fn cleanup_db(
 
     Session::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .exec(db)
         .await?;
 

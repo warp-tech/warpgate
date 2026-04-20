@@ -16,15 +16,15 @@ pub struct SsoLoginRequest {
 }
 
 impl SsoLoginRequest {
-    pub fn auth_url(&self) -> &Url {
+    pub const fn auth_url(&self) -> &Url {
         &self.auth_url
     }
 
-    pub fn csrf_token(&self) -> &CsrfToken {
+    pub const fn csrf_token(&self) -> &CsrfToken {
         &self.csrf_token
     }
 
-    pub fn redirect_url(&self) -> &RedirectUrl {
+    pub const fn redirect_url(&self) -> &RedirectUrl {
         &self.redirect_url
     }
 

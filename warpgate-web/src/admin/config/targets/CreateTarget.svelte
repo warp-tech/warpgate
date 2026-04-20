@@ -48,7 +48,10 @@
                         verify: true,
                     },
                     username: 'root',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Postgres: {
                     kind: TargetKind.Postgres,
@@ -59,7 +62,10 @@
                         verify: true,
                     },
                     username: 'postgres',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,

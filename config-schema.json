@@ -44,6 +44,7 @@
       "$ref": "#/$defs/LogConfig",
       "default": {
         "format": "text",
+        "audit_retention": "11months 30days 3h 50m 24s",
         "retention": "7days",
         "send_to": null
       }
@@ -222,6 +223,10 @@
         "format": {
           "$ref": "#/$defs/LogFormat",
           "default": "text"
+        },
+        "audit_retention": {
+          "type": "string",
+          "default": "11months 30days 3h 50m 24s"
         },
         "retention": {
           "type": "string",

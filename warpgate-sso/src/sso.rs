@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::ops::Deref;
 
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
@@ -169,7 +168,7 @@ impl SsoClient {
         }
 
         for scope in self.config.scopes() {
-            auth_req = auth_req.add_scope(Scope::new(scope.to_string()));
+            auth_req = auth_req.add_scope(Scope::new(scope.clone()));
         }
 
         let pkce_verifier = if self.config.needs_pkce_verifier() {
@@ -231,7 +230,7 @@ impl SsoClient {
 
         if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
             token_verifier = token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
-                trusted_audiences.contains(aud.deref())
+                trusted_audiences.contains(&**aud)
             });
         }
 

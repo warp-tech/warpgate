@@ -6,7 +6,7 @@
     import { formatDistance, formatDistanceToNow } from 'date-fns'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
-    import LogViewer from './LogViewer.svelte'
+    import LogViewer from './log-viewer/LogViewer.svelte'
     import RelativeDate from './RelativeDate.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'

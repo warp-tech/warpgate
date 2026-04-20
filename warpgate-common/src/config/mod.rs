@@ -5,7 +5,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use defaults::*;
+use defaults::{
+    _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
+    _default_http_listen, _default_kubernetes_listen, _default_mysql_listen,
+    _default_postgres_listen, _default_recordings_path, _default_retention,
+    _default_session_max_age, _default_ssh_inactivity_timeout, _default_ssh_keys_path,
+    _default_ssh_listen,
+};
 use poem::http::uri;
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
@@ -20,6 +26,7 @@ use warpgate_tls::IntoTlsCertificateRelativePaths;
 
 use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
+use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
@@ -74,7 +81,7 @@ pub struct UserSsoCredential {
 }
 
 impl UserAuthCredential {
-    pub fn kind(&self) -> CredentialKind {
+    pub const fn kind(&self) -> CredentialKind {
         match self {
             Self::Password(_) => CredentialKind::Password,
             Self::PublicKey(_) => CredentialKind::PublicKey,
@@ -140,20 +147,18 @@ impl UserRequireCredentialsPolicy {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Clone, Object)]
 pub struct User {
-    #[serde(default)]
     pub id: Uuid,
     pub username: String,
     pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "require")]
     pub credential_policy: Option<UserRequireCredentialsPolicy>,
     pub rate_limit_bytes_per_second: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ldap_server_id: Option<Uuid>,
+    pub allowed_ip_ranges: Option<Vec<WarpgateIpNet>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Clone, Object)]
 pub struct UserDetails {
     pub inner: User,
     pub credentials: Vec<UserAuthCredential>,
@@ -232,7 +237,7 @@ pub enum AdminPermission {
 }
 
 impl AdminRole {
-    pub fn has_permission(&self, perm: AdminPermission) -> bool {
+    pub const fn has_permission(&self, perm: AdminPermission) -> bool {
         match perm {
             AdminPermission::TargetsCreate => self.targets_create,
             AdminPermission::TargetsEdit => self.targets_edit,
@@ -306,11 +311,11 @@ pub struct SshConfig {
 
 impl Default for SshConfig {
     fn default() -> Self {
-        SshConfig {
+        Self {
             enable: false,
             listen: _default_ssh_listen(),
             keys: _default_ssh_keys_path(),
-            host_key_verification: Default::default(),
+            host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
@@ -321,7 +326,7 @@ impl Default for SshConfig {
 
 impl SshConfig {
     pub fn external_port(&self) -> u16 {
-        self.external_port.unwrap_or(self.listen.port())
+        self.external_port.unwrap_or_else(|| self.listen.port())
     }
 
     pub fn external_host(&self) -> Option<String> {
@@ -369,12 +374,12 @@ pub struct HttpConfig {
 
 impl Default for HttpConfig {
     fn default() -> Self {
-        HttpConfig {
+        Self {
             listen: _default_http_listen(),
             external_port: None,
             external_host: None,
-            certificate: "".to_owned(),
-            key: "".to_owned(),
+            certificate: "".into(),
+            key: "".into(),
             trust_x_forwarded_headers: false,
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
@@ -385,7 +390,7 @@ impl Default for HttpConfig {
 
 impl HttpConfig {
     pub fn external_port(&self) -> u16 {
-        self.external_port.unwrap_or(self.listen.port())
+        self.external_port.unwrap_or_else(|| self.listen.port())
     }
 
     pub fn external_host(&self) -> Option<String> {
@@ -436,20 +441,20 @@ pub struct MySqlConfig {
 
 impl Default for MySqlConfig {
     fn default() -> Self {
-        MySqlConfig {
+        Self {
             enable: false,
             listen: _default_mysql_listen(),
             external_port: None,
             external_host: None,
-            certificate: "".to_owned(),
-            key: "".to_owned(),
+            certificate: "".into(),
+            key: "".into(),
         }
     }
 }
 
 impl MySqlConfig {
     pub fn external_port(&self) -> u16 {
-        self.external_port.unwrap_or(self.listen.port())
+        self.external_port.unwrap_or_else(|| self.listen.port())
     }
 
     pub fn external_host(&self) -> Option<String> {
@@ -484,13 +489,13 @@ pub struct KubernetesConfig {
 
 impl Default for KubernetesConfig {
     fn default() -> Self {
-        KubernetesConfig {
+        Self {
             enable: false,
             listen: _default_kubernetes_listen(),
             external_port: None,
             external_host: None,
-            certificate: "".to_owned(),
-            key: "".to_owned(),
+            certificate: "".into(),
+            key: "".into(),
             session_max_age: _default_session_max_age(),
         }
     }
@@ -498,7 +503,7 @@ impl Default for KubernetesConfig {
 
 impl KubernetesConfig {
     pub fn external_port(&self) -> u16 {
-        self.external_port.unwrap_or(self.listen.port())
+        self.external_port.unwrap_or_else(|| self.listen.port())
     }
 
     pub fn external_host(&self) -> Option<String> {
@@ -529,20 +534,20 @@ pub struct PostgresConfig {
 
 impl Default for PostgresConfig {
     fn default() -> Self {
-        PostgresConfig {
+        Self {
             enable: false,
             listen: _default_postgres_listen(),
             external_port: None,
             external_host: None,
-            certificate: "".to_owned(),
-            key: "".to_owned(),
+            certificate: "".into(),
+            key: "".into(),
         }
     }
 }
 
 impl PostgresConfig {
     pub fn external_port(&self) -> u16 {
-        self.external_port.unwrap_or(self.listen.port())
+        self.external_port.unwrap_or_else(|| self.listen.port())
     }
 
     pub fn external_host(&self) -> Option<String> {
@@ -574,6 +579,10 @@ pub struct LogConfig {
     #[schemars(with = "String")]
     pub retention: Duration,
 
+    #[serde(default = "_default_audit_retention", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub audit_retention: Duration,
+
     #[serde(default)]
     pub send_to: Option<String>,
 
@@ -585,6 +594,7 @@ impl Default for LogConfig {
     fn default() -> Self {
         Self {
             retention: _default_retention(),
+            audit_retention: _default_audit_retention(),
             send_to: None,
             format: LogFormat::default(),
         }
@@ -649,21 +659,19 @@ pub struct WarpgateConfig {
 
 impl WarpgateConfig {
     pub fn external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
-        if let Some(external_host) = self.store.external_host.as_ref() {
+        self.store.external_host.as_ref().map(|external_host| {
             #[allow(clippy::unwrap_used)]
-            let external_host = external_host.split(":").next().unwrap();
+            let external_host = external_host.split(':').next().unwrap();
 
-            Some((
+            (
                 Scheme::HTTPS,
                 external_host.to_owned(),
                 self.store
                     .http
                     .external_port
-                    .or(Some(self.store.http.listen.port())),
-            ))
-        } else {
-            None
-        }
+                    .or_else(|| Some(self.store.http.listen.port())),
+            )
+        })
     }
 
     /// Extract external host:port from request headers
@@ -693,7 +701,7 @@ impl WarpgateConfig {
             if let Some(xfh) = request.header("x-forwarded-host") {
                 // XFH can contain both host and port
                 let parts = xfh.split(':').collect::<Vec<_>>();
-                host = parts.first().map(|x| x.to_string()).or(host);
+                host = parts.first().map(ToString::to_string).or(host);
                 port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
             }
 
@@ -713,7 +721,7 @@ impl WarpgateConfig {
     ) -> Result<Url, WarpgateError> {
         let Some((scheme, host, port)) = for_request
             .and_then(|r| self.external_host_from_request(r))
-            .or(self.external_host_from_config())
+            .or_else(|| self.external_host_from_config())
         else {
             return Err(WarpgateError::ExternalHostUnknown);
         };
@@ -721,8 +729,8 @@ impl WarpgateConfig {
         if let Some(list) = domain_whitelist {
             if !list.contains(&host) {
                 return Err(WarpgateError::ExternalHostNotWhitelisted(
-                    host.clone(),
-                    list.iter().map(|x| x.to_string()).collect(),
+                    host,
+                    list.to_vec(),
                 ));
             }
         }
@@ -733,7 +741,7 @@ impl WarpgateConfig {
             if scheme == Scheme::HTTP && port != 80 || scheme == Scheme::HTTPS && port != 443 {
                 url = format!("{url}:{port}");
             }
-        };
+        }
         Url::parse(&url).map_err(WarpgateError::UrlParse)
     }
 

@@ -40,7 +40,7 @@ pub enum AuthCredential {
 }
 
 impl AuthCredential {
-    pub fn kind(&self) -> CredentialKind {
+    pub const fn kind(&self) -> CredentialKind {
         match self {
             Self::Password { .. } => CredentialKind::Password,
             Self::PublicKey { .. } => CredentialKind::PublicKey,
@@ -65,7 +65,7 @@ impl AuthCredential {
 
 impl From<UserCertificateCredential> for AuthCredential {
     fn from(cred: UserCertificateCredential) -> Self {
-        AuthCredential::Certificate {
+        Self::Certificate {
             certificate_pem: cred.certificate_pem,
         }
     }

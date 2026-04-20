@@ -2,23 +2,22 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-migrations"
+version = "0.22.0-beta.6"
 publish = false
-version = "0.22.0-beta.4"
 
 [lib]
 
 [dependencies]
 tokio.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
 regex.workspace = true
 sea-orm = { workspace = true, features = [
-    "with-chrono",
     "with-uuid",
     "with-json",
 ], default-features = false }
 sea-orm-migration.workspace = true
 russh.workspace = true
+time.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 serde_json.workspace = true

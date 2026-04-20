@@ -53,7 +53,7 @@ impl ImportApi {
             return Ok(ImportLdapUsersResponse::Ok(Json(vec![])));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
@@ -77,6 +77,7 @@ impl ImportApi {
                         rate_limit_bytes_per_second: Set(None),
                         ldap_object_uuid: Set(Some(user.object_uuid)),
                         ldap_server_id: Set(Some(server.id)),
+                        allowed_ip_ranges: Set(serde_json::Value::Null),
                     };
                     values.insert(&*db).await?;
                     imported.push(user.username.clone());
@@ -160,7 +161,7 @@ struct CreateLdapServerRequest {
     uuid_attribute: String,
 }
 
-fn default_port() -> i32 {
+const fn default_port() -> i32 {
     389
 }
 
@@ -168,23 +169,23 @@ fn default_user_filter() -> String {
     "(objectClass=person)".to_string()
 }
 
-fn default_tls_mode() -> TlsMode {
+const fn default_tls_mode() -> TlsMode {
     TlsMode::Preferred
 }
 
-fn default_tls_verify() -> bool {
+const fn default_tls_verify() -> bool {
     true
 }
 
-fn default_enabled() -> bool {
+const fn default_enabled() -> bool {
     true
 }
 
-fn default_auto_link_sso_users() -> bool {
+const fn default_auto_link_sso_users() -> bool {
     false
 }
 
-fn default_username_attribute() -> LdapUsernameAttribute {
+const fn default_username_attribute() -> LdapUsernameAttribute {
     LdapUsernameAttribute::Cn
 }
 
@@ -192,7 +193,7 @@ fn default_ssh_key_attribute() -> String {
     "sshPublicKey".to_string()
 }
 
-fn default_uuid_attribute() -> String {
+const fn default_uuid_attribute() -> String {
     String::new()
 }
 
@@ -295,7 +296,7 @@ impl ListApi {
     ) -> Result<GetLdapServersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let mut query = LdapServer::Entity::find().order_by_asc(LdapServer::Column::Name);
 
@@ -330,7 +331,7 @@ impl ListApi {
             )));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         // Check if name already exists
         let existing = LdapServer::Entity::find()
@@ -446,7 +447,7 @@ impl ListApi {
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {}", e),
+                        message: format!("Connection failed: {e}"),
                         base_dns: None,
                     },
                 ))),
@@ -512,7 +513,7 @@ impl DetailApi {
     ) -> Result<GetLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapServerResponse::NotFound);
@@ -535,7 +536,7 @@ impl DetailApi {
     ) -> Result<UpdateLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateLdapServerResponse::NotFound);
@@ -566,11 +567,10 @@ impl DetailApi {
             host: body.host.clone(),
             port: body.port as u16,
             bind_dn: body.bind_dn.clone(),
-            bind_password: body
-                .bind_password
-                .as_ref()
-                .map(|p| p.expose_secret().clone())
-                .unwrap_or_else(|| model.bind_password.clone().unwrap()),
+            bind_password: body.bind_password.as_ref().map_or_else(
+                || model.bind_password.clone().unwrap(),
+                |p| p.expose_secret().clone(),
+            ),
             tls_mode: body.tls_mode,
             tls_verify: body.tls_verify,
             base_dns: vec![],
@@ -602,7 +602,7 @@ impl DetailApi {
     ) -> Result<DeleteLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteLdapServerResponse::NotFound);
@@ -643,7 +643,7 @@ impl QueryApi {
     ) -> Result<GetLdapUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersCreate)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapUsersResponse::NotFound);
@@ -661,8 +661,7 @@ impl QueryApi {
             Ok(users) => users,
             Err(e) => {
                 return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
-                    "Failed to query users: {}",
-                    e
+                    "Failed to query users: {e}"
                 ))))
             }
         };

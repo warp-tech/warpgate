@@ -18,9 +18,9 @@ use crate::Cli;
 pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
         match cli.debug {
-            0 => std::env::set_var("RUST_LOG", "warpgate=info"),
-            1 => std::env::set_var("RUST_LOG", "warpgate=debug"),
-            2 => std::env::set_var("RUST_LOG", "warpgate=debug,russh=debug"),
+            0 => std::env::set_var("RUST_LOG", "audit=info,warpgate=info"),
+            1 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug"),
+            2 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug,russh=debug"),
             _ => std::env::set_var("RUST_LOG", "debug"),
         }
     }
@@ -35,7 +35,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     // Determine effective log format (CLI overrides config)
     let log_format = cli
         .log_format
-        .or(config.map(|c| c.store.log.format))
+        .or_else(|| config.map(|c| c.store.log.format))
         .unwrap_or_default();
 
     let registry = tracing_subscriber::registry();
