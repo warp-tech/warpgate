@@ -39,7 +39,7 @@ fn ldap_user_attributes(config: &LdapConfig) -> Vec<String> {
 
 /// Extract user details from an LDAP [SearchEntry].
 /// Returns None if no valid username or UUID can be determined.
-fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<LdapUser> {
+fn extract_ldap_user(search_entry: &SearchEntry, config: &LdapConfig) -> Result<LdapUser> {
     let dn = search_entry.dn.clone();
 
     // Extract username - try different attributes
@@ -62,6 +62,7 @@ fn extract_ldap_user(search_entry: SearchEntry, config: &LdapConfig) -> Result<L
         .and_then(|v| v.first())
         .cloned();
 
+    #[allow(clippy::option_if_let_else)]
     let object_uuid = if let Some(custom_uuid_attr) = &config.uuid_attribute {
         // Try parsing as a binary UUID
         search_entry
@@ -134,9 +135,9 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
                 &ldap_user_attributes(config),
             )
             .await
-            .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?
+            .map_err(|e| LdapError::QueryFailed(format!("Search failed in {base_dn}: {e}")))?
             .success()
-            .map_err(|e| LdapError::QueryFailed(format!("Search failed in {}: {}", base_dn, e)))?;
+            .map_err(|e| LdapError::QueryFailed(format!("Search failed in {base_dn}: {e}")))?;
 
         for entry in rs {
             let search_entry = SearchEntry::construct(entry);
@@ -148,13 +149,12 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
             }
             seen_dns.insert(dn.clone());
 
-            match extract_ldap_user(search_entry, config) {
+            match extract_ldap_user(&search_entry, config) {
                 Ok(user) => {
                     all_users.push(user);
                 }
                 Err(e) => {
                     warn!("Skipping LDAP user {dn}: {e}");
-                    continue;
                 }
             }
         }
@@ -207,14 +207,13 @@ async fn find_user_by_filter(
             #[allow(clippy::unwrap_used, reason = "length checked")]
             let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
 
-            match extract_ldap_user(search_entry, config) {
+            match extract_ldap_user(&search_entry, config) {
                 Ok(user) => {
                     debug!("Found LDAP user with filter {filter}: {user:?}");
                     return Ok(Some(user));
                 }
                 Err(e) => {
                     warn!("LDAP result extraction failed for filter {filter}: {e}");
-                    continue;
                 }
             }
         }
@@ -237,7 +236,7 @@ pub async fn find_user_by_uuid(
     let binary_guid_str = {
         let uuid_bytes = object_uuid.as_bytes();
         uuid_bytes.iter().fold(String::new(), |mut s, b| {
-            let _ = write!(&mut s, "\\{:02x}", b);
+            let _ = write!(&mut s, "\\{b:02x}");
             s
         })
     };

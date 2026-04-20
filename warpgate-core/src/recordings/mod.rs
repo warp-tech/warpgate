@@ -6,8 +6,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
+use time::OffsetDateTime;
 use tokio::sync::{broadcast, Mutex};
-use tracing::*;
+use tracing::info;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
 use warpgate_common::{GlobalParams, RecordingsConfig, SessionId, WarpgateConfig};
@@ -79,12 +80,7 @@ impl SessionRecordings {
     }
 
     /// Starting a recording with the same name again will append to it
-    pub async fn start<T, M>(
-        &mut self,
-        id: &SessionId,
-        name: Option<String>,
-        metadata: M,
-    ) -> Result<T>
+    pub async fn start<T, M>(&self, id: &SessionId, name: Option<String>, metadata: M) -> Result<T>
     where
         T: Recorder,
         M: Serialize + Debug,
@@ -109,22 +105,21 @@ impl SessionRecordings {
                 )
                 .one(&*db)
                 .await?;
-            match existing {
-                Some(e) => e,
-                None => {
-                    info!(%name, ?metadata, path=?path, "Recording session {}", id);
-                    use sea_orm::ActiveValue::Set;
-                    let values = Recording::ActiveModel {
-                        id: Set(Uuid::new_v4()),
-                        started: Set(chrono::Utc::now()),
-                        session_id: Set(*id),
-                        name: Set(name.clone()),
-                        kind: Set(T::kind()),
-                        metadata: Set(serde_json::to_string(&metadata)?),
-                        ..Default::default()
-                    };
-                    values.insert(&*db).await.map_err(Error::Database)?
-                }
+            if let Some(e) = existing {
+                e
+            } else {
+                use sea_orm::ActiveValue::Set;
+                info!(%name, ?metadata, path=?path, "Recording session {}", id);
+                let values = Recording::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    started: Set(OffsetDateTime::now_utc()),
+                    session_id: Set(*id),
+                    name: Set(name.clone()),
+                    kind: Set(T::kind()),
+                    metadata: Set(serde_json::to_string(&metadata)?),
+                    ..Default::default()
+                };
+                values.insert(&*db).await.map_err(Error::Database)?
             }
         };
 
@@ -141,7 +136,7 @@ impl SessionRecordings {
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
         let live = self.live.lock().await;
-        live.get(id).map(|sender| sender.subscribe())
+        live.get(id).map(broadcast::Sender::subscribe)
     }
 
     pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {

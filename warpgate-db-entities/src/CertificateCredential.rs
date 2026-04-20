@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
 use sea_orm::Set;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserCertificateCredential};
 
@@ -13,8 +13,8 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     pub label: String,
-    pub date_added: Option<DateTime<Utc>>,
-    pub last_used: Option<DateTime<Utc>>,
+    pub date_added: Option<OffsetDateTime>,
+    pub last_used: Option<OffsetDateTime>,
     #[sea_orm(column_type = "Text")]
     pub certificate_pem: String,
 }
@@ -46,7 +46,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for UserCertificateCredential {
     fn from(credential: Model) -> Self {
-        UserCertificateCredential {
+        Self {
             certificate_pem: credential.certificate_pem.into(),
         }
     }

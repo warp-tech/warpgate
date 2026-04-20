@@ -9,6 +9,8 @@ export interface ConnectionOptions {
     targetExternalHost?: string
     ticketSecret?: string
     targetDefaultDatabaseName?: string
+    clientCertificatePem?: string
+    clientPrivateKeyPem?: string
 }
 
 export function makeSSHUsername (opt: ConnectionOptions): string {
@@ -181,8 +183,8 @@ current-context: ${context}
 users:
 - name: ${context}
   user:
-    client-certificate-data: <your-client-certificate-base64>
-    client-key-data: <your-private-key-base64>
+    client-certificate-data: ${opt.clientCertificatePem ? btoa(opt.clientCertificatePem) : '<your-client-certificate-base64>'}
+    client-key-data: ${opt.clientPrivateKeyPem ? btoa(opt.clientPrivateKeyPem) : '<your-private-key-base64>'}
 `
     }
 }

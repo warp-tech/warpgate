@@ -12,6 +12,9 @@ fix *ARGS:
 clippy *ARGS:
     for p in {{projects}}; do cargo cranky --all-features -p $p {{ARGS}}; done
 
+bless *ARGS:
+    for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done
+
 test:
     for p in {{projects}}; do cargo test --all-features -p $p; done
 

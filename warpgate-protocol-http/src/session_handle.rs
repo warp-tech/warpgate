@@ -22,7 +22,7 @@ pub struct HttpSessionHandle {
 impl HttpSessionHandle {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<SessionHandleCommand>) {
         let (sender, receiver) = mpsc::unbounded_channel();
-        (HttpSessionHandle { sender }, receiver)
+        (Self { sender }, receiver)
     }
 }
 

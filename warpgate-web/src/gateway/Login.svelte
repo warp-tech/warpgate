@@ -174,7 +174,7 @@
 
     <div class="mt-5">
         <div class="page-summary-bar">
-            {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
+            {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
                 <h1>Welcome</h1>
             {:else}
                 <h1>Continue login</h1>
@@ -209,7 +209,7 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
             <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
             {@render localLoginForm()}
         {/if}
@@ -219,6 +219,9 @@
         {#if authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
+        {#if authState === ApiAuthState.IpRejected}
+            <Alert color="danger">Login denied: your IP address is not in the allowed range for this user</Alert>
+        {/if}
         {#if serverErrorMessage}
             <Alert color="danger">{serverErrorMessage}</Alert>
         {/if}
@@ -227,7 +230,7 @@
         {/if}
     </div>
 
-    {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed}
+    {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
         <Loadable promise={ssoProvidersPromise}>
             {#snippet children(ssoProviders)}
                 <div class="mt-3 sso-buttons">
@@ -254,7 +257,7 @@
         </Loadable>
     {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
         <div class="mt-3 text-center">
             <!-- svelte-ignore a11y_invalid_attribute -->
             <a
@@ -270,7 +273,7 @@
         </div>
     {/if}
 
-    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed}
+    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
         <button
             class="btn w-100 mt-3 btn-secondary"
             onclick={cancel}

@@ -7,13 +7,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
-use ansi_term::Colour;
 use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::{MethodKind, MethodSet, Sig};
+use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
@@ -36,7 +36,7 @@ use warpgate_core::{
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::ServiceOutput;
+use super::service_output::{ansi_paint, ServiceOutput};
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
@@ -130,8 +130,8 @@ impl ServerSession {
     ) -> Result<impl Future<Output = Result<()>>> {
         let id = server_handle.lock().await.id();
 
-        let _span = info_span!("SSH", session=%id);
-        let _enter = _span.enter();
+        let span_ = info_span!("SSH", session=%id);
+        let _enter = span_.enter();
 
         let mut rc_handles = RemoteClient::create(id, services.clone())?;
 
@@ -266,54 +266,56 @@ impl ServerSession {
                         CredentialKind::Totp,
                         CredentialKind::WebUserApproval,
                     ],
+                    Some(self.remote_address.ip()),
                 )
                 .await?
                 .1;
             self.auth_state = Some(state);
         }
         #[allow(clippy::unwrap_used)]
-        Ok(self.auth_state.as_ref().cloned().unwrap())
+        Ok(self.auth_state.clone().unwrap())
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
         let client_ip = self.remote_address.ip().to_string();
-        match self.username {
-            Some(ref username) => {
-                info_span!("SSH", session=%self.id, session_username=%username, %client_ip)
-            }
-            None => info_span!("SSH", session=%self.id, %client_ip),
+        if let Some(ref username) = self.username {
+            info_span!("SSH", session=%self.id, session_username=%username, %client_ip)
+        } else {
+            info_span!("SSH", session=%self.id, %client_ip)
         }
     }
 
-    fn map_channel(&self, ch: &ServerChannelId) -> Result<Uuid, WarpgateError> {
+    fn map_channel(&self, ch: ServerChannelId) -> Result<Uuid, WarpgateError> {
         self.channel_map
-            .get_by_left(ch)
-            .cloned()
-            .ok_or(WarpgateError::InconsistentState)
+            .get_by_left(&ch)
+            .copied()
+            .ok_or(WarpgateError::InconsistentState(
+                "Tried to map unknown channel ID".into(),
+            ))
     }
 
     fn map_channel_reverse(&self, ch: &Uuid) -> Result<ServerChannelId> {
         self.channel_map
             .get_by_right(ch)
-            .cloned()
+            .copied()
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
-    pub async fn emit_service_message(&mut self, msg: &str) -> Result<()> {
+    pub fn emit_service_message(&self, msg: &str) -> Result<()> {
         debug!("Service message: {}", msg);
 
         let output = format!(
             "{}{} {}\r\n",
             ERASE_PROGRESS_SPINNER,
-            Colour::Black.on(Colour::White).paint(" Warpgate "),
+            ansi_paint(Color::Black, Color::White, " Warpgate "),
             msg.replace('\n', "\r\n"),
         );
-        self.emit_pty_output(output.as_bytes()).await?;
+        self.emit_pty_output(output.as_bytes())?;
 
         Ok(())
     }
 
-    pub async fn emit_pty_output(&mut self, data: &[u8]) -> Result<()> {
+    pub fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
         let channels = self.pty_channels.clone();
         for channel in channels {
             let channel = self.map_channel_reverse(&channel)?;
@@ -340,31 +342,25 @@ impl ServerSession {
                 anyhow::bail!("Invalid session state (target not set)")
             }
             TargetSelection::NotFound(name) => {
-                self.emit_service_message(&format!("Selected target not found: {name}"))
-                    .await?;
+                self.emit_service_message(&format!("Selected target not found: {name}"))?;
                 self.disconnect_server().await;
-                anyhow::bail!("Target not found: {}", name);
+                anyhow::bail!("Target not found: {name}");
             }
             TargetSelection::Found(target, ssh_options) => {
                 if self.rc_state == RCState::NotInitialized {
-                    self.connect_remote(target, ssh_options).await?;
+                    self.connect_remote(&target, ssh_options)?;
                 }
             }
         }
         Ok(())
     }
 
-    async fn connect_remote(
-        &mut self,
-        target: Target,
-        ssh_options: TargetSSHOptions,
-    ) -> Result<()> {
+    fn connect_remote(&mut self, target: &Target, ssh_options: TargetSSHOptions) -> Result<()> {
         self.rc_state = RCState::Connecting;
         self.send_command(RCCommand::Connect(ssh_options))
             .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.service_output.show_progress();
-        self.emit_service_message(&format!("Selected target: {}", target.name))
-            .await?;
+        self.emit_service_message(&format!("Selected target: {}", target.name))?;
 
         Ok(())
     }
@@ -377,7 +373,7 @@ impl ServerSession {
             match event {
                 Event::Client(RCEvent::Done) => Err(WarpgateError::SessionEnd)?,
                 Event::ServerHandler(ServerHandlerEvent::Disconnect) => {
-                    Err(WarpgateError::SessionEnd)?
+                    Err(WarpgateError::SessionEnd)?;
                 }
                 Event::Client(e) => {
                     debug!(event=?e, "Event");
@@ -402,7 +398,7 @@ impl ServerSession {
                     }
                 }
                 Event::ServiceOutput(data) => {
-                    let _ = self.emit_pty_output(&data).await;
+                    let _ = self.emit_pty_output(&data);
                 }
                 Event::ConsoleInput(_) => (),
             }
@@ -457,7 +453,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
-                let channel_id = self.map_channel(&server_channel_id)?;
+                let channel_id = self.map_channel(server_channel_id)?;
                 self.channel_pty_size_map
                     .insert(channel_id, request.clone());
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
@@ -485,7 +481,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
-                let channel_id = self.map_channel(&server_channel_id)?;
+                let channel_id = self.map_channel(server_channel_id)?;
                 let _ = self.maybe_connect_remote().await;
 
                 let _ = self.send_command(RCCommand::Channel(
@@ -536,7 +532,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ExtendedData(channel, data, code, reply) => {
-                self._extended_data(channel, code, data).await?;
+                self._extended_data(channel, code, data)?;
                 let _ = reply.send(());
             }
 
@@ -546,7 +542,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ChannelEof(channel, reply) => {
-                self._channel_eof(channel).await?;
+                self._channel_eof(channel)?;
                 let _ = reply.send(());
             }
 
@@ -617,9 +613,9 @@ impl ServerSession {
     pub async fn handle_session_control(&mut self, command: SessionHandleCommand) -> Result<()> {
         match command {
             SessionHandleCommand::Close => {
-                let _ = self.emit_service_message("Session closed by admin").await;
+                let _ = self.emit_service_message("Session closed by admin");
                 info!("Session closed by admin");
-                self.request_disconnect().await;
+                self.request_disconnect();
                 self.disconnect_server().await;
             }
         }
@@ -636,11 +632,9 @@ impl ServerSession {
                         let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black
-                                .on(Colour::Green)
-                                .paint(" ✓ Warpgate connected ")
+                            ansi_paint(Color::Black, Color::Green, " ✓ Warpgate connected ")
                         );
-                        let _ = self.emit_pty_output(msg.as_bytes()).await;
+                        let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     RCState::Disconnected => {
                         self.service_output.stop_progress();
@@ -670,40 +664,41 @@ impl ServerSession {
                             received_key_type,
                             received_key_base64
                         );
-                        self.emit_service_message(&msg).await?;
+                        self.emit_service_message(&msg)?;
                         self.emit_service_message(
                             "If you know that the key is correct (e.g. it has been changed),",
-                        )
-                        .await?;
+                        )?;
                         self.emit_service_message(
                             "you can remove the old key in the Warpgate management UI and try again",
                         )
-                        .await?;
+                        ?;
                     }
                     ConnectionError::Authentication => {
                         let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black
-                                .on(Colour::Red)
-                                .paint(" ✗ SSH target rejected Warpgate authentication request ")
+                            ansi_paint(
+                                Color::Black,
+                                Color::Red,
+                                " ✗ SSH target rejected Warpgate authentication request "
+                            )
                         );
-                        let _ = self.emit_pty_output(msg.as_bytes()).await;
+                        let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     error => {
                         let msg = format!(
                             "{}{} {}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black.on(Colour::Red).paint(" ✗ Connection failed "),
+                            ansi_paint(Color::Black, Color::Red, " ✗ Connection failed "),
                             error
                         );
-                        let _ = self.emit_pty_output(msg.as_bytes()).await;
+                        let _ = self.emit_pty_output(msg.as_bytes());
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_service_message(&format!("Error: {e}")).await;
+                let _ = self.emit_service_message(&format!("Error: {e}"));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -835,8 +830,7 @@ impl ServerSession {
                     "Host key ({}): {}",
                     key.algorithm(),
                     key.public_key_base64()
-                ))
-                .await?;
+                ))?;
             }
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
@@ -938,7 +932,7 @@ impl ServerSession {
     }
 
     async fn handle_unknown_host_key(
-        &mut self,
+        &self,
         key: PublicKey,
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
@@ -970,31 +964,30 @@ impl ServerSession {
             warn!(
                 "Connect to this target with an interactive session once to accept the host key."
             );
-            self.request_disconnect().await;
+            self.request_disconnect();
             anyhow::bail!("No PTY channel to show an interactive prompt on")
         }
 
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
             key.algorithm()
-        ))
-        .await?;
-        self.emit_service_message("Trust this key? (y/n)").await?;
+        ))?;
+        self.emit_service_message("Trust this key? (y/n)")?;
 
         let mut sub = self
             .hub
             .subscribe(|e| matches!(e, Event::ConsoleInput(_)))
             .await;
 
-        let mut service_output = self.service_output.clone();
+        let service_output = self.service_output.clone();
         tokio::spawn(async move {
             loop {
                 match sub.recv().await {
                     Some(Event::ConsoleInput(data)) => {
-                        if data == "y".as_bytes() {
+                        if &data[..] == b"y" {
                             let _ = reply.send(true);
                             break;
-                        } else if data == "n".as_bytes() {
+                        } else if &data[..] == b"n" {
                             let _ = reply.send(false);
                             break;
                         }
@@ -1125,7 +1118,7 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         request: PtyRequest,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         self.channel_pty_size_map
             .insert(channel_id, request.clone());
         if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
@@ -1150,7 +1143,7 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         data: Bytes,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         match std::str::from_utf8(&data) {
             Err(e) => {
                 error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
@@ -1179,7 +1172,7 @@ impl ServerSession {
 
     async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
         let recorder = async {
-            let mut recorder = self
+            let recorder = self
                 .services
                 .recordings
                 .lock()
@@ -1210,7 +1203,7 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         request: X11Request,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Requested X11");
         let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::Channel(
@@ -1227,7 +1220,7 @@ impl ServerSession {
         name: String,
         value: String,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, %name, %value, "Environment");
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
@@ -1267,7 +1260,7 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         name: String,
     ) -> Result<(), SshClientError> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         info!(channel=%channel_id, "Requesting subsystem {}", &name);
         let _ = self.maybe_connect_remote().await;
         self.send_command_and_wait(RCCommand::Channel(
@@ -1279,11 +1272,11 @@ impl ServerSession {
     }
 
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
         if self.rc_state == RCState::Connecting && data.first() == Some(&3) {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
-            self.request_disconnect().await;
+            self.request_disconnect();
             return Ok(());
         }
 
@@ -1315,13 +1308,13 @@ impl ServerSession {
         Ok(())
     }
 
-    async fn _extended_data(
-        &mut self,
+    fn _extended_data(
+        &self,
         server_channel_id: ServerChannelId,
         code: u32,
         data: Bytes,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
         let _ = self.send_command(RCCommand::Channel(
             channel_id,
@@ -1361,7 +1354,7 @@ impl ServerSession {
     }
 
     async fn _agent_forward(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Requested Agent Forwarding");
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
@@ -1388,16 +1381,17 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        if let Ok(true) = self
-            .try_validate_public_key_offer(
+        if matches!(
+            self.try_validate_public_key_offer(
                 &selector,
                 Some(AuthCredential::PublicKey {
                     kind: key.algorithm(),
                     public_key_bytes: Bytes::from(key.public_key_bytes()),
                 }),
             )
-            .await
-        {
+            .await,
+            Ok(true)
+        ) {
             return russh::server::Auth::Accept;
         }
 
@@ -1621,10 +1615,10 @@ impl ServerSession {
         for cred_kind in kinds {
             let method_kind = match cred_kind {
                 CredentialKind::Password => MethodKind::Password,
-                CredentialKind::Totp => MethodKind::KeyboardInteractive,
-                CredentialKind::WebUserApproval => MethodKind::KeyboardInteractive,
+                CredentialKind::Totp | CredentialKind::WebUserApproval | CredentialKind::Sso => {
+                    MethodKind::KeyboardInteractive
+                }
                 CredentialKind::PublicKey => MethodKind::PublicKey,
-                CredentialKind::Sso => MethodKind::KeyboardInteractive,
                 CredentialKind::Certificate => {
                     // Certificate authentication is not supported for SSH protocol
                     // This credential type is primarily for Kubernetes
@@ -1645,7 +1639,7 @@ impl ServerSession {
     }
 
     async fn try_validate_public_key_offer(
-        &mut self,
+        &self,
         selector: &AuthSelector,
         credential: Option<AuthCredential>,
     ) -> Result<bool> {
@@ -1663,7 +1657,7 @@ impl ServerSession {
 
                 Ok(false)
             }
-            _ => Ok(false),
+            AuthSelector::Ticket { .. } => Ok(false),
         }
     }
 
@@ -1757,10 +1751,10 @@ impl ServerSession {
             }
             AuthSelector::Ticket { secret } => {
                 match authorize_ticket(&self.services.db, secret).await? {
-                    Some((ticket, user_info)) => {
-                        info!("Authorized for {} with a ticket", ticket.target);
+                    Some((ticket, target, user_info)) => {
+                        info!("Authorized for {} with a ticket", target.name);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(user_info.clone(), &ticket.target).await?;
+                        self._auth_accept(user_info.clone(), &target.name).await?;
 
                         Ok(AuthResult::Accepted { user_info })
                     }
@@ -1807,7 +1801,7 @@ impl ServerSession {
 
         // Forward username from the authenticated user to the target, if target has no username
         if ssh_options.username.is_empty() {
-            ssh_options.username = user_info.username.to_string();
+            ssh_options.username = user_info.username.clone();
         }
 
         let _ = self.server_handle.lock().await.set_target(&target).await;
@@ -1816,15 +1810,15 @@ impl ServerSession {
     }
 
     async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
         Ok(())
     }
 
-    async fn _channel_eof(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+    fn _channel_eof(&self, server_channel_id: ServerChannelId) -> Result<()> {
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
         Ok(())
@@ -1835,7 +1829,7 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         signal: Sig,
     ) -> Result<()> {
-        let channel_id = self.map_channel(&server_channel_id)?;
+        let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, ?signal, "Signal");
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
@@ -1845,14 +1839,14 @@ impl ServerSession {
         Ok(())
     }
 
-    fn send_command(&mut self, command: RCCommand) -> Result<(), RCCommand> {
+    fn send_command(&self, command: RCCommand) -> Result<(), RCCommand> {
         self.rc_tx.send((command, None)).map_err(|e| e.0 .0)
     }
 
     async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
         let (tx, rx) = oneshot::channel();
         let mut cmd = match self.rc_tx.send((command, Some(tx))) {
-            Ok(_) => PendingCommand::Waiting(rx),
+            Ok(()) => PendingCommand::Waiting(rx),
             Err(_) => PendingCommand::Failed,
         };
 
@@ -1864,21 +1858,21 @@ impl ServerSession {
                 event = self.get_next_event() => {
                     match event {
                         Some(event) => {
-                            self.handle_event(event).await.map_err(SshClientError::from)?
+                            self.handle_event(event).await.map_err(SshClientError::from)?;
                         }
                         None => {Err(SshClientError::MpscError)?}
-                    };
+                    }
                 }
             }
         }
     }
 
-    pub async fn _disconnect(&mut self) {
+    pub fn _disconnect(&self) {
         debug!("Client disconnect requested");
-        self.request_disconnect().await;
+        self.request_disconnect();
     }
 
-    async fn request_disconnect(&mut self) {
+    fn request_disconnect(&self) {
         debug!("Disconnecting");
         let _ = self.rc_abort_tx.send(());
         if self.rc_state != RCState::NotInitialized && self.rc_state != RCState::Disconnected {
@@ -1896,7 +1890,7 @@ impl ServerSession {
         let channels = all_channels
             .into_iter()
             .map(|x| self.map_channel_reverse(&x))
-            .filter_map(|x| x.ok())
+            .filter_map(std::result::Result::ok)
             .collect::<Vec<_>>();
 
         let _ = self
@@ -1930,13 +1924,13 @@ impl Future for PendingCommand {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.get_mut() {
-            PendingCommand::Waiting(ref mut rx) => match Pin::new(rx).poll(cx) {
+            Self::Waiting(ref mut rx) => match Pin::new(rx).poll(cx) {
                 Poll::Ready(result) => {
                     Poll::Ready(result.unwrap_or(Err(SshClientError::MpscError)))
                 }
                 Poll::Pending => Poll::Pending,
             },
-            PendingCommand::Failed => Poll::Ready(Err(SshClientError::MpscError)),
+            Self::Failed => Poll::Ready(Err(SshClientError::MpscError)),
         }
     }
 }

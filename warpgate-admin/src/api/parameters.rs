@@ -21,6 +21,7 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub show_session_menu: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -31,6 +32,7 @@ struct ParameterUpdate {
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub minimize_password_login: Option<bool>,
+    pub show_session_menu: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -55,7 +57,7 @@ impl Api {
     ) -> Result<GetParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -65,6 +67,7 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             minimize_password_login: parameters.minimize_password_login,
+            show_session_menu: parameters.show_session_menu,
         })))
     }
 
@@ -81,19 +84,20 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let services = &ctx.services;
+        let services = ctx.services();
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
         parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
         parameters.rate_limit_bytes_per_second =
-            Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+            Set(body.rate_limit_bytes_per_second.map(i64::from));
         parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
         parameters.ssh_client_auth_password = body.ssh_client_auth_password.map_or(NotSet, Set);
         parameters.ssh_client_auth_keyboard_interactive = body
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
+        parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);
@@ -102,7 +106,7 @@ impl Api {
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .apply_new_rate_limits(&*services.state.lock().await)
             .await?;
 
         Ok(UpdateParametersResponse::Done)

@@ -2,28 +2,30 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.22.0-beta.4"
+version = "0.22.0-beta.6"
+publish = false
 
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 cookie = "0.18"
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
 http = { version = "1.0", default-features = false }
-once_cell = { version = "1.17", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 reqwest.workspace = true
+reqwest.features = ["json"]
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 warpgate-admin = { path = "../warpgate-admin", default-features = false }
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
@@ -33,6 +35,7 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-web = { path = "../warpgate-web", default-features = false }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
+subtle = "2"
 uuid.workspace = true
 regex.workspace = true
 url = { version = "2.4", default-features = false }

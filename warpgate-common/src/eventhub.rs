@@ -11,7 +11,7 @@ pub struct EventSender<E> {
 
 impl<E> Clone for EventSender<E> {
     fn clone(&self) -> Self {
-        EventSender {
+        Self {
             subscriptions: self.subscriptions.clone(),
         }
     }

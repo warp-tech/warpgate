@@ -30,8 +30,8 @@ impl Services {
         admin_token: Option<String>,
         params: GlobalParams,
     ) -> Result<Self> {
-        let mut db = connect_to_db(&config, &params).await?;
-        populate_db(&mut db, &mut config).await?;
+        let db = connect_to_db(&config, &params).await?;
+        populate_db(&db, &mut config).await?;
         let db = Arc::new(Mutex::new(db));
 
         let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
@@ -39,7 +39,7 @@ impl Services {
 
         let config = Arc::new(Mutex::new(config));
 
-        let config_provider = Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).await.into()));
+        let config_provider = Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).into()));
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(config_provider.clone())));
 
@@ -47,13 +47,13 @@ impl Services {
             let auth_state_store = auth_state_store.clone();
             async move {
                 loop {
-                    auth_state_store.lock().await.vacuum().await;
+                    auth_state_store.lock().await.vacuum();
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             }
         });
 
-        let mut rate_limiter_registry = RateLimiterRegistry::new(db.clone());
+        let rate_limiter_registry = RateLimiterRegistry::new(db.clone());
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
@@ -61,7 +61,7 @@ impl Services {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db, &rate_limiter_registry)?,
+            state: State::new(&db, &rate_limiter_registry),
             rate_limiter_registry,
             config_provider,
             auth_state_store,

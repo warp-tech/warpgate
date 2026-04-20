@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -6,10 +5,12 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set,
 };
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
 
 use super::AnySecurityScheme;
@@ -25,8 +26,8 @@ fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateErro
 struct ExistingCertificateCredential {
     id: Uuid,
     label: String,
-    date_added: Option<DateTime<Utc>>,
-    last_used: Option<DateTime<Utc>>,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
     fingerprint: String,
 }
 
@@ -70,6 +71,8 @@ enum GetCertificateCredentialsResponse {
 enum IssueCertificateCredentialResponse {
     #[oai(status = 201)]
     Issued(Json<IssuedCertificateCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -97,7 +100,7 @@ impl ListApi {
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let objects = CertificateCredential::Entity::find()
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -123,14 +126,13 @@ impl ListApi {
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let params = Parameters::Entity::get(&db).await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
-        let user = User::Entity::find_by_id(*user_id)
-            .one(&*db)
-            .await?
-            .ok_or(WarpgateError::UserNotFound(user_id.to_string()))?;
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(IssueCertificateCredentialResponse::NotFound);
+        };
 
         let public_key_pem = body.public_key_pem.trim();
         let client_cert =
@@ -141,7 +143,7 @@ impl ListApi {
         let object = CertificateCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
-            date_added: Set(Some(Utc::now())),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
             certificate_pem: Set(client_cert_pem.clone()),
@@ -149,6 +151,17 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let credential_name = body.label.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(credential_name),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -186,7 +199,7 @@ impl DetailApi {
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
             .one(&*db)
@@ -219,7 +232,7 @@ impl DetailApi {
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -233,13 +246,29 @@ impl DetailApi {
 
         CertificateRevocation::ActiveModel {
             id: Set(Uuid::new_v4()),
-            date_added: Set(Utc::now()),
+            date_added: Set(OffsetDateTime::now_utc()),
             serial_number_base64: Set(serialize_certificate_serial(&cert)),
         }
         .insert(&*db)
         .await?;
 
+        let credential_name = model.label.clone();
         model.delete(&*db).await?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(RevokeCertificateCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(RevokeCertificateCredentialResponse::Revoked)
     }
 }

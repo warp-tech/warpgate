@@ -17,6 +17,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
@@ -60,6 +61,10 @@ async fn _handle_connection(
     stream: TcpStream,
 ) -> Result<()> {
     stream.set_nodelay(true)?;
+
+    if detect_port_knock(&stream).await {
+        return Ok(());
+    }
 
     let remote_address = stream.peer_addr().context("getting peer address")?;
 
@@ -163,7 +168,7 @@ where
     ret
 }
 
-pub(crate) async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
+pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
         let db = services.db.lock().await;
         Parameters::Entity::get(&db).await?

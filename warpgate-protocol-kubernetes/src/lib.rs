@@ -18,10 +18,10 @@ pub struct KubernetesProtocolServer {
 }
 
 impl KubernetesProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(Self {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 

@@ -3,6 +3,7 @@ use sea_orm_migration::prelude::*;
 
 pub mod ticket {
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -14,8 +15,8 @@ pub mod ticket {
         pub username: String,
         pub target: String,
         pub uses_left: Option<i16>,
-        pub expiry: Option<DateTimeUtc>,
-        pub created: DateTimeUtc,
+        pub expiry: Option<OffsetDateTime>,
+        pub created: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

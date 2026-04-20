@@ -158,7 +158,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         title="No other targets yet" />
 {/if}
 
-<Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined}>
+<Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined} size="lg">
     <ModalBody>
         {#if selectedTarget}
         <ConnectionInstructions

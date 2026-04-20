@@ -1,10 +1,10 @@
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use poem::http::{self, HeaderName};
 
 /// Headers that should not be forwarded to upstream when proxying HTTP requests
-pub static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
+pub static DONT_FORWARD_HEADERS: LazyLock<HashSet<HeaderName>> = LazyLock::new(|| {
     #[allow(clippy::mutable_key_type)]
     let mut s = HashSet::new();
     s.insert(http::header::ACCEPT_ENCODING);

@@ -26,7 +26,7 @@ impl SSHProtocolServer {
         let config = services.config.lock().await;
         generate_keys(&config, &services.global_params, "host")?;
         generate_keys(&config, &services.global_params, "client")?;
-        Ok(SSHProtocolServer {
+        Ok(Self {
             services: services.clone(),
         })
     }

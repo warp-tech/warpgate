@@ -12,7 +12,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::*;
+use tracing::error;
 use uuid::Uuid;
 use warpgate_common::AdminPermission;
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -55,7 +55,7 @@ impl Api {
     ) -> poem::Result<GetRecordingResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
@@ -81,8 +81,8 @@ impl Api {
     ) -> poem::Result<GetKubernetesRecordingResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-        let db = ctx.services.db.lock().await;
-        let recordings = ctx.services.recordings.lock().await;
+        let db = ctx.services().db.lock().await;
+        let recordings = ctx.services().recordings.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
@@ -118,7 +118,7 @@ pub async fn api_get_recording_cast(
 ) -> poem::Result<String> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = ctx.services.db.lock().await;
+    let db = ctx.services().db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
@@ -131,14 +131,14 @@ pub async fn api_get_recording_cast(
     };
 
     let path = {
-        ctx.services
+        ctx.services()
             .recordings
             .lock()
             .await
             .path_for(&recording.session_id, &recording.name)
     };
 
-    let mut response = vec![]; //String::new();
+    let mut response = vec![];
 
     let mut last_size = (0, 0);
     let file = File::open(&path).await.map_err(InternalServerError)?;
@@ -176,7 +176,7 @@ pub async fn api_get_recording_tcpdump(
 ) -> poem::Result<Bytes> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = ctx.services.db.lock().await;
+    let db = ctx.services().db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))
@@ -189,7 +189,7 @@ pub async fn api_get_recording_tcpdump(
     };
 
     let path = {
-        ctx.services
+        ctx.services()
             .recordings
             .lock()
             .await
@@ -207,7 +207,7 @@ pub async fn api_get_recording_stream(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> impl IntoResponse {
-    let recordings = ctx.services.recordings.lock().await;
+    let recordings = ctx.services().recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
     ws.on_upgrade(|socket| async move {
