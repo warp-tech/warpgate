@@ -9,7 +9,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates-java nodejs openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/* \
-    && cargo install --locked just==1.4.0
+    && cargo install --locked just@1.4.0
 
 COPY . /opt/warpgate
 
