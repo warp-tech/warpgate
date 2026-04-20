@@ -276,12 +276,19 @@ async fn _handle_normal_request_inner(
             .unwrap_or_default()
             .to_lowercase();
 
-        let is_watch = req
+        let query_pairs: Vec<_> = req
             .uri()
             .query()
-            .is_some_and(|q| q.split('&').any(|p| p.starts_with("watch=true")));
+            .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
+            .unwrap_or_default();
 
-        if transfer_encoding == "chunked" || is_watch {
+        // watch=true: used by kubectl to await changes
+        // follow=true: used by kubectl logs
+        let is_streaming_response = query_pairs
+            .iter()
+            .any(|(k, v)| (k == "watch" || k == "follow") && v == "true");
+
+        if transfer_encoding == "chunked" || is_streaming_response {
             (
                 Body::from_bytes_stream(response.bytes_stream().map_err(std::io::Error::other)),
                 None,
@@ -401,18 +408,14 @@ async fn _handle_websocket_request_inner(
             config.store.recordings.enable
         };
         if enabled {
-            match start_recording_exec(
-                &session_id,
-                &services.recordings,
-                deduce_exec_recording_metadata(&full_url),
-            )
-            .await
-            {
-                Err(e) => {
-                    error!("Failed to start recording: {}", e);
-                }
-                Ok(recorder) => {
-                    tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+            if let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
+                match start_recording_exec(&session_id, &services.recordings, metadata).await {
+                    Err(e) => {
+                        error!("Failed to start recording: {}", e);
+                    }
+                    Ok(recorder) => {
+                        tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+                    }
                 }
             }
         }
@@ -488,6 +491,7 @@ async fn _handle_websocket_request_inner(
             "v3.channel.k8s.io",
             "v4.channel.k8s.io",
             "v5.channel.k8s.io",
+            "SPDY/3.1+portforward.k8s.io",
         ])
         .on_upgrade(|socket| async move {
             ws_handler_inner(socket).await.inspect_err(|e| {
