@@ -23,7 +23,7 @@ rustls-native-certs = { version = "0.8", default-features = false }
 pgwire = { version = "0.30", default-features = false, features = [
     "server-api-aws-lc-rs",
 ] }
-rsasl = { version = "2.1.0", default-features = false, features = [
+rsasl = { git = "https://github.com/Eugeny/rsasl.git", rev = "cbf4b0f3e05c73b33ac332718ab6e955eaa58166", default-features = false, features = [
     "config_builder",
     "scram-sha-2",
     "std",
