@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.22.0-beta.1-27-gaf973ca-modified"
+    "version": "chart-v0.0.2-16-g0efc9547-modified"
   },
   "servers": [
     {
@@ -289,16 +289,6 @@
             "name": "search",
             "schema": {
               "type": "string"
-            },
-            "in": "query",
-            "required": false,
-            "deprecated": false,
-            "explode": true
-          },
-          {
-            "name": "for_ticket_request",
-            "schema": {
-              "type": "boolean"
             },
             "in": "query",
             "required": false,
@@ -1014,7 +1004,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Ticket"
+                    "$ref": "#/components/schemas/MyTicketModel"
                   }
                 }
               }
@@ -1070,6 +1060,47 @@
           }
         ],
         "operationId": "delete_my_ticket"
+      }
+    },
+    "/ticket-request-targets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketRequestTarget"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ticket_request_targets"
       }
     }
   },
@@ -1238,10 +1269,6 @@
           "duration_seconds": {
             "type": "integer",
             "format": "int64"
-          },
-          "uses": {
-            "type": "integer",
-            "format": "int16"
           },
           "description": {
             "type": "string"
@@ -1575,6 +1602,40 @@
           }
         }
       },
+      "MyTicketModel": {
+        "type": "object",
+        "title": "MyTicketModel",
+        "required": [
+          "id",
+          "target_name",
+          "description",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "uses_left": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "NewApiToken": {
         "type": "object",
         "title": "NewApiToken",
@@ -1775,56 +1836,6 @@
           },
           "default_database_name": {
             "type": "string"
-          },
-          "ticket_max_duration_seconds": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "ticket_max_uses": {
-            "type": "integer",
-            "format": "int16"
-          }
-        }
-      },
-      "Ticket": {
-        "type": "object",
-        "title": "Ticket",
-        "required": [
-          "id",
-          "username",
-          "description",
-          "target",
-          "created",
-          "self_service"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "username": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "target": {
-            "type": "string"
-          },
-          "uses_left": {
-            "type": "integer",
-            "format": "int16"
-          },
-          "expiry": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "self_service": {
-            "type": "boolean"
           }
         }
       },
@@ -1834,8 +1845,7 @@
         "required": [
           "id",
           "user_id",
-          "username",
-          "target_name",
+          "target_id",
           "description",
           "status",
           "created"
@@ -1849,19 +1859,13 @@
             "type": "string",
             "format": "uuid"
           },
-          "username": {
-            "type": "string"
-          },
-          "target_name": {
-            "type": "string"
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "requested_duration_seconds": {
             "type": "integer",
             "format": "int64"
-          },
-          "requested_uses": {
-            "type": "integer",
-            "format": "int16"
           },
           "description": {
             "type": "string"
@@ -1869,8 +1873,9 @@
           "status": {
             "$ref": "#/components/schemas/TicketRequestStatus"
           },
-          "resolved_by_username": {
-            "type": "string"
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "ticket_id": {
             "type": "string",
@@ -1912,6 +1917,27 @@
           "Denied",
           "Expired"
         ]
+      },
+      "TicketRequestTarget": {
+        "type": "object",
+        "title": "TicketRequestTarget",
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          }
+        }
       },
       "TokenAndSecret": {
         "type": "object",

@@ -19,6 +19,8 @@
     let tickets: Ticket[]|undefined = $state()
     let requests: TicketRequest[]|undefined = $state()
     let requestHistoryFilter: TicketRequestStatus|undefined = $state()
+    let userMap: Map<string, string> = $state(new Map())
+    let targetMap: Map<string, string> = $state(new Map())
 
     let denyModalRequest: TicketRequest|undefined = $state()
     let denyReason = $state('')
@@ -41,8 +43,17 @@
         requests = await api.getTicketRequests({})
     }
 
+    async function loadLookups () {
+        const [users, targets] = await Promise.all([
+            api.getUsers({}),
+            api.getTargets({}),
+        ])
+        userMap = new Map(users.map(u => [u.id, u.username]))
+        targetMap = new Map(targets.map(t => [t.id, t.name]))
+    }
+
     async function load () {
-        await Promise.all([loadTickets(), loadRequests()])
+        await Promise.all([loadTickets(), loadRequests(), loadLookups()])
     }
 
     const initPromise = load()
@@ -61,7 +72,9 @@
         success = undefined
         try {
             const result = await api.approveTicketRequest({ id: request.id })
-            success = `Approved ticket request for ${result.username} to ${result.targetName}. The user can now activate it.`
+            const userName = userMap.get(result.userId) ?? result.userId
+            const targetName = targetMap.get(result.targetId) ?? result.targetId
+            success = `Approved ticket request for ${userName} to ${targetName}. The user can now activate it.`
             await loadRequests()
         } catch (err: any) {
             error = await stringifyError(err)
@@ -80,7 +93,7 @@
                     reason: denyReason || undefined,
                 },
             })
-            success = `Denied ticket request from ${denyModalRequest.username}.`
+            success = `Denied ticket request from ${userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}.`
             denyModalRequest = undefined
             denyReason = ''
             await loadRequests()
@@ -123,7 +136,7 @@
                 </span>
                 <div class="ms-2 me-auto">
                     <strong>
-                        {request.username} &rarr; {request.targetName}
+                        {userMap.get(request.userId) ?? request.userId} &rarr; {targetMap.get(request.targetId) ?? request.targetId}
                     </strong>
                     {#if request.description}
                         <small class="d-block text-muted">{request.description}</small>
@@ -131,11 +144,6 @@
                     {#if request.requestedDurationSeconds}
                         <small class="d-block text-muted">
                             Duration: {formatDuration(request.requestedDurationSeconds)}
-                        </small>
-                    {/if}
-                    {#if request.requestedUses}
-                        <small class="d-block text-muted">
-                            Uses: {request.requestedUses}
                         </small>
                     {/if}
                 </div>
@@ -174,7 +182,7 @@
                     <div class="list-group-item">
                         <div>
                             <strong>
-                                Access to {ticket.target} as {ticket.username}
+                                Access to {ticket.targetName} as {ticket.username}
                             </strong>
                             {#if ticket.selfService}
                                 <span class="badge bg-info ms-2">self-service</span>
@@ -252,7 +260,7 @@
                 </span>
                 <div class="ms-2 me-auto">
                     <strong>
-                        {request.username} &rarr; {request.targetName}
+                        {userMap.get(request.userId) ?? request.userId} &rarr; {targetMap.get(request.targetId) ?? request.targetId}
                     </strong>
                     {#if request.description}
                         <small class="d-block text-muted">{request.description}</small>
@@ -262,14 +270,9 @@
                             Duration: {formatDuration(request.requestedDurationSeconds)}
                         </small>
                     {/if}
-                    {#if request.requestedUses}
+                    {#if request.resolvedByUserId}
                         <small class="d-block text-muted">
-                            Uses: {request.requestedUses}
-                        </small>
-                    {/if}
-                    {#if request.resolvedByUsername}
-                        <small class="d-block text-muted">
-                            {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'} by {request.resolvedByUsername}
+                            {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'} by {userMap.get(request.resolvedByUserId) ?? request.resolvedByUserId}
                         </small>
                     {/if}
                     {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
@@ -311,7 +314,7 @@
         {/if}
         {#if denyModalRequest}
         <p>
-            Deny request from <strong>{denyModalRequest.username}</strong> to <strong>{denyModalRequest.targetName}</strong>?
+            Deny request from <strong>{userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}</strong> to <strong>{targetMap.get(denyModalRequest.targetId) ?? denyModalRequest.targetId}</strong>?
         </p>
         <FormGroup floating label="Reason (optional)">
             <input type="text" bind:value={denyReason} class="form-control" placeholder="Why is this being denied?" maxlength="2000"/>

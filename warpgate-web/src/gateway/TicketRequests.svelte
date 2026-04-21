@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, TargetKind, TicketRequestStatus, type TicketRequest, type Ticket, type TargetSnapshot } from 'gateway/lib/api'
+    import { api, TargetKind, TicketRequestStatus, type TicketRequest, type MyTicketModel, type TargetSnapshot, type TicketRequestTarget } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import RelativeDate from 'admin/RelativeDate.svelte'
@@ -19,7 +19,8 @@
     let lastSecret: string|undefined = $state()
     let lastTargetName: string|undefined = $state()
     let requests: TicketRequest[]|undefined = $state()
-    let tickets: Ticket[]|undefined = $state()
+    let tickets: MyTicketModel[]|undefined = $state()
+    let ticketRequestTargets: TicketRequestTarget[]|undefined = $state()
     let targets: TargetSnapshot[]|undefined = $state()
     let showForm = $state(true)
     let showAllRequests = $state(false)
@@ -35,18 +36,9 @@
     let description = $state('')
     let descriptionTouched = $state(false)
     let durationText = $state('8h')
-    let uses: number|undefined = $state()
-
-    let selectedTargetData = $derived(targets?.find(t => t.name === selectedTarget))
 
     let maxDurationSeconds = $derived(
-        selectedTargetData?.ticketMaxDurationSeconds
-        ?? $serverInfo?.ticketMaxDurationSeconds
-    )
-
-    let maxUses = $derived(
-        selectedTargetData?.ticketMaxUses
-        ?? $serverInfo?.ticketMaxUses
+        $serverInfo?.ticketMaxDurationSeconds
     )
 
     let durationSeconds = $derived(parseDuration(durationText))
@@ -62,29 +54,24 @@
         return undefined
     })
 
-    let usesError = $derived.by(() => {
-        if (uses != null && maxUses != null && uses > maxUses) {
-            return `Maximum uses: ${maxUses}`
-        }
-        return undefined
-    })
-
     let descriptionRequired = $derived($serverInfo?.ticketRequireDescription ?? false)
     let descriptionMissing = $derived(descriptionRequired && !description.trim())
 
-    let formInvalid = $derived(!!durationError || !!usesError || descriptionMissing)
+    let formInvalid = $derived(!!durationError || descriptionMissing)
 
     async function load () {
-        const [r, t, tgts] = await Promise.all([
+        const [r, t, trt, tgts] = await Promise.all([
             api.getMyTicketRequests(),
             api.getMyTickets(),
-            api.getTargets({ search: '', forTicketRequest: true }),
+            api.getTicketRequestTargets(),
+            api.getTargets({ search: '' }),
         ])
         requests = r
         tickets = t
+        ticketRequestTargets = trt
         targets = tgts
-        if (targets.length && !selectedTarget) {
-            selectedTarget = targets[0]!.name
+        if (ticketRequestTargets.length && !selectedTarget) {
+            selectedTarget = ticketRequestTargets[0]!.name
         }
     }
 
@@ -101,7 +88,6 @@
                 createTicketRequestBody: {
                     targetName: selectedTarget,
                     durationSeconds: durationSeconds || undefined,
-                    uses: uses || undefined,
                     description: description || undefined,
                 },
             })
@@ -115,7 +101,6 @@
             showForm = false
             description = ''
             descriptionTouched = false
-            uses = undefined
             await load()
         } catch (err: any) {
             error = await stringifyError(err)
@@ -142,7 +127,7 @@
             if (result.secret) {
                 success = 'Ticket activated!'
                 lastSecret = result.secret
-                lastTargetName = request.targetName
+                lastTargetName = ticketRequestTargets?.find(t => t.id === request.targetId)?.name
             }
             showForm = false
             await load()
@@ -152,7 +137,7 @@
         }
     }
 
-    async function deleteTicket (ticket: Ticket) {
+    async function deleteTicket (ticket: MyTicketModel) {
         try {
             await api.deleteMyTicket({ id: ticket.id })
             await load()
@@ -206,12 +191,12 @@
 {#if showForm}
 <h4 class="mt-4">Request a ticket</h4>
 
-{#if targets && targets.length}
+{#if ticketRequestTargets && ticketRequestTargets.length}
 <form onsubmit={e => e.preventDefault()}>
 <div class="card p-3 mb-4">
     <FormGroup floating label="Target">
         <select bind:value={selectedTarget} class="form-control" required>
-            {#each targets as target (target.name)}
+            {#each ticketRequestTargets as target (target.name)}
                 <option value={target.name}>
                     {target.name}
                 </option>
@@ -251,15 +236,6 @@
         {/if}
     </FormGroup>
 
-    <FormGroup floating label="Number of uses (optional)">
-        <input type="number" min="1" bind:value={uses} class="form-control" class:is-invalid={!!usesError}/>
-        {#if usesError}
-            <div class="invalid-feedback">{usesError}</div>
-        {:else if maxUses}
-            <small class="form-text text-muted">Maximum: {maxUses}</small>
-        {/if}
-    </FormGroup>
-
     <AsyncButton
         color="primary"
         click={createRequest}
@@ -267,7 +243,7 @@
     >Request ticket</AsyncButton>
 </div>
 </form>
-{:else if targets}
+{:else if ticketRequestTargets}
 <EmptyState title="No targets available" />
 {/if}
 
@@ -287,7 +263,7 @@
                 <Fa icon={statusIcon(request.status)} fw />
             </span>
             <div class="ms-2 me-auto">
-                <strong>{request.targetName}</strong>
+                <strong>{ticketRequestTargets?.find(t => t.id === request.targetId)?.name ?? request.targetId}</strong>
                 <small class="d-block text-muted">
                     {request.status}
                     {#if request.denyReason}
@@ -329,7 +305,7 @@
         <div class="list-group-item">
             <Fa icon={faTicket} fw class="text-success" />
             <div class="ms-2 me-auto">
-                <strong>{ticket.target}</strong>
+                <strong>{ticket.targetName}</strong>
                 {#if ticket.description}
                     <small class="d-block text-muted">{ticket.description}</small>
                 {/if}
