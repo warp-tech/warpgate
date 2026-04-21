@@ -1,0 +1,40 @@
+<script lang="ts">
+    import type { Snippet } from 'svelte'
+
+    interface Props {
+        id: string
+        title: string
+        class?: string
+        hideHeading?: boolean
+        children?: Snippet
+    }
+
+    const props: Props = $props()
+</script>
+
+<section data-section={props.id} data-section-title={props.title} class="sectioned-form-section {props.class ?? ''}" id={`${props.id}-heading`}>
+    {#if !props.hideHeading}
+        <h4>{props.title}</h4>
+    {/if}
+    {@render props.children?.()}
+</section>
+
+<style>
+    section {
+        scroll-margin-top: 50px;
+    }
+
+    .sectioned-form-section {
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .sectioned-form-section:last-child {
+        border-bottom: none;
+    }
+
+    .sectioned-form-section h4 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+    }
+</style>

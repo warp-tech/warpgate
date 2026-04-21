@@ -290,7 +290,7 @@
     }
 </script>
 
-<div class="d-flex align-items-center mt-4 mb-2">
+<div class="d-flex mt-4 mb-2 header">
     <h4 class="m-0">Credentials</h4>
     <span class="ms-auto"></span>
     {#if $adminPermissions.usersEdit}
@@ -475,6 +475,17 @@
 
         .label:not(:first-child), .main {
             margin-left: .75rem;
+        }
+    }
+
+    .header {
+        align-items: center;
+    }
+
+    @media (max-width: 720px) {
+        .header {
+            flex-direction: column;
+            align-items: start;
         }
     }
 </style>
