@@ -42,6 +42,7 @@ mod m00037_database_target_auth;
 mod m00038_fix_target_auth_tags;
 mod m00039_show_session_menu;
 mod m00040_allowed_ip_range;
+mod m00041_fix_user_role_assignment_dates;
 
 pub struct Migrator;
 
@@ -89,6 +90,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00038_fix_target_auth_tags::Migration),
             Box::new(m00039_show_session_menu::Migration),
             Box::new(m00040_allowed_ip_range::Migration),
+            Box::new(m00041_fix_user_role_assignment_dates::Migration),
         ]
     }
 }
