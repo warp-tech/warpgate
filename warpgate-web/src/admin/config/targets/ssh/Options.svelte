@@ -62,10 +62,10 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
-            <option value="Certificate">Warpgate's own certificates authority</option>
+            <option value="Certificate">Warpgate's own certificate authority</option>
         </select>
     </FormGroup>
-    {#if ['PublicKey', 'Certificate'].some(e => e === options.auth.kind)}
+    {#if ['PublicKey', 'Certificate'].includes(options.auth.kind)}
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
             href="/@warpgate/admin#/config/ssh"

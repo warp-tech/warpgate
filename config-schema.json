@@ -88,7 +88,8 @@
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
         "keys": "./data/keys",
-        "listen": "[::]:2222"
+        "listen": "[::]:2222",
+        "temporary_client_certificate_validity": "5m"
       }
     },
     "sso_providers": {
@@ -416,6 +417,10 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:2222"
+        },
+        "temporary_client_certificate_validity": {
+          "type": "string",
+          "default": "5m"
         }
       }
     },

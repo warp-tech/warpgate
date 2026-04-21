@@ -8,7 +8,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00033_target_ssh_cert"
+        "m00037_target_ssh_cert"
     }
 }
 
@@ -23,9 +23,6 @@ impl MigrationTrait for Migration {
             .all(conn)
             .await?;
 
-        println!("--- migration");
-        println!("{:?}", ssh_targets);
-
         for target in ssh_targets {
             let mut options = target
                 .options
@@ -34,19 +31,14 @@ impl MigrationTrait for Migration {
                 .clone();
 
             if let Some(auth) = options.get_mut("auth") {
-                println!("--- auth found");
                 if auth.get("kind").is_some() {
-                    // Already migrated
-                    println!("--- already migrated");
                     continue;
                 } else if let Some(password) = auth.get("password").cloned() {
-                    println!("--- found password");
                     *auth = serde_json::json!({
                         "kind": "password",
                         "password": password,
                     });
                 } else {
-                    println!("--- found pubkey");
                     *auth = serde_json::json!({
                         "kind": "publickey",
                     });
@@ -55,7 +47,6 @@ impl MigrationTrait for Migration {
                 let mut target: target::ActiveModel = target.into();
                 let options = serde_json::json!({"ssh": options});
                 target.options = Set(options);
-                println!("--- updated ");
                 target.update(conn).await?;
             }
         }
@@ -71,12 +62,11 @@ impl MigrationTrait for Migration {
             .all(conn)
             .await?;
 
-        // Check if there is a target authentified by a certificate
+        // Check if there is a target authenticated by a certificate
         let has_certificates = ssh_targets
-            .clone()
-            .into_iter()
-            .filter_map(|t| t.options.get("ssh").cloned())
-            .filter_map(|t| t.get("auth").cloned())
+            .iter()
+            .filter_map(|t| t.options.get("ssh"))
+            .filter_map(|t| t.get("auth"))
             .any(|t| {
                 let value = JsonValue::String("certificate".to_string());
                 t.get("kind") == Some(&value)

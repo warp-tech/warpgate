@@ -30,7 +30,7 @@ use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
 use crate::{
-    gen_target_user_cert, generate_private, load_keys, ForwardedStreamlocalParams,
+    issue_temporary_client_certificate, generate_private, load_keys, ForwardedStreamlocalParams,
     ForwardedTcpIpParams,
 };
 
@@ -478,21 +478,22 @@ impl RemoteClient {
         ssh_options: &TargetSSHOptions,
         session: &mut Handle<ClientHandler>,
     ) -> Result<bool, ConnectionError> {
-        // #[allow(clippy::explicit_auto_deref)]
-        let keys = load_keys(
-            &*self.services.config.lock().await,
-            &self.services.global_params,
-            "client",
-        )?;
-        for key in keys.into_iter() {
+        let config = self.services.config.lock().await.clone();
+        let cert_validity = config.store.ssh.temporary_client_certificate_validity;
+        let keys = load_keys(&config, &self.services.global_params, "client")?;
+        for key in keys {
             // Generate a certificate signed by private key
             let client_key = generate_private(key.algorithm()).map_err(russh::Error::from)?;
             let key_str = client_key
                 .public_key()
                 .to_openssh()
                 .map_err(russh::Error::from)?;
-            let certificate =
-                gen_target_user_cert(&ssh_options.username, &PublicKey::from(&client_key), &key)?;
+            let certificate = issue_temporary_client_certificate(
+                &ssh_options.username,
+                &PublicKey::from(&client_key),
+                &key,
+                cert_validity,
+            )?;
 
             let response = session
                 .authenticate_openssh_cert(

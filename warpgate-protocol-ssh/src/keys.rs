@@ -1,6 +1,6 @@
 use std::fs::{create_dir_all, File};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use russh::keys::ssh_key::certificate;
@@ -63,18 +63,19 @@ pub fn load_keys(
     ])
 }
 
-pub fn gen_target_user_cert(
+pub fn issue_temporary_client_certificate(
     user: &str,
     public_key: &PublicKey,
     signing_key: &PrivateKey,
+    validity: Duration,
 ) -> Result<Certificate, russh::keys::Error> {
-    // Certificate are used only for authentication
-    // Thus don't need a long validity period
-    let valid_after = SystemTime::now()
+    // Backdate slightly to tolerate modest clock skew between Warpgate and targets.
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| russh::keys::Error::SshKey(e.into()))?
         .as_secs();
-    let valid_before = valid_after + 60;
+    let valid_after = now.saturating_sub(30);
+    let valid_before = now.saturating_add(validity.as_secs().max(1));
 
     let mut cert_builder = certificate::Builder::new_with_random_nonce(
         &mut get_crypto_rng(),

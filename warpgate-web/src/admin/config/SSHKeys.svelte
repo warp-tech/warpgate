@@ -49,8 +49,8 @@
             </div>
         {/each}
     </div>
-    <h2>Warpgate's own Certificate Authority</h2>
-    <Alert color="info">Add theses keys to the file referrenced by your targets' <code>TrustedUserCAKeys</code></Alert>
+    <h2>Warpgate's SSH CA keys</h2>
+    <Alert color="info">Add these keys to the file referenced by your targets' <code>TrustedUserCAKeys</code></Alert>
     <div class="list-group list-group-flush">
         {#each ownKeys as key (key)}
             <div class="list-group-item d-flex">

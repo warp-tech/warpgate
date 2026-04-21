@@ -96,6 +96,10 @@ pub const fn _default_ssh_inactivity_timeout() -> Duration {
     Duration::from_secs(60 * 5)
 }
 
+pub const fn _default_temporary_client_certificate_validity() -> Duration {
+    Duration::from_secs(60)
+}
+
 #[allow(clippy::unnecessary_wraps)]
 pub fn _default_postgres_idle_timeout_str() -> Option<String> {
     Some("10m".to_string())
