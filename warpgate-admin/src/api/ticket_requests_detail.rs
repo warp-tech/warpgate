@@ -2,20 +2,29 @@ use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{approve_ticket_request, deny_ticket_request};
-use warpgate_db_entities::TicketRequest;
+use warpgate_db_entities::{TicketRequest, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
 
-fn admin_username(ctx: &AuthenticatedRequestContext) -> String {
-    ctx.auth
-        .username()
-        .cloned()
-        .unwrap_or_else(|| "admin-token".to_string())
+async fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Result<Uuid, WarpgateError> {
+    let Some(username) = ctx.auth.username() else {
+        return Err(WarpgateError::NoAdminAccess);
+    };
+    let db = ctx.services.db.lock().await;
+    let Some(user) = User::Entity::find()
+        .filter(User::Column::Username.eq(username))
+        .one(&*db)
+        .await?
+    else {
+        return Err(WarpgateError::NoAdminAccess);
+    };
+    Ok(user.id)
 }
 
 pub struct Api;
@@ -56,7 +65,8 @@ impl Api {
     ) -> Result<ApproveTicketRequestResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
-        match approve_ticket_request(&ctx.services.db, id.0, &admin_username(&ctx)).await? {
+        let uid = admin_user_id(&ctx).await?;
+        match approve_ticket_request(&ctx.services.db, id.0, uid).await? {
             Some(request) => Ok(ApproveTicketRequestResponse::Ok(Json(request))),
             None => Ok(ApproveTicketRequestResponse::NotFound),
         }
@@ -76,7 +86,8 @@ impl Api {
     ) -> Result<DenyTicketRequestResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
-        match deny_ticket_request(&ctx.services.db, id.0, &admin_username(&ctx), body.reason.clone())
+        let uid = admin_user_id(&ctx).await?;
+        match deny_ticket_request(&ctx.services.db, id.0, uid, body.reason.clone())
             .await?
         {
             Some(request) => Ok(DenyTicketRequestResponse::Ok(Json(request))),

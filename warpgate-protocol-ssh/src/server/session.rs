@@ -1752,11 +1752,11 @@ impl ServerSession {
                 }
             }
             AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, secret, &self.services.config_provider).await? {
-                    Some((ticket, user_info)) => {
-                        info!("Authorized for {} with a ticket", ticket.target);
+                match authorize_ticket(&self.services.db, secret).await? {
+                    Some((ticket, target, user_info)) => {
+                        info!("Authorized for {} with a ticket", target.name);
                         consume_ticket(&self.services.db, &ticket.id).await?;
-                        self._auth_accept(user_info.clone(), &ticket.target).await?;
+                        self._auth_accept(user_info.clone(), &target.name).await?;
 
                         Ok(AuthResult::Accepted { user_info })
                     }

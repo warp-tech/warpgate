@@ -141,7 +141,7 @@ pub async fn api_get_recording_cast(
             .path_for(&recording.session_id, &recording.name)
     };
 
-    let mut response = vec![]; //String::new();
+    let mut response = vec![];
 
     let mut last_size = (0, 0);
     let file = File::open(&path).await.map_err(InternalServerError)?;

@@ -305,7 +305,6 @@ impl DetailApi {
             )));
         }
 
-        // Get all enabled LDAP servers
         let ldap_servers: Vec<LdapServer::Model> = LdapServer::Entity::find()
             .filter(LdapServer::Column::Enabled.eq(true))
             .all(&*db)
@@ -317,7 +316,6 @@ impl DetailApi {
             )));
         }
 
-        // Try to find user in LDAP servers using username as email
         let username = &user.username;
         let mut ldap_server_id = None;
         let mut ldap_object_uuid = None;

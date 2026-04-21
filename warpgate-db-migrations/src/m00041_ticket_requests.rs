@@ -16,15 +16,13 @@ pub(crate) mod ticket_request {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
         pub user_id: Uuid,
-        pub username: String,
-        pub target_name: String,
+        pub target_id: Uuid,
         pub requested_duration_seconds: Option<i64>,
-        pub requested_uses: Option<i16>,
         #[sea_orm(column_type = "Text")]
         pub description: String,
         #[sea_orm(column_type = "String(StringLen::N(16))")]
         pub status: String,
-        pub resolved_by_username: Option<String>,
+        pub resolved_by_user_id: Option<Uuid>,
         pub ticket_id: Option<Uuid>,
         pub created: DateTimeUtc,
         pub resolved_at: Option<DateTimeUtc>,
@@ -42,7 +40,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00033_ticket_requests"
+        "m00041_ticket_requests"
     }
 }
 
@@ -52,12 +50,62 @@ impl MigrationTrait for Migration {
         let builder = manager.get_database_backend();
         let schema = Schema::new(builder);
 
-        // Create ticket_requests table
         manager
             .create_table(schema.create_table_from_entity(ticket_request::Entity))
             .await?;
 
-        // Add self_service column to tickets table
+        // Normalize tickets: replace username/target string columns with user_id/target_id FKs
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ticket::Entity)
+                    .add_column(ColumnDef::new(Alias::new("user_id")).uuid().null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ticket::Entity)
+                    .add_column(ColumnDef::new(Alias::new("target_id")).uuid().null())
+                    .to_owned(),
+            )
+            .await?;
+
+        let conn = manager.get_connection();
+
+        conn.execute_unprepared(
+            "UPDATE tickets SET user_id = (SELECT id FROM users WHERE users.username = tickets.username)"
+        ).await?;
+
+        conn.execute_unprepared(
+            "UPDATE tickets SET target_id = (SELECT id FROM targets WHERE targets.name = tickets.target)"
+        ).await?;
+
+        // Delete orphaned tickets where user or target no longer exists
+        conn.execute_unprepared(
+            "DELETE FROM tickets WHERE user_id IS NULL OR target_id IS NULL"
+        ).await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ticket::Entity)
+                    .drop_column(Alias::new("username"))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ticket::Entity)
+                    .drop_column(Alias::new("target"))
+                    .to_owned(),
+            )
+            .await?;
+
         manager
             .alter_table(
                 Table::alter()
@@ -72,7 +120,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Add ticket_requests_manage column to admin_roles table
         manager
             .alter_table(
                 Table::alter()
@@ -87,7 +134,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Add ticket policy columns to parameters table
         manager
             .alter_table(
                 Table::alter()
@@ -157,7 +203,20 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Add per-target ticket settings
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
+                    .add_column(
+                        ColumnDef::new(Alias::new("ticket_request_show_all_targets"))
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
         manager
             .alter_table(
                 Table::alter()
@@ -212,22 +271,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Show all targets in ticket request form (default: false = only accessible targets)
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(parameters::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("ticket_request_show_all_targets"))
-                            .boolean()
-                            .not_null()
-                            .default(false),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        // Grant ticket_requests_manage to the built-in warpgate:admin role
         let conn = manager.get_connection();
         let bool_true = match manager.get_database_backend() {
             sea_orm::DatabaseBackend::Postgres => "TRUE",
@@ -245,6 +288,53 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(Table::drop().table(ticket_request::Entity).to_owned())
+            .await?;
+
+        // Reverse ticket normalization: re-add string columns, populate, drop UUID columns
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("tickets"))
+                    .add_column(ColumnDef::new(Alias::new("username")).string().null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("tickets"))
+                    .add_column(ColumnDef::new(Alias::new("target")).string().null())
+                    .to_owned(),
+            )
+            .await?;
+
+        let conn = manager.get_connection();
+
+        conn.execute_unprepared(
+            "UPDATE tickets SET username = (SELECT username FROM users WHERE users.id = tickets.user_id)"
+        ).await?;
+
+        conn.execute_unprepared(
+            "UPDATE tickets SET target = (SELECT name FROM targets WHERE targets.id = tickets.target_id)"
+        ).await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("tickets"))
+                    .drop_column(Alias::new("user_id"))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Alias::new("tickets"))
+                    .drop_column(Alias::new("target_id"))
+                    .to_owned(),
+            )
             .await?;
 
         manager

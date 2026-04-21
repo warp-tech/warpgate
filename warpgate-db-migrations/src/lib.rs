@@ -34,7 +34,7 @@ mod m00029_certificate_revocation;
 mod m00030_add_recording_metadata;
 mod m00031_minimize_password_login;
 mod m00032_admin_roles;
-mod m00033_ticket_requests;
+mod m00041_ticket_requests;
 
 pub struct Migrator;
 
@@ -74,7 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00030_add_recording_metadata::Migration),
             Box::new(m00031_minimize_password_login::Migration),
             Box::new(m00032_admin_roles::Migration),
-            Box::new(m00033_ticket_requests::Migration),
+            Box::new(m00041_ticket_requests::Migration),
         ]
     }
 }

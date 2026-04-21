@@ -1,8 +1,10 @@
+use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
+use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
@@ -11,7 +13,7 @@ use warpgate_core::ticket_requests::{
     activate_ticket_request, create_ticket_request, ActivateTicketRequestError,
     CreateTicketRequestError, CreateTicketRequestParams, TicketRequestResult,
 };
-use warpgate_db_entities::{Ticket, TicketRequest};
+use warpgate_db_entities::{Target, Ticket, TicketRequest};
 
 use super::common::get_user;
 use crate::api::AnySecurityScheme;
@@ -30,7 +32,6 @@ pub struct Api;
 struct CreateTicketRequestBody {
     target_name: String,
     duration_seconds: Option<i64>,
-    uses: Option<i16>,
     description: Option<String>,
 }
 
@@ -47,6 +48,16 @@ impl From<TicketRequestResult> for TicketRequestResponse {
             secret: result.secret.map(|s| s.expose_secret().to_string()),
         }
     }
+}
+
+#[derive(Serialize, Object)]
+struct MyTicketModel {
+    pub id: Uuid,
+    pub target_name: String,
+    pub description: String,
+    pub uses_left: Option<i16>,
+    pub expiry: Option<DateTime<Utc>>,
+    pub created: DateTime<Utc>,
 }
 
 #[derive(ApiResponse)]
@@ -82,7 +93,7 @@ enum GetTicketRequestResponse {
 #[derive(ApiResponse)]
 enum GetMyTicketsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<Ticket::Model>>),
+    Ok(Json<Vec<MyTicketModel>>),
     #[oai(status = 401)]
     Unauthorized,
 }
@@ -152,7 +163,6 @@ impl Api {
                 username: user_model.username.clone(),
                 target_name,
                 duration_seconds: body.duration_seconds,
-                uses: body.uses,
                 description: body.description.clone().unwrap_or_default(),
             },
         )
@@ -293,14 +303,33 @@ impl Api {
             return Ok(GetMyTicketsResponse::Unauthorized);
         };
 
+        // Only show self-service tickets — admin-created tickets are not visible to the user
         let tickets = Ticket::Entity::find()
-            .filter(Ticket::Column::Username.eq(&user_model.username))
+            .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
             .order_by_desc(Ticket::Column::Created)
             .all(&*db)
             .await?;
 
-        Ok(GetMyTicketsResponse::Ok(Json(tickets)))
+        let mut result = Vec::with_capacity(tickets.len());
+        for ticket in tickets {
+            let target_name = ticket
+                .find_related(Target::Entity)
+                .one(&*db)
+                .await?
+                .map(|t| t.name)
+                .unwrap_or_default();
+            result.push(MyTicketModel {
+                id: ticket.id,
+                target_name,
+                description: ticket.description,
+                uses_left: ticket.uses_left,
+                expiry: ticket.expiry,
+                created: ticket.created,
+            });
+        }
+
+        Ok(GetMyTicketsResponse::Ok(Json(result)))
     }
 
     #[oai(
@@ -323,8 +352,9 @@ impl Api {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         };
 
+        // Users can only delete their own self-service tickets, not admin-issued ones
         let Some(ticket) = Ticket::Entity::find_by_id(id.0)
-            .filter(Ticket::Column::Username.eq(&user_model.username))
+            .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
             .one(&*db)
             .await?

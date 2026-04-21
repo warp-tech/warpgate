@@ -25,14 +25,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
-    pub username: String,
-    pub target_name: String,
+    pub target_id: Uuid,
     pub requested_duration_seconds: Option<i64>,
-    pub requested_uses: Option<i16>,
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub status: TicketRequestStatus,
-    pub resolved_by_username: Option<String>,
+    pub resolved_by_user_id: Option<Uuid>,
     pub ticket_id: Option<Uuid>,
     pub created: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
@@ -49,6 +47,12 @@ pub enum Relation {
     )]
     User,
     #[sea_orm(
+        belongs_to = "super::Target::Entity",
+        from = "Column::TargetId",
+        to = "super::Target::Column::Id"
+    )]
+    Target,
+    #[sea_orm(
         belongs_to = "super::Ticket::Entity",
         from = "Column::TicketId",
         to = "super::Ticket::Column::Id"
@@ -59,6 +63,12 @@ pub enum Relation {
 impl Related<super::User::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::User.def()
+    }
+}
+
+impl Related<super::Target::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Target.def()
     }
 }
 

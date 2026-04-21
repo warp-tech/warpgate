@@ -24,7 +24,6 @@ export function formatDuration (totalSeconds: number): string {
 export function parseDuration (str: string): number | undefined {
     const trimmed = str.trim()
     if (!trimmed) return undefined
-    // Plain number = seconds
     const asNumber = Number(trimmed)
     if (!isNaN(asNumber) && asNumber > 0) return Math.floor(asNumber)
     let total = 0
