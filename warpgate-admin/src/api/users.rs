@@ -5,7 +5,6 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
@@ -390,7 +389,7 @@ impl DetailApi {
 // ========== User Role Assignment DTOs ==========
 
 /// Response containing user role assignment with expiry info.
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct UserRoleAssignmentResponse {
     /// Role ID
     id: Uuid,
@@ -409,14 +408,14 @@ struct UserRoleAssignmentResponse {
 }
 
 /// Request to add a user role with optional expiry
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct AddUserRoleRequest {
     #[oai(default)]
     expires_at: Option<OffsetDateTime>,
 }
 
 /// Request to update user role expiry
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct UpdateUserRoleRequest {
     /// The new expiry timestamp, or null to remove expiry (make permanent)
     expires_at: Option<OffsetDateTime>,

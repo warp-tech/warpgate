@@ -30,23 +30,17 @@ use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
 use crate::{ListenEndpoint, Secret, WarpgateError};
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum UserAuthCredential {
-    #[serde(rename = "password")]
     Password(UserPasswordCredential),
-    #[serde(rename = "publickey")]
     PublicKey(UserPublicKeyCredential),
-    #[serde(rename = "certificate")]
     Certificate(UserCertificateCredential),
-    #[serde(rename = "otp")]
     Totp(UserTotpCredential),
-    #[serde(rename = "sso")]
     Sso(UserSsoCredential),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPasswordCredential {
     pub hash: Secret<String>,
 }
@@ -59,22 +53,21 @@ impl UserPasswordCredential {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserCertificateCredential {
     pub certificate_pem: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserTotpCredential {
-    #[serde(with = "crate::helpers::serde_base64_secret")]
     pub key: OtpSecretKey,
 }
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserSsoCredential {
     pub provider: Option<String>,
     pub email: String,
@@ -173,17 +166,15 @@ impl Deref for UserDetails {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct AdminRole {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
