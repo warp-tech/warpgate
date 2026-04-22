@@ -54,7 +54,7 @@ impl ParseFromJSON for WarpgateIpNet {
         let ipnet = string
             .parse()
             .map_err(|e| ParseError::custom(format!("could not parse network address: {e:?}")))?;
-        Ok(WarpgateIpNet(ipnet, string))
+        Ok(Self(ipnet, string))
     }
 }
 

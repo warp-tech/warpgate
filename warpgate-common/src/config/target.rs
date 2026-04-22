@@ -128,7 +128,7 @@ impl Default for DatabaseTargetAuth {
 }
 
 impl DatabaseTargetAuth {
-    pub fn password(&self) -> Option<&str> {
+    pub const fn password(&self) -> Option<&str> {
         match self {
             Self::Password(auth) => Some(auth.password.as_str()),
             Self::IamRole(_) => None,
@@ -176,7 +176,7 @@ impl TargetMySqlOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: password,
+                password,
             }));
         }
     }
@@ -225,7 +225,7 @@ impl TargetPostgresOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: password,
+                password,
             }));
         }
     }
