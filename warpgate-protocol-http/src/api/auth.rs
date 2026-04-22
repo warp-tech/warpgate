@@ -46,6 +46,7 @@ enum ApiAuthState {
     WebUserApprovalNeeded,
     PublicKeyNeeded,
     Success,
+    IpRejected,
 }
 
 #[derive(Object)]
@@ -140,18 +141,25 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let mut auth_state_store = services.auth_state_store.lock().await;
         let state_arc = match get_auth_state_for_request(
             &body.username,
             session,
             &mut auth_state_store,
+            remote_ip,
         )
         .await
         {
             Err(WarpgateError::UserNotFound(_)) => {
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::Failed,
+                })))
+            }
+            Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    state: ApiAuthState::IpRejected,
                 })))
             }
             x => x,
@@ -191,7 +199,7 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let state_id = session.get_auth_state_id();
 
         let mut auth_state_store = services.auth_state_store.lock().await;
@@ -248,7 +256,7 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -272,7 +280,7 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -301,7 +309,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateListResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let store = services.auth_state_store.lock().await;
 
         let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
@@ -331,7 +339,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let state_arc = get_auth_state(&id, &ctx).await;
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
@@ -354,7 +362,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(state_arc) = get_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -387,7 +395,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(state_arc) = get_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -404,7 +412,7 @@ async fn get_auth_state(
     id: &Uuid,
     ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let store = ctx.services.auth_state_store.lock().await;
+    let store = ctx.services().auth_state_store.lock().await;
 
     let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
     else {
@@ -454,7 +462,7 @@ pub async fn api_get_web_auth_requests_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
 ) -> anyhow::Result<impl IntoResponse> {
-    let services = &ctx.services;
+    let services = ctx.services();
     let auth_state_store = services.auth_state_store.clone();
 
     let username = match &ctx.auth {

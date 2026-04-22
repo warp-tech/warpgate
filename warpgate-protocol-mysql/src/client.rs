@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tracing::{debug, info, trace, warn};
-use warpgate_common::TargetMySqlOptions;
+use warpgate_common::{TargetMySqlOptions, WarpgateError};
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
@@ -117,6 +117,16 @@ impl MySqlClient {
             username: target.username.clone(),
         };
 
+        // Resolve the effective password (may be an IAM-generated token or legacy field)
+        let effective_password = match &target.effective_auth() {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+            warpgate_common::DatabaseTargetAuth::IamRole(_) => {
+                warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
+                    .await
+                    .map_err(WarpgateError::Aws)?
+            }
+        };
+
         if handshake.auth_plugin == Some(AuthPlugin::MySqlNativePassword) {
             let scramble_bytes = [
                 &handshake.auth_plugin_data.first_ref()[..],
@@ -131,12 +141,9 @@ impl MySqlClient {
                     response.auth_plugin = Some(AuthPlugin::MySqlNativePassword);
                     response.auth_response = Some(
                         BytesMut::from(
-                            compute_auth_challenge_response(
-                                scramble,
-                                target.password.as_deref().unwrap_or(""),
-                            )
-                            .map_err(MySqlError::other)?
-                            .as_bytes(),
+                            compute_auth_challenge_response(scramble, &effective_password)
+                                .map_err(MySqlError::other)?
+                                .as_bytes(),
                         )
                         .freeze(),
                     );

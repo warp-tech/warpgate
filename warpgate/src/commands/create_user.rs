@@ -37,6 +37,7 @@ pub async fn command(
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
         };
         values.insert(&*db).await.map_err(WarpgateError::from)?
     };
@@ -56,8 +57,7 @@ pub async fn command(
             .one(&*db)
             .await?
         {
-            UserRoleAssignment::Entity::idempotent_grant(&*db, db_user.id, db_role.id, None)
-                .await?;
+            UserRoleAssignment::Entity::idempotent_grant(&db, db_user.id, db_role.id, None).await?;
         }
 
         // admin role

@@ -177,6 +177,7 @@ impl DatabaseConfigProvider {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
         }
         .insert(db)
         .await?;
@@ -601,7 +602,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
                     entities::UserRoleAssignment::Entity::idempotent_grant(
-                        &*db, user.id, role.id, None,
+                        &db, user.id, role.id, None,
                     )
                     .await?;
                 }

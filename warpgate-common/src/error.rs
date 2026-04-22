@@ -3,6 +3,7 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
@@ -63,17 +64,30 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("AWS: {0}")]
+    Aws(AwsError),
+    #[error("IP address {0} is not in the allowed range for user {1}")]
+    IpAddrNotAllowed(String, String),
+    #[error("could not parse IP network address: {0}")]
+    InvalidNetworkAddress(String),
 }
 
 impl ResponseError for WarpgateError {
     fn status(&self) -> poem::http::StatusCode {
         match self {
-            Self::InvalidTicket(_) | Self::UserNotFound(_) | Self::RoleNotFound(_) => {
-                poem::http::StatusCode::UNAUTHORIZED
-            }
+            Self::InvalidTicket(_)
+            | Self::UserNotFound(_)
+            | Self::RoleNotFound(_)
+            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
+    fn from(err: Box<dyn Error + Send + Sync + 'static>) -> Self {
+        Self::Other(err)
     }
 }
 

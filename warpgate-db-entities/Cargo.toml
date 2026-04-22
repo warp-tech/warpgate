@@ -2,13 +2,14 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-db-entities"
-version = "0.22.0-beta.5"
+version = "0.23.2"
 publish = false
 
 [dependencies]
 bytes = { version = "1.4", default-features = false }
 poem-openapi.workspace = true
 sqlx.workspace = true
+ipnet.workspace = true
 sea-orm = { workspace = true, features = [
     "macros",
     "with-uuid",

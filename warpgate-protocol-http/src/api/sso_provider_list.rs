@@ -95,7 +95,14 @@ impl Api {
         &self,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> Result<GetSsoProvidersResponse, WarpgateError> {
-        let mut providers = ctx.services.config.lock().await.store.sso_providers.clone();
+        let mut providers = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
@@ -171,7 +178,7 @@ impl Api {
         code: Option<&String>,
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
@@ -200,7 +207,14 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let providers_config = ctx.services.config.lock().await.store.sso_providers.clone();
+        let providers_config = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         let mut iter = providers_config.iter();
         let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
             return Ok(Err(format!("No provider matching {}", context.provider)));
@@ -226,8 +240,22 @@ impl Api {
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let state_arc =
-            get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+            match get_auth_state_for_request(&username, session, &mut auth_state_store, remote_ip)
+                .await
+            {
+                Ok(state) => state,
+                Err(e) => {
+                    if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
+                        return Ok(Err(
+                        "Login denied: your IP address is not in the allowed range for this user"
+                            .to_string(),
+                    ));
+                    }
+                    return Err(e);
+                }
+            };
 
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;
@@ -356,7 +384,7 @@ impl Api {
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
 
         let return_url = config.construct_external_url(Some(req), None)?;
         debug!("Return URL: {}", &return_url);

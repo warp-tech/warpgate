@@ -23,6 +23,7 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 
@@ -30,8 +31,8 @@ use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
 use crate::{
-    issue_temporary_client_certificate, generate_private, load_keys, ForwardedStreamlocalParams,
-    ForwardedTcpIpParams,
+    generate_private, issue_temporary_client_certificate, load_keys, load_preferred_key,
+    ForwardedStreamlocalParams, ForwardedTcpIpParams,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +53,9 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Ssh(#[from] russh::Error),
+
+    #[error("AWS: {0}")]
+    Aws(#[from] AwsError),
 
     #[error("Could not resolve address")]
     Resolve,
@@ -677,6 +681,50 @@ impl RemoteClient {
                             auth_result = self.connect_certificate(&ssh_options, &mut session).await?;
                             if !auth_result {
                                 auth_error_msg = Some("Certificate authentication was rejected by the SSH target".into());
+                            }
+                        }
+                        SSHTargetAuth::IamRole(_) => {
+                            let instance_info = warpgate_aws::find_instance_by_ip(&ssh_options.host).await?;
+
+                            let key = load_preferred_key(
+                                &*self.services.config.lock().await,
+                                &self.services.global_params,
+                                "client"
+                            )?;
+
+                            let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+
+                            // Push the public key via EC2 Instance Connect
+                            warpgate_aws::send_ssh_public_key(
+                                &instance_info.instance_id,
+                                &instance_info.availability_zone,
+                                &instance_info.region,
+                                &ssh_options.username,
+                                &pub_key_str,
+                            ).await?;
+
+                            // Now authenticate with this key (key is valid for 60 seconds)
+                            let key = Arc::new(key.clone());
+                            let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                            let response = session
+                                .authenticate_publickey(
+                                    ssh_options.username.clone(),
+                                    PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                                )
+                                .await?;
+
+                            auth_result = self._handle_auth_result(
+                                &mut session,
+                                ssh_options.username.clone(),
+                                response
+                            ).await.unwrap_or(false);
+
+                            if auth_result {
+                                debug!(username=&ssh_options.username[..], "Authenticated via EC2 Instance Connect");
+                            }
+
+                            if !auth_result {
+                                auth_error_msg = Some("EC2 Instance Connect authentication was rejected by the SSH target".into());
                             }
                         }
                     }

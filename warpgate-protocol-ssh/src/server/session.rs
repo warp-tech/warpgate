@@ -7,13 +7,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
-use ansi_term::Colour;
 use anyhow::{Context, Result};
 use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::{MethodKind, MethodSet, Sig};
+use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{broadcast, oneshot, Mutex};
 use tracing::*;
@@ -36,7 +36,7 @@ use warpgate_core::{
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::ServiceOutput;
+use super::service_output::{ansi_paint, ServiceOutput};
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
@@ -266,6 +266,7 @@ impl ServerSession {
                         CredentialKind::Totp,
                         CredentialKind::WebUserApproval,
                     ],
+                    Some(self.remote_address.ip()),
                 )
                 .await?
                 .1;
@@ -306,7 +307,7 @@ impl ServerSession {
         let output = format!(
             "{}{} {}\r\n",
             ERASE_PROGRESS_SPINNER,
-            Colour::Black.on(Colour::White).paint(" Warpgate "),
+            ansi_paint(Color::Black, Color::White, " Warpgate "),
             msg.replace('\n', "\r\n"),
         );
         self.emit_pty_output(output.as_bytes())?;
@@ -631,9 +632,7 @@ impl ServerSession {
                         let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black
-                                .on(Colour::Green)
-                                .paint(" ✓ Warpgate connected ")
+                            ansi_paint(Color::Black, Color::Green, " ✓ Warpgate connected ")
                         );
                         let _ = self.emit_pty_output(msg.as_bytes());
                     }
@@ -678,9 +677,11 @@ impl ServerSession {
                         let msg = format!(
                             "{}{}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black
-                                .on(Colour::Red)
-                                .paint(" ✗ SSH target rejected Warpgate authentication request ")
+                            ansi_paint(
+                                Color::Black,
+                                Color::Red,
+                                " ✗ SSH target rejected Warpgate authentication request "
+                            )
                         );
                         let _ = self.emit_pty_output(msg.as_bytes());
                     }
@@ -688,7 +689,7 @@ impl ServerSession {
                         let msg = format!(
                             "{}{} {}\r\n",
                             ERASE_PROGRESS_SPINNER,
-                            Colour::Black.on(Colour::Red).paint(" ✗ Connection failed "),
+                            ansi_paint(Color::Black, Color::Red, " ✗ Connection failed "),
                             error
                         );
                         let _ = self.emit_pty_output(msg.as_bytes());

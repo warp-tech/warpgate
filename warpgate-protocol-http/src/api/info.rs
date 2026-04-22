@@ -88,6 +88,7 @@ pub struct Info {
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
+    running_on_ec2: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -106,7 +107,7 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         let external_host = config
             .construct_external_url(Some(req), None)
             .ok()
@@ -115,14 +116,14 @@ impl Api {
             .map(|x| x.to_string());
 
         let parameters = {
-            Parameters::Entity::get(&*ctx.services.db.lock().await)
+            Parameters::Entity::get(&*ctx.services().db.lock().await)
                 .await
                 .context("loading parameters")?
         };
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = ctx.services.config_provider.lock().await;
+                let mut p = ctx.services().config_provider.lock().await;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)
@@ -148,7 +149,7 @@ impl Api {
         };
 
         let has_ldap = LdapServer::Entity::find()
-            .one(&*ctx.services.db.lock().await)
+            .one(&*ctx.services().db.lock().await)
             .await
             .context("loading LDAP servers")?
             .is_some();
@@ -195,7 +196,7 @@ impl Api {
         // compute admin permissions (only if authenticated)
         let admin_permissions = if let Some(ctx) = &auth_ctx {
             if let Some(username) = ctx.auth.username() {
-                let db = ctx.services.db.lock().await;
+                let db = ctx.services().db.lock().await;
                 let perms = {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
@@ -290,6 +291,11 @@ impl Api {
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
+            running_on_ec2: if auth_ctx.is_some() {
+                Some(warpgate_aws::check_ec2().await)
+            } else {
+                None
+            },
         })))
     }
 }

@@ -60,7 +60,8 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) = authenticate_and_get_target(req, &target_name, &ctx.services).await?;
+    let (user_info, target) =
+        authenticate_and_get_target(req, &target_name, ctx.services()).await?;
 
     let TargetOptions::Kubernetes(k8s_options) = &target.options else {
         return Err(poem::Error::from_string(
@@ -82,7 +83,7 @@ pub async fn handle_api_request(
         handle.set_target(&target).await?;
         (
             handle.id(),
-            span_for_request(req, &ctx.services, Some(&*handle)).await?,
+            span_for_request(req, ctx.services(), Some(&*handle)).await?,
         )
     };
 
@@ -95,7 +96,7 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
@@ -107,14 +108,14 @@ pub async fn handle_api_request(
                 &path,
                 user_info,
                 session_id,
-                &ctx.services,
+                ctx.services(),
             )
             .await
             .map(IntoResponse::into_response)
             .context("handling Kubernetes API request")
         };
 
-        let client_ip = get_client_ip(req, &ctx.services).await;
+        let client_ip = get_client_ip(req, ctx.services()).await;
         let response = response.inspect_err(|e| {
             log_request_error(req.method(), req.original_uri(), client_ip.as_deref(), e);
         })?;
@@ -143,7 +144,8 @@ async fn _handle_normal_request_inner(
     services: &Services,
 ) -> Result<Response, WarpgateError> {
     let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .build()
             .context("building reqwest client")?;
 
@@ -153,6 +155,7 @@ async fn _handle_normal_request_inner(
         match &k8s_options.auth {
             warpgate_common::KubernetesTargetAuth::Token(_) => "Token",
             warpgate_common::KubernetesTargetAuth::Certificate(_) => "Certificate",
+            warpgate_common::KubernetesTargetAuth::IamRole(_) => "IamRole",
         }
     );
 
@@ -273,12 +276,19 @@ async fn _handle_normal_request_inner(
             .unwrap_or_default()
             .to_lowercase();
 
-        let is_watch = req
+        let query_pairs: Vec<_> = req
             .uri()
             .query()
-            .is_some_and(|q| q.split('&').any(|p| p.starts_with("watch=true")));
+            .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
+            .unwrap_or_default();
 
-        if transfer_encoding == "chunked" || is_watch {
+        // watch=true: used by kubectl to await changes
+        // follow=true: used by kubectl logs
+        let is_streaming_response = query_pairs
+            .iter()
+            .any(|(k, v)| (k == "watch" || k == "follow") && v == "true");
+
+        if transfer_encoding == "chunked" || is_streaming_response {
             (
                 Body::from_bytes_stream(response.bytes_stream().map_err(std::io::Error::other)),
                 None,
@@ -386,7 +396,8 @@ async fn _handle_websocket_request_inner(
     }
 
     let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)?
+        create_authenticated_client(k8s_options, Some(&user_info.username.clone()), services)
+            .await?
             .http1_only()
             .build()?;
 
@@ -397,18 +408,14 @@ async fn _handle_websocket_request_inner(
             config.store.recordings.enable
         };
         if enabled {
-            match start_recording_exec(
-                &session_id,
-                &services.recordings,
-                deduce_exec_recording_metadata(&full_url),
-            )
-            .await
-            {
-                Err(e) => {
-                    error!("Failed to start recording: {}", e);
-                }
-                Ok(recorder) => {
-                    tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+            if let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
+                match start_recording_exec(&session_id, &services.recordings, metadata).await {
+                    Err(e) => {
+                        error!("Failed to start recording: {}", e);
+                    }
+                    Ok(recorder) => {
+                        tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+                    }
                 }
             }
         }
@@ -484,6 +491,7 @@ async fn _handle_websocket_request_inner(
             "v3.channel.k8s.io",
             "v4.channel.k8s.io",
             "v5.channel.k8s.io",
+            "SPDY/3.1+portforward.k8s.io",
         ])
         .on_upgrade(|socket| async move {
             ws_handler_inner(socket).await.inspect_err(|e| {

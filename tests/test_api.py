@@ -1,3 +1,7 @@
+"""
+This test runs against Postgres for a better chance to catch
+DB field type related issues that don't surface on SQLite (e.g. timestamp types)
+"""
 import contextlib
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
@@ -10,8 +14,9 @@ import pytest
 import requests
 
 from .api_client import sdk, admin_client as new_admin_client
-from .conftest import WarpgateProcess
+from .conftest import ProcessManager, WarpgateProcess
 from .test_http_common import *  # noqa
+from .util import wait_port
 
 
 @dataclass
@@ -823,12 +828,31 @@ def _create_user_api_token(
     return token_resp.json()["secret"]
 
 
+@pytest.fixture(scope="session")
+def pg_wg(processes: ProcessManager):
+    db_port = processes.start_postgres_server()
+    wg = processes.start_wg(
+        database_url=f"postgres://user:123@localhost:{db_port}/db",
+    )
+    wait_port(wg.http_port, for_process=wg.process, recv=False)
+    wait_port(wg.ssh_port, for_process=wg.process)
+    wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
+    yield wg
+
+
+@pytest.fixture
+def admin_client(pg_wg: WarpgateProcess):
+    url = f"https://localhost:{pg_wg.http_port}"
+    with new_admin_client(url) as api:
+        yield api
+
+
 def test_all_openapi_admin_operations_permission_enforcement(
-    shared_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
 ):
     _verify_all_openapi_ops_are_covered()
 
-    url = f"https://localhost:{shared_wg.http_port}"
+    url = f"https://localhost:{pg_wg.http_port}"
 
     resources: Dict[str, object] = {}
     resources["role_id"] = admin_client.create_role(
@@ -918,6 +942,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
     resources["ldap_server_id"] = ldap.id
 
     for case in ADMIN_API_TEST_CASES:
+        print(f"Testing {case.id} with permission {case.permission}")
         # Positive case: role has required permission (or any admin if None).
         allow_payload = make_limited_admin_role_payload(
             **({case.permission: True} if case.permission else {})
@@ -926,6 +951,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
         allowed_user = _create_user_with_role(admin_client, allowed_role.id)
         token = _create_user_api_token(url, allowed_user.username, "123")
         with new_admin_client(url, token) as allowed_api:
+            print('Trying positive case')
             try:
                 response = case.call(allowed_api, resources)
                 (status, body) = response.status_code, response.data
@@ -951,8 +977,9 @@ def test_all_openapi_admin_operations_permission_enforcement(
             denied_token = _create_user_api_token(url, denied_user.username, "123")
 
             with new_admin_client(
-                f"https://localhost:{shared_wg.http_port}", denied_token
+                f"https://localhost:{pg_wg.http_port}", denied_token
             ) as denied_api:
+                print('Trying negative case')
                 try:
                     response = case.call(denied_api, resources)
                     (status, body) = response.status_code, response.data

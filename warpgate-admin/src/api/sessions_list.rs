@@ -31,7 +31,9 @@ enum CloseAllSessionsResponse {
 
 #[OpenApi]
 impl Api {
+    #[allow(clippy::too_many_arguments)]
     #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
+    #[allow(clippy::too_many_arguments)]
     async fn api_get_all_sessions(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
@@ -46,7 +48,7 @@ impl Api {
 
         require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {
@@ -86,7 +88,7 @@ impl Api {
     ) -> poem::Result<CloseAllSessionsResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
 
-        let state = ctx.services.state.lock().await;
+        let state = ctx.services().state.lock().await;
 
         for s in state.sessions.values() {
             let mut session = s.lock().await;
@@ -106,7 +108,7 @@ pub async fn api_get_sessions_changes_stream(
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-    let mut receiver = ctx.services.state.lock().await.subscribe();
+    let mut receiver = ctx.services().state.lock().await.subscribe();
 
     Ok(ws
         .on_upgrade(|socket| async move {

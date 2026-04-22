@@ -61,7 +61,7 @@ impl ListApi {
     ) -> Result<GetTargetsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let mut targets = Target::Entity::find();
 
@@ -113,7 +113,7 @@ impl ListApi {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -124,12 +124,24 @@ impl ListApi {
             )));
         }
 
+        let mut options = body.options.clone();
+
+        match &mut options {
+            TargetOptions::MySql(opts) => {
+                opts.normalize();
+            }
+            TargetOptions::Postgres(opts) => {
+                opts.normalize();
+            }
+            _ => {}
+        }
+
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
-            kind: Set((&body.options).into()),
-            options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            kind: Set((&options).into()),
+            options: Set(serde_json::to_value(options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
         };
@@ -196,7 +208,7 @@ impl DetailApi {
     ) -> Result<GetTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetTargetResponse::NotFound);
@@ -215,7 +227,7 @@ impl DetailApi {
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -225,7 +237,7 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
-        let services = &ctx.services;
+        let services = ctx.services();
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
@@ -262,7 +274,7 @@ impl DetailApi {
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
@@ -307,7 +319,7 @@ impl DetailApi {
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
@@ -374,7 +386,7 @@ impl RolesApi {
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -405,7 +417,7 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -443,7 +455,7 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(model) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))

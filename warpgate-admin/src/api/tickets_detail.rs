@@ -39,7 +39,7 @@ impl Api {
 
         require_admin_permission(&ctx, Some(AdminPermission::TicketsDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(ticket) = Ticket::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTicketResponse::NotFound);

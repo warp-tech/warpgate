@@ -111,6 +111,26 @@
                 Disabling password authentication can help prevent brute-force attacks.
             </InfoBox>
 
+            <h4 class="mt-4">HTTP</h4>
+            <label
+                for="showSessionMenu"
+                class="d-flex align-items-center"
+            >
+                <Input
+                    id="showSessionMenu"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.showSessionMenu = !parameters!.showSessionMenu
+                        update()
+                    }}
+                    checked={parameters.showSessionMenu} />
+                <div>Show session menu</div>
+            </label>
+            <InfoBox class="mt-3 mb-3">
+                Warpgate can inject a session menu into HTTP sessions, allowing users to log out or return back to the home page.
+            </InfoBox>
+
             {#if hasSsoProviders}
             <h4 class="mt-4">Login</h4>
             <label

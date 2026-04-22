@@ -12,6 +12,7 @@ use futures::TryStreamExt;
 use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
 use tracing::{error, info, warn, Instrument};
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::ListenEndpoint;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
@@ -74,6 +75,9 @@ impl ProtocolServer for MySQLProtocolServer {
             let remote_address = stream.peer_addr().context("getting peer address")?;
 
             stream.set_nodelay(true)?;
+            if detect_port_knock(&stream).await {
+                continue;
+            }
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();

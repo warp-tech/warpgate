@@ -100,7 +100,7 @@ impl ListApi {
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let objects = CertificateCredential::Entity::find()
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -126,7 +126,7 @@ impl ListApi {
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let params = Parameters::Entity::get(&db).await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
@@ -199,7 +199,7 @@ impl DetailApi {
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
             .one(&*db)
@@ -232,7 +232,7 @@ impl DetailApi {
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
