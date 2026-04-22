@@ -62,13 +62,14 @@
     <FormGroup floating label="Authenticate using" class="w-100">
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
+            <option value="Certificate">Warpgate's own certificate authority</option>
             <option value="Password">Password</option>
             {#if $serverInfo?.runningOnEc2}
                 <option value="IamRole">IAM Role (experimental)</option>
             {/if}
         </select>
     </FormGroup>
-    {#if options.auth.kind === 'PublicKey'}
+    {#if ['PublicKey', 'Certificate'].includes(options.auth.kind)}
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
             href="/@warpgate/admin#/config/ssh"
