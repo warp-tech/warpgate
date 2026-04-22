@@ -8,7 +8,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00037_target_ssh_cert"
+        "m00042_target_ssh_cert"
     }
 }
 
@@ -27,7 +27,7 @@ impl MigrationTrait for Migration {
             let mut options = target
                 .options
                 .get("ssh")
-                .unwrap_or(Default::default())
+                .unwrap_or_default()
                 .clone();
 
             if let Some(auth) = options.get_mut("auth") {
@@ -75,7 +75,7 @@ impl MigrationTrait for Migration {
         if has_certificates {
             // At least one target is using certificate auth
             // reversing would fallback to pubkey, which would not work
-            panic!("This migration cannot be reversed");
+            assert!(!has_certificates, "This migration cannot be reversed");
         }
 
         for target in ssh_targets {
