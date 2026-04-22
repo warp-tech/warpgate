@@ -89,7 +89,7 @@
         "keepalive_interval": null,
         "keys": "./data/keys",
         "listen": "[::]:2222",
-        "temporary_client_certificate_validity": "5m"
+        "temporary_client_certificate_validity": "1m"
       }
     },
     "sso_providers": {
@@ -420,7 +420,7 @@
         },
         "temporary_client_certificate_validity": {
           "type": "string",
-          "default": "5m"
+          "default": "1m"
         }
       }
     },
