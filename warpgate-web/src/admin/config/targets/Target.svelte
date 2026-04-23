@@ -218,7 +218,15 @@
                 </div>
                 <div class="col">
                     <FormGroup floating label="Authenticate using">
-                        <select class="form-control" bind:value={target.options.auth!.kind}>
+                        <select class="form-control"
+                            value={target.options.auth?.kind ?? 'Password'}
+                            onchange={e => {
+                                const kind = (e.target as HTMLSelectElement).value
+                                target!.options.auth = kind === 'IamRole'
+                                    ? { kind: 'IamRole' }
+                                    : { kind: 'Password', password: target!.options.auth?.password ?? '' }
+                            }}
+                        >
                             <option value="Password">Password</option>
                             {#if $serverInfo?.runningOnEc2}
                                 <option value="IamRole">IAM Role (experimental)</option>
@@ -228,9 +236,15 @@
                 </div>
             </div>
 
-            {#if target.options.auth!.kind === 'Password'}
+            {#if target.options.auth === null || target.options.auth?.kind === 'Password'}
                 <FormGroup floating label="Password">
-                    <input class="form-control" type="password" autocomplete="off" bind:value={target.options.auth!.password} />
+                    <input class="form-control" type="password" autocomplete="off"
+                        placeholder={target.options.auth === null ? 'Enter new password to replace legacy value' : undefined}
+                        value={target.options.auth?.password ?? ''}
+                        oninput={e => {
+                            target!.options.auth = { kind: 'Password', password: (e.target as HTMLInputElement).value }
+                        }}
+                    />
                 </FormGroup>
             {/if}
 
