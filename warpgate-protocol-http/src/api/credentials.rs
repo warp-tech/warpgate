@@ -7,7 +7,10 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{User, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError};
+use warpgate_common::{
+    validate_password, PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
+    UserRequireCredentialsPolicy, WarpgateError,
+};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
@@ -55,6 +58,8 @@ enum ChangePasswordResponse {
     Done(Json<PasswordState>),
     #[oai(status = 401)]
     Unauthorized,
+    #[oai(status = 422)]
+    PolicyViolation(Json<Vec<PasswordPolicyViolation>>),
 }
 
 #[derive(Object)]
@@ -66,6 +71,7 @@ pub struct CredentialsState {
     sso: Vec<ExistingSsoCredential>,
     credential_policy: UserRequireCredentialsPolicy,
     ldap_linked: bool,
+    password_policy: PasswordPolicy,
 }
 
 #[derive(ApiResponse)]
@@ -278,6 +284,8 @@ impl Api {
             .all(&*db)
             .await?;
 
+        let parameters = Parameters::Entity::get(&*db).await?;
+
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
                 0 => PasswordState::Unset,
@@ -290,6 +298,7 @@ impl Api {
             sso: sso_creds.into_iter().map(Into::into).collect(),
             credential_policy: user_cfg.credential_policy.unwrap_or_default(),
             ldap_linked: user.ldap_server_id.is_some(),
+            password_policy: parameters.password_policy(),
         })))
     }
 
@@ -311,6 +320,13 @@ impl Api {
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
+
+        let parameters = Parameters::Entity::get(&*db).await?;
+        let policy = parameters.password_policy();
+        let violations = validate_password(&body.password, &policy);
+        if !violations.is_empty() {
+            return Ok(ChangePasswordResponse::PolicyViolation(Json(violations)));
+        }
 
         entities::PasswordCredential::Entity::delete_many()
             .filter(entities::PasswordCredential::Column::UserId.eq(user.id))
