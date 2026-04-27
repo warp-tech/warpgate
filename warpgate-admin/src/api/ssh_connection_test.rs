@@ -15,9 +15,14 @@ use crate::api::common::require_admin_permission;
 pub struct Api;
 
 #[derive(Object)]
+#[oai(rename_all = "camelCase")]
 struct CheckSshHostKeyRequest {
     host: String,
     port: u16,
+    username: Option<String>,
+    allow_insecure_algos: Option<bool>,
+    auth: Option<SSHTargetAuth>,
+    jump_host: Option<warpgate_common::SSHJumpHostOptions>,
 }
 
 #[derive(Object)]
@@ -55,11 +60,14 @@ impl Api {
             RCCommand::Connect(TargetSSHOptions {
                 host: body.host.clone(),
                 port: body.port,
-                username: String::new(),
-                allow_insecure_algos: None,
-                auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
-                    password: String::new().into(),
+                username: body.username.clone().unwrap_or_default(),
+                allow_insecure_algos: body.allow_insecure_algos,
+                auth: body.auth.clone().unwrap_or_else(|| {
+                    SSHTargetAuth::Password(SshTargetPasswordAuth {
+                        password: String::new().into(),
+                    })
                 }),
+                jump_host: body.jump_host.clone(),
             }),
             None,
         ));
@@ -68,6 +76,10 @@ impl Api {
             let key = loop {
                 match handles.event_rx.recv().await {
                     Some(RCEvent::HostKeyReceived(key)) => break key,
+                    Some(RCEvent::HostKeyUnknown(key, reply)) => {
+                        let _ = reply.send(true);
+                        break key;
+                    },
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),
