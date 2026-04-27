@@ -39,7 +39,66 @@
     </div>
 </div>
 
-<h4 class="mt-4">Authentication</h4>
+<h4 class="mt-4">Jump Host</h4>
+
+<div class="d-flex mb-3">
+    <Input
+        class="mb-0 me-2"
+        type="switch"
+        label="Use a Jump Host"
+        checked={!!options.jump_host}
+        onchange={(e) => {
+            if (e.target.checked) {
+                options.jump_host = {
+                    host: '',
+                    port: 22,
+                    username: '',
+                    auth: { kind: 'PublicKey' }
+                }
+            } else {
+                options.jump_host = null
+            }
+            hostKeyCheckInvalidated = true
+        }} />
+</div>
+
+{#if options.jump_host}
+<div class="border rounded p-3 mb-4 bg-body-tertiary">
+    <div class="row">
+        <div class="col-8">
+            <FormGroup floating label="Jump Host address">
+                <input class="form-control" bind:value={options.jump_host.host} />
+            </FormGroup>
+        </div>
+        <div class="col-4">
+            <FormGroup floating label="Jump Host port">
+                <input class="form-control" type="number" bind:value={options.jump_host.port} min="1" max="65535" step="1" />
+            </FormGroup>
+        </div>
+    </div>
+
+    <FormGroup floating label="Jump Host username">
+        <input class="form-control" bind:value={options.jump_host.username} />
+    </FormGroup>
+
+    <div class="d-flex">
+        <FormGroup floating label="Authenticate using" class="w-100">
+            <select bind:value={options.jump_host.auth.kind} class="form-control">
+                <option value="PublicKey">Warpgate's own private keys</option>
+                <option value="Password">Password</option>
+                {#if $serverInfo?.runningOnEc2}
+                    <option value="IamRole">IAM Role (experimental)</option>
+                {/if}
+            </select>
+        </FormGroup>
+        {#if options.jump_host.auth.kind === 'Password'}
+            <FormGroup floating label="Password" class="w-100 ms-3">
+                <input class="form-control" type="password" autocomplete="off" bind:value={options.jump_host.auth.password} />
+            </FormGroup>
+        {/if}
+    </div>
+</div>
+{/if}
 
 {#if $adminPermissions.targetsEdit}
 <div class="mb-3">
@@ -88,5 +147,5 @@
         class="mb-0 me-2"
         type="switch"
         label="Allow insecure SSH algorithms (e.g. for older network devices)"
-        bind:checked={options.allowInsecureAlgos} />
+        bind:checked={options.allow_insecure_algos} />
 </div>
