@@ -71,6 +71,7 @@ ignore = [
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
     "RUSTSEC-2026-0099", # rustls: Name constraints were accepted for certificates asserting a wildcard name
     "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
+    "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
