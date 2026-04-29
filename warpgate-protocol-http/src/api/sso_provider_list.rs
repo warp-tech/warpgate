@@ -61,6 +61,7 @@ enum ReturnToSsoPostResponse {
 #[derive(Deserialize)]
 pub struct ReturnToSsoFormData {
     pub code: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Object)]
@@ -128,9 +129,10 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         code: Query<Option<String>>,
+        state: Query<Option<String>>,
     ) -> Result<Response<ReturnToSsoResponse>, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, ctx, code.as_ref())
+            .api_return_to_sso_get_common(req, session, ctx, code.as_ref(), state.as_ref())
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
 
@@ -148,9 +150,16 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         data: Form<ReturnToSsoFormData>,
+        state: Query<Option<String>>,
     ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, ctx, data.code.as_ref())
+            .api_return_to_sso_get_common(
+                req,
+                session,
+                ctx,
+                data.code.as_ref(),
+                data.state.as_ref().or(state.as_ref()),
+            )
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
         let serialized_url = serde_json::to_string(&url)?;
@@ -176,6 +185,7 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         code: Option<&String>,
+        state: Option<&String>,
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
         let services = ctx.services();
@@ -188,6 +198,14 @@ impl Api {
                 "No authorization code in the return URL request".to_string()
             ));
         };
+
+        let Some(state) = state else {
+            return Ok(Err("No SSO state parameter in the return request".to_string()));
+        };
+
+        if !context.request.verify_state(state) {
+            return Ok(Err("Invalid SSO state parameter".to_string()));
+        }
 
         let response = context
             .request
