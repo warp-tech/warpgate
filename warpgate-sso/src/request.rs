@@ -1,6 +1,7 @@
 use openidconnect::url::Url;
 use openidconnect::{CsrfToken, Nonce, PkceCodeVerifier, RedirectUrl};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tracing::{debug, error};
 
 use crate::{SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse};
@@ -22,6 +23,14 @@ impl SsoLoginRequest {
 
     pub const fn csrf_token(&self) -> &CsrfToken {
         &self.csrf_token
+    }
+
+    pub fn verify_state(&self, state: &str) -> bool {
+        self.csrf_token()
+            .secret()
+            .as_bytes()
+            .ct_eq(state.as_bytes())
+            .into()
     }
 
     pub const fn redirect_url(&self) -> &RedirectUrl {

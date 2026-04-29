@@ -23,3 +23,4 @@ jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"]
 data-encoding.workspace = true
 futures.workspace = true
 schemars.workspace = true
+subtle = "2"
