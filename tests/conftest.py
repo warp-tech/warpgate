@@ -120,18 +120,21 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config=""):
+    def start_ssh_server(self, trusted_keys=[], extra_config="", trusted_ca=[]):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
         authorized_keys_path = data_dir / "authorized_keys"
         authorized_keys_path.write_text("\n".join(trusted_keys))
         config_path = data_dir / "sshd_config"
+        ssh_ca = data_dir / "trusted_ca"
+        ssh_ca.write_text("\n".join(trusted_ca))
         config_path.write_text(
             dedent(
                 f"""\
                 Port 22
                 AuthorizedKeysFile {authorized_keys_path}
+                TrustedUserCAKeys {ssh_ca}
                 AllowAgentForwarding yes
                 AllowTcpForwarding yes
                 GatewayPorts yes
@@ -147,9 +150,11 @@ class ProcessManager:
                 """
             )
         )
+
         data_dir.chmod(0o700)
         authorized_keys_path.chmod(0o600)
         config_path.chmod(0o600)
+        ssh_ca.chmod(0o600)
 
         self.start(
             [
