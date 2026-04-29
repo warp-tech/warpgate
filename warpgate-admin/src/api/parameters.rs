@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
@@ -22,6 +22,7 @@ struct ParameterValues {
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
     pub show_session_menu: bool,
+    pub password_policy: PasswordPolicy,
 }
 
 #[derive(Serialize, Object)]
@@ -33,6 +34,7 @@ struct ParameterUpdate {
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub minimize_password_login: Option<bool>,
     pub show_session_menu: Option<bool>,
+    pub password_policy: Option<PasswordPolicy>,
 }
 
 #[derive(ApiResponse)]
@@ -68,6 +70,7 @@ impl Api {
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             minimize_password_login: parameters.minimize_password_login,
             show_session_menu: parameters.show_session_menu,
+            password_policy: parameters.password_policy(),
         })))
     }
 
@@ -98,6 +101,14 @@ impl Api {
             .map_or(NotSet, Set);
         parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
+
+        if let Some(ref policy) = body.password_policy {
+            parameters.password_policy_min_length = Set(policy.min_length as i32);
+            parameters.password_policy_require_uppercase = Set(policy.require_uppercase);
+            parameters.password_policy_require_lowercase = Set(policy.require_lowercase);
+            parameters.password_policy_require_digits = Set(policy.require_digits);
+            parameters.password_policy_require_special = Set(policy.require_special);
+        }
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

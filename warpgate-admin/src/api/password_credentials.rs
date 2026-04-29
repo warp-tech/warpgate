@@ -4,10 +4,13 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, Secret, UserPasswordCredential, WarpgateError};
+use warpgate_common::{
+    validate_password, AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential,
+    WarpgateError,
+};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
-use warpgate_db_entities::{PasswordCredential, User};
+use warpgate_db_entities::{Parameters, PasswordCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -40,6 +43,8 @@ enum CreatePasswordCredentialResponse {
     Created(Json<ExistingPasswordCredential>),
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 422)]
+    PolicyViolation(Json<Vec<PasswordPolicyViolation>>),
 }
 
 pub struct ListApi;
@@ -86,6 +91,15 @@ impl ListApi {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
         let db = ctx.services().db.lock().await;
+
+        let parameters = Parameters::Entity::get(&*db).await?;
+        let policy = parameters.password_policy();
+        let violations = validate_password(body.password.expose_secret(), &policy);
+        if !violations.is_empty() {
+            return Ok(CreatePasswordCredentialResponse::PolicyViolation(Json(
+                violations,
+            )));
+        }
 
         let object = PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
