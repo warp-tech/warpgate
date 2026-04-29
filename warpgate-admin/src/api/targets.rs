@@ -237,12 +237,23 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
+        let mut options = body.options.clone();
+
+        match &mut options {
+            TargetOptions::MySql(opts) => {
+                opts.normalize();
+            }
+            TargetOptions::Postgres(opts) => {
+                opts.normalize();
+            }
+            _ => {}
+        }
+
         let services = ctx.services();
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
-        model.options =
-            Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
+        model.options = Set(serde_json::to_value(options).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
         let target = model.update(&*db).await?;

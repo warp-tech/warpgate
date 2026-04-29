@@ -178,6 +178,10 @@ impl TargetMySqlOptions {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
                 password,
             }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
         }
     }
 }
@@ -226,6 +230,10 @@ impl TargetPostgresOptions {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
                 password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
             }));
         }
     }
