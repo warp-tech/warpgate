@@ -51,6 +51,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Checksum of inputs that produce /data/warpgate.yaml: the override ConfigMap
+and, when config_env_var_replace is set, the resolved env Secret values.
+Empty when nothing applies or lookup is unavailable (helm template / dry-run).
+*/}}
+{{- define "warpgate.configChecksum" -}}
+{{- $configContent := "" -}}
+{{- if .Values.overrides_config -}}
+  {{- $configContent = include (print $.Template.BasePath "/configmap.yaml") . -}}
+{{- end -}}
+{{- $envParts := list -}}
+{{- if and .Values.config_env_var_replace .Values.setup.envFromSecret -}}
+  {{- range $key, $val := .Values.setup.envFromSecret -}}
+    {{- $ref := split "/" $val -}}
+    {{- $secret := lookup "v1" "Secret" $.Release.Namespace $ref._0 -}}
+    {{- if and $secret (hasKey ($secret.data | default dict) $ref._1) -}}
+      {{- $envParts = append $envParts (printf "%s=%s" $key (index $secret.data $ref._1)) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if or $configContent $envParts -}}
+{{- printf "%s\n%s" $configContent ($envParts | sortAlpha | join "\n") | sha256sum -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "warpgate.serviceAccountName" -}}
