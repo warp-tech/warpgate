@@ -5,7 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::debug;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
@@ -64,7 +64,6 @@ impl Api {
             Some(req),
             provider_config.return_domain_whitelist.as_deref(),
         )?;
-        info!("{:?}", provider_config);
         return_url.set_path(&format!(
             "{}warpgate/api/sso/return",
             provider_config.return_url_prefix
