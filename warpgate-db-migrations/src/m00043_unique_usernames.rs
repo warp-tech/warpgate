@@ -11,10 +11,7 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
         let backend = manager.get_database_backend();
 
-        // Delete all objects that reference duplicate users (via user_id FK),
-        // keeping only the rows that belong to the user we will retain per username.
-        // MIN(id) is used to pick one representative user per username group.
-        for table in &[
+        let child_tables = [
             "credentials_otp",
             "credentials_password",
             "credentials_public_key",
@@ -24,16 +21,36 @@ impl MigrationTrait for Migration {
             "user_roles",
             "user_admin_roles",
             "tickets",
-        ] {
-            db.execute_unprepared(&format!(
-                "DELETE FROM {table} WHERE user_id NOT IN (SELECT MIN(id) AS id FROM users GROUP BY username)"
-            ))
-            .await?;
+        ];
+
+        // Delete all objects that reference duplicate users (via user_id FK),
+        // keeping only the rows that belong to the user we will retain per username.
+        // PostgreSQL's MIN() does not accept uuid, so we cast to text there.
+        match backend {
+            DbBackend::Postgres => {
+                for table in &child_tables {
+                    db.execute_unprepared(&format!(
+                        "DELETE FROM {table} WHERE user_id::text NOT IN \
+                         (SELECT MIN(id::text) FROM users GROUP BY username)"
+                    ))
+                    .await?;
+                }
+            }
+            DbBackend::MySql | DbBackend::Sqlite => {
+                for table in &child_tables {
+                    db.execute_unprepared(&format!(
+                        "DELETE FROM {table} WHERE user_id NOT IN \
+                         (SELECT MIN(id) FROM users GROUP BY username)"
+                    ))
+                    .await?;
+                }
+            }
         }
 
         // Delete duplicate users, retaining the one with the lowest id per username.
         // MySQL does not allow a subquery to reference the same table being deleted
         // without an intermediate derived table, so we use a double-subquery there.
+        // PostgreSQL requires a cast to text for MIN() on uuid.
         match backend {
             DbBackend::MySql => {
                 db.execute_unprepared(
@@ -42,7 +59,14 @@ impl MigrationTrait for Migration {
                 )
                 .await?;
             }
-            DbBackend::Postgres | DbBackend::Sqlite => {
+            DbBackend::Postgres => {
+                db.execute_unprepared(
+                    "DELETE FROM users WHERE id::text NOT IN \
+                     (SELECT MIN(id::text) FROM users GROUP BY username)",
+                )
+                .await?;
+            }
+            DbBackend::Sqlite => {
                 db.execute_unprepared(
                     "DELETE FROM users WHERE id NOT IN \
                      (SELECT MIN(id) FROM users GROUP BY username)",
