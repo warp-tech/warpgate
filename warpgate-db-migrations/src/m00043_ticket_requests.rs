@@ -6,6 +6,24 @@ use crate::m00007_targets_and_roles::target;
 use crate::m00010_parameters::parameters;
 use crate::m00032_admin_roles::admin_role;
 
+pub(crate) mod user {
+    use sea_orm::entity::prelude::*;
+    use uuid::Uuid;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "users")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        pub username: String,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub(crate) mod ticket_request {
     use sea_orm::entity::prelude::*;
     use time::OffsetDateTime;
@@ -32,7 +50,26 @@ pub(crate) mod ticket_request {
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {}
+    pub enum Relation {
+        #[sea_orm(
+            belongs_to = "super::user::Entity",
+            from = "Column::UserId",
+            to = "super::user::Column::Id"
+        )]
+        User,
+        #[sea_orm(
+            belongs_to = "crate::m00007_targets_and_roles::target::Entity",
+            from = "Column::TargetId",
+            to = "crate::m00007_targets_and_roles::target::Column::Id"
+        )]
+        Target,
+        #[sea_orm(
+            belongs_to = "crate::m00001_create_ticket::ticket::Entity",
+            from = "Column::TicketId",
+            to = "crate::m00001_create_ticket::ticket::Column::Id"
+        )]
+        Ticket,
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }

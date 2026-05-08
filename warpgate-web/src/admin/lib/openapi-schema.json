@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.2-17-g5e001794-modified"
+    "version": "v0.23.3-26-g0c726dea-modified"
   },
   "servers": [
     {
@@ -5861,6 +5861,7 @@
           "username",
           "description",
           "target_id",
+          "target",
           "self_service",
           "created"
         ],
@@ -5882,6 +5883,9 @@
           "target_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "target": {
+            "type": "string"
           },
           "uses_left": {
             "type": "integer",
