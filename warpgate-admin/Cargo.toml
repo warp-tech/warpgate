@@ -2,13 +2,13 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-admin"
-version = "0.22.0"
+version = "0.23.3"
+publish = false
 
 [dependencies]
 anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true
-chrono = { version = "0.4", default-features = false }
 futures.workspace = true
 hex.workspace = true
 mime_guess = { version = "2.0", default-features = false }
@@ -22,16 +22,18 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warpgate-ca = { version = "*", path = "../warpgate-ca" }
-warpgate-common = { version = "*", path = "../warpgate-common" }
+warpgate-ca = { path = "../warpgate-ca" }
+warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
-warpgate-tls = { version = "*", path = "../warpgate-tls" }
-warpgate-core = { version = "*", path = "../warpgate-core" }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities" }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
-warpgate-protocol-ssh = { version = "*", path = "../warpgate-protocol-ssh" }
-warpgate-protocol-kubernetes = { version = "*", path = "../warpgate-protocol-kubernetes" }
+warpgate-tls = { path = "../warpgate-tls" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
+warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
+ipnet = "2"
 regex.workspace = true

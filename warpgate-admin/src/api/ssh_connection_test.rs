@@ -49,16 +49,16 @@ impl Api {
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services.clone())?;
+        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
 
         let _ = handles.command_tx.send((
             RCCommand::Connect(TargetSSHOptions {
                 host: body.host.clone(),
                 port: body.port,
-                username: "".into(),
+                username: String::new(),
                 allow_insecure_algos: None,
                 auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
-                    password: "".to_string().into(),
+                    password: String::new().into(),
                 }),
             }),
             None,

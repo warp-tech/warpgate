@@ -1,9 +1,9 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::WarpgateError;
@@ -26,15 +26,15 @@ enum GetApiTokensResponse {
 #[derive(Object)]
 struct NewApiToken {
     label: String,
-    expiry: DateTime<Utc>,
+    expiry: OffsetDateTime,
 }
 
 #[derive(Object)]
 struct ExistingApiToken {
     id: Uuid,
     label: String,
-    created: DateTime<Utc>,
-    expiry: DateTime<Utc>,
+    created: OffsetDateTime,
+    expiry: OffsetDateTime,
 }
 
 impl From<ApiToken::Model> for ExistingApiToken {
@@ -85,7 +85,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
@@ -110,7 +110,7 @@ impl Api {
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
@@ -120,10 +120,10 @@ impl Api {
         let object = ApiToken::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
-            created: Set(Utc::now()),
+            created: Set(OffsetDateTime::now_utc()),
             expiry: Set(body.expiry),
             label: Set(body.label.clone()),
-            secret: Set(secret.expose_secret().to_string()),
+            secret: Set(secret.expose_secret().clone()),
         }
         .insert(&*db)
         .await
@@ -131,7 +131,7 @@ impl Api {
 
         Ok(CreateApiTokenResponse::Created(Json(TokenAndSecret {
             token: object.into(),
-            secret: secret.expose_secret().to_string(),
+            secret: secret.expose_secret().clone(),
         })))
     }
 
@@ -147,7 +147,7 @@ impl Api {
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);

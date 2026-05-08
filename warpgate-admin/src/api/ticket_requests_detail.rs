@@ -16,7 +16,7 @@ async fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Result<Uuid, Warpga
     let Some(username) = ctx.auth.username() else {
         return Err(WarpgateError::NoAdminAccess);
     };
-    let db = ctx.services.db.lock().await;
+    let db = ctx.services().db.lock().await;
     let Some(user) = User::Entity::find()
         .filter(User::Column::Username.eq(username))
         .one(&*db)
@@ -66,7 +66,7 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         let uid = admin_user_id(&ctx).await?;
-        match approve_ticket_request(&ctx.services.db, id.0, uid).await? {
+        match approve_ticket_request(&ctx.services().db, id.0, uid).await? {
             Some(request) => Ok(ApproveTicketRequestResponse::Ok(Json(request))),
             None => Ok(ApproveTicketRequestResponse::NotFound),
         }
@@ -87,9 +87,7 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         let uid = admin_user_id(&ctx).await?;
-        match deny_ticket_request(&ctx.services.db, id.0, uid, body.reason.clone())
-            .await?
-        {
+        match deny_ticket_request(&ctx.services().db, id.0, uid, body.reason.clone()).await? {
             Some(request) => Ok(DenyTicketRequestResponse::Ok(Json(request))),
             None => Ok(DenyTicketRequestResponse::NotFound),
         }

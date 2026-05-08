@@ -25,6 +25,15 @@ pub struct PortsInfo {
     kubernetes: Option<u16>,
 }
 
+#[derive(Serialize, Object)]
+pub struct ExternalHostsInfo {
+    ssh: Option<String>,
+    http: Option<String>,
+    mysql: Option<String>,
+    postgres: Option<String>,
+    kubernetes: Option<String>,
+}
+
 #[derive(Serialize, Object, Debug)]
 pub struct SetupState {
     has_targets: bool,
@@ -32,7 +41,7 @@ pub struct SetupState {
 }
 
 impl SetupState {
-    pub fn completed(&self) -> bool {
+    pub const fn completed(&self) -> bool {
         self.has_targets && self.has_users
     }
 }
@@ -71,6 +80,7 @@ pub struct Info {
     username: Option<String>,
     selected_target: Option<String>,
     external_host: Option<String>,
+    external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
     minimize_password_login: bool,
     authorized_via_ticket: bool,
@@ -84,6 +94,7 @@ pub struct Info {
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
+    running_on_ec2: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -102,23 +113,23 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
         let external_host = config
             .construct_external_url(Some(req), None)
             .ok()
             .as_ref()
-            .and_then(|x| x.host())
+            .and_then(url::Url::host)
             .map(|x| x.to_string());
 
         let parameters = {
-            Parameters::Entity::get(&*ctx.services.db.lock().await)
+            Parameters::Entity::get(&*ctx.services().db.lock().await)
                 .await
                 .context("loading parameters")?
         };
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = ctx.services.config_provider.lock().await;
+                let mut p = ctx.services().config_provider.lock().await;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)
@@ -133,10 +144,10 @@ impl Api {
                     has_targets: targets.len() > 1,
                     has_users: users.len() > 1,
                 };
-                if !state.completed() {
-                    Some(state)
-                } else {
+                if state.completed() {
                     None
+                } else {
+                    Some(state)
                 }
             } else {
                 None
@@ -144,15 +155,54 @@ impl Api {
         };
 
         let has_ldap = LdapServer::Entity::find()
-            .one(&*ctx.services.db.lock().await)
+            .one(&*ctx.services().db.lock().await)
             .await
             .context("loading LDAP servers")?
             .is_some();
 
+        let fallback_host = external_host.clone();
+
+        let protocol_external_hosts = if auth_ctx.is_some() {
+            Some(ExternalHostsInfo {
+                ssh: config
+                    .store
+                    .ssh
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                http: config
+                    .store
+                    .http
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                mysql: config
+                    .store
+                    .mysql
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                postgres: config
+                    .store
+                    .postgres
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                kubernetes: config
+                    .store
+                    .kubernetes
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+            })
+        } else {
+            None
+        };
+
         // compute admin permissions (only if authenticated)
         let admin_permissions = if let Some(ctx) = &auth_ctx {
             if let Some(username) = ctx.auth.username() {
-                let db = ctx.services.db.lock().await;
+                let db = ctx.services().db.lock().await;
                 let perms = {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
@@ -180,6 +230,8 @@ impl Api {
                             combined.sessions_view |= r.sessions_view;
                             combined.sessions_terminate |= r.sessions_terminate;
                             combined.recordings_view |= r.recordings_view;
+                            combined.tickets_create |= r.tickets_create;
+                            combined.tickets_delete |= r.tickets_delete;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
                             combined.tickets_create |= r.tickets_create;
@@ -199,7 +251,7 @@ impl Api {
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
-            username: session.get_username(),
+            username: auth_ctx.as_ref().and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
             minimize_password_login: parameters.minimize_password_login,
@@ -210,6 +262,7 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
+            external_hosts: protocol_external_hosts,
             ports: if auth_ctx.is_some() {
                 PortsInfo {
                     ssh: if config.store.ssh.enable {
@@ -252,6 +305,11 @@ impl Api {
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
+            running_on_ec2: if auth_ctx.is_some() {
+                Some(warpgate_aws::check_ec2().await)
+            } else {
+                None
+            },
         })))
     }
 }

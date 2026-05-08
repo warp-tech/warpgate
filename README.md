@@ -155,6 +155,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/solidassassin"><img src="https://avatars.githubusercontent.com/u/47082246?v=4?s=100" width="100px;" alt="Rokas Krivaitis"/><br /><sub><b>Rokas Krivaitis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=solidassassin" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/SachinMaharana"><img src="https://avatars.githubusercontent.com/u/8871040?v=4?s=100" width="100px;" alt="SachinMaharana"/><br /><sub><b>SachinMaharana</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=SachinMaharana" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/pandeysambhi"><img src="https://avatars.githubusercontent.com/u/48976443?v=4?s=100" width="100px;" alt="Sambhavi Pandey"/><br /><sub><b>Sambhavi Pandey</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=pandeysambhi" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

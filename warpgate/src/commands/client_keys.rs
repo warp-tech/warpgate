@@ -3,7 +3,7 @@ use warpgate_common::GlobalParams;
 
 use crate::config::load_config;
 
-pub(crate) async fn command(params: &GlobalParams) -> Result<()> {
+pub fn command(params: &GlobalParams) -> Result<()> {
     let config = load_config(params, true)?;
     let keys = warpgate_protocol_ssh::load_keys(&config, params, "client")?;
     println!("Warpgate SSH client keys:");

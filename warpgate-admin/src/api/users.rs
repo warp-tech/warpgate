@@ -1,18 +1,20 @@
 use poem::web::Data;
-use poem_openapi::param::{Path, Query};
+use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
+use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, AdminRole as AdminRoleConfig, Role as RoleConfig, User as UserConfig,
+    AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::{AdminRole, Role, User, UserRoleAssignment};
+use warpgate_core::logging::{format_related_ids, AuditEvent};
+use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -29,6 +31,7 @@ struct UserDataRequest {
     credential_policy: Option<UserRequireCredentialsPolicy>,
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
+    allowed_ip_ranges: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
@@ -53,12 +56,12 @@ impl ListApi {
     async fn api_get_all_users(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
-        search: Query<Option<String>>,
+        search: poem_openapi::param::Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
@@ -90,7 +93,7 @@ impl ListApi {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -103,9 +106,17 @@ impl ListApi {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
+
+        AuditEvent::UserCreated {
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
@@ -175,7 +186,7 @@ impl DetailApi {
     ) -> Result<GetUserResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetUserResponse::NotFound);
@@ -194,28 +205,39 @@ impl DetailApi {
     ) -> Result<UpdateUserResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
         };
 
         let mut model: User::ActiveModel = user.into();
+
         model.username = Set(body.username.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.credential_policy =
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
-        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
+        model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
+            Some(ranges) => serde_json::to_value(
+                ranges
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(WarpgateError::from)?,
+            None => serde_json::Value::Null,
+        });
         let user = model.update(&*db).await?;
 
         drop(db);
 
-        ctx.services
+        ctx.services()
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *ctx.services.state.lock().await)
+            .apply_new_rate_limits(&*ctx.services().state.lock().await)
             .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
@@ -230,7 +252,7 @@ impl DetailApi {
     ) -> Result<DeleteUserResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserResponse::NotFound);
@@ -241,7 +263,20 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        UserAdminRoleAssignment::Entity::delete_many()
+            .filter(UserAdminRoleAssignment::Column::UserId.eq(user.id))
+            .exec(&*db)
+            .await?;
+
+        AuditEvent::UserDeleted {
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         user.delete(&*db).await?;
+
         Ok(DeleteUserResponse::Deleted)
     }
 
@@ -258,7 +293,7 @@ impl DetailApi {
     ) -> Result<UnlinkUserFromLdapResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UnlinkUserFromLdapResponse::NotFound);
@@ -289,11 +324,11 @@ impl DetailApi {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AutoLinkUserToLdapResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
-
         use warpgate_db_entities::LdapServer;
 
-        let db = ctx.services.db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(AutoLinkUserToLdapResponse::NotFound);
@@ -329,10 +364,9 @@ impl DetailApi {
                     ldap_object_uuid = Some(ldap_user.object_uuid);
                     break;
                 }
-                Ok(None) => continue,
+                Ok(None) => (),
                 Err(e) => {
                     warn!("Error searching for LDAP user in {}: {e}", ldap_server.name);
-                    continue;
                 }
             }
         }
@@ -352,10 +386,53 @@ impl DetailApi {
     }
 }
 
+// ========== User Role Assignment DTOs ==========
+
+/// Response containing user role assignment with expiry info.
+#[derive(Object, Clone, Debug)]
+struct UserRoleAssignmentResponse {
+    /// Role ID
+    id: Uuid,
+    /// Role name
+    name: String,
+    /// Role description
+    description: String,
+    /// When the role was granted
+    granted_at: Option<OffsetDateTime>,
+    /// When this role assignment expires (null = permanent)
+    expires_at: Option<OffsetDateTime>,
+    /// Whether this assignment has expired
+    is_expired: bool,
+    /// Whether this assignment is currently active (not expired, not revoked)
+    is_active: bool,
+}
+
+/// Request to add a user role with optional expiry
+#[derive(Object, Clone, Debug)]
+struct AddUserRoleRequest {
+    #[oai(default)]
+    expires_at: Option<OffsetDateTime>,
+}
+
+/// Request to update user role expiry
+#[derive(Object, Clone, Debug)]
+struct UpdateUserRoleRequest {
+    /// The new expiry timestamp, or null to remove expiry (make permanent)
+    expires_at: Option<OffsetDateTime>,
+}
+
 #[derive(ApiResponse)]
 enum GetUserRolesResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<RoleConfig>>),
+    Ok(Json<Vec<UserRoleAssignmentResponse>>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum GetUserRoleResponse {
+    #[oai(status = 200)]
+    Ok(Json<UserRoleAssignmentResponse>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -363,15 +440,25 @@ enum GetUserRolesResponse {
 #[derive(ApiResponse)]
 enum AddUserRoleResponse {
     #[oai(status = 201)]
-    Created,
+    Created(Json<UserRoleAssignmentResponse>),
     #[oai(status = 409)]
     AlreadyExists,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
 enum DeleteUserRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum UpdateUserRoleResponse {
+    #[oai(status = 200)]
+    Ok(Json<UserRoleAssignmentResponse>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -390,6 +477,8 @@ enum AddUserAdminRoleResponse {
     Created,
     #[oai(status = 409)]
     AlreadyExists,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -402,8 +491,24 @@ enum DeleteUserAdminRoleResponse {
 
 pub struct RolesApi;
 
+fn build_assignment_response(
+    assignment: &UserRoleAssignment::Model,
+    role: &Role::Model,
+) -> UserRoleAssignmentResponse {
+    UserRoleAssignmentResponse {
+        id: role.id,
+        name: role.name.clone(),
+        description: role.description.clone(),
+        granted_at: assignment.granted_at,
+        expires_at: assignment.expires_at,
+        is_expired: assignment.expired(),
+        is_active: assignment.active(),
+    }
+}
+
 #[OpenApi]
 impl RolesApi {
+    /// Get all role assignments for a user with expiry information
     #[oai(
         path = "/users/:id/roles",
         method = "get",
@@ -417,23 +522,67 @@ impl RolesApi {
     ) -> Result<GetUserRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
-        let Some((_, roles)) = User::Entity::find_by_id(*id)
-            .find_with_related(Role::Entity)
-            .all(&*db)
-            .await
-            .map(|x| x.into_iter().next())
-            .map_err(WarpgateError::from)?
-        else {
+        let Some(_user) = User::Entity::find_by_id(*id).one(&*db).await? else {
             return Ok(GetUserRolesResponse::NotFound);
         };
 
-        Ok(GetUserRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
-        )))
+        let assignments = UserRoleAssignment::Entity::find()
+            .filter(UserRoleAssignment::Column::UserId.eq(*id))
+            .all(&*db)
+            .await?;
+
+        let mut results = Vec::new();
+        for assignment in assignments {
+            let Some(role) = Role::Entity::find_by_id(assignment.role_id)
+                .one(&*db)
+                .await?
+            else {
+                continue;
+            };
+            results.push(build_assignment_response(&assignment, &role));
+        }
+
+        Ok(GetUserRolesResponse::Ok(Json(results)))
     }
 
+    /// Get a single user role assignment with details
+    #[oai(
+        path = "/users/:id/roles/:role_id",
+        method = "get",
+        operation_id = "get_user_role"
+    )]
+    async fn api_get_user_role(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        id: Path<Uuid>,
+        role_id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetUserRoleResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+        let db = ctx.services().db.lock().await;
+
+        let Some(assignment) = UserRoleAssignment::Entity::find()
+            .filter(UserRoleAssignment::Column::UserId.eq(id.0))
+            .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(GetUserRoleResponse::NotFound);
+        };
+
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(GetUserRoleResponse::NotFound);
+        };
+
+        Ok(GetUserRoleResponse::Ok(Json(build_assignment_response(
+            &assignment,
+            &role,
+        ))))
+    }
+
+    /// Add a role to a user with optional expiry
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "post",
@@ -444,34 +593,41 @@ impl RolesApi {
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         role_id: Path<Uuid>,
+        body: Json<Option<AddUserRoleRequest>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
+        let expires_at = body.0.and_then(|b| b.expires_at);
 
-        if !UserRoleAssignment::Entity::find()
-            .filter(UserRoleAssignment::Column::UserId.eq(id.0))
-            .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
-            .all(&*db)
-            .await
-            .map_err(WarpgateError::from)?
-            .is_empty()
-        {
-            return Ok(AddUserRoleResponse::AlreadyExists);
-        }
-
-        let values = UserRoleAssignment::ActiveModel {
-            user_id: Set(id.0),
-            role_id: Set(role_id.0),
-            ..Default::default()
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(AddUserRoleResponse::NotFound);
         };
 
-        values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(AddUserRoleResponse::AlreadyExists);
+        };
 
-        Ok(AddUserRoleResponse::Created)
+        let assignment =
+            UserRoleAssignment::Entity::idempotent_grant(&db, id.0, role_id.0, expires_at).await?;
+
+        AuditEvent::AccessRoleGranted {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            role_id: role.id,
+            role_name: role.name.clone(),
+            actor_user_id: ctx.auth.user_id(),
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+
+        Ok(AddUserRoleResponse::Created(Json(
+            build_assignment_response(&assignment, &role),
+        )))
     }
 
+    /// Remove a role from a user (soft delete - sets revoked_at)
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "delete",
@@ -486,13 +642,13 @@ impl RolesApi {
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
-        let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
-        let Some(_role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
@@ -500,15 +656,68 @@ impl RolesApi {
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
             .one(&*db)
-            .await
-            .map_err(WarpgateError::from)?
+            .await?
         else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
-        model.delete(&*db).await.map_err(WarpgateError::from)?;
+        // Soft delete - set revoked_at
+        let now = OffsetDateTime::now_utc();
+        let mut model: UserRoleAssignment::ActiveModel = model.into();
+        model.revoked_at = Set(Some(now));
+        model.update(&*db).await?;
+
+        AuditEvent::AccessRoleRevoked {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            role_id: role.id,
+            role_name: role.name.clone(),
+            actor_user_id: ctx.auth.user_id(),
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
 
         Ok(DeleteUserRoleResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/users/:id/roles/:role_id",
+        method = "put",
+        operation_id = "update_user_role"
+    )]
+    async fn api_update_user_role(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        id: Path<Uuid>,
+        role_id: Path<Uuid>,
+        body: Json<UpdateUserRoleRequest>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UpdateUserRoleResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+        let db = ctx.services().db.lock().await;
+
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(UpdateUserRoleResponse::NotFound);
+        };
+
+        let Some(assignment) = UserRoleAssignment::Entity::find()
+            .filter(UserRoleAssignment::Column::UserId.eq(id.0))
+            .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
+            .one(&*db)
+            .await?
+        else {
+            return Ok(UpdateUserRoleResponse::NotFound);
+        };
+
+        let mut model: UserRoleAssignment::ActiveModel = assignment.into();
+        model.expires_at = Set(body.expires_at);
+        // If renewing an expired role, clear revoked_at
+        model.revoked_at = Set(None);
+        let updated = model.update(&*db).await?;
+
+        Ok(UpdateUserRoleResponse::Ok(Json(build_assignment_response(
+            &updated, &role,
+        ))))
     }
 
     #[oai(
@@ -524,7 +733,7 @@ impl RolesApi {
     ) -> Result<GetUserAdminRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
             .find_with_related(AdminRole::Entity)
@@ -537,7 +746,7 @@ impl RolesApi {
         };
 
         Ok(GetUserAdminRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
+            roles.into_iter().map(Into::into).collect(),
         )))
     }
 
@@ -555,7 +764,15 @@ impl RolesApi {
     ) -> Result<AddUserAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
+
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+            return Ok(AddUserAdminRoleResponse::NotFound);
+        };
+
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+            return Ok(AddUserAdminRoleResponse::NotFound);
+        };
 
         if !warpgate_db_entities::UserAdminRoleAssignment::Entity::find()
             .filter(warpgate_db_entities::UserAdminRoleAssignment::Column::UserId.eq(id.0))
@@ -577,6 +794,17 @@ impl RolesApi {
         };
 
         values.insert(&*db).await.map_err(WarpgateError::from)?;
+
+        AuditEvent::AdminRoleGranted {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            admin_role_id: role.id,
+            admin_role_name: role.name.clone(),
+            actor_user_id: ctx.auth.user_id(),
+            related_admin_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+
         Ok(AddUserAdminRoleResponse::Created)
     }
 
@@ -594,13 +822,13 @@ impl RolesApi {
     ) -> Result<DeleteUserAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
-        let Some(_user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
-        let Some(_role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
@@ -617,6 +845,17 @@ impl RolesApi {
         };
 
         model.delete(&*db).await.map_err(WarpgateError::from)?;
+
+        AuditEvent::AdminRoleRevoked {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username.clone(),
+            admin_role_id: role.id,
+            admin_role_name: role.name.clone(),
+            actor_user_id: ctx.auth.user_id(),
+            related_admin_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+
         Ok(DeleteUserAdminRoleResponse::Deleted)
     }
 }

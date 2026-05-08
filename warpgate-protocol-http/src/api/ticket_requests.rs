@@ -1,10 +1,10 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
@@ -56,8 +56,8 @@ struct MyTicketModel {
     pub target_name: String,
     pub description: String,
     pub uses_left: Option<i16>,
-    pub expiry: Option<DateTime<Utc>>,
-    pub created: DateTime<Utc>,
+    pub expiry: Option<OffsetDateTime>,
+    pub created: OffsetDateTime,
 }
 
 #[derive(ApiResponse)]
@@ -142,7 +142,7 @@ impl Api {
             )));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(CreateTicketRequestResponse::Unauthorized);
         };
@@ -156,8 +156,8 @@ impl Api {
         }
 
         let result = create_ticket_request(
-            &ctx.services.db,
-            &ctx.services.config_provider,
+            &ctx.services().db,
+            &ctx.services().config_provider,
             CreateTicketRequestParams {
                 user_id: user_model.id,
                 username: user_model.username.clone(),
@@ -191,7 +191,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         }
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         };
@@ -220,7 +220,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetTicketRequestResponse::Unauthorized);
         };
@@ -254,19 +254,19 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         };
         drop(db);
 
-        match activate_ticket_request(&ctx.services.db, id.0, user_model.id).await {
-            Ok((request, secret)) => {
-                Ok(ActivateTicketRequestResponse::Ok(Json(TicketRequestResponse {
+        match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
+            Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
+                TicketRequestResponse {
                     request,
                     secret: Some(secret.expose_secret().to_string()),
-                })))
-            }
+                },
+            ))),
             Err(ActivateTicketRequestError::NotFound) => {
                 Ok(ActivateTicketRequestResponse::NotFound)
             }
@@ -298,7 +298,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetMyTicketsResponse::Unauthorized);
         }
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetMyTicketsResponse::Unauthorized);
         };
@@ -347,7 +347,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         }
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         };

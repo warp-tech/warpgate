@@ -47,7 +47,7 @@ impl russh::client::Handler for ClientHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        let mut known_hosts = KnownHosts::new(&self.services.db);
+        let known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
                 server_public_key.clone(),

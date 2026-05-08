@@ -51,7 +51,7 @@ impl Api {
             return Ok(GetTicketRequestTargetsResponse::Unauthorized);
         }
 
-        let services = &ctx.services;
+        let services = &ctx.services();
 
         let policy = {
             let db = services.db.lock().await;

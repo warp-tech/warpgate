@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Input } from '@sveltestrap/sveltestrap'
-import { CredentialKind, type UserRequireCredentialsPolicy } from './lib/api'
+import { CredentialKind, type UserRequireCredentialsPolicy } from 'admin/lib/api'
 import type { ExistingCredential } from './CredentialEditor.svelte'
 import InfoBox from 'common/InfoBox.svelte'
 import { SvelteSet } from 'svelte/reactivity'

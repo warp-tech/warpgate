@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "chart-v0.0.2-16-g0efc9547-modified"
+    "version": "chart-v0.0.2-17-g5e001794-modified"
   },
   "servers": [
     {
@@ -354,6 +354,16 @@
             "required": false,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "state",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -364,6 +374,18 @@
         "operationId": "return_to_sso"
       },
       "post": {
+        "parameters": [
+          {
+            "name": "state",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -1196,7 +1218,8 @@
           "SsoNeeded",
           "WebUserApprovalNeeded",
           "PublicKeyNeeded",
-          "Success"
+          "Success",
+          "IpRejected"
         ]
       },
       "AuthStateResponseInternal": {
@@ -1452,6 +1475,27 @@
           }
         }
       },
+      "ExternalHostsInfo": {
+        "type": "object",
+        "title": "ExternalHostsInfo",
+        "properties": {
+          "ssh": {
+            "type": "string"
+          },
+          "http": {
+            "type": "string"
+          },
+          "mysql": {
+            "type": "string"
+          },
+          "postgres": {
+            "type": "string"
+          },
+          "kubernetes": {
+            "type": "string"
+          }
+        }
+      },
       "GroupInfo": {
         "type": "object",
         "title": "GroupInfo",
@@ -1499,6 +1543,9 @@
           "external_host": {
             "type": "string"
           },
+          "external_hosts": {
+            "$ref": "#/components/schemas/ExternalHostsInfo"
+          },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           },
@@ -1539,6 +1586,9 @@
           },
           "admin_permissions": {
             "$ref": "#/components/schemas/AdminPermissions"
+          },
+          "running_on_ec2": {
+            "type": "boolean"
           }
         }
       },

@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
-use super::defaults::*;
+use super::defaults::{
+    _default_empty_string, _default_empty_vec, _default_mysql_port,
+    _default_postgres_idle_timeout_str, _default_ssh_port, _default_true, _default_username,
+};
 use crate::Secret;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -37,13 +40,15 @@ pub struct TargetSSHOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum SSHTargetAuth {
     #[serde(rename = "password")]
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(SshTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -54,9 +59,12 @@ pub struct SshTargetPasswordAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetPublicKeyAuth {}
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetIamRoleAuth {}
+
 impl Default for SSHTargetAuth {
     fn default() -> Self {
-        SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())
+        Self::PublicKey(SshTargetPublicKeyAuth::default())
     }
 }
 
@@ -94,6 +102,40 @@ impl Default for Tls {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum DatabaseTargetAuth {
+    #[serde(rename = "password")]
+    Password(DatabaseTargetPasswordAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(DatabaseTargetIamRoleAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetPasswordAuth {
+    #[serde(default)]
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetIamRoleAuth {}
+
+impl Default for DatabaseTargetAuth {
+    fn default() -> Self {
+        Self::Password(DatabaseTargetPasswordAuth::default())
+    }
+}
+
+impl DatabaseTargetAuth {
+    pub const fn password(&self) -> Option<&str> {
+        match self {
+            Self::Password(auth) => Some(auth.password.as_str()),
+            Self::IamRole(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
@@ -106,13 +148,42 @@ pub struct TargetMySqlOptions {
     pub username: String,
 
     #[serde(default)]
-    pub password: Option<String>,
+    auth: Option<DatabaseTargetAuth>,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+}
+
+impl TargetMySqlOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -127,7 +198,12 @@ pub struct TargetPostgresOptions {
     pub username: String,
 
     #[serde(default)]
-    pub password: Option<String>,
+    auth: Option<DatabaseTargetAuth>,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
@@ -137,6 +213,30 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+}
+
+impl TargetPostgresOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -152,13 +252,15 @@ pub struct TargetKubernetesOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum KubernetesTargetAuth {
     #[serde(rename = "token")]
     Token(KubernetesTargetTokenAuth),
     #[serde(rename = "certificate")]
     Certificate(KubernetesTargetCertificateAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(KubernetesTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -166,9 +268,12 @@ pub struct KubernetesTargetTokenAuth {
     pub token: Secret<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct KubernetesTargetIamRoleAuth {}
+
 impl Default for KubernetesTargetAuth {
     fn default() -> Self {
-        KubernetesTargetAuth::Certificate(KubernetesTargetCertificateAuth::default())
+        Self::Certificate(KubernetesTargetCertificateAuth::default())
     }
 }
 

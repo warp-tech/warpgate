@@ -3,11 +3,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
-use rand::Rng;
+use rand::RngExt;
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{error, info, info_span, trace, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
@@ -69,7 +69,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 | Capabilities::DEPRECATE_EOF
                 | Capabilities::SECURE_CONNECTION
                 | Capabilities::SSL,
-            challenge: get_crypto_rng().gen(),
+            challenge: get_crypto_rng().random(),
             tls_config: Arc::new(tls_config),
             username: None,
             database: None,
@@ -81,11 +81,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
 
     pub fn make_logging_span(&self) -> tracing::Span {
         let client_ip = self.remote_address.ip().to_string();
-        match self.username {
-            Some(ref username) => {
-                info_span!("MySQL", session=%self.id, session_username=%username, %client_ip)
-            }
-            None => info_span!("MySQL", session=%self.id, %client_ip),
+        if let Some(ref username) = self.username {
+            info_span!("MySQL", session=%self.id, session_username=%username, %client_ip)
+        } else {
+            info_span!("MySQL", session=%self.id, %client_ip)
         }
     }
 
@@ -123,10 +122,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 }
                 self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
                 continue;
-            } else {
-                self.send_error(1002, "Warpgate requires TLS - please enable it in your client: add `--ssl` on the CLI or add `?sslMode=PREFERRED` to your database URI").await?;
-                return Err(MySqlError::TlsNotSupportedByClient);
             }
+            self.send_error(1002, "Warpgate requires TLS - please enable it in your client: add `--ssl` on the CLI or add `?sslMode=PREFERRED` to your database URI").await?;
+            return Err(MySqlError::TlsNotSupportedByClient);
         };
 
         if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
@@ -170,8 +168,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         handshake: HandshakeResponse,
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
-        let selector: AuthSelector = handshake.username.deref().into();
-
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut MySqlSession<S>,
         ) -> Result<(), MySqlError> {
@@ -186,6 +182,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             this.stream.flush().await?;
             Ok(())
         }
+
+        let selector: AuthSelector = handshake.username.deref().into();
 
         match selector {
             AuthSelector::User {
@@ -202,6 +200,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                         &username,
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],
+                        Some(self.remote_address.ip()),
                     )
                     .await?
                     .1;
@@ -258,8 +257,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                             .await
                             .map_err(MySqlError::other)?;
 
-                        self.run_authorized(handshake, user_info, target.name)
-                            .await
+                        self.run_authorized(handshake, user_info, target.name).await
                     }
                     _ => fail(&mut self).await,
                 }

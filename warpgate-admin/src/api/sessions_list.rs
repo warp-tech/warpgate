@@ -31,7 +31,9 @@ enum CloseAllSessionsResponse {
 
 #[OpenApi]
 impl Api {
+    #[allow(clippy::too_many_arguments)]
     #[oai(path = "/sessions", method = "get", operation_id = "get_sessions")]
+    #[allow(clippy::too_many_arguments)]
     async fn api_get_all_sessions(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
@@ -39,13 +41,14 @@ impl Api {
         limit: Query<Option<u64>>,
         active_only: Query<Option<bool>>,
         logged_in_only: Query<Option<bool>>,
+        username: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
-
         use warpgate_db_entities::Session;
 
-        let db = ctx.services.db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+
+        let db = ctx.services().db.lock().await;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {
@@ -53,6 +56,9 @@ impl Api {
         }
         if logged_in_only.unwrap_or(false) {
             q = q.filter(Session::Column::Username.is_not_null());
+        }
+        if let Some(username_filter) = username.as_ref() {
+            q = q.filter(Session::Column::Username.eq(username_filter.as_str()));
         }
 
         Ok(GetSessionsResponse::Ok(Json(
@@ -82,7 +88,7 @@ impl Api {
     ) -> poem::Result<CloseAllSessionsResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
 
-        let state = ctx.services.state.lock().await;
+        let state = ctx.services().state.lock().await;
 
         for s in state.sessions.values() {
             let mut session = s.lock().await;
@@ -102,14 +108,14 @@ pub async fn api_get_sessions_changes_stream(
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-    let mut receiver = ctx.services.state.lock().await.subscribe();
+    let mut receiver = ctx.services().state.lock().await.subscribe();
 
     Ok(ws
         .on_upgrade(|socket| async move {
             let (mut sink, _) = socket.split();
 
             while receiver.recv().await.is_ok() {
-                sink.send(Message::Text("".to_string())).await?;
+                sink.send(Message::Text("".into())).await?;
             }
 
             Ok::<(), anyhow::Error>(())

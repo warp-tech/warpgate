@@ -113,9 +113,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)?
+            session.channel_success(channel)?;
         } else {
-            session.channel_failure(channel)?
+            session.channel_failure(channel)?;
         }
 
         Ok(())
@@ -172,9 +172,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)?
+            session.channel_success(channel)?;
         } else {
-            session.channel_failure(channel)?
+            session.channel_failure(channel)?;
         }
 
         Ok(())
@@ -194,7 +194,7 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        Ok(rx.await.unwrap_or(Auth::reject()))
+        Ok(rx.await.unwrap_or_else(|_| Auth::reject()))
     }
 
     async fn auth_publickey(
@@ -303,7 +303,7 @@ impl russh::server::Handler for ServerHandler {
         self.send_event(ServerHandlerEvent::WindowChangeRequest(
             ServerChannelId(channel),
             PtyRequest {
-                term: "".to_string(),
+                term: "".into(),
                 col_width,
                 row_height,
                 pix_width,
@@ -363,9 +363,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
 
         if rx.await.unwrap_or(false) {
-            session.channel_success(channel)?
+            session.channel_success(channel)?;
         } else {
-            session.channel_failure(channel)?
+            session.channel_failure(channel)?;
         }
 
         Ok(())
@@ -472,9 +472,9 @@ impl russh::server::Handler for ServerHandler {
         self.send_event(ServerHandlerEvent::TcpIpForward(address, port, tx))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
-            session.request_success()
+            session.request_success();
         } else {
-            session.request_failure()
+            session.request_failure();
         }
         Ok(allowed)
     }
@@ -490,9 +490,9 @@ impl russh::server::Handler for ServerHandler {
         self.send_event(ServerHandlerEvent::CancelTcpIpForward(address, port, tx))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
-            session.request_success()
+            session.request_success();
         } else {
-            session.request_failure()
+            session.request_failure();
         }
         Ok(allowed)
     }
@@ -507,9 +507,9 @@ impl russh::server::Handler for ServerHandler {
         self.send_event(ServerHandlerEvent::StreamlocalForward(socket_path, tx))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
-            session.request_success()
+            session.request_success();
         } else {
-            session.request_failure()
+            session.request_failure();
         }
         Ok(allowed)
     }
@@ -527,9 +527,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
-            session.request_success()
+            session.request_success();
         } else {
-            session.request_failure()
+            session.request_failure();
         }
         Ok(allowed)
     }
@@ -546,9 +546,9 @@ impl russh::server::Handler for ServerHandler {
         ))?;
         let allowed = rx.await.unwrap_or(false);
         if allowed {
-            session.request_success()
+            session.request_success();
         } else {
-            session.request_failure()
+            session.request_failure();
         }
         Ok(allowed)
     }

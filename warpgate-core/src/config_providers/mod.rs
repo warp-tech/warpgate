@@ -5,8 +5,9 @@ pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
@@ -92,7 +93,7 @@ pub async fn authorize_ticket(
         }
 
         if let Some(datetime) = ticket.expiry {
-            if datetime < chrono::Utc::now() {
+            if datetime < OffsetDateTime::now_utc() {
                 warn!("Ticket has expired: {}", &ticket.id);
                 return Ok(None);
             }

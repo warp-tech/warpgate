@@ -35,7 +35,7 @@ impl Api {
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
-        let requests = list_ticket_requests(&ctx.services.db, status.0).await?;
+        let requests = list_ticket_requests(&ctx.services().db, status.0).await?;
         Ok(GetTicketRequestsResponse::Ok(Json(requests)))
     }
 }

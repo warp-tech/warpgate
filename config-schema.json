@@ -19,6 +19,7 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
@@ -32,6 +33,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8443",
@@ -42,6 +44,7 @@
       "$ref": "#/$defs/LogConfig",
       "default": {
         "format": "text",
+        "audit_retention": "11months 30days 3h 50m 24s",
         "retention": "7days",
         "send_to": null
       }
@@ -51,6 +54,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:33306"
@@ -61,6 +65,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:55432"
@@ -77,6 +82,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
@@ -124,6 +130,13 @@
           "type": "string",
           "default": "1day"
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -170,6 +183,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -204,6 +224,10 @@
           "$ref": "#/$defs/LogFormat",
           "default": "text"
         },
+        "audit_retention": {
+          "type": "string",
+          "default": "11months 30days 3h 50m 24s"
+        },
         "retention": {
           "type": "string",
           "default": "7days"
@@ -235,6 +259,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -265,6 +296,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -334,6 +372,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [

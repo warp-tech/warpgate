@@ -23,6 +23,7 @@ pub struct Model {
     pub ticket_max_uses: Option<i16>,
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
+    pub show_session_menu: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -51,6 +52,7 @@ impl Entity {
                     ticket_max_uses: Set(None),
                     ticket_require_description: Set(false),
                     ticket_request_show_all_targets: Set(false),
+                    show_session_menu: Set(true),
                 }
                 .insert(db)
                 .await

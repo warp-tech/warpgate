@@ -1,4 +1,3 @@
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use poem::session::Session;
@@ -9,12 +8,12 @@ use poem_openapi::payload::{Html, Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{debug, error, info, warn};
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
-use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
+use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
 use crate::api::common::logout;
@@ -62,6 +61,7 @@ enum ReturnToSsoPostResponse {
 #[derive(Deserialize)]
 pub struct ReturnToSsoFormData {
     pub code: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Object)]
@@ -96,7 +96,14 @@ impl Api {
         &self,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> Result<GetSsoProvidersResponse, WarpgateError> {
-        let mut providers = ctx.services.config.lock().await.store.sso_providers.clone();
+        let mut providers = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         Ok(GetSsoProvidersResponse::Ok(Json(
             providers
@@ -122,9 +129,10 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         code: Query<Option<String>>,
+        state: Query<Option<String>>,
     ) -> Result<Response<ReturnToSsoResponse>, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, ctx, &code)
+            .api_return_to_sso_get_common(req, session, ctx, code.as_ref(), state.as_ref())
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
 
@@ -142,9 +150,16 @@ impl Api {
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         data: Form<ReturnToSsoFormData>,
+        state: Query<Option<String>>,
     ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
         let url = self
-            .api_return_to_sso_get_common(req, session, ctx, &data.code)
+            .api_return_to_sso_get_common(
+                req,
+                session,
+                ctx,
+                data.code.as_ref(),
+                data.state.as_ref().or(state.as_ref()),
+            )
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
         let serialized_url = serde_json::to_string(&url)?;
@@ -169,19 +184,28 @@ impl Api {
         req: &Request,
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
-        code: &Option<String>,
+        code: Option<&String>,
+        state: Option<&String>,
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
-        let services = &ctx.services;
+        let services = ctx.services();
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
 
-        let Some(ref code) = *code else {
+        let Some(code) = code else {
             return Ok(Err(
                 "No authorization code in the return URL request".to_string()
             ));
         };
+
+        let Some(state) = state else {
+            return Ok(Err("No SSO state parameter in the return request".to_string()));
+        };
+
+        if !context.request.verify_state(state) {
+            return Ok(Err("Invalid SSO state parameter".to_string()));
+        }
 
         let response = context
             .request
@@ -201,7 +225,14 @@ impl Api {
 
         info!("SSO login as {email}");
 
-        let providers_config = ctx.services.config.lock().await.store.sso_providers.clone();
+        let providers_config = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
         let mut iter = providers_config.iter();
         let Some(provider_config) = iter.find(|x| x.name == context.provider) else {
             return Ok(Err(format!("No provider matching {}", context.provider)));
@@ -227,8 +258,22 @@ impl Api {
         };
 
         let mut auth_state_store = services.auth_state_store.lock().await;
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let state_arc =
-            get_auth_state_for_request(&username, session, &mut auth_state_store).await?;
+            match get_auth_state_for_request(&username, session, &mut auth_state_store, remote_ip)
+                .await
+            {
+                Ok(state) => state,
+                Err(e) => {
+                    if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
+                        return Ok(Err(
+                        "Login denied: your IP address is not in the allowed range for this user"
+                            .to_string(),
+                    ));
+                    }
+                    return Err(e);
+                }
+            };
 
         let mut state = state_arc.lock().await;
         let mut cp = services.config_provider.lock().await;
@@ -267,10 +312,13 @@ impl Api {
 
             let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
                 // Apply wildcard "*" mapping if user has any groups
-                let mut roles: Vec<String> = if !remote_groups.is_empty() {
-                    mappings.get("*").map(|v| v.roles()).unwrap_or_default()
-                } else {
+                let mut roles: Vec<String> = if remote_groups.is_empty() {
                     Vec::new()
+                } else {
+                    mappings
+                        .get("*")
+                        .map(RoleMapping::roles)
+                        .unwrap_or_default()
                 };
 
                 // Apply specific group mappings
@@ -301,12 +349,18 @@ impl Api {
             // compute managed list from mapping values (or all role names if no mapping provided)
             let managed_admin_names: Option<Vec<String>> = admin_map
                 .as_ref()
-                .map(|m| m.values().flat_map(|v| v.roles()).collect());
+                .map(|m| m.values().flat_map(RoleMapping::roles).collect());
 
             let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
                 remote_admins
                     .iter()
-                    .flat_map(|r| mappings.get(r).map(|v| v.roles()).into_iter().flatten())
+                    .flat_map(|r| {
+                        mappings
+                            .get(r)
+                            .map(RoleMapping::roles)
+                            .into_iter()
+                            .flatten()
+                    })
                     .collect()
             } else {
                 remote_admins.clone()
@@ -325,7 +379,7 @@ impl Api {
 
         if let Some(ref host) = context.return_host {
             if next_url.starts_with('/') {
-                next_url = format!("https://{}{}", host, next_url);
+                next_url = format!("https://{host}{next_url}");
             }
         }
 
@@ -348,7 +402,7 @@ impl Api {
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
 
         let return_url = config.construct_external_url(Some(req), None)?;
         debug!("Return URL: {}", &return_url);
@@ -365,7 +419,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
         let logout_url = client.logout(state.token, return_url).await?;
 
-        logout(session, session_middleware.lock().await.deref_mut());
+        logout(session, &mut *session_middleware.lock().await);
 
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),

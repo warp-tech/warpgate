@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -21,12 +21,16 @@ enum GetLogsResponse {
 
 #[derive(Object)]
 struct GetLogsRequest {
-    before: Option<DateTime<Utc>>,
-    after: Option<DateTime<Utc>>,
+    before: Option<OffsetDateTime>,
+    after: Option<OffsetDateTime>,
     limit: Option<u64>,
     session_id: Option<Uuid>,
     username: Option<String>,
     search: Option<String>,
+    target: Option<String>,
+    related_users: Option<Uuid>,
+    related_access_roles: Option<Uuid>,
+    related_admin_roles: Option<Uuid>,
 }
 
 #[OpenApi]
@@ -38,11 +42,11 @@ impl Api {
         body: Json<GetLogsRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLogsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
         use warpgate_db_entities::LogEntry;
 
-        let db = ctx.services.db.lock().await;
+        require_admin_permission(&ctx, None).await?;
+
+        let db = ctx.services().db.lock().await;
         let mut q = LogEntry::Entity::find()
             .order_by_desc(LogEntry::Column::Timestamp)
             .limit(body.limit.unwrap_or(100));
@@ -59,7 +63,25 @@ impl Api {
             q = q.filter(LogEntry::Column::SessionId.eq(*session_id));
         }
         if let Some(ref username) = body.username {
-            q = q.filter(LogEntry::Column::SessionId.eq(username.clone()));
+            q = q.filter(LogEntry::Column::Username.eq(username.clone()));
+        }
+        if let Some(ref target) = body.target {
+            if !target.is_empty() {
+                q = q.filter(LogEntry::Column::Target.eq(target.clone()));
+            }
+        }
+        if let Some(ref related_user) = body.related_users {
+            q = q.filter(LogEntry::Column::RelatedUsers.contains(format!("${related_user}$")));
+        }
+        if let Some(ref related_access_role) = body.related_access_roles {
+            q = q.filter(
+                LogEntry::Column::RelatedAccessRoles.contains(format!("${related_access_role}$")),
+            );
+        }
+        if let Some(ref related_admin_role) = body.related_admin_roles {
+            q = q.filter(
+                LogEntry::Column::RelatedAdminRoles.contains(format!("${related_admin_role}$")),
+            );
         }
         if let Some(ref search) = body.search {
             if !search.is_empty() {

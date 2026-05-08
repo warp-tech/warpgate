@@ -2,7 +2,8 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-common"
-version = "0.22.0"
+version = "0.23.3"
+publish = false
 
 [[bin]]
 name = "config-schema"
@@ -14,14 +15,13 @@ clap = { version = "4.0", features = ["derive", "std"], default-features = false
 argon2 = { version = "0.5", default-features = false }
 async-trait = { version = "0.1", default-features = false }
 bytes.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
 git-version = { version = "0.3.9", default-features = false }
 governor.workspace = true
 humantime-serde = { version = "1.1", default-features = false }
-once_cell = { version = "1.17", default-features = false }
+ipnet.workspace = true
 password-hash.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
@@ -30,6 +30,7 @@ rand_core.workspace = true
 rand.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
+reqwest.features = ["json"]
 reqwest-websocket.workspace = true
 russh.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
@@ -37,9 +38,10 @@ rustls-pki-types.workspace = true
 rustls.workspace = true
 schemars.workspace = true
 sea-orm.workspace = true
-serde_json.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio-rustls.workspace = true
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
@@ -49,9 +51,10 @@ tracing-core = { version = "0.1", default-features = false }
 tracing.workspace = true
 url = { version = "2.2", default-features = false }
 uuid.workspace = true
-warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
-warpgate-ldap = { version = "*", path = "../warpgate-ldap" }
-warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-ca = { path = "../warpgate-ca", default-features = false }
+warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-sso = { path = "../warpgate-sso", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
 webpki = { version = "0.22", default-features = false }
 x509-parser = "0.17.0"

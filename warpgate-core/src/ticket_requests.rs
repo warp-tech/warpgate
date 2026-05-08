@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use chrono::Utc;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+};
+use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
@@ -150,9 +152,8 @@ pub async fn create_ticket_request(
         ));
     }
 
-    let auto_approve = has_access
-        && policy.ticket_auto_approve_existing_access
-        && !target.ticket_require_approval;
+    let auto_approve =
+        has_access && policy.ticket_auto_approve_existing_access && !target.ticket_require_approval;
 
     if auto_approve {
         let (ticket_id, secret) = insert_self_service_ticket(
@@ -175,8 +176,8 @@ pub async fn create_ticket_request(
             status: Set(TicketRequestStatus::Approved),
             resolved_by_user_id: Set(None),
             ticket_id: Set(Some(ticket_id)),
-            created: Set(Utc::now()),
-            resolved_at: Set(Some(Utc::now())),
+            created: Set(OffsetDateTime::now_utc()),
+            resolved_at: Set(Some(OffsetDateTime::now_utc())),
             deny_reason: Set(None),
         };
         let request_model = request.insert(&*db_conn).await?;
@@ -201,7 +202,7 @@ pub async fn create_ticket_request(
             status: Set(TicketRequestStatus::Pending),
             resolved_by_user_id: Set(None),
             ticket_id: Set(None),
-            created: Set(Utc::now()),
+            created: Set(OffsetDateTime::now_utc()),
             resolved_at: Set(None),
             deny_reason: Set(None),
         };
@@ -229,16 +230,14 @@ async fn insert_self_service_ticket(
 ) -> Result<(Uuid, Secret<String>), WarpgateError> {
     let secret = generate_ticket_secret();
     let ticket_id = Uuid::new_v4();
-    let expiry = duration_seconds.and_then(|d| {
-        chrono::Duration::try_seconds(d).map(|dur| Utc::now() + dur)
-    });
+    let expiry = duration_seconds.map(|d| OffsetDateTime::now_utc() + Duration::seconds(d));
 
     let ticket = Ticket::ActiveModel {
         id: Set(ticket_id),
         secret: Set(secret.expose_secret().to_string()),
         user_id: Set(user_id),
         target_id: Set(target_id),
-        created: Set(Utc::now()),
+        created: Set(OffsetDateTime::now_utc()),
         expiry: Set(expiry),
         uses_left: Set(uses),
         description: Set(description.to_string()),
@@ -285,7 +284,7 @@ pub async fn approve_ticket_request(
     let mut active: TicketRequest::ActiveModel = request.into();
     active.status = Set(TicketRequestStatus::Approved);
     active.resolved_by_user_id = Set(Some(admin_user_id));
-    active.resolved_at = Set(Some(Utc::now()));
+    active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     let updated = active.update(&*db_conn).await?;
 
     info!(
@@ -409,7 +408,7 @@ pub async fn deny_ticket_request(
     let mut active: TicketRequest::ActiveModel = request.into();
     active.status = Set(TicketRequestStatus::Denied);
     active.resolved_by_user_id = Set(Some(admin_user_id));
-    active.resolved_at = Set(Some(Utc::now()));
+    active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     active.deny_reason = Set(reason);
     let updated = active.update(&*db_conn).await?;
 

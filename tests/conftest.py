@@ -240,6 +240,7 @@ class ProcessManager:
                 "server",
                 "--disable",
                 "traefik",
+                "--disable-cloud-controller",
             ]
         )
 
@@ -500,6 +501,7 @@ class ProcessManager:
         server_options = _json.dumps(
             {
                 "AccessTokenJwtType": "JWT",
+                "IssuerUri": f"http://localhost:{port}",
                 "Discovery": {"ShowKeySet": True},
                 "Authentication": {
                     "CookieSameSiteMode": "Lax",
@@ -564,7 +566,7 @@ class ProcessManager:
                 "CLIENTS_CONFIGURATION_PATH=/tmp/config/clients-config.json",
                 "-v",
                 f"{oidc_data_dir}:/tmp/config:ro",
-                "ghcr.io/soluto/oidc-server-mock:0.10.1",
+                "xdevsoftware/oidc-server-mock:1.2.6",
             ]
         )
 
@@ -596,6 +598,7 @@ class ProcessManager:
         stderr=None,
         stdout=None,
         http_port=None,
+        database_url=None,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
@@ -648,6 +651,7 @@ class ProcessManager:
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
                     "WARPGATE_UNDER_TEST": "1",
+                    "RUST_LOG": "debug",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
@@ -657,24 +661,27 @@ class ProcessManager:
             )
 
         if not share_with:
+            setup_args = [
+                "unattended-setup",
+                "--ssh-port",
+                str(ssh_port),
+                "--http-port",
+                str(http_port),
+                "--mysql-port",
+                str(mysql_port),
+                "--postgres-port",
+                str(postgres_port),
+                "--kubernetes-port",
+                str(kubernetes_port),
+                "--data-path",
+                data_dir,
+                "--external-host",
+                "external-host",
+            ]
+            if database_url:
+                setup_args += ["--database-url", database_url]
             p = run(
-                [
-                    "unattended-setup",
-                    "--ssh-port",
-                    str(ssh_port),
-                    "--http-port",
-                    str(http_port),
-                    "--mysql-port",
-                    str(mysql_port),
-                    "--postgres-port",
-                    str(postgres_port),
-                    "--kubernetes-port",
-                    str(kubernetes_port),
-                    "--data-path",
-                    data_dir,
-                    "--external-host",
-                    "external-host",
-                ],
+                setup_args,
                 env={"WARPGATE_ADMIN_PASSWORD": "123"},
             )
             p.communicate()
@@ -809,6 +816,17 @@ def admin_client(shared_wg: WarpgateProcess):
 
 
 # ----
+
+
+@pytest.fixture(scope="session")
+def shared_ssh_port(processes, wg_c_ed25519_pubkey):
+    """Shared SSH server for tests that don't need their own instance.
+
+    Used by test_role_expiry to avoid starting separate Docker containers.
+    """
+    port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
+    wait_port(port)
+    return port
 
 
 @pytest.fixture(scope="session")

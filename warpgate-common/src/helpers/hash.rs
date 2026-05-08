@@ -3,7 +3,7 @@ use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{Error, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use data_encoding::HEXLOWER;
-use rand::Rng;
+use rand::RngExt;
 
 use crate::Secret;
 
@@ -33,6 +33,6 @@ pub fn verify_password_hash(password: &str, hash: &str) -> Result<bool> {
 
 pub fn generate_ticket_secret() -> Secret<String> {
     let mut bytes = [0; 32];
-    rand::thread_rng().fill(&mut bytes[..]);
+    rand::rng().fill(&mut bytes[..]);
     Secret::new(HEXLOWER.encode(&bytes))
 }

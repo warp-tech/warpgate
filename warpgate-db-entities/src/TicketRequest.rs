@@ -1,7 +1,7 @@
-use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
@@ -32,8 +32,8 @@ pub struct Model {
     pub status: TicketRequestStatus,
     pub resolved_by_user_id: Option<Uuid>,
     pub ticket_id: Option<Uuid>,
-    pub created: DateTime<Utc>,
-    pub resolved_at: Option<DateTime<Utc>>,
+    pub created: OffsetDateTime,
+    pub resolved_at: Option<OffsetDateTime>,
     #[sea_orm(column_type = "Text", nullable)]
     pub deny_reason: Option<String>,
 }

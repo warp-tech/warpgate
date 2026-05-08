@@ -2,14 +2,16 @@
 edition = "2021"
 license = "Apache-2.0"
 name = "warpgate-protocol-mysql"
-version = "0.22.0"
+version = "0.23.3"
+publish = false
 
 [dependencies]
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
-warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
-warpgate-database-protocols = { version = "*", path = "../warpgate-database-protocols", default-features = false }
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }
 anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 futures.workspace = true
@@ -26,4 +28,3 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 webpki = { version = "0.22", default-features = false }
-once_cell = { version = "1.17", default-features = false }

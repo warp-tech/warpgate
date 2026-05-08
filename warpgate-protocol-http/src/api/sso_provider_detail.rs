@@ -5,7 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use tracing::*;
+use tracing::debug;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
@@ -52,7 +52,7 @@ impl Api {
         name: Path<String>,
         next: Query<Option<String>>,
     ) -> Result<StartSsoResponse, WarpgateError> {
-        let config = ctx.services.config.lock().await;
+        let config = ctx.services().config.lock().await;
 
         let name = name.0;
 
@@ -64,7 +64,6 @@ impl Api {
             Some(req),
             provider_config.return_domain_whitelist.as_deref(),
         )?;
-        info!("{:?}", provider_config);
         return_url.set_path(&format!(
             "{}warpgate/api/sso/return",
             provider_config.return_url_prefix
@@ -74,7 +73,7 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = req.header("host").map(|h| h.to_string());
+        let return_host = ctx.trusted_host_header(req);
 
         let url = sso_req.auth_url().to_string();
         session.set(

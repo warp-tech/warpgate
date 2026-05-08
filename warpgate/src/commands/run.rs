@@ -3,7 +3,7 @@ use futures::{FutureExt, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
-use tracing::*;
+use tracing::{debug, error, info, warn};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint};
 use warpgate_core::db::cleanup_db;
@@ -29,7 +29,7 @@ async fn run_protocol_server<T: ProtocolServer + Send + 'static>(
         .with_context(|| format!("protocol server: {name}"))
 }
 
-pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<()> {
+pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<()> {
     let version = warpgate_version();
     info!(%version, "Warpgate");
 
@@ -61,7 +61,7 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
 
     protocol_futures.push(
         run_protocol_server(
-            HTTPProtocolServer::new(&services).await?,
+            HTTPProtocolServer::new(&services),
             config.store.http.listen.clone(),
         )
         .boxed(),
@@ -80,7 +80,7 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
     if config.store.mysql.enable {
         protocol_futures.push(
             run_protocol_server(
-                MySQLProtocolServer::new(&services).await?,
+                MySQLProtocolServer::new(&services),
                 config.store.mysql.listen.clone(),
             )
             .boxed(),
@@ -90,7 +90,7 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
     if config.store.postgres.enable {
         protocol_futures.push(
             run_protocol_server(
-                PostgresProtocolServer::new(&services).await?,
+                PostgresProtocolServer::new(&services),
                 config.store.postgres.listen.clone(),
             )
             .boxed(),
@@ -100,7 +100,6 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
     if config.store.kubernetes.enable {
         protocol_futures.push(
             KubernetesProtocolServer::new(&services)
-                .await?
                 .run(config.store.kubernetes.listen.clone())
                 .boxed(),
         );
@@ -111,17 +110,20 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
         async move {
             loop {
                 let retention = { services.config.lock().await.store.log.retention };
-                let interval = retention / 10;
+                let audit_retention = { services.config.lock().await.store.log.audit_retention };
+                let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
-                match cleanup_db(
-                    &mut *services.db.lock().await,
-                    &mut *services.recordings.lock().await,
+                if let Err(error) = cleanup_db(
+                    &*services.db.lock().await,
+                    &*services.recordings.lock().await,
                     &retention,
+                    &audit_retention,
                 )
                 .await
                 {
-                    Err(error) => error!(?error, "Failed to cleanup the database"),
-                    Ok(_) => debug!("Database cleaned up, next in {:?}", interval),
+                    error!(?error, "Failed to cleanup the database");
+                } else {
+                    debug!("Database cleaned up, next in {:?}", interval);
                 }
                 tokio::time::sleep(interval).await;
             }
@@ -186,11 +188,11 @@ pub(crate) async fn command(params: &GlobalParams, enable_admin_token: bool) -> 
 pub async fn watch_config_and_reload(services: Services) -> Result<()> {
     let mut reload_event = watch_config(&services.global_params, services.config.clone())?;
 
-    while let Ok(()) = reload_event.recv().await {
+    while reload_event.recv().await == Ok(()) {
         let state = services.state.lock().await;
         let mut cp = services.config_provider.lock().await;
         // TODO no longer happens since everything is in the DB
-        for (id, session) in state.sessions.iter() {
+        for (id, session) in &state.sessions {
             let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
                 (session.user_info.as_ref(), session.target.as_ref())

@@ -37,8 +37,6 @@ pub enum PostgresError {
     Sasl(#[from] SASLError),
     #[error("SASL session: {0}")]
     SaslSession(#[from] SessionError),
-    #[error("Password is required for authentication")]
-    PasswordRequired,
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
     #[error(transparent)]
@@ -53,6 +51,6 @@ impl PostgresError {
 
 impl From<ErrorResponse> for PostgresError {
     fn from(e: ErrorResponse) -> Self {
-        PostgresError::RemoteError(e)
+        Self::RemoteError(e)
     }
 }

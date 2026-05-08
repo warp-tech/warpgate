@@ -57,7 +57,8 @@ impl Api {
         search: Query<Option<String>>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
-        let services = &ctx.services;
+        // Fetch target groups for group information
+        let services = ctx.services();
         let groups: Vec<TargetGroup::Model> = {
             let db = services.db.lock().await;
             TargetGroup::Entity::find().all(&*db).await

@@ -14,7 +14,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -65,7 +65,7 @@ impl ListApi {
     ) -> Result<GetTargetsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let mut targets = Target::Entity::find();
 
@@ -98,7 +98,7 @@ impl ListApi {
         let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
 
         let targets: Result<Vec<TargetConfig>, _> =
-            targets.into_iter().map(|t| t.try_into()).collect();
+            targets.into_iter().map(TryInto::try_into).collect();
         let targets = targets.map_err(WarpgateError::from)?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))
@@ -117,7 +117,7 @@ impl ListApi {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -128,12 +128,24 @@ impl ListApi {
             )));
         }
 
+        let mut options = body.options.clone();
+
+        match &mut options {
+            TargetOptions::MySql(opts) => {
+                opts.normalize();
+            }
+            TargetOptions::Postgres(opts) => {
+                opts.normalize();
+            }
+            _ => {}
+        }
+
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
-            kind: Set((&body.options).into()),
-            options: Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?),
+            kind: Set((&options).into()),
+            options: Set(serde_json::to_value(options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
             ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
@@ -204,7 +216,7 @@ impl DetailApi {
     ) -> Result<GetTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetTargetResponse::NotFound);
@@ -223,7 +235,7 @@ impl DetailApi {
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -233,13 +245,24 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
-        let services = &ctx.services;
+        let mut options = body.options.clone();
+
+        match &mut options {
+            TargetOptions::MySql(opts) => {
+                opts.normalize();
+            }
+            TargetOptions::Postgres(opts) => {
+                opts.normalize();
+            }
+            _ => {}
+        }
+
+        let services = ctx.services();
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
-        model.options =
-            Set(serde_json::to_value(body.options.clone()).map_err(WarpgateError::from)?);
-        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(|x| x as i64));
+        model.options = Set(serde_json::to_value(options).map_err(WarpgateError::from)?);
+        model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
@@ -253,7 +276,7 @@ impl DetailApi {
             .rate_limiter_registry
             .lock()
             .await
-            .apply_new_rate_limits(&mut *services.state.lock().await)
+            .apply_new_rate_limits(&*services.state.lock().await)
             .await?;
 
         Ok(UpdateTargetResponse::Ok(Json(
@@ -274,7 +297,7 @@ impl DetailApi {
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
@@ -285,13 +308,18 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
+        Ticket::Entity::delete_many()
+            .filter(Ticket::Column::TargetId.eq(target.id))
+            .exec(&*db)
+            .await?;
+
         if target.kind == TargetKind::Ssh {
             let options: TargetOptions = serde_json::from_value(target.options.clone())?;
             if let TargetOptions::Ssh(ssh_options) = options {
                 use warpgate_db_entities::KnownHost;
                 KnownHost::Entity::delete_many()
                     .filter(KnownHost::Column::Host.eq(&ssh_options.host))
-                    .filter(KnownHost::Column::Port.eq(ssh_options.port as i32))
+                    .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
                     .exec(&*db)
                     .await?;
             }
@@ -314,7 +342,7 @@ impl DetailApi {
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
@@ -381,7 +409,7 @@ impl RolesApi {
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -394,7 +422,7 @@ impl RolesApi {
         };
 
         Ok(GetTargetRolesResponse::Ok(Json(
-            roles.into_iter().map(|x| x.into()).collect(),
+            roles.into_iter().map(Into::into).collect(),
         )))
     }
 
@@ -412,7 +440,7 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -450,7 +478,7 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services.db.lock().await;
+        let db = ctx.services().db.lock().await;
 
         let Some(model) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
