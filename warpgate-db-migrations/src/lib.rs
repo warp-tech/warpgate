@@ -44,6 +44,7 @@ mod m00039_show_session_menu;
 mod m00040_allowed_ip_range;
 mod m00041_fix_user_role_assignment_dates;
 mod m00042_database_target_auth_again;
+mod m00043_unique_usernames;
 
 pub struct Migrator;
 
@@ -93,6 +94,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00040_allowed_ip_range::Migration),
             Box::new(m00041_fix_user_role_assignment_dates::Migration),
             Box::new(m00042_database_target_auth_again::Migration),
+            Box::new(m00043_unique_usernames::Migration),
         ]
     }
 }

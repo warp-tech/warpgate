@@ -22,6 +22,8 @@ pub enum WarpgateError {
     Other(Box<dyn Error + Send + Sync>),
     #[error("user {0} not found")]
     UserNotFound(String),
+    #[error("user {0} already exists")]
+    UserAlreadyExists(String),
     #[error("role {0} not found")]
     RoleNotFound(String),
     #[error("failed to parse URL: {0}")]
@@ -79,6 +81,7 @@ impl ResponseError for WarpgateError {
             | Self::UserNotFound(_)
             | Self::RoleNotFound(_)
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
+            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
