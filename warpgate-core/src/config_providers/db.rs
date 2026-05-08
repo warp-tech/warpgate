@@ -166,6 +166,16 @@ impl DatabaseConfigProvider {
             }
         }
 
+        let existing_user = entities::User::Entity::find()
+            .filter(entities::User::Column::Username.eq(&preferred_username))
+            .one(db)
+            .await?;
+
+        if existing_user.is_some() {
+            error!("Cannot auto-create SSO user with username {preferred_username} because it already exists and does not have a matching SSO credential.");
+            return Err(WarpgateError::UserAlreadyExists(preferred_username));
+        }
+
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),

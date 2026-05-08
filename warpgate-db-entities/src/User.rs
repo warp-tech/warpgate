@@ -19,6 +19,7 @@ use crate::{
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
     #[sea_orm(column_type = "Text")]
