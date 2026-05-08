@@ -75,7 +75,6 @@ impl Api {
             let auth_clone = ctx.auth.clone();
             targets = stream::iter(targets)
                 .filter(|t| {
-                    let services = services.clone();
                     let auth = auth_clone.clone();
                     let name = t.name.clone();
                     async move {
