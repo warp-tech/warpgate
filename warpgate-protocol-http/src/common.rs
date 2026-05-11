@@ -17,6 +17,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{ProtocolName, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
@@ -263,7 +264,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
         let config = ctx.services().config.lock().await;
-        if let Ok(base_url) = config.construct_external_url(None, None) {
+        if let Ok(base_url) = construct_external_url(Some(&req), &config, None).await {
             if let Some(base_host) = base_url.host_str() {
                 let request_host = ctx.trusted_hostname(&req);
 

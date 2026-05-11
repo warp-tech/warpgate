@@ -37,3 +37,9 @@ updates:
     directory: /docker
     schedule:
       interval: daily
+
+  - package-ecosystem: pip
+    directory: /tests
+    labels: ["type/deps"]
+    schedule:
+      interval: "daily"
