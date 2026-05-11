@@ -26,6 +26,7 @@ use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
     WarpgateError,
 };
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -523,7 +524,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::AuthKeyboardInteractive(username, response, reply) => {
-                let _ = reply.send(self._auth_keyboard_interactive(username, response).await);
+                let _ = reply.send(self._auth_keyboard_interactive(username, response).await?);
             }
 
             ServerHandlerEvent::Data(channel, data, reply) => {
@@ -1497,7 +1498,7 @@ impl ServerSession {
         &mut self,
         ssh_username: Secret<String>,
         response: Option<Secret<String>>,
-    ) -> russh::server::Auth {
+    ) -> Result<russh::server::Auth> {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
@@ -1506,7 +1507,7 @@ impl ServerSession {
             .contains(&MethodKind::KeyboardInteractive)
         {
             warn!("Client attempted keyboard-interactive auth even though it was not advertised");
-            return russh::server::Auth::reject();
+            return Ok(russh::server::Auth::reject());
         }
 
         let cred;
@@ -1526,7 +1527,7 @@ impl ServerSession {
 
         self.keyboard_interactive_state = KeyboardInteractiveState::None;
 
-        match self.try_auth_lazy(&selector, cred).await {
+        Ok(match self.try_auth_lazy(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
@@ -1539,10 +1540,10 @@ impl ServerSession {
                     }
                 } else if kinds.contains(&CredentialKind::WebUserApproval) {
                     let Some(auth_state) = self.auth_state.as_ref() else {
-                        return russh::server::Auth::Reject {
+                        return Ok(russh::server::Auth::Reject {
                             proceed_with_methods: None,
                             partial_success: false,
-                        };
+                        });
                     };
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
@@ -1556,18 +1557,17 @@ impl ServerSession {
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
-                    let login_url = match auth_state
-                        .lock()
-                        .await
-                        .construct_web_approval_url(&*self.services.config.lock().await)
-                    {
+                    let login_url = match auth_state.lock().await.construct_web_approval_url(
+                        construct_external_url(None, &*self.services.config.lock().await, None)
+                            .await?,
+                    ) {
                         Ok(login_url) => login_url,
                         Err(error) => {
                             error!(?error, "Failed to construct external URL");
-                            return russh::server::Auth::Reject {
+                            return Ok(russh::server::Auth::Reject {
                                 proceed_with_methods: None,
                                 partial_success: false,
-                            };
+                            });
                         }
                     };
 
@@ -1604,7 +1604,7 @@ impl ServerSession {
                     partial_success: false,
                 }
             }
-        }
+        })
     }
 
     fn get_remaining_auth_methods(&self, kinds: HashSet<CredentialKind>) -> MethodSet {

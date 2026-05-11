@@ -15,6 +15,7 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
@@ -226,7 +227,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let login_url_result =
                                     state_arc.lock().await.construct_web_approval_url(
-                                        &*self.services.config.lock().await,
+                                        construct_external_url(
+                                            None,
+                                            &*self.services.config.lock().await,
+                                            None,
+                                        )
+                                        .await?,
                                     );
                                 let login_url = match login_url_result {
                                     Ok(login_url) => login_url,

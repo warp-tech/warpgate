@@ -2,7 +2,7 @@
 edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-protocol-kubernetes"
-version = "0.23.3"
+version = "0.23.4"
 publish = false
 
 [dependencies]
@@ -29,7 +29,7 @@ tokio.workspace = true
 tokio-rustls = { version = "0.26", default-features = false }
 time.workspace = true
 tracing.workspace = true
-url = { version = "2.0", default-features = false }
+url.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }

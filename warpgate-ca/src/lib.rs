@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use aws_lc_rs::digest;
 use aws_lc_rs::error::KeyRejected;
-use aws_lc_rs::signature::{EcdsaKeyPair, ECDSA_P384_SHA3_384_ASN1_SIGNING};
+use aws_lc_rs::signature::{ECDSA_P384_SHA3_384_ASN1_SIGNING, EcdsaKeyPair};
 use data_encoding::BASE64;
 use der::{Decode, DecodePem, Encode};
 use spki::{AlgorithmIdentifier, SubjectPublicKeyInfo};
@@ -126,8 +126,8 @@ pub fn issue_client_certificate(
     use const_oid::db::{rfc4519, rfc5280, rfc5912};
     use der::asn1::{OctetString, SetOfVec, Utf8StringRef};
     use x509_cert::attr::AttributeTypeAndValue;
-    use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
     use x509_cert::ext::Extension;
+    use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
     use x509_cert::name::{RdnSequence, RelativeDistinguishedName};
 
     let ca_key_pair =

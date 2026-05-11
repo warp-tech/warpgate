@@ -82,7 +82,7 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted full Host header value (including port if present),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
-        let mut host = req.header(HOST).map(ToString::to_string).or_else(|| {
+        let mut host: Option<String> = req.header(HOST).map(ToString::to_string).or_else(|| {
             let uri = req.original_uri();
             let h = uri.host()?;
             Some(match uri.port() {
@@ -105,6 +105,17 @@ impl UnauthenticatedRequestContext {
     pub fn trusted_hostname(&self, req: &Request) -> Option<String> {
         self.trusted_host_header(req)
             .map(|h| h.split(':').next().unwrap_or(&h).to_string())
+    }
+
+    /// Returns the trusted port only,
+    /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
+    pub fn trusted_port(&self, req: &Request) -> Option<u16> {
+        let host_header = self.trusted_host_header(req)?;
+        if let Some(port_str) = host_header.split(':').nth(1) {
+            port_str.parse().ok()
+        } else {
+            None
+        }
     }
 
     /// Returns the trusted protocol scheme for the request, preferring X-Forwarded-Proto

@@ -28,6 +28,7 @@ use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
@@ -134,7 +135,7 @@ impl ProtocolServer for HTTPProtocolServer {
         // work for the base host and its subdomains, not sibling domains.
         let base_cookie_domain: Option<String> = {
             let config = self.services.config.lock().await;
-            match config.construct_external_url(None, None) {
+            match construct_external_url(None, &config, None).await {
                 Ok(url) => {
                     if let Some(host) = url.host_str() {
                         // Use the base host directly with a leading dot (e.g., ".warp.tavahealth.com")

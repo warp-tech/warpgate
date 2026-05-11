@@ -91,6 +91,7 @@ regex = { version = "1.6", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
 reqwest-websocket = "0.6.0"
 time = "0.3"
+url = { version = "2.4", default-features = false }
 
 [profile.release]
 lto = true

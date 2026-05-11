@@ -8,6 +8,7 @@ use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{AdminRole, LdapServer, Parameters, User};
@@ -108,8 +109,8 @@ impl Api {
         auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
         let config = ctx.services().config.lock().await;
-        let external_host = config
-            .construct_external_url(Some(req), None)
+        let external_host = construct_external_url(Some(req), &config, None)
+            .await
             .ok()
             .as_ref()
             .and_then(url::Url::host)

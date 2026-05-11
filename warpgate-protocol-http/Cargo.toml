@@ -2,7 +2,7 @@
 edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.23.3"
+version = "0.23.4"
 publish = false
 
 [dependencies]
@@ -38,4 +38,4 @@ percent-encoding = { version = "2.1", default-features = false }
 subtle = "2"
 uuid.workspace = true
 regex.workspace = true
-url = { version = "2.4", default-features = false }
+url.workspace = true
