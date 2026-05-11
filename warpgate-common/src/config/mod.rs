@@ -670,7 +670,7 @@ impl WarpgateConfig {
         &self,
         request: &poem::Request,
     ) -> Option<(Scheme, String, Option<u16>)> {
-        let (mut scheme, mut host, mut port) = (Scheme::HTTPS, None, None);
+        let (mut scheme, mut host_header, mut port) = (Scheme::HTTPS, None, None);
         let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
 
         // Try the Host header first
@@ -678,12 +678,14 @@ impl WarpgateConfig {
 
         let original_url = request.original_uri();
         if let Some(original_host) = original_url.host() {
-            host = Some(original_host.to_string());
+            host_header = Some(original_host.to_string());
             port = original_url.port().map(|x| x.as_u16());
+        } else if let Some(header) = request.header("host") {
+            host_header = Some(header.to_string());
         }
 
-        // But prefer X-Forwarded-* headers if enabled
         if trust_forwarded_headers {
+            // But prefer X-Forwarded-* headers if enabled
             scheme = request
                 .header("x-forwarded-proto")
                 .and_then(|x| Scheme::try_from(x).ok())
@@ -691,9 +693,7 @@ impl WarpgateConfig {
 
             if let Some(xfh) = request.header("x-forwarded-host") {
                 // XFH can contain both host and port
-                let parts = xfh.split(':').collect::<Vec<_>>();
-                host = parts.first().map(ToString::to_string).or(host);
-                port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
+                host_header = Some(xfh.to_string());
             }
 
             port = request
@@ -701,6 +701,13 @@ impl WarpgateConfig {
                 .and_then(|x| x.parse::<u16>().ok())
                 .or(port);
         }
+
+        let host = host_header.map(|h| {
+            let parts = h.split(':').collect::<Vec<_>>();
+            port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
+            #[allow(clippy::indexing_slicing, reason = "always present")]
+            parts[0].to_string()
+        });
 
         host.map(|host| (scheme, host, port))
     }
