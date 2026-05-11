@@ -3,8 +3,8 @@ mod deadlock_detecting_mutex {
     use std::any::type_name;
     use std::collections::HashMap;
     use std::ops::{Deref, DerefMut};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use tokio::task::Id;
 

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
-use notify::{recommended_watcher, RecursiveMode, Watcher};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use notify::{RecursiveMode, Watcher, recommended_watcher};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{error, info, warn};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
@@ -66,9 +66,10 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
                             .collect(),
                         )),
                         x => x.cloned(),
-                    } {
-                        user.insert(Value::String("require".into()), new_require);
                     }
+                {
+                    user.insert(Value::String("require".into()), new_require);
+                }
             }
         }
     }

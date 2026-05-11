@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use time::OffsetDateTime;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;

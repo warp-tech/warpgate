@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::helpers::locks::{Mutex, MutexGuard};
 

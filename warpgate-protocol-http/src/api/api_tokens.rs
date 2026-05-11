@@ -5,8 +5,8 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::WarpgateError;
+use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_db_entities::ApiToken;
 

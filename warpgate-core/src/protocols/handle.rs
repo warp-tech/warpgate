@@ -3,13 +3,13 @@ use std::sync::Arc;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, info_span};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
 use crate::logging::AuditEvent;
-use crate::rate_limiting::{stack_rate_limiters, RateLimiterRegistry};
+use crate::rate_limiting::{RateLimiterRegistry, stack_rate_limiters};
 use crate::{SessionState, State};
 
 pub trait SessionHandle {

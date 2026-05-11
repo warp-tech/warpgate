@@ -16,7 +16,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use crate::client::{ConnectionOptions, PostgresClient};

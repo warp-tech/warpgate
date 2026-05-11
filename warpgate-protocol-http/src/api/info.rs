@@ -1,7 +1,7 @@
 use anyhow::Context;
+use poem::Request;
 use poem::session::Session;
 use poem::web::Data;
-use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
@@ -12,7 +12,7 @@ use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{AdminRole, LdapServer, Parameters, User};
 
-use crate::common::{is_user_admin, SessionExt};
+use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
 
@@ -138,11 +138,7 @@ impl Api {
                     has_targets: targets.len() > 1,
                     has_users: users.len() > 1,
                 };
-                if state.completed() {
-                    None
-                } else {
-                    Some(state)
-                }
+                if state.completed() { None } else { Some(state) }
             } else {
                 None
             }
@@ -242,7 +238,9 @@ impl Api {
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
-            username: auth_ctx.as_ref().and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
+            username: auth_ctx
+                .as_ref()
+                .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
             minimize_password_login: parameters.minimize_password_login,

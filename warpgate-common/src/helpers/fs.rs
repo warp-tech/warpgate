@@ -16,7 +16,9 @@ fn maybe_apply_permissions<P: AsRef<Path>>(
 
 fn warn_failure(e: &std::io::Error) {
     error!("Warning: failed to tighten file permissions: {}", e);
-    error!("If you are managing file permissions externally and do not need Warpgate to change them, you can pass --skip-securing-files");
+    error!(
+        "If you are managing file permissions externally and do not need Warpgate to change them, you can pass --skip-securing-files"
+    );
 }
 
 pub fn secure_directory<P: AsRef<Path>>(path: P) -> std::io::Result<()> {

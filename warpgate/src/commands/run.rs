@@ -120,11 +120,14 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                     &audit_retention,
                 )
                 .await
-                { Err(error) => {
-                    error!(?error, "Failed to cleanup the database");
-                } _ => {
-                    debug!("Database cleaned up, next in {:?}", interval);
-                }}
+                {
+                    Err(error) => {
+                        error!(?error, "Failed to cleanup the database");
+                    }
+                    _ => {
+                        debug!("Database cleaned up, next in {:?}", interval);
+                    }
+                }
                 tokio::time::sleep(interval).await;
             }
         }
@@ -199,10 +202,10 @@ pub async fn watch_config_and_reload(services: Services) -> Result<()> {
                 && !cp
                     .authorize_target(&user_info.username, &target.name)
                     .await?
-                {
-                    warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
-                    session.handle.close();
-                }
+            {
+                warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
+                session.handle.close();
+            }
         }
     }
 

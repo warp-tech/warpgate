@@ -1,7 +1,7 @@
 use anyhow::Result;
+use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{Error, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use argon2::Argon2;
 use data_encoding::HEXLOWER;
 use rand::RngExt;
 

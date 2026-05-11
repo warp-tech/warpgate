@@ -1,6 +1,6 @@
 use std::io::Write as _;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use bytes::Bytes;
 use termcolor::{Buffer, Color, ColorSpec, WriteColor as _};

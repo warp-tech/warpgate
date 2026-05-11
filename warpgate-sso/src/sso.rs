@@ -7,19 +7,19 @@ use openidconnect::core::{
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    reqwest, AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
+    AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
     DiscoveryError, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
     HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
     OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
     ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
-    StandardTokenResponse, TokenResponse, UserInfoClaims,
+    StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
-use crate::SsoError;
 
 /// Deserialize a value that may be either a single string or a sequence of strings.
 ///

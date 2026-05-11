@@ -3,10 +3,10 @@ use std::sync::Arc;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
-use poem::{handler, Body, IntoResponse, Request, Response};
+use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{debug, info_span, Instrument};
+use tracing::{Instrument, debug, info_span};
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -122,7 +122,7 @@ async fn get_target_for_request(
             username
         }
         RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
-            return Ok(None)
+            return Ok(None);
         }
     };
 

@@ -1,5 +1,5 @@
-use sea_orm::entity::prelude::*;
 use sea_orm::Schema;
+use sea_orm::entity::prelude::*;
 use sea_orm_migration::prelude::*;
 
 pub mod certificate_revocation {

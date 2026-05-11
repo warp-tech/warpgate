@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
-use tracing::{error, info, warn, Instrument};
-use warpgate_common::helpers::net::detect_port_knock;
+use rustls::server::NoClientAuth;
+use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
