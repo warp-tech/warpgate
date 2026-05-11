@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use base64::{self, Engine};
+use poem::Addr;
 use poem::listener::Acceptor;
 use poem::web::{LocalAddr, RemoteAddr};
-use poem::Addr;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
@@ -139,11 +139,11 @@ fn extract_peer_certificates<T>(tls_stream: &TlsStream<T>) -> Option<Vec<u8>> {
     let (_, tls_conn) = tls_stream.get_ref();
 
     // Extract peer certificates - this gives us the certificate chain
-    if let Some(peer_certs) = tls_conn.peer_certificates() {
-        if let Some(end_entity_cert) = peer_certs.first() {
-            debug!("Extracted client certificate from TLS stream");
-            return Some(end_entity_cert.as_ref().to_vec());
-        }
+    if let Some(peer_certs) = tls_conn.peer_certificates()
+        && let Some(end_entity_cert) = peer_certs.first()
+    {
+        debug!("Extracted client certificate from TLS stream");
+        return Some(end_entity_cert.as_ref().to_vec());
     }
 
     debug!("No client certificate found in TLS stream");
@@ -188,8 +188,8 @@ where
                 match base64::engine::general_purpose::STANDARD.decode(cert_part) {
                     Ok(cert_der) => {
                         debug!(
-                        "Middleware: Successfully extracted client certificate from remote_addr"
-                    );
+                            "Middleware: Successfully extracted client certificate from remote_addr"
+                        );
 
                         let client_cert = ClientCertificate {
                             der_bytes: cert_der,

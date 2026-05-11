@@ -65,8 +65,7 @@ pub async fn command(
             .filter(AdminRole::Column::Name.eq(role_name.clone()))
             .one(&*db)
             .await?
-        {
-            if UserAdminRoleAssignment::Entity::find()
+            && UserAdminRoleAssignment::Entity::find()
                 .filter(UserAdminRoleAssignment::Column::UserId.eq(db_user.id))
                 .filter(UserAdminRoleAssignment::Column::AdminRoleId.eq(db_admin.id))
                 .all(&*db)
@@ -80,7 +79,6 @@ pub async fn command(
                 };
                 values.insert(&*db).await.map_err(WarpgateError::from)?;
             }
-        }
     }
 
     Ok(())

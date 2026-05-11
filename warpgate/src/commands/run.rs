@@ -196,15 +196,13 @@ pub async fn watch_config_and_reload(services: Services) -> Result<()> {
             let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
                 (session.user_info.as_ref(), session.target.as_ref())
-            {
-                if !cp
+                && !cp
                     .authorize_target(&user_info.username, &target.name)
                     .await?
                 {
                     warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
                     session.handle.close();
                 }
-            }
         }
     }
 

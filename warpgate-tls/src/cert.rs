@@ -111,10 +111,10 @@ impl TlsCertificateBundle {
             }
         }
 
-        if let Some(subject) = cert.subject().iter_common_name().next() {
-            if let Ok(cn) = subject.as_str() {
-                names.push(cn.to_string());
-            }
+        if let Some(subject) = cert.subject().iter_common_name().next()
+            && let Ok(cn) = subject.as_str()
+        {
+            names.push(cn.to_string());
         }
 
         // Remove duplicates while preserving order

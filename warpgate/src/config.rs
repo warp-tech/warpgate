@@ -49,8 +49,8 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
 
         if let Some(Value::Sequence(users)) = map.get_mut(Value::String("users".into())) {
             for user in users {
-                if let Value::Mapping(user) = user {
-                    if let Some(new_require) = match user.get(Value::String("require".into())) {
+                if let Value::Mapping(user) = user
+                    && let Some(new_require) = match user.get(Value::String("require".into())) {
                         Some(Value::Sequence(old_requires)) => Some(Value::Mapping(
                             vec![
                                 (
@@ -69,7 +69,6 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
                     } {
                         user.insert(Value::String("require".into()), new_require);
                     }
-                }
             }
         }
     }

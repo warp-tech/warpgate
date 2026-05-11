@@ -3,8 +3,8 @@ use serde::Deserialize;
 use tracing::{debug, warn};
 use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
-use crate::config::SsoInternalProviderConfig;
 use crate::SsoError;
+use crate::config::SsoInternalProviderConfig;
 
 #[derive(Debug, Deserialize)]
 struct DirectoryGroupsResponse {
@@ -147,11 +147,11 @@ async fn fetch_user_groups(
 
         all_groups.extend(resp.groups.into_iter().map(|g| g.email));
 
-        if let Some(token) = resp.next_page_token {
-            if !token.is_empty() {
-                page_token = Some(token);
-                continue;
-            }
+        if let Some(token) = resp.next_page_token
+            && !token.is_empty()
+        {
+            page_token = Some(token);
+            continue;
         }
         break;
     }

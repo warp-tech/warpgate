@@ -717,13 +717,13 @@ impl WarpgateConfig {
             return Err(WarpgateError::ExternalHostUnknown);
         };
 
-        if let Some(list) = domain_whitelist {
-            if !list.contains(&host) {
-                return Err(WarpgateError::ExternalHostNotWhitelisted(
-                    host,
-                    list.to_vec(),
-                ));
-            }
+        if let Some(list) = domain_whitelist
+            && !list.contains(&host)
+        {
+            return Err(WarpgateError::ExternalHostNotWhitelisted(
+                host,
+                list.to_vec(),
+            ));
         }
 
         let mut url = format!("{scheme}://{host}");
@@ -737,11 +737,15 @@ impl WarpgateConfig {
     }
 
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host {
-            if ext.contains(':') {
-                warn!("Looks like your `external_host` config option contains a port - it will be ignored.");
-                warn!("Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.");
-            }
+        if let Some(ref ext) = self.store.external_host
+            && ext.contains(':')
+        {
+            warn!(
+                "Looks like your `external_host` config option contains a port - it will be ignored."
+            );
+            warn!(
+                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
+            );
         }
     }
 }

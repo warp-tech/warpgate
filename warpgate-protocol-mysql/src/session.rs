@@ -15,16 +15,16 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
+use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
     AuthSwitchRequest, Handshake, HandshakeResponse,
 };
 use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use warpgate_database_protocols::mysql::protocol::text::Query;
-use warpgate_database_protocols::mysql::protocol::Capabilities;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
@@ -127,11 +127,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Err(MySqlError::TlsNotSupportedByClient);
         };
 
-        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
-            if let Some(mut response) = resp.auth_response.clone() {
-                let password = Secret::new(response.get_str_nul()?);
-                return self.run_authorization(resp, password).await;
-            }
+        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword)
+            && let Some(mut response) = resp.auth_response.clone()
+        {
+            let password = Secret::new(response.get_str_nul()?);
+            return self.run_authorization(resp, password).await;
         }
 
         let req = AuthSwitchRequest {
@@ -433,10 +433,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             trace!(?response, "client got packet");
             self.stream.push(&&response[..], ())?;
             self.stream.flush().await?;
-            if let Some(com) = response.first() {
-                if com == &0 || com == &0xff || com == &0xfe {
-                    break;
-                }
+            if let Some(com) = response.first()
+                && (com == &0 || com == &0xff || com == &0xfe)
+            {
+                break;
             }
         }
         Ok(())

@@ -15,7 +15,7 @@ use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::{MethodKind, MethodSet, Sig};
 use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{
@@ -31,12 +31,12 @@ use warpgate_core::recordings::{
     TrafficRecorder,
 };
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::{ansi_paint, ServiceOutput};
+use super::service_output::{ServiceOutput, ansi_paint};
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
@@ -449,22 +449,22 @@ impl ServerSession {
                         Ok(())
                     }
                     Err(x) => Err(x.into()),
-                }
+                };
             }
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
                 self.channel_pty_size_map
                     .insert(channel_id, request.clone());
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+                    && let Err(error) = recorder
                         .write_pty_resize(request.col_width, request.row_height)
                         .await
-                    {
-                        error!(%channel_id, ?error, "Failed to record terminal data");
-                        self.channel_recorders.remove(&channel_id);
-                    }
+                {
+                    error!(%channel_id, ?error, "Failed to record terminal data");
+                    self.channel_recorders.remove(&channel_id);
                 }
+
                 self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestPty(request),
@@ -960,7 +960,9 @@ impl ServerSession {
         }
 
         if self.pty_channels.is_empty() {
-            warn!("Target host key is not trusted, but there is no active PTY channel to show the trust prompt on.");
+            warn!(
+                "Target host key is not trusted, but there is no active PTY channel to show the trust prompt on."
+            );
             warn!(
                 "Connect to this target with an interactive session once to accept the host key."
             );
@@ -1577,12 +1579,12 @@ impl ServerSession {
                         name: Cow::Borrowed("Warpgate authentication"),
                         instructions: Cow::Owned(format!(
                             concat!(
-                            "-----------------------------------------------------------------------\n",
-                            "Warpgate authentication: please open the following URL in your browser:\n",
-                            "{}\n\n",
-                            "Make sure you're seeing this security key: {}\n",
-                            "-----------------------------------------------------------------------\n"
-                        ),
+                                "-----------------------------------------------------------------------\n",
+                                "Warpgate authentication: please open the following URL in your browser:\n",
+                                "{}\n\n",
+                                "Make sure you're seeing this security key: {}\n",
+                                "-----------------------------------------------------------------------\n"
+                            ),
                             login_url,
                             identification_string
                                 .chars()
@@ -1840,7 +1842,7 @@ impl ServerSession {
     }
 
     fn send_command(&self, command: RCCommand) -> Result<(), RCCommand> {
-        self.rc_tx.send((command, None)).map_err(|e| e.0 .0)
+        self.rc_tx.send((command, None)).map_err(|e| e.0.0)
     }
 
     async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {

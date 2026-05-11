@@ -92,11 +92,11 @@ pub async fn authorize_ticket(
             return Ok(None);
         }
 
-        if let Some(datetime) = ticket.expiry {
-            if datetime < OffsetDateTime::now_utc() {
-                warn!("Ticket has expired: {}", &ticket.id);
-                return Ok(None);
-            }
+        if let Some(datetime) = ticket.expiry
+            && datetime < OffsetDateTime::now_utc()
+        {
+            warn!("Ticket has expired: {}", &ticket.id);
+            return Ok(None);
         }
 
         let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id)

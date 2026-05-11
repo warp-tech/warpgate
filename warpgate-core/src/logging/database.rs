@@ -4,9 +4,9 @@ use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{error, Subscriber};
-use tracing_subscriber::registry::LookupSpan;
+use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
+use tracing_subscriber::registry::LookupSpan;
 use uuid::Uuid;
 use warpgate_db_entities::LogEntry;
 
@@ -22,10 +22,10 @@ where
 {
     let _ = LOG_SENDER.set(tokio::sync::broadcast::channel(1024).0);
     ValuesLogLayer::new(|values, target| {
-        if let Some(sender) = LOG_SENDER.get() {
-            if let Some(entry) = values_to_log_entry_data(values, target) {
-                let _ = sender.send(entry);
-            }
+        if let Some(sender) = LOG_SENDER.get()
+            && let Some(entry) = values_to_log_entry_data(values, target)
+        {
+            let _ = sender.send(entry);
         }
     })
 }

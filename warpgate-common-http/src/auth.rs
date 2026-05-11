@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
+use poem::Request;
 use poem::http::header::HOST;
 use poem::http::uri::Scheme;
-use poem::Request;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_common::http_headers::{X_FORWARDED_HOST, X_FORWARDED_PROTO};
@@ -91,10 +91,10 @@ impl UnauthenticatedRequestContext {
             })
         });
 
-        if self.should_trust_x_forwarded {
-            if let Some(xfh) = req.header(&X_FORWARDED_HOST) {
-                host = Some(xfh.to_string());
-            }
+        if self.should_trust_x_forwarded
+            && let Some(xfh) = req.header(&X_FORWARDED_HOST)
+        {
+            host = Some(xfh.to_string());
         }
 
         host
@@ -117,10 +117,10 @@ impl UnauthenticatedRequestContext {
             .unwrap_or(Scheme::HTTPS);
 
         if self.should_trust_x_forwarded {
-            if let Some(proto) = req.header(&X_FORWARDED_PROTO) {
-                if let Ok(s) = Scheme::try_from(proto) {
-                    scheme = s;
-                }
+            if let Some(proto) = req.header(&X_FORWARDED_PROTO)
+                && let Ok(s) = Scheme::try_from(proto)
+            {
+                scheme = s;
             }
         }
 
