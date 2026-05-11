@@ -163,6 +163,7 @@ pub async fn create_ticket_request(
             effective_duration,
             effective_uses,
             &params.description,
+            true,
         )
         .await?;
 
@@ -227,6 +228,7 @@ async fn insert_self_service_ticket(
     duration_seconds: Option<i64>,
     uses: Option<i16>,
     description: &str,
+    self_service: bool,
 ) -> Result<(Uuid, Secret<String>), WarpgateError> {
     let secret = generate_ticket_secret();
     let ticket_id = Uuid::new_v4();
@@ -241,7 +243,7 @@ async fn insert_self_service_ticket(
         expiry: Set(expiry),
         uses_left: Set(uses),
         description: Set(description.to_string()),
-        self_service: Set(true),
+        self_service: Set(self_service),
     };
     ticket.insert(db_conn).await?;
 
@@ -366,6 +368,7 @@ pub async fn activate_ticket_request(
         effective_duration,
         max_uses,
         &request.description,
+        false,
     )
     .await?;
 
