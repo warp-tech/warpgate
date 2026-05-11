@@ -35,7 +35,7 @@ http = "1"
 reqwest.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-url = { version = "2.4", default-features = false }
+url.workspace = true
 data-encoding.workspace = true
 aws-sdk-rds = "1.130.0"
 thiserror.workspace = true
