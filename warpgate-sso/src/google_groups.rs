@@ -35,9 +35,9 @@ pub async fn fetch_groups_if_configured(
     user_email: Option<&str>,
 ) -> Result<Option<Vec<String>>, SsoError> {
     let SsoInternalProviderConfig::Google {
-        service_account_email: Some(ref sa_email),
-        service_account_key: Some(ref sa_key),
-        admin_email: Some(ref admin_email),
+        service_account_email: Some(sa_email),
+        service_account_key: Some(sa_key),
+        admin_email: Some(admin_email),
         ..
     } = config
     else {

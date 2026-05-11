@@ -451,7 +451,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .iter()
                     .any(|credential| match credential {
                         UserAuthCredential::PublicKey(UserPublicKeyCredential {
-                            key: ref user_key,
+                            key: user_key,
                         }) => &openssh_public_key == user_key.expose_secret(),
                         _ => false,
                     }))
@@ -462,7 +462,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .iter()
                     .any(|credential| match credential {
                         UserAuthCredential::Password(UserPasswordCredential {
-                            hash: ref user_password_hash,
+                            hash: user_password_hash,
                         }) => verify_password_hash(
                             client_password.expose_secret(),
                             user_password_hash.expose_secret(),
@@ -483,7 +483,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .iter()
                     .any(|credential| match credential {
                         UserAuthCredential::Totp(UserTotpCredential {
-                            key: ref user_otp_key,
+                            key: user_otp_key,
                         }) => verify_totp(client_otp.expose_secret(), user_otp_key),
                         _ => false,
                     }))
@@ -494,8 +494,8 @@ impl ConfigProvider for DatabaseConfigProvider {
             } => {
                 for credential in &user_details.credentials {
                     if let UserAuthCredential::Sso(UserSsoCredential {
-                        ref provider,
-                        ref email,
+                        provider,
+                        email,
                     }) = credential
                     {
                         if provider.as_ref().unwrap_or(client_provider) == client_provider

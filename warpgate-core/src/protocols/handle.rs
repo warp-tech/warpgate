@@ -123,10 +123,13 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub async fn wrap_stream(
+    pub async fn wrap_stream<S>(
         &self,
-        stream: impl AsyncRead + AsyncWrite + Unpin + Send,
-    ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send, WarpgateError> {
+        stream: S,
+    ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send + use<S>, WarpgateError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
         let (stream, handle) = stack_rate_limiters(stream);
         let mut ss = self.session_state.lock().await;
         self.rate_limiters_registry

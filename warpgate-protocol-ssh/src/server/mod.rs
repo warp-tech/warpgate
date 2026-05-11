@@ -86,7 +86,10 @@ async fn _handle_connection(
     let (event_tx, event_rx) = unbounded_channel();
 
     let handler = ServerHandler { event_tx };
-    let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+    let wrapped_stream = {
+        let guard = server_handle.lock().await;
+        guard.wrap_stream(stream).await?
+    };
 
     let session = match ServerSession::start(
         remote_address,

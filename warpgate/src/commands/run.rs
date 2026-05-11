@@ -113,18 +113,18 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let audit_retention = { services.config.lock().await.store.log.audit_retention };
                 let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
-                if let Err(error) = cleanup_db(
+                match cleanup_db(
                     &*services.db.lock().await,
                     &*services.recordings.lock().await,
                     &retention,
                     &audit_retention,
                 )
                 .await
-                {
+                { Err(error) => {
                     error!(?error, "Failed to cleanup the database");
-                } else {
+                } _ => {
                     debug!("Database cleaned up, next in {:?}", interval);
-                }
+                }}
                 tokio::time::sleep(interval).await;
             }
         }

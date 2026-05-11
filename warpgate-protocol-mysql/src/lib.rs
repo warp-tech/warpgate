@@ -95,7 +95,10 @@ impl ProtocolServer for MySQLProtocolServer {
                 .await
                 .context("registering session")?;
 
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+                let wrapped_stream = {
+                    let guard = server_handle.lock().await;
+                    guard.wrap_stream(stream).await?
+                };
 
                 let session = MySqlSession::new(
                     server_handle,
