@@ -1,25 +1,25 @@
 use std::sync::Arc;
 
+use poem::Request;
 use poem::session::Session;
 use poem::web::{Data, Form};
-use poem::Request;
 use poem_openapi::param::Query;
 use poem_openapi::payload::{Html, Json, Response};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
-use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
+use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
 use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
-use super::sso_provider_detail::{SsoContext, SSO_CONTEXT_SESSION_KEY};
-use crate::api::common::logout;
-use crate::common::{authorize_session, get_auth_state_for_request, SessionExt};
-use crate::session::SessionStore;
+use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
+use crate::api::common::logout;
+use crate::common::{SessionExt, authorize_session, get_auth_state_for_request};
+use crate::session::SessionStore;
 
 pub struct Api;
 
@@ -200,7 +200,9 @@ impl Api {
         };
 
         let Some(state) = state else {
-            return Ok(Err("No SSO state parameter in the return request".to_string()));
+            return Ok(Err(
+                "No SSO state parameter in the return request".to_string()
+            ));
         };
 
         if !context.request.verify_state(state) {
@@ -337,7 +339,9 @@ impl Api {
             active_role_names.sort();
             active_role_names.dedup();
 
-            debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
+            debug!(
+                "SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}"
+            );
             cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
                 .await?;
         }
@@ -366,7 +370,9 @@ impl Api {
                 remote_admins.clone()
             };
 
-            debug!("SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}");
+            debug!(
+                "SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}"
+            );
             cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)
                 .await?;
         }
@@ -377,10 +383,10 @@ impl Api {
             .unwrap_or("/@warpgate#/login")
             .to_owned();
 
-        if let Some(ref host) = context.return_host {
-            if next_url.starts_with('/') {
-                next_url = format!("https://{host}{next_url}");
-            }
+        if let Some(ref host) = context.return_host
+            && next_url.starts_with('/')
+        {
+            next_url = format!("https://{host}{next_url}");
         }
 
         Ok(Ok(next_url))

@@ -702,21 +702,20 @@ impl ServerSession {
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel)
+                    && let Err(error) = recorder
                         .write(TerminalRecordingStreamId::Output, &data)
                         .await
-                    {
-                        error!(%channel, ?error, "Failed to record terminal data");
-                        self.channel_recorders.remove(&channel);
-                    }
+                {
+                    error!(%channel, ?error, "Failed to record terminal data");
+                    self.channel_recorders.remove(&channel);
                 }
 
-                if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder.write_rx(&data).await {
-                        error!(%channel, ?error, "Failed to record traffic data");
-                        self.traffic_connection_recorders.remove(&channel);
-                    }
+                if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel)
+                    && let Err(error) = recorder.write_rx(&data).await
+                {
+                    error!(%channel, ?error, "Failed to record traffic data");
+                    self.traffic_connection_recorders.remove(&channel);
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
@@ -810,14 +809,13 @@ impl ServerSession {
             }
             RCEvent::Done => {}
             RCEvent::ExtendedData { channel, data, ext } => {
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel)
+                    && let Err(error) = recorder
                         .write(TerminalRecordingStreamId::Error, &data)
                         .await
-                    {
-                        error!(%channel, ?error, "Failed to record session data");
-                        self.channel_recorders.remove(&channel);
-                    }
+                {
+                    error!(%channel, ?error, "Failed to record session data");
+                    self.channel_recorders.remove(&channel);
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
@@ -1123,14 +1121,13 @@ impl ServerSession {
         let channel_id = self.map_channel(server_channel_id)?;
         self.channel_pty_size_map
             .insert(channel_id, request.clone());
-        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder
+        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder
                 .write_pty_resize(request.col_width, request.row_height)
                 .await
-            {
-                error!(%channel_id, ?error, "Failed to record terminal data");
-                self.channel_recorders.remove(&channel_id);
-            }
+        {
+            error!(%channel_id, ?error, "Failed to record terminal data");
+            self.channel_recorders.remove(&channel_id);
         }
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
@@ -1282,21 +1279,20 @@ impl ServerSession {
             return Ok(());
         }
 
-        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder
+        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder
                 .write(TerminalRecordingStreamId::Input, &data)
                 .await
-            {
-                error!(channel=%channel_id, ?error, "Failed to record terminal data");
-                self.channel_recorders.remove(&channel_id);
-            }
+        {
+            error!(channel=%channel_id, ?error, "Failed to record terminal data");
+            self.channel_recorders.remove(&channel_id);
         }
 
-        if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder.write_tx(&data).await {
-                error!(channel=%channel_id, ?error, "Failed to record traffic data");
-                self.traffic_connection_recorders.remove(&channel_id);
-            }
+        if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder.write_tx(&data).await
+        {
+            error!(channel=%channel_id, ?error, "Failed to record traffic data");
+            self.traffic_connection_recorders.remove(&channel_id);
         }
 
         if self.pty_channels.contains(&channel_id) {
@@ -1709,15 +1705,14 @@ impl ServerSession {
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
-                if let Some(credential) = credential {
-                    if cp
+                if let Some(credential) = credential
+                    && cp
                         .lock()
                         .await
                         .validate_credential(username, &credential)
                         .await?
-                    {
-                        state.add_valid_credential(credential);
-                    }
+                {
+                    state.add_valid_credential(credential);
                 }
 
                 let user_auth_result = state.verify();

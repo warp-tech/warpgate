@@ -51,10 +51,8 @@ jobs:
 
       - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
 
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
-        with:
-          target: ${{ matrix.target }}
-          override: true
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:

@@ -4,7 +4,7 @@ use poem::web::Data;
 use poem::{Endpoint, FromRequest, IntoResponse, Middleware, Request, Response};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 
-use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
+use crate::common::{SESSION_COOKIE_NAME, is_localhost_host};
 
 #[derive(Clone)]
 pub struct CookieHostMiddleware {
@@ -61,47 +61,47 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             // Use the cookie crate to parse and modify cookies properly
             let mut modified_session_cookie: Option<String> = None;
             for cookie_str in &cookie_values {
-                if let Ok(mut cookie) = Cookie::parse(cookie_str) {
-                    if cookie.name() == SESSION_COOKIE_NAME {
-                        // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
-                        let is_localhost = is_localhost_host(&host);
-                        let target_domain = if is_localhost {
-                            None // Omit Domain attribute for localhost - browser will scope to exact host
-                        } else if let Some(ref base) = self.base_domain {
-                            Some(base.clone())
-                        } else {
-                            Some(host.clone())
-                        };
+                if let Ok(mut cookie) = Cookie::parse(cookie_str)
+                    && cookie.name() == SESSION_COOKIE_NAME
+                {
+                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
+                    let is_localhost = is_localhost_host(&host);
+                    let target_domain = if is_localhost {
+                        None // Omit Domain attribute for localhost - browser will scope to exact host
+                    } else if let Some(ref base) = self.base_domain {
+                        Some(base.clone())
+                    } else {
+                        Some(host.clone())
+                    };
 
-                        // Set or remove Domain attribute using cookie crate methods
-                        if let Some(ref domain) = target_domain {
-                            cookie.set_domain(domain.clone());
-                        } else {
-                            // For localhost, we need to remove the domain attribute
-                            cookie.unset_domain();
-                        }
-
-                        // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
-                        if is_https {
-                            cookie.set_secure(true);
-                            cookie.set_same_site(cookie::SameSite::None);
-                        }
-
-                        if self.base_domain.is_none() {
-                            tracing::warn!(
-                                "CookieHostMiddleware: Setting session cookie domain to request host: {} (no base domain configured). This may prevent SSO from working across subdomains. Consider setting 'external_host' in config.",
-                                host
-                            );
-                        }
-
-                        modified_session_cookie = Some(cookie.to_string());
-                        tracing::debug!(
-                            "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
-                            target_domain,
-                            is_https
-                        );
-                        break;
+                    // Set or remove Domain attribute using cookie crate methods
+                    if let Some(ref domain) = target_domain {
+                        cookie.set_domain(domain.clone());
+                    } else {
+                        // For localhost, we need to remove the domain attribute
+                        cookie.unset_domain();
                     }
+
+                    // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
+                    if is_https {
+                        cookie.set_secure(true);
+                        cookie.set_same_site(cookie::SameSite::None);
+                    }
+
+                    if self.base_domain.is_none() {
+                        tracing::warn!(
+                            "CookieHostMiddleware: Setting session cookie domain to request host: {} (no base domain configured). This may prevent SSO from working across subdomains. Consider setting 'external_host' in config.",
+                            host
+                        );
+                    }
+
+                    modified_session_cookie = Some(cookie.to_string());
+                    tracing::debug!(
+                        "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
+                        target_domain,
+                        is_https
+                    );
+                    break;
                 }
             }
 
@@ -120,12 +120,11 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                     headers.append(http::header::SET_COOKIE, header_value);
                 }
                 for cookie_str in &cookie_values {
-                    if let Ok(cookie) = Cookie::parse(cookie_str) {
-                        if cookie.name() != SESSION_COOKIE_NAME {
-                            if let Ok(header_value) = cookie_str.parse::<http::HeaderValue>() {
-                                headers.append(http::header::SET_COOKIE, header_value);
-                            }
-                        }
+                    if let Ok(cookie) = Cookie::parse(cookie_str)
+                        && cookie.name() != SESSION_COOKIE_NAME
+                        && let Ok(header_value) = cookie_str.parse::<http::HeaderValue>()
+                    {
+                        headers.append(http::header::SET_COOKIE, header_value);
                     }
                 }
             }

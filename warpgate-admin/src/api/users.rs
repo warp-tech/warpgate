@@ -13,7 +13,7 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::logging::{format_related_ids, AuditEvent};
+use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
@@ -220,13 +220,8 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
-            Some(ranges) => serde_json::to_value(
-                ranges
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(WarpgateError::from)?,
+            Some(ranges) => serde_json::to_value(ranges.into_iter().collect::<Vec<_>>())
+                .map_err(WarpgateError::from)?,
             None => serde_json::Value::Null,
         });
         let user = model.update(&*db).await?;

@@ -17,6 +17,7 @@ use crate::Cli;
 
 pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
+        #[allow(unsafe_code)]
         unsafe {
             match cli.debug {
                 0 => std::env::set_var("RUST_LOG", "audit=info,warpgate=info"),
