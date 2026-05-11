@@ -5,10 +5,11 @@ use rand::RngExt;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use url::Url;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::{SessionId, User, WarpgateConfig, WarpgateError};
+use crate::{SessionId, User, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -160,9 +161,8 @@ impl AuthState {
 
     pub fn construct_web_approval_url(
         &self,
-        config: &WarpgateConfig,
+        mut external_url: Url,
     ) -> Result<url::Url, WarpgateError> {
-        let mut external_url = config.construct_external_url(None, None)?;
         external_url.set_path("@warpgate");
         external_url.set_fragment(Some(&format!("/login/{}", self.id())));
         Ok(external_url)

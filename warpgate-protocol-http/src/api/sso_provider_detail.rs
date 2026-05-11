@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_sso::{SsoClient, SsoLoginRequest};
 
 pub struct Api;
@@ -60,10 +61,12 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
-        let mut return_url = config.construct_external_url(
+        let mut return_url = construct_external_url(
             Some(req),
+            &config,
             provider_config.return_domain_whitelist.as_deref(),
-        )?;
+        )
+        .await?;
         return_url.set_path(&format!(
             "{}warpgate/api/sso/return",
             provider_config.return_url_prefix

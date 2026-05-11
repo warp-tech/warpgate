@@ -7317,6 +7317,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "warpgate-common",
  "warpgate-core",
@@ -7559,6 +7560,7 @@ dependencies = [
  "uuid",
  "warpgate-aws",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-tls",
 ]
@@ -7586,6 +7588,7 @@ dependencies = [
  "uuid",
  "warpgate-aws",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
  "zeroize",

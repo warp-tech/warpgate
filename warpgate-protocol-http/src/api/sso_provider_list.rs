@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
 use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
@@ -200,7 +201,9 @@ impl Api {
         };
 
         let Some(state) = state else {
-            return Ok(Err("No SSO state parameter in the return request".to_string()));
+            return Ok(Err(
+                "No SSO state parameter in the return request".to_string()
+            ));
         };
 
         if !context.request.verify_state(state) {
@@ -404,7 +407,7 @@ impl Api {
 
         let config = ctx.services().config.lock().await;
 
-        let return_url = config.construct_external_url(Some(req), None)?;
+        let return_url = construct_external_url(Some(req), &config, None).await?;
         debug!("Return URL: {}", &return_url);
 
         let Some(provider_config) = config
