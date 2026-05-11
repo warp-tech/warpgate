@@ -113,7 +113,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let audit_retention = { services.config.lock().await.store.log.audit_retention };
                 let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
-                if let Err(error) = cleanup_db(
+                match cleanup_db(
                     &*services.db.lock().await,
                     &*services.recordings.lock().await,
                     &retention,
@@ -121,9 +121,12 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 )
                 .await
                 {
-                    error!(?error, "Failed to cleanup the database");
-                } else {
-                    debug!("Database cleaned up, next in {:?}", interval);
+                    Err(error) => {
+                        error!(?error, "Failed to cleanup the database");
+                    }
+                    _ => {
+                        debug!("Database cleaned up, next in {:?}", interval);
+                    }
                 }
                 tokio::time::sleep(interval).await;
             }
@@ -196,14 +199,12 @@ pub async fn watch_config_and_reload(services: Services) -> Result<()> {
             let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
                 (session.user_info.as_ref(), session.target.as_ref())
-            {
-                if !cp
+                && !cp
                     .authorize_target(&user_info.username, &target.name)
                     .await?
-                {
-                    warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
-                    session.handle.close();
-                }
+            {
+                warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
+                session.handle.close();
             }
         }
     }

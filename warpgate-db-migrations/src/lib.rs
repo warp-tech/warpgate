@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
-use sea_orm_migration::prelude::*;
 use sea_orm_migration::MigrationTrait;
+use sea_orm_migration::prelude::*;
 
 mod m00001_create_ticket;
 mod m00002_create_session;

@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
@@ -16,7 +16,7 @@ pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60
 
 /// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
 /// extract the inner IPv4 address. Otherwise return as-is.
-fn normalize_ip(ip: IpAddr) -> IpAddr {
+const fn normalize_ip(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => IpAddr::V4(v4),

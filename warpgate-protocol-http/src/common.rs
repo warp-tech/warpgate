@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use http::{HeaderName, StatusCode};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use poem::error::InternalServerError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
@@ -189,10 +189,10 @@ pub async fn get_auth_state_for_request(
     store: &mut AuthStateStore,
     remote_ip: Option<IpAddr>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    if let Some(id) = session.get_auth_state_id() {
-        if !store.contains_key(&id.0) {
-            session.remove(AUTH_STATE_ID_SESSION_KEY);
-        }
+    if let Some(id) = session.get_auth_state_id()
+        && !store.contains_key(&id.0)
+    {
+        session.remove(AUTH_STATE_ID_SESSION_KEY);
     }
 
     if let Some(id) = session.get_auth_state_id() {
@@ -264,26 +264,26 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     let mut session_auth = session.get_auth();
     if session_auth.is_some() {
         let config = ctx.services().config.lock().await;
-        if let Ok(base_url) = construct_external_url(Some(&req), &config, None).await {
-            if let Some(base_host) = base_url.host_str() {
-                let request_host = ctx.trusted_hostname(&req);
+        if let Ok(base_url) = construct_external_url(None, &config, None).await
+            && let Some(base_host) = base_url.host_str()
+        {
+            let request_host = ctx.trusted_hostname(&req);
 
-                if let Some(host) = request_host {
-                    // Validate request host matches base host or is a subdomain/localhost
-                    let is_localhost = is_localhost_host(&host);
-                    let is_authorized = host == base_host
-                        || host.ends_with(&format!(".{base_host}"))
-                        || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
+            if let Some(host) = request_host {
+                // Validate request host matches base host or is a subdomain/localhost
+                let is_localhost = is_localhost_host(&host);
+                let is_authorized = host == base_host
+                    || host.ends_with(&format!(".{base_host}"))
+                    || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
 
-                    if !is_authorized {
-                        tracing::warn!(
-                            "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
-                            host,
-                            base_host
-                        );
-                        session.clear();
-                        session_auth = None;
-                    }
+                if !is_authorized {
+                    tracing::warn!(
+                        "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
+                        host,
+                        base_host
+                    );
+                    session.clear();
+                    session_auth = None;
                 }
             }
         }

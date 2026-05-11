@@ -8,8 +8,8 @@ use tokio::time::Instant;
 use tracing::debug;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::writer::RecordingWriter;
 use super::Recorder;
+use super::writer::RecordingWriter;
 
 pub struct TrafficRecorder {
     writer: RecordingWriter,

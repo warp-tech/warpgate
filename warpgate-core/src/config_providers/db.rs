@@ -173,7 +173,9 @@ impl DatabaseConfigProvider {
             .await?;
 
         if existing_user.is_some() {
-            error!("Cannot auto-create SSO user with username {preferred_username} because it already exists and does not have a matching SSO credential.");
+            error!(
+                "Cannot auto-create SSO user with username {preferred_username} because it already exists and does not have a matching SSO credential."
+            );
             return Err(WarpgateError::UserAlreadyExists(preferred_username));
         }
 
@@ -416,20 +418,17 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         // Sync SSH keys from LDAP if user is linked
-        if matches!(client_credential, AuthCredential::PublicKey { .. }) {
-            if let (Some(ldap_server_id), Some(ldap_object_uuid)) =
+        if matches!(client_credential, AuthCredential::PublicKey { .. })
+            && let (Some(ldap_server_id), Some(ldap_object_uuid)) =
                 (user_model.ldap_server_id, &user_model.ldap_object_uuid)
-            {
-                if let Err(e) = self
-                    .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
-                    .await
-                {
-                    warn!(
-                        "Failed to sync SSH keys from LDAP for user {}: {}",
-                        username, e
-                    );
-                }
-            }
+            && let Err(e) = self
+                .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
+                .await
+        {
+            warn!(
+                "Failed to sync SSH keys from LDAP for user {}: {}",
+                username, e
+            );
         }
 
         let user_details = user_model.load_details(&db).await?;
@@ -451,7 +450,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .iter()
                     .any(|credential| match credential {
                         UserAuthCredential::PublicKey(UserPublicKeyCredential {
-                            key: ref user_key,
+                            key: user_key,
                         }) => &openssh_public_key == user_key.expose_secret(),
                         _ => false,
                     }))
@@ -462,7 +461,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .iter()
                     .any(|credential| match credential {
                         UserAuthCredential::Password(UserPasswordCredential {
-                            hash: ref user_password_hash,
+                            hash: user_password_hash,
                         }) => verify_password_hash(
                             client_password.expose_secret(),
                             user_password_hash.expose_secret(),
@@ -482,9 +481,9 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .credentials
                     .iter()
                     .any(|credential| match credential {
-                        UserAuthCredential::Totp(UserTotpCredential {
-                            key: ref user_otp_key,
-                        }) => verify_totp(client_otp.expose_secret(), user_otp_key),
+                        UserAuthCredential::Totp(UserTotpCredential { key: user_otp_key }) => {
+                            verify_totp(client_otp.expose_secret(), user_otp_key)
+                        }
                         _ => false,
                     }))
             }
@@ -493,16 +492,12 @@ impl ConfigProvider for DatabaseConfigProvider {
                 email: client_email,
             } => {
                 for credential in &user_details.credentials {
-                    if let UserAuthCredential::Sso(UserSsoCredential {
-                        ref provider,
-                        ref email,
-                    }) = credential
+                    if let UserAuthCredential::Sso(UserSsoCredential { provider, email }) =
+                        credential
+                        && provider.as_ref().unwrap_or(client_provider) == client_provider
+                        && email == client_email
                     {
-                        if provider.as_ref().unwrap_or(client_provider) == client_provider
-                            && email == client_email
-                        {
-                            return Ok(true);
-                        }
+                        return Ok(true);
                     }
                 }
                 Ok(false)

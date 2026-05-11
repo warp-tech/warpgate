@@ -17,9 +17,9 @@ use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
-use russh::{kex, MethodKind, Preferred, Sig};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use russh::{MethodKind, Preferred, Sig, kex};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
@@ -30,7 +30,7 @@ use warpgate_core::Services;
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{load_keys, load_preferred_key, ForwardedStreamlocalParams, ForwardedTcpIpParams};
+use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_keys, load_preferred_key};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -500,10 +500,10 @@ impl RemoteClient {
             keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
-        if ssh_options.allow_insecure_algos.unwrap_or(false) {
-            if let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192) {
-                config.gex = gex;
-            }
+        if ssh_options.allow_insecure_algos.unwrap_or(false)
+            && let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192)
+        {
+            config.gex = gex;
         }
 
         let config = Arc::new(config);

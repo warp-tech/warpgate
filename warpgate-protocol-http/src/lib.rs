@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
-pub use common::{SsoLoginState, PROTOCOL_NAME};
+pub use common::{PROTOCOL_NAME, SsoLoginState};
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
@@ -23,7 +23,7 @@ use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::{debug, Instrument};
+use tracing::{Instrument, debug};
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
@@ -39,7 +39,7 @@ use warpgate_tls::{
 };
 use warpgate_web::Assets;
 
-use crate::common::{endpoint_auth, page_auth, SESSION_COOKIE_NAME};
+use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
@@ -155,12 +155,17 @@ impl ProtocolServer for HTTPProtocolServer {
                         );
                         Some(domain)
                     } else {
-                        tracing::warn!("Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication.");
+                        tracing::warn!(
+                            "Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication."
+                        );
                         None
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.", e);
+                    tracing::warn!(
+                        "Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.",
+                        e
+                    );
                     None
                 }
             }

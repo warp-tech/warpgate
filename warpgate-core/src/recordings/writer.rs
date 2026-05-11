@@ -8,11 +8,11 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{try_block, GlobalParams};
+use warpgate_common::{GlobalParams, try_block};
 use warpgate_db_entities::Recording;
 
 use super::{Error, Result};

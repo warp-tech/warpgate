@@ -2,12 +2,12 @@ use std::io::{self, Write};
 
 use serde::Serialize;
 use serde_json::json;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use super::values::{RecordVisitor, SerializedRecordValues};
 
@@ -38,12 +38,12 @@ where
 
         let current = ctx.current_span();
         let parent_id = event.parent().or_else(|| current.id());
-        if let Some(parent_id) = parent_id {
-            if let Some(span) = ctx.span(parent_id) {
-                for span in span.scope().from_root() {
-                    if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
-                        values.extend((*other_values).clone().into_iter());
-                    }
+        if let Some(parent_id) = parent_id
+            && let Some(span) = ctx.span(parent_id)
+        {
+            for span in span.scope().from_root() {
+                if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
+                    values.extend((*other_values).clone().into_iter());
                 }
             }
         }

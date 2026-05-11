@@ -17,7 +17,7 @@ use warpgate_common::auth::{
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use crate::client::{ConnectionOptions, PostgresClient};

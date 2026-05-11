@@ -647,11 +647,15 @@ pub struct WarpgateConfig {
 
 impl WarpgateConfig {
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host {
-            if ext.contains(':') {
-                warn!("Looks like your `external_host` config option contains a port - it will be ignored.");
-                warn!("Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.");
-            }
+        if let Some(ref ext) = self.store.external_host
+            && ext.contains(':')
+        {
+            warn!(
+                "Looks like your `external_host` config option contains a port - it will be ignored."
+            );
+            warn!(
+                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
+            );
         }
     }
 }

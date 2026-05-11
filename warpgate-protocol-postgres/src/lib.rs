@@ -11,14 +11,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
+use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
-use tracing::{error, info, warn, Instrument};
-use warpgate_common::helpers::net::detect_port_knock;
+use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
@@ -110,7 +110,10 @@ impl ProtocolServer for PostgresProtocolServer {
                 )
                 .await?;
 
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+                let wrapped_stream = {
+                    let guard = server_handle.lock().await;
+                    guard.wrap_stream(stream).await?
+                };
 
                 let session = PostgresSession::new(
                     server_handle,

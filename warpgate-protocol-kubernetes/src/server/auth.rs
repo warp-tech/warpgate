@@ -18,42 +18,41 @@ pub async fn authenticate_and_get_target(
     services: &Services,
 ) -> poem::Result<(AuthStateUserInfo, Target)> {
     // Check for Bearer token authentication (API tokens)
-    if let Some(auth_header) = req.headers().get("authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                let mut config_provider = services.config_provider.lock().await;
-                if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
-                    // Look up the specific target by name from the URL
-                    let targets = config_provider
-                        .list_targets()
+    if let Some(auth_header) = req.headers().get("authorization")
+        && let Ok(auth_str) = auth_header.to_str()
+        && let Some(token) = auth_str.strip_prefix("Bearer ")
+    {
+        let mut config_provider = services.config_provider.lock().await;
+        if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
+            // Look up the specific target by name from the URL
+            let targets = config_provider
+                .list_targets()
+                .await
+                .context("listing targets")?;
+
+            // Find the target with the specified name
+            for target in targets {
+                if target.name == target_name
+                    && matches!(target.options, TargetOptions::Kubernetes(_))
+                {
+                    if config_provider
+                        .authorize_target(&user.username, &target.name)
                         .await
-                        .context("listing targets")?;
-
-                    // Find the target with the specified name
-                    for target in targets {
-                        if target.name == target_name
-                            && matches!(target.options, TargetOptions::Kubernetes(_))
-                        {
-                            if config_provider
-                                .authorize_target(&user.username, &target.name)
-                                .await
-                                .unwrap_or(false)
-                            {
-                                return Ok(((&user).into(), target));
-                            }
-                            return Err(poem::Error::from_string(
-                                format!("Access denied to target: {target_name}"),
-                                poem::http::StatusCode::FORBIDDEN,
-                            ));
-                        }
+                        .unwrap_or(false)
+                    {
+                        return Ok(((&user).into(), target));
                     }
-
                     return Err(poem::Error::from_string(
-                        format!("Kubernetes target not found: {target_name}"),
-                        poem::http::StatusCode::NOT_FOUND,
+                        format!("Access denied to target: {target_name}"),
+                        poem::http::StatusCode::FORBIDDEN,
                     ));
                 }
             }
+
+            return Err(poem::Error::from_string(
+                format!("Kubernetes target not found: {target_name}"),
+                poem::http::StatusCode::NOT_FOUND,
+            ));
         }
     }
 
@@ -246,8 +245,8 @@ pub async fn validate_client_certificate(
 }
 
 fn der_to_pem(der_bytes: &[u8]) -> String {
-    use base64::engine::general_purpose;
     use base64::Engine as _;
+    use base64::engine::general_purpose;
     let cert_b64 = general_purpose::STANDARD.encode(der_bytes);
     let cert_lines: Vec<String> = cert_b64
         .chars()

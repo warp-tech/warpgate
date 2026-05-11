@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;

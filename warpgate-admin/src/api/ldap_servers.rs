@@ -662,7 +662,7 @@ impl QueryApi {
             Err(e) => {
                 return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
                     "Failed to query users: {e}"
-                ))))
+                ))));
             }
         };
         let mut users = users.into_iter().map(Into::into).collect::<Vec<_>>();

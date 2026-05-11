@@ -3,8 +3,8 @@ use serde::Deserialize;
 use tracing::{debug, warn};
 use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
-use crate::config::SsoInternalProviderConfig;
 use crate::SsoError;
+use crate::config::SsoInternalProviderConfig;
 
 #[derive(Debug, Deserialize)]
 struct DirectoryGroupsResponse {
@@ -35,9 +35,9 @@ pub async fn fetch_groups_if_configured(
     user_email: Option<&str>,
 ) -> Result<Option<Vec<String>>, SsoError> {
     let SsoInternalProviderConfig::Google {
-        service_account_email: Some(ref sa_email),
-        service_account_key: Some(ref sa_key),
-        admin_email: Some(ref admin_email),
+        service_account_email: Some(sa_email),
+        service_account_key: Some(sa_key),
+        admin_email: Some(admin_email),
         ..
     } = config
     else {
@@ -147,11 +147,11 @@ async fn fetch_user_groups(
 
         all_groups.extend(resp.groups.into_iter().map(|g| g.email));
 
-        if let Some(token) = resp.next_page_token {
-            if !token.is_empty() {
-                page_token = Some(token);
-                continue;
-            }
+        if let Some(token) = resp.next_page_token
+            && !token.is_empty()
+        {
+            page_token = Some(token);
+            continue;
         }
         break;
     }

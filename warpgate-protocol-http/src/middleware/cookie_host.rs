@@ -4,7 +4,7 @@ use poem::web::Data;
 use poem::{Endpoint, FromRequest, IntoResponse, Middleware, Request, Response};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 
-use crate::common::{is_localhost_host, SESSION_COOKIE_NAME};
+use crate::common::{SESSION_COOKIE_NAME, is_localhost_host};
 
 #[derive(Clone)]
 pub struct CookieHostMiddleware {
@@ -89,30 +89,30 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         // Use the cookie crate to parse and modify cookies properly
         let mut modified_session_cookie: Option<String> = None;
         for cookie_str in &cookie_values {
-            if let Ok(mut cookie) = Cookie::parse(cookie_str) {
-                if cookie.name() == SESSION_COOKIE_NAME {
-                    // Set or remove Domain attribute using cookie crate methods
-                    if let Some(ref domain) = target_domain {
-                        cookie.set_domain(domain.clone());
-                    } else {
-                        // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
-                        cookie.unset_domain();
-                    }
-
-                    // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
-                    if is_https {
-                        cookie.set_secure(true);
-                        cookie.set_same_site(cookie::SameSite::None);
-                    }
-
-                    modified_session_cookie = Some(cookie.to_string());
-                    tracing::debug!(
-                        "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
-                        target_domain,
-                        is_https
-                    );
-                    break;
+            if let Ok(mut cookie) = Cookie::parse(cookie_str)
+                && cookie.name() == SESSION_COOKIE_NAME
+            {
+                // Set or remove Domain attribute using cookie crate methods
+                if let Some(ref domain) = target_domain {
+                    cookie.set_domain(domain.clone());
+                } else {
+                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
+                    cookie.unset_domain();
                 }
+
+                // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
+                if is_https {
+                    cookie.set_secure(true);
+                    cookie.set_same_site(cookie::SameSite::None);
+                }
+
+                modified_session_cookie = Some(cookie.to_string());
+                tracing::debug!(
+                    "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
+                    target_domain,
+                    is_https
+                );
+                break;
             }
         }
 

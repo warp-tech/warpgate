@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use futures::{StreamExt, TryStreamExt};
 use poem::web::websocket::{WebSocket, WebSocketStream};
 use poem::web::{Data, Path};
-use poem::{handler, Body, IntoResponse, Request, Response};
+use poem::{Body, IntoResponse, Request, Response, handler};
 use reqwest_websocket::Upgrade;
 use serde::Deserialize;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite;
-use tracing::{debug, error, warn, Instrument};
+use tracing::{Instrument, debug, error, warn};
 use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
@@ -20,8 +20,8 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::Services;
+use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
 use crate::correlator::RequestCorrelator;
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
@@ -304,8 +304,8 @@ async fn _handle_normal_request_inner(
     };
 
     // Record the response
-    if let Some(ref mut recorder) = recorder_opt {
-        if let Err(e) = recorder
+    if let Some(ref mut recorder) = recorder_opt
+        && let Err(e) = recorder
             .record_response(
                 method,
                 full_url.as_ref(),
@@ -315,19 +315,18 @@ async fn _handle_normal_request_inner(
                 body_for_recording.unwrap_or_default().as_ref(),
             )
             .await
-        {
-            warn!("Failed to record Kubernetes response: {}", e);
-        }
+    {
+        warn!("Failed to record Kubernetes response: {}", e);
     }
 
     let mut poem_response = Response::builder().status(status);
 
     // Copy response headers
     for (name, value) in &response_headers {
-        if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes()) {
-            if let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes()) {
-                poem_response = poem_response.header(poem_name, poem_value);
-            }
+        if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes())
+            && let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes())
+        {
+            poem_response = poem_response.header(poem_name, poem_value);
         }
     }
 
@@ -407,15 +406,13 @@ async fn _handle_websocket_request_inner(
             let config = services.config.lock().await;
             config.store.recordings.enable
         };
-        if enabled {
-            if let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
-                match start_recording_exec(&session_id, &services.recordings, metadata).await {
-                    Err(e) => {
-                        error!("Failed to start recording: {}", e);
-                    }
-                    Ok(recorder) => {
-                        tokio::spawn(run_websocket_recording(recorder, recorder_rx));
-                    }
+        if enabled && let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
+            match start_recording_exec(&session_id, &services.recordings, metadata).await {
+                Err(e) => {
+                    error!("Failed to start recording: {}", e);
+                }
+                Ok(recorder) => {
+                    tokio::spawn(run_websocket_recording(recorder, recorder_rx));
                 }
             }
         }

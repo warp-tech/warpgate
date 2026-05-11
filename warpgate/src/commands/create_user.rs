@@ -65,21 +65,19 @@ pub async fn command(
             .filter(AdminRole::Column::Name.eq(role_name.clone()))
             .one(&*db)
             .await?
-        {
-            if UserAdminRoleAssignment::Entity::find()
+            && UserAdminRoleAssignment::Entity::find()
                 .filter(UserAdminRoleAssignment::Column::UserId.eq(db_user.id))
                 .filter(UserAdminRoleAssignment::Column::AdminRoleId.eq(db_admin.id))
                 .all(&*db)
                 .await?
                 .is_empty()
-            {
-                let values = UserAdminRoleAssignment::ActiveModel {
-                    user_id: Set(db_user.id),
-                    admin_role_id: Set(db_admin.id),
-                    ..Default::default()
-                };
-                values.insert(&*db).await.map_err(WarpgateError::from)?;
-            }
+        {
+            let values = UserAdminRoleAssignment::ActiveModel {
+                user_id: Set(db_user.id),
+                admin_role_id: Set(db_admin.id),
+                ..Default::default()
+            };
+            values.insert(&*db).await.map_err(WarpgateError::from)?;
         }
     }
 

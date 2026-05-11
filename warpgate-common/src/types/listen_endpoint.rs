@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 
-use futures::stream::{iter, FuturesUnordered};
+use futures::stream::{FuturesUnordered, iter};
 use futures::{Stream, StreamExt, TryStreamExt};
 use poem::listener::Listener;
 use schemars::JsonSchema;

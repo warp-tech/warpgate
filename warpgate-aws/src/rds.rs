@@ -1,7 +1,7 @@
 use aws_sdk_rds::auth_token::AuthTokenGenerator;
 
-use crate::region::parse_rds_region;
 use crate::AwsError;
+use crate::region::parse_rds_region;
 
 /// Generate an RDS IAM authentication token.
 ///

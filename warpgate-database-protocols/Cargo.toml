@@ -3,7 +3,7 @@ name = "warpgate-database-protocols"
 version = "0.23.4"
 description = "Core of SQLx, the rust SQL toolkit. Just the database protocol parts."
 license = "MIT OR Apache-2.0"
-edition = "2021"
+edition = "2024"
 authors = [
     "Ryan Leckey <leckey.ryan@gmail.com>",
     "Austin Bonander <austin.bonander@gmail.com>",

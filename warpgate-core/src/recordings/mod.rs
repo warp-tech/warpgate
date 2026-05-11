@@ -7,7 +7,7 @@ use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
@@ -142,15 +142,14 @@ impl SessionRecordings {
     pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
         let path = self.path_for(session_id, name);
         tokio::fs::remove_file(&path).await?;
-        if let Some(parent) = path.parent() {
-            if tokio::fs::read_dir(parent)
+        if let Some(parent) = path.parent()
+            && tokio::fs::read_dir(parent)
                 .await?
                 .next_entry()
                 .await?
                 .is_none()
-            {
-                tokio::fs::remove_dir(parent).await?;
-            }
+        {
+            tokio::fs::remove_dir(parent).await?;
         }
         Ok(())
     }

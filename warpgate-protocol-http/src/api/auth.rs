@@ -3,9 +3,9 @@ use std::sync::Arc;
 use anyhow::bail;
 use futures::{SinkExt, StreamExt};
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::{handler, IntoResponse, Request};
+use poem::web::websocket::{Message, WebSocket};
+use poem::{IntoResponse, Request, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -21,7 +21,7 @@ use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::{ConfigProvider, Services};
 
 use super::common::logout;
-use crate::common::{authorize_session, endpoint_auth, get_auth_state_for_request, SessionExt};
+use crate::common::{SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request};
 use crate::session::SessionStore;
 pub struct Api;
 
@@ -155,12 +155,12 @@ impl Api {
             Err(WarpgateError::UserNotFound(_)) => {
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::Failed,
-                })))
+                })));
             }
             Err(WarpgateError::IpAddrNotAllowed(..)) => {
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::IpRejected,
-                })))
+                })));
             }
             x => x,
         }?;

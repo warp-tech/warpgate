@@ -1,6 +1,6 @@
+use poem::FromRequest;
 use poem::http::uri::Scheme;
 use poem::web::Data;
-use poem::FromRequest;
 use url::Url;
 use warpgate_common::WarpgateError;
 

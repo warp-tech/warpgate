@@ -65,10 +65,10 @@ impl Api {
         if let Some(ref username) = body.username {
             q = q.filter(LogEntry::Column::Username.eq(username.clone()));
         }
-        if let Some(ref target) = body.target {
-            if !target.is_empty() {
-                q = q.filter(LogEntry::Column::Target.eq(target.clone()));
-            }
+        if let Some(ref target) = body.target
+            && !target.is_empty()
+        {
+            q = q.filter(LogEntry::Column::Target.eq(target.clone()));
         }
         if let Some(ref related_user) = body.related_users {
             q = q.filter(LogEntry::Column::RelatedUsers.contains(format!("${related_user}$")));
@@ -83,15 +83,15 @@ impl Api {
                 LogEntry::Column::RelatedAdminRoles.contains(format!("${related_admin_role}$")),
             );
         }
-        if let Some(ref search) = body.search {
-            if !search.is_empty() {
-                q = q.filter(
-                    LogEntry::Column::Text
-                        .contains(search)
-                        .or(LogEntry::Column::Username.contains(search))
-                        .or(LogEntry::Column::Values.contains(search)),
-                );
-            }
+        if let Some(ref search) = body.search
+            && !search.is_empty()
+        {
+            q = q.filter(
+                LogEntry::Column::Text
+                    .contains(search)
+                    .or(LogEntry::Column::Username.contains(search))
+                    .or(LogEntry::Column::Values.contains(search)),
+            );
         }
 
         let logs = q.all(&*db).await?;
