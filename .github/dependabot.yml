@@ -30,16 +30,20 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    labels: ["type/deps"]
     schedule:
       interval: daily
 
   - package-ecosystem: docker
     directory: /docker
+    labels: ["type/deps"]
     schedule:
       interval: daily
 
-  - package-ecosystem: pip
+  - package-ecosystem: poetry
     directory: /tests
     labels: ["type/deps"]
+    exclude-paths:
+      - api_sdk
     schedule:
       interval: "daily"
