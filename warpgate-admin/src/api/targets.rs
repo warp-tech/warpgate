@@ -3,9 +3,9 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::SimpleExpr;
+use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 use warpgate_common::{
@@ -17,7 +17,7 @@ use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct TargetDataRequest {
@@ -72,14 +72,13 @@ impl ListApi {
         if let Some(ref search) = *search {
             let search_pattern = format!("%{}%", search.to_lowercase());
             targets = targets
-                .filter(
-                    Condition::any()
-                        .add(Target::Column::Name.like(&search_pattern))
-                        .add(Target::Column::Description.like(&search_pattern)),
-                )
+                .filter(case_insensitive_search(
+                    search,
+                    [Target::Column::Name, Target::Column::Description],
+                ))
                 .order_by_asc({
                     let case_expr: SimpleExpr = Expr::case(
-                        Expr::col((Target::Entity, Target::Column::Name)).like(&search_pattern),
+                        Expr::expr(Func::lower(Expr::col(Target::Column::Name))).like(&search_pattern),
                         0,
                     )
                     .finally(1)

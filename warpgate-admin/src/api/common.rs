@@ -1,5 +1,8 @@
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::{Func, IntoCondition};
 use sea_orm::{
-    ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait,
 };
 use warpgate_common::{AdminPermission, WarpgateError};
 pub use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
@@ -90,4 +93,16 @@ pub async fn require_admin_permission(
             None => WarpgateError::NoAdminAccess,
         })
     }
+}
+
+pub fn case_insensitive_search<C, I>(search: &str, columns: I) -> impl IntoCondition
+where
+    C: ColumnTrait,
+    I: IntoIterator<Item = C>,
+{
+    let search_pattern = format!("%{}%", search.to_lowercase());
+
+    columns.into_iter().fold(Condition::any(), |condition, column| {
+        condition.add(Expr::expr(Func::lower(Expr::col(column))).like(search_pattern.clone()))
+    })
 }
