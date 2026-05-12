@@ -11,7 +11,7 @@
     import { Button, FormGroup, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
     import { adminPermissions } from 'admin/lib/store'
     import { statusIcon, statusColor } from 'common/ticketRequestStatus'
-    import { formatDuration } from 'common/duration'
+    import { formatDurationAsHumantime } from 'common/duration'
     import Loadable from 'common/Loadable.svelte'
 
     let error: string|undefined = $state()
@@ -28,9 +28,13 @@
 
     let pendingRequests = $derived(requests?.filter(r => r.status === TicketRequestStatus.Pending) ?? [])
     let filteredHistory = $derived.by(() => {
-        if (!requests) return []
+        if (!requests) {
+            return []
+        }
         const nonPending = requests.filter(r => r.status !== TicketRequestStatus.Pending)
-        if (!requestHistoryFilter) return nonPending
+        if (!requestHistoryFilter) {
+            return nonPending
+        }
         return nonPending.filter(r => r.status === requestHistoryFilter)
     })
 
@@ -39,7 +43,9 @@
     }
 
     async function loadRequests () {
-        if (!$adminPermissions.ticketRequestsManage) return
+        if (!$adminPermissions.ticketRequestsManage) {
+            return
+        }
         requests = await api.getTicketRequests({})
     }
 
@@ -83,7 +89,9 @@
     }
 
     async function deny () {
-        if (!denyModalRequest) return
+        if (!denyModalRequest) {
+            return
+        }
         denyError = undefined
         success = undefined
         try {
@@ -130,11 +138,11 @@
     <h5 class="mt-4 mb-3">Pending requests <span class="badge bg-warning text-dark">{pendingRequests.length}</span></h5>
     <div class="list-group list-group-flush mb-4">
         {#each pendingRequests as request (request.id)}
-            <div class="list-group-item">
+            <div class="list-group-item gap-3">
                 <span class={statusColor(request.status)} title={request.status}>
                     <Fa icon={statusIcon(request.status)} fw />
                 </span>
-                <div class="ms-2 me-auto">
+                <div class="me-auto">
                     <strong>
                         {userMap.get(request.userId) ?? request.userId} &rarr; {targetMap.get(request.targetId) ?? request.targetId}
                     </strong>
@@ -143,27 +151,28 @@
                     {/if}
                     {#if request.requestedDurationSeconds}
                         <small class="d-block text-muted">
-                            Duration: {formatDuration(request.requestedDurationSeconds)}
+                            Duration: {formatDurationAsHumantime(request.requestedDurationSeconds)}
                         </small>
                     {/if}
                 </div>
                 <small class="text-muted mx-3">
                     <RelativeDate date={request.created} />
                 </small>
-                <AsyncButton
-                    color="success"
-                    class="me-1"
-                    click={() => approve(request)}
-                >Approve</AsyncButton>
-                <Button
-                    color="danger"
-                    size="sm"
-                    onclick={() => {
-                        denyModalRequest = request
-                        denyReason = ''
-                        denyError = undefined
-                    }}
-                >Deny</Button>
+                <div class="d-flex gap-1">
+                    <AsyncButton
+                        color="success"
+                        class="me-1"
+                        click={() => approve(request)}
+                    >Approve</AsyncButton>
+                    <Button
+                        color="danger"
+                        onclick={() => {
+                            denyModalRequest = request
+                            denyReason = ''
+                            denyError = undefined
+                        }}
+                    >Deny</Button>
+                </div>
             </div>
         {/each}
     </div>
@@ -179,10 +188,10 @@
         {#if tickets.length}
             <div class="list-group list-group-flush mb-4">
                 {#each tickets as ticket (ticket.id)}
-                    <div class="list-group-item">
+                    <div class="list-group-item gap-3">
                         <div>
                             <strong>
-                                Access to {ticket.targetName} as {ticket.username}
+                                Access to {ticket.target} as {ticket.username}
                             </strong>
                             {#if ticket.selfService}
                                 <span class="badge bg-info ms-2">self-service</span>
@@ -192,25 +201,25 @@
                                     {ticket.description}
                                 </small>
                             {/if}
+                            {#if ticket.expiry}
+                                <small class="text-muted d-flex align-items-center gap-2">
+                                    <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} /> Until {ticket.expiry?.toLocaleString()}
+                                </small>
+                            {/if}
                         </div>
-                        {#if ticket.expiry}
-                            <small class="text-muted ms-4 d-flex align-items-center">
-                                <Fa icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark} fw /> Until {ticket.expiry?.toLocaleString()}
-                            </small>
-                        {/if}
                         {#if ticket.usesLeft != null}
                             {#if ticket.usesLeft > 0}
-                                <small class="text-muted ms-4 d-flex align-items-center">
-                                    <Fa icon={faSquareCheck} fw /> Uses left: {ticket.usesLeft}
+                                <small class="text-muted d-flex align-items-center gap-2">
+                                    <Fa icon={faSquareCheck} /> Uses left: {ticket.usesLeft}
                                 </small>
                             {/if}
                             {#if ticket.usesLeft === 0}
-                                <small class="text-danger ms-4">
-                                    <Fa icon={faSquareXmark} fw /> Used up
+                                <small class="text-danger d-flex align-items-center gap-2">
+                                    <Fa icon={faSquareXmark} /> Used up
                                 </small>
                             {/if}
                         {/if}
-                        <small class="text-muted me-4 ms-auto">
+                        <small class="text-muted ms-auto">
                             <RelativeDate date={ticket.created} />
                         </small>
                         <Button
@@ -247,7 +256,6 @@
                 <option value="">All</option>
                 <option value={TicketRequestStatus.Approved}>Approved</option>
                 <option value={TicketRequestStatus.Denied}>Denied</option>
-                <option value={TicketRequestStatus.Expired}>Expired</option>
             </select>
         </FormGroup>
     </h5>
@@ -267,7 +275,7 @@
                     {/if}
                     {#if request.requestedDurationSeconds}
                         <small class="d-block text-muted">
-                            Duration: {formatDuration(request.requestedDurationSeconds)}
+                            Duration: {formatDurationAsHumantime(request.requestedDurationSeconds)}
                         </small>
                     {/if}
                     {#if request.resolvedByUserId}
@@ -308,22 +316,21 @@
 
 <Modal isOpen={!!denyModalRequest} toggle={() => denyModalRequest = undefined}>
     <ModalBody>
-        <h5 class="modal-title mb-3">Deny ticket request</h5>
         {#if denyError}
-        <Alert color="danger">{denyError}</Alert>
+            <Alert color="danger">{denyError}</Alert>
         {/if}
         {#if denyModalRequest}
-        <p>
-            Deny request from <strong>{userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}</strong> to <strong>{targetMap.get(denyModalRequest.targetId) ?? denyModalRequest.targetId}</strong>?
-        </p>
-        <FormGroup floating label="Reason (optional)">
-            <input type="text" bind:value={denyReason} class="form-control" placeholder="Why is this being denied?" maxlength="2000"/>
-        </FormGroup>
+            <p>
+                Deny request from <strong>{userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}</strong> to <strong>{targetMap.get(denyModalRequest.targetId) ?? denyModalRequest.targetId}</strong>?
+            </p>
+            <FormGroup floating label="Reason (optional)">
+                <input type="text" bind:value={denyReason} class="form-control" placeholder="Why is this being denied?" maxlength="2000"/>
+            </FormGroup>
         {/if}
     </ModalBody>
     <ModalFooter>
-        <AsyncButton color="danger" click={deny}>Deny</AsyncButton>
-        <Button color="secondary" onclick={() => denyModalRequest = undefined}>Cancel</Button>
+        <AsyncButton class="modal-button" color="danger" click={deny}>Deny</AsyncButton>
+        <Button class="modal-button" color="secondary" onclick={() => denyModalRequest = undefined}>Cancel</Button>
     </ModalFooter>
 </Modal>
 

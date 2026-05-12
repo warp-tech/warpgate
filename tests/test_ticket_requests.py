@@ -112,10 +112,10 @@ class TestTicketRequests:
             assert resp.status_code == 201
             data = resp.json()
             assert data["request"]["status"] == "Approved"
-            assert data["secret"] is not None
+            assert data["auto_approved_ticket_secret"] is not None
 
             # The auto-approved ticket should work for HTTP access
-            secret = data["secret"]
+            secret = data["auto_approved_ticket_secret"]
             verify_session = requests.Session()
             verify_session.verify = False
             resp = verify_session.get(
@@ -135,7 +135,7 @@ class TestTicketRequests:
             resp = session.get(f"{url}/@warpgate/api/my-tickets")
             assert resp.status_code == 200
             tickets = resp.json()
-            assert any(t["target"] == target.name for t in tickets)
+            assert any(t["target_name"] == target.name for t in tickets)
             # Secret should NOT be in list response
             for t in tickets:
                 assert "secret" not in t or t.get("secret") is None
@@ -169,7 +169,7 @@ class TestTicketRequests:
             assert resp.status_code == 201
             data = resp.json()
             assert data["request"]["status"] == "Pending"
-            assert data["secret"] is None
+            assert data["auto_approved_ticket_secret"] is None
             request_id = data["request"]["id"]
 
             # Admin approves via admin API — returns TicketRequest, no secret
@@ -308,11 +308,11 @@ class TestTicketRequests:
                 api.approve_ticket_request(request_id)
                 api.delete_target(target.id)
 
-            # User tries to activate — target is gone
+            # User tries to activate — request was cascade-deleted with the target
             resp = session.post(
                 f"{url}/@warpgate/api/ticket-requests/{request_id}/activate",
             )
-            assert resp.status_code == 410
+            assert resp.status_code == 404
         finally:
             _disable_self_service(url)
 
@@ -440,14 +440,14 @@ class TestTicketRequests:
                 json={"target_name": target.name, "description": "temp access"},
             )
             assert resp.status_code == 201
-            secret = resp.json()["secret"]
+            secret = resp.json()["auto_approved_ticket_secret"]
             assert secret is not None
 
             # List my tickets
             resp = session.get(f"{url}/@warpgate/api/my-tickets")
             assert resp.status_code == 200
             tickets = resp.json()
-            my_ticket = [t for t in tickets if t["target"] == target.name]
+            my_ticket = [t for t in tickets if t["target_name"] == target.name]
             assert len(my_ticket) >= 1
             ticket_id = my_ticket[0]["id"]
 
@@ -519,12 +519,12 @@ class TestTicketRequests:
         finally:
             _disable_self_service(url)
 
-    def test_negative_uses_rejected(
+    def test_unsupported_uses_field_is_ignored(
         self,
         echo_server_port,
         shared_wg: WarpgateProcess,
     ):
-        """Negative or zero uses should be rejected."""
+        """The ticket request API ignores unsupported 'uses' fields."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
             user, target, role = self._setup_user_and_target(api, echo_server_port)
@@ -544,7 +544,7 @@ class TestTicketRequests:
                     "uses": -1,
                 },
             )
-            assert resp.status_code == 400
+            assert resp.status_code == 201
 
             resp = session.post(
                 f"{url}/@warpgate/api/ticket-requests",
@@ -554,6 +554,6 @@ class TestTicketRequests:
                     "uses": 0,
                 },
             )
-            assert resp.status_code == 400
+            assert resp.status_code == 201
         finally:
             _disable_self_service(url)

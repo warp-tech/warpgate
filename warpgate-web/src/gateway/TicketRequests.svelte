@@ -1,34 +1,39 @@
 <script lang="ts">
-    import { api, TargetKind, TicketRequestStatus, type TicketRequest, type MyTicketModel, type TargetSnapshot, type TicketRequestTarget } from 'gateway/lib/api'
+    import { api, TargetKind, TicketRequestStatus, type MyTicketModel, type TargetSnapshot, type TicketRequestTarget, type TicketRequestModel } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import RelativeDate from 'admin/RelativeDate.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
     import Fa from 'svelte-fa'
-    import { faTicket, faTriangleExclamation, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
+    import { faTicket, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { FormGroup, Button } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
     import EmptyState from 'common/EmptyState.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { statusIcon, statusColor } from 'common/ticketRequestStatus'
-    import { formatDuration, parseDuration } from 'common/duration'
+    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
     let error: string|undefined = $state()
     let success: string|undefined = $state()
     let lastSecret: string|undefined = $state()
     let lastTargetName: string|undefined = $state()
-    let requests: TicketRequest[]|undefined = $state()
+    let requests: TicketRequestModel[]|undefined = $state()
     let tickets: MyTicketModel[]|undefined = $state()
     let ticketRequestTargets: TicketRequestTarget[]|undefined = $state()
     let targets: TargetSnapshot[]|undefined = $state()
-    let showForm = $state(true)
+    let showForm = $state(false)
     let showAllRequests = $state(false)
 
     const REQUEST_PAGE_SIZE = 25
     let visibleRequests = $derived.by(() => {
-        if (!requests) return []
-        if (showAllRequests) return requests
+        if (!requests) {
+            return []
+        }
+        if (showAllRequests) {
+            return requests
+        }
         return requests.slice(0, REQUEST_PAGE_SIZE)
     })
 
@@ -41,15 +46,17 @@
         $serverInfo?.ticketMaxDurationSeconds
     )
 
-    let durationSeconds = $derived(parseDuration(durationText))
+    let durationSeconds = $derived(parseHumantimeDuration(durationText))
 
     let durationError = $derived.by(() => {
         if (durationText.trim() && !durationSeconds) {
             return 'Invalid duration. Examples: 30m, 8h, 1d, 2h30m'
         }
-        if (!durationSeconds || !maxDurationSeconds) return undefined
+        if (!durationSeconds || !maxDurationSeconds) {
+            return undefined
+        }
         if (durationSeconds > maxDurationSeconds) {
-            return `Maximum duration: ${formatDuration(maxDurationSeconds)}`
+            return `Maximum duration: ${formatDurationAsHumantime(maxDurationSeconds)}`
         }
         return undefined
     })
@@ -78,7 +85,9 @@
     const initPromise = load()
 
     async function createRequest () {
-        if (formInvalid) return
+        if (formInvalid) {
+            return
+        }
         error = undefined
         success = undefined
         lastSecret = undefined
@@ -91,12 +100,12 @@
                     description: description || undefined,
                 },
             })
-            if (result.secret) {
-                success = 'Ticket auto-approved!'
-                lastSecret = result.secret
+            if (result.autoApprovedTicketSecret) {
+                success = 'Ticket was auto-approved'
+                lastSecret = result.autoApprovedTicketSecret
                 lastTargetName = selectedTarget
             } else {
-                success = 'Request submitted and is pending admin approval.'
+                success = 'Request submitted and is pending admin approval'
             }
             showForm = false
             description = ''
@@ -108,16 +117,16 @@
         }
     }
 
-    function requestAnother () {
+    function openRequestForm () {
         showForm = true
+        error = undefined
         success = undefined
         lastSecret = undefined
         lastTargetName = undefined
-        error = undefined
         descriptionTouched = false
     }
 
-    async function activateRequest (request: TicketRequest) {
+    async function activateRequest (request: TicketRequestModel) {
         error = undefined
         success = undefined
         lastSecret = undefined
@@ -125,9 +134,9 @@
         try {
             const result = await api.activateTicketRequest({ id: request.id })
             if (result.secret) {
-                success = 'Ticket activated!'
+                success = 'Ticket activated'
                 lastSecret = result.secret
-                lastTargetName = ticketRequestTargets?.find(t => t.id === request.targetId)?.name
+                lastTargetName = request.targetName
             }
             showForm = false
             await load()
@@ -149,6 +158,7 @@
 
 <div class="page-summary-bar">
     <h1>Ticket requests</h1>
+    <button class="btn btn-primary ms-auto" onclick={openRequestForm}>Request a ticket</button>
 </div>
 
 {#if error}
@@ -162,15 +172,13 @@
 {#if lastSecret && lastTargetName}
     {@const targetData = targets?.find(t => t.name === lastTargetName)}
     {#if targetData}
-        <div class="card p-3 mt-3">
-            <p class="mb-2 text-warning">
-                <Fa icon={faTriangleExclamation} fw />
+        <div class="my-5">
+            <InfoBox class="mb-2" variant="warning">
                 <strong>Personal use only</strong> &mdash; do not share this secret. It grants access as your account.
-            </p>
-            <p class="mb-3 text-muted">
-                <Fa icon={faEyeSlash} fw />
+            </InfoBox>
+            <InfoBox class="mb-3" icon={faEyeSlash}>
                 The secret is only shown once &mdash; you won't be able to see it again.
-            </p>
+            </InfoBox>
             <ConnectionInstructions
                 targetName={lastTargetName}
                 targetKind={targetData.kind}
@@ -188,82 +196,85 @@
 
 <Loadable promise={initPromise}>
 
-{#if showForm}
-<h4 class="mt-4">Request a ticket</h4>
+<Modal isOpen={showForm} toggle={() => showForm = false}>
+    <ModalBody>
+        <h4 class="mb-3">Request a ticket</h4>
 
-{#if ticketRequestTargets && ticketRequestTargets.length}
-<form onsubmit={e => e.preventDefault()}>
-<div class="card p-3 mb-4">
-    <FormGroup floating label="Target">
-        <select bind:value={selectedTarget} class="form-control" required>
-            {#each ticketRequestTargets as target (target.name)}
-                <option value={target.name}>
-                    {target.name}
-                </option>
-            {/each}
-        </select>
-    </FormGroup>
+        {#if ticketRequestTargets?.length}
+        <form onsubmit={e => e.preventDefault()}>
+            <FormGroup floating label="Target">
+                <select bind:value={selectedTarget} class="form-control" required>
+                    {#each ticketRequestTargets as target (target.name)}
+                        <option value={target.name}>
+                            {target.name}
+                        </option>
+                    {/each}
+                </select>
+            </FormGroup>
 
-    <FormGroup floating label={descriptionRequired ? 'Description (required)' : 'Description'}>
-        <input
-            type="text"
-            bind:value={description}
-            class="form-control"
-            class:is-invalid={descriptionMissing && descriptionTouched}
-            placeholder="Why do you need access?"
-            maxlength="2000"
-            onblur={() => descriptionTouched = true}
-        />
-        {#if descriptionMissing}
-            <small class="form-text text-muted">A description is required for ticket requests.</small>
+            <FormGroup floating label={descriptionRequired ? 'Description (required)' : 'Description'}>
+                <input
+                    type="text"
+                    bind:value={description}
+                    class="form-control"
+                    class:is-invalid={descriptionMissing && descriptionTouched}
+                    placeholder="Why do you need access?"
+                    maxlength="2000"
+                    onblur={() => descriptionTouched = true}
+                />
+                {#if descriptionMissing}
+                    <small class="form-text text-muted">A description is required for ticket requests.</small>
+                {/if}
+            </FormGroup>
+
+            <FormGroup floating label="Duration">
+                <input
+                    type="text"
+                    bind:value={durationText}
+                    class="form-control"
+                    class:is-invalid={!!durationError}
+                    placeholder="e.g. 8h, 30m, 1d"
+                />
+                {#if durationError}
+                    <div class="invalid-feedback">{durationError}</div>
+                {:else if maxDurationSeconds}
+                    <small class="form-text text-muted">Maximum: {formatDurationAsHumantime(maxDurationSeconds)}</small>
+                {:else}
+                    <small class="form-text text-muted">Examples: 30m, 8h, 1d, 2h30m</small>
+                {/if}
+            </FormGroup>
+        </form>
+        {:else if ticketRequestTargets}
+        <EmptyState title="No targets available" />
         {/if}
-    </FormGroup>
+    </ModalBody>
+    <ModalFooter>
+        <AsyncButton
+            color="primary"
+            class="modal-button"
+            click={createRequest}
+            disabled={formInvalid || !(ticketRequestTargets && ticketRequestTargets.length)}
+        >
+            Request ticket
+        </AsyncButton>
 
-    <FormGroup floating label="Duration">
-        <input
-            type="text"
-            bind:value={durationText}
-            class="form-control"
-            class:is-invalid={!!durationError}
-            placeholder="e.g. 8h, 30m, 1d"
-        />
-        {#if durationError}
-            <div class="invalid-feedback">{durationError}</div>
-        {:else if maxDurationSeconds}
-            <small class="form-text text-muted">Maximum: {formatDuration(maxDurationSeconds)}</small>
-        {:else}
-            <small class="form-text text-muted">Examples: 30m, 8h, 1d, 2h30m</small>
-        {/if}
-    </FormGroup>
-
-    <AsyncButton
-        color="primary"
-        click={createRequest}
-        disabled={formInvalid}
-    >Request ticket</AsyncButton>
-</div>
-</form>
-{:else if ticketRequestTargets}
-<EmptyState title="No targets available" />
-{/if}
-
-{:else}
-<div class="mt-4">
-    <Button color="primary" onclick={requestAnother}>Request another ticket</Button>
-</div>
-{/if}
+        <Button class="modal-button" color="secondary" onclick={() => showForm = false}>
+            Close
+        </Button>
+    </ModalFooter>
+</Modal>
 
 {#if requests}
 <h4 class="mt-4">My requests</h4>
 {#if requests.length}
 <div class="list-group list-group-flush mb-4">
     {#each visibleRequests as request (request.id)}
-        <div class="list-group-item">
+        <div class="list-group-item gap-3">
             <span class={statusColor(request.status)} title={request.status}>
                 <Fa icon={statusIcon(request.status)} fw />
             </span>
-            <div class="ms-2 me-auto">
-                <strong>{ticketRequestTargets?.find(t => t.id === request.targetId)?.name ?? request.targetId}</strong>
+            <div class="me-auto">
+                <strong>{request.targetName}</strong>
                 <small class="d-block text-muted">
                     {request.status}
                     {#if request.denyReason}
@@ -277,11 +288,10 @@
             {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
                 <AsyncButton
                     color="success"
-                    class="ms-1"
                     click={() => activateRequest(request)}
                 >Activate</AsyncButton>
             {/if}
-            <small class="text-muted ms-3 flex-shrink-0">
+            <small class="text-muted flex-shrink-0">
                 <RelativeDate date={request.created} />
             </small>
         </div>
@@ -298,29 +308,29 @@
 {/if}
 
 {#if tickets}
-<h4 class="mt-4">My active tickets</h4>
+<h4 class="mt-4">Active tickets</h4>
 {#if tickets.length}
 <div class="list-group list-group-flush">
     {#each tickets as ticket (ticket.id)}
-        <div class="list-group-item">
+        <div class="list-group-item gap-3">
             <Fa icon={faTicket} fw class="text-success" />
-            <div class="ms-2 me-auto">
+            <div class="me-auto">
                 <strong>{ticket.targetName}</strong>
                 {#if ticket.description}
                     <small class="d-block text-muted">{ticket.description}</small>
                 {/if}
+                {#if ticket.expiry}
+                    <small class="d-block text-muted">
+                        Expires <RelativeDate date={ticket.expiry} />
+                    </small>
+                {/if}
+                {#if ticket.usesLeft != null}
+                    <small class="d-block text-muted">
+                        {ticket.usesLeft} uses left
+                    </small>
+                {/if}
             </div>
-            {#if ticket.expiry}
-                <small class="text-muted ms-3 flex-shrink-0">
-                    Expires {ticket.expiry.toLocaleString()}
-                </small>
-            {/if}
-            {#if ticket.usesLeft != null}
-                <small class="text-muted ms-3 flex-shrink-0">
-                    {ticket.usesLeft} uses left
-                </small>
-            {/if}
-            <small class="text-muted ms-3 me-2 flex-shrink-0">
+            <small class="text-muted flex-shrink-0">
                 <RelativeDate date={ticket.created} />
             </small>
             <Button

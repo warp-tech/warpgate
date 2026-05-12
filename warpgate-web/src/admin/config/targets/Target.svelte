@@ -14,7 +14,7 @@
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
-    import { formatDuration, parseDuration } from 'common/duration'
+    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
     interface Props {
         params: { id: string };
@@ -36,7 +36,7 @@
             api.listTargetGroups(),
         ])
         ticketDurationText = target.ticketMaxDurationSeconds
-            ? formatDuration(target.ticketMaxDurationSeconds)
+            ? formatDurationAsHumantime(target.ticketMaxDurationSeconds)
             : ''
     }
 
@@ -375,7 +375,7 @@
                 placeholder="Use global default"
                 bind:value={ticketDurationText}
                 onchange={() => {
-                    const seconds = parseDuration(ticketDurationText)
+                    const seconds = parseHumantimeDuration(ticketDurationText)
                     target!.ticketMaxDurationSeconds = seconds ?? undefined
                     update()
                 }}

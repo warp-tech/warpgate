@@ -6,7 +6,7 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import { formatDuration, parseDuration } from 'common/duration'
+    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'
 
     let parameters: ParameterValues | undefined = $state()
@@ -20,7 +20,7 @@
         const ssoProviders = await gatewayApi.getSsoProviders()
         hasSsoProviders = ssoProviders.length > 0
         durationText = parameters.ticketMaxDurationSeconds
-            ? formatDuration(parameters.ticketMaxDurationSeconds)
+            ? formatDurationAsHumantime(parameters.ticketMaxDurationSeconds)
             : ''
     }
 
@@ -32,7 +32,7 @@
     }
 
     function onDurationChange () {
-        const seconds = parseDuration(durationText)
+        const seconds = parseHumantimeDuration(durationText)
         parameters!.ticketMaxDurationSeconds = seconds ?? undefined
         update()
     }

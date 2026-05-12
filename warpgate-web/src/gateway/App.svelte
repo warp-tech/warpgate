@@ -172,7 +172,7 @@
 
 <style lang="scss">
     .container {
-        width: 500px;
+        width: 600px;
         max-width: 100vw;
     }
 </style>

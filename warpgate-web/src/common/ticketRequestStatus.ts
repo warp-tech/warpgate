@@ -1,21 +1,18 @@
-import { faCheck, faClock, faXmark, faHourglass } from '@fortawesome/free-solid-svg-icons'
+import { faCheck, faClock, faXmark, type IconDefinition } from '@fortawesome/free-solid-svg-icons'
+import { TicketRequestStatus } from 'admin/lib/api'
 
-export function statusIcon (status: string) {
-    switch (status) {
-        case 'Pending': return faClock
-        case 'Approved': return faCheck
-        case 'Denied': return faXmark
-        case 'Expired': return faHourglass
-        default: return faClock
-    }
+export function statusIcon (status: TicketRequestStatus): IconDefinition {
+    return {
+        [TicketRequestStatus.Pending]: faClock,
+        [TicketRequestStatus.Approved]: faCheck,
+        [TicketRequestStatus.Denied]: faXmark,
+    }[status] ?? faClock
 }
 
-export function statusColor (status: string) {
-    switch (status) {
-        case 'Pending': return 'text-warning'
-        case 'Approved': return 'text-success'
-        case 'Denied': return 'text-danger'
-        case 'Expired': return 'text-muted'
-        default: return 'text-muted'
-    }
+export function statusColor (status: TicketRequestStatus): string {
+    return {
+        [TicketRequestStatus.Pending]: 'text-warning',
+        [TicketRequestStatus.Approved]: 'text-success',
+        [TicketRequestStatus.Denied]: 'text-danger',
+    }[status] ?? 'text-muted'
 }

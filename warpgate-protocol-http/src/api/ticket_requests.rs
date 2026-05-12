@@ -3,15 +3,14 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
-use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_core::ticket_requests::{
     activate_ticket_request, create_ticket_request, ActivateTicketRequestError,
-    CreateTicketRequestError, CreateTicketRequestParams, TicketRequestResult,
+    CreateTicketRequestError, CreateTicketRequestParams,
 };
 use warpgate_db_entities::{Target, Ticket, TicketRequest};
 
@@ -46,7 +45,23 @@ struct TicketRequestResponse {
     request: TicketRequest::Model,
 }
 
-#[derive(Serialize, Object)]
+#[derive(Object)]
+struct TicketRequestModel {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub target_id: Uuid,
+    pub target_name: String,
+    pub requested_duration_seconds: Option<i64>,
+    pub description: String,
+    pub status: warpgate_db_entities::TicketRequest::TicketRequestStatus,
+    pub resolved_by_user_id: Option<Uuid>,
+    pub ticket_id: Option<Uuid>,
+    pub created: OffsetDateTime,
+    pub resolved_at: Option<OffsetDateTime>,
+    pub deny_reason: Option<String>,
+}
+
+#[derive(Object)]
 struct MyTicketModel {
     pub id: Uuid,
     pub target_name: String,
@@ -56,10 +71,16 @@ struct MyTicketModel {
     pub created: OffsetDateTime,
 }
 
+#[derive(Object)]
+struct CreatedRequest {
+    pub request: TicketRequest::Model,
+    pub auto_approved_ticket_secret: Option<Secret<String>>,
+}
+
 #[derive(ApiResponse)]
 enum CreateTicketRequestResponse {
     #[oai(status = 201)]
-    Created(Json<TicketRequest::Model>),
+    Created(Json<CreatedRequest>),
     #[oai(status = 400)]
     BadRequest(Json<String>),
     #[oai(status = 401)]
@@ -71,7 +92,7 @@ enum CreateTicketRequestResponse {
 #[derive(ApiResponse)]
 enum GetTicketRequestsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<TicketRequest::Model>>),
+    Ok(Json<Vec<TicketRequestModel>>),
     #[oai(status = 401)]
     Unauthorized,
 }
@@ -165,7 +186,10 @@ impl Api {
         .await;
 
         match result {
-            Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(result.request))),
+            Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(CreatedRequest {
+                request: result.request,
+                auto_approved_ticket_secret: result.auto_approved_secret.clone(),
+            }))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
                 Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
             }
@@ -198,7 +222,31 @@ impl Api {
             .all(&*db)
             .await?;
 
-        Ok(GetTicketRequestsResponse::Ok(Json(requests)))
+        let mut views = Vec::with_capacity(requests.len());
+        for req in requests {
+            let target_name = req
+                .find_related(Target::Entity)
+                .one(&*db)
+                .await?
+                .map(|t| t.name)
+                .unwrap_or_default();
+            views.push(TicketRequestModel {
+                id: req.id,
+                user_id: req.user_id,
+                target_id: req.target_id,
+                target_name,
+                requested_duration_seconds: req.requested_duration_seconds,
+                description: req.description,
+                status: req.status,
+                resolved_by_user_id: req.resolved_by_user_id,
+                ticket_id: req.ticket_id,
+                created: req.created,
+                resolved_at: req.resolved_at,
+                deny_reason: req.deny_reason,
+            });
+        }
+
+        Ok(GetTicketRequestsResponse::Ok(Json(views)))
     }
 
     #[oai(
@@ -357,6 +405,10 @@ impl Api {
             return Ok(DeleteMyTicketResponse::NotFound);
         };
 
+        TicketRequest::Entity::delete_many()
+            .filter(TicketRequest::Column::TicketId.eq(Some(ticket.id)))
+            .exec(&*db)
+            .await?;
         ticket.delete(&*db).await?;
         Ok(DeleteMyTicketResponse::Deleted)
     }

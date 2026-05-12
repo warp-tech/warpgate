@@ -19,7 +19,7 @@ use crate::{ConfigProvider, ConfigProviderEnum};
 
 pub struct TicketRequestResult {
     pub request: TicketRequest::Model,
-    pub secret: Option<Secret<String>>,
+    pub auto_approved_secret: Option<Secret<String>>,
 }
 
 pub struct CreateTicketRequestParams {
@@ -194,7 +194,7 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
-            secret: Some(secret),
+            auto_approved_secret: Some(secret),
         })
     } else {
         let request_id = Uuid::new_v4();
@@ -220,7 +220,7 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
-            secret: None,
+            auto_approved_secret: None,
         })
     }
 }
@@ -256,7 +256,7 @@ async fn insert_self_service_ticket(
 pub async fn approve_ticket_request(
     db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
     request_id: Uuid,
-    admin_user_id: Uuid,
+    admin_user_id: Option<Uuid>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
     let db_conn = db.lock().await;
 
@@ -288,12 +288,12 @@ pub async fn approve_ticket_request(
 
     let mut active: TicketRequest::ActiveModel = request.into();
     active.status = Set(TicketRequestStatus::Approved);
-    active.resolved_by_user_id = Set(Some(admin_user_id));
+    active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     let updated = active.update(&*db_conn).await?;
 
     info!(
-        "Admin {} approved ticket request {}",
+        "Admin {:?} approved ticket request {}",
         admin_user_id, request_id
     );
 
@@ -393,7 +393,7 @@ pub async fn activate_ticket_request(
 pub async fn deny_ticket_request(
     db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
     request_id: Uuid,
-    admin_user_id: Uuid,
+    admin_user_id: Option<Uuid>,
     reason: Option<String>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
     let db_conn = db.lock().await;
@@ -416,13 +416,13 @@ pub async fn deny_ticket_request(
 
     let mut active: TicketRequest::ActiveModel = request.into();
     active.status = Set(TicketRequestStatus::Denied);
-    active.resolved_by_user_id = Set(Some(admin_user_id));
+    active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     active.deny_reason = Set(reason);
     let updated = active.update(&*db_conn).await?;
 
     info!(
-        "Admin {} denied ticket request {}",
+        "Admin {:?} denied ticket request {}",
         admin_user_id, request_id
     );
 
