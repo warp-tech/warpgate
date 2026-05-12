@@ -225,17 +225,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .await
                                     .subscribe(auth_state_id);
 
-                                let login_url_result =
-                                    state_arc.lock().await.construct_web_approval_url(
-                                        construct_external_url(
-                                            None,
-                                            &*self.services.config.lock().await,
-                                            None,
-                                        )
-                                        .await?,
-                                    );
-                                let login_url = match login_url_result {
-                                    Ok(login_url) => login_url,
+                                let ext_url_result = construct_external_url(
+                                    None,
+                                    &*self.services.config.lock().await,
+                                    None,
+                                )
+                                .await;
+
+                                let login_url = match ext_url_result {
+                                    Ok(ext_url) => {
+                                        state_arc.lock().await.construct_web_approval_url(ext_url)
+                                    }
                                     Err(error) => {
                                         error!(?error, "Failed to construct external URL");
                                         return fail(&mut self).await;

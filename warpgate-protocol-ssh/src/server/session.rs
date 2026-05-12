@@ -1559,11 +1559,14 @@ impl ServerSession {
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
-                    let login_url = match auth_state.lock().await.construct_web_approval_url(
-                        construct_external_url(None, &*self.services.config.lock().await, None)
-                            .await?,
-                    ) {
-                        Ok(login_url) => login_url,
+                    let login_url = match construct_external_url(
+                        None,
+                        &*self.services.config.lock().await,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(ext_url) => auth_state.lock().await.construct_web_approval_url(ext_url),
                         Err(error) => {
                             error!(?error, "Failed to construct external URL");
                             return Ok(russh::server::Auth::Reject {

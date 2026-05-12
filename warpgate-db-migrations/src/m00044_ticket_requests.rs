@@ -6,7 +6,7 @@ use crate::m00007_targets_and_roles::target;
 use crate::m00010_parameters::parameters;
 use crate::m00032_admin_roles::admin_role;
 
-pub(crate) mod user {
+pub mod user {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 
@@ -24,7 +24,7 @@ pub(crate) mod user {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub(crate) mod ticket_request {
+pub mod ticket_request {
     use sea_orm::entity::prelude::*;
     use time::OffsetDateTime;
     use uuid::Uuid;
@@ -263,8 +263,7 @@ impl MigrationTrait for Migration {
             _ => "1",
         };
         conn.execute_unprepared(&format!(
-            "UPDATE admin_roles SET ticket_requests_manage = {} WHERE name = 'warpgate:admin'",
-            bool_true
+            "UPDATE admin_roles SET ticket_requests_manage = {bool_true} WHERE name = 'warpgate:admin'",
         ))
         .await?;
 

@@ -125,8 +125,7 @@ pub async fn create_ticket_request(
             if let Some(max_duration) = max_duration {
                 if duration > max_duration {
                     return Err(CreateTicketRequestError::InvalidInput(format!(
-                        "Requested duration exceeds maximum of {} seconds",
-                        max_duration
+                        "Requested duration exceeds maximum of {max_duration} seconds",
                     )));
                 }
             }
@@ -239,7 +238,7 @@ async fn insert_self_service_ticket(
 
     let ticket = Ticket::ActiveModel {
         id: Set(ticket_id),
-        secret: Set(secret.expose_secret().to_string()),
+        secret: Set(secret.expose_secret().clone()),
         user_id: Set(user_id),
         target_id: Set(target_id),
         created: Set(OffsetDateTime::now_utc()),
