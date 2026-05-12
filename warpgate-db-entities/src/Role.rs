@@ -13,6 +13,7 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    pub is_default: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -46,6 +47,7 @@ impl From<Model> for Role {
             id: model.id,
             name: model.name,
             description: model.description,
+            is_default: model.is_default,
         }
     }
 }

@@ -8,12 +8,14 @@ import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let name = $state('')
+let isDefault = $state(false)
 
 async function create () {
     try {
         const role = await api.createRole({
             roleDataRequest: {
                 name,
+                isDefault,
             },
         })
         replace(`/config/access-roles/${role.id}`)
@@ -39,6 +41,18 @@ async function create () {
                 <!-- svelte-ignore a11y_autofocus -->
                 <input class="form-control" bind:value={name} required autofocus />
             </FormGroup>
+
+            <div class="form-check mb-3">
+                <input
+                    id="isDefault"
+                    class="form-check-input"
+                    type="checkbox"
+                    bind:checked={isDefault}
+                />
+                <label class="form-check-label" for="isDefault">
+                    Default role
+                </label>
+            </div>
 
             <AsyncButton
                 color="primary"

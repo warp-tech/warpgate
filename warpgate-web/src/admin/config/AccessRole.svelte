@@ -83,6 +83,18 @@
         <FormGroup floating label="Description">
             <Input bind:value={role!.description} />
         </FormGroup>
+
+        <div class="form-check mb-3">
+            <input
+                id="isDefault"
+                class="form-check-input"
+                type="checkbox"
+                bind:checked={role!.isDefault}
+            />
+            <label class="form-check-label" for="isDefault">
+                Default role
+            </label>
+        </div>
     </Loadable>
 
     {#if error}

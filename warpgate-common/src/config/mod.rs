@@ -168,6 +168,7 @@ pub struct Role {
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]
