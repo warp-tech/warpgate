@@ -3,7 +3,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
@@ -156,14 +157,15 @@ pub async fn create_ticket_request(
         has_access && policy.ticket_auto_approve_existing_access && !target.ticket_require_approval;
 
     if auto_approve {
+        let txn = db_conn.begin().await?;
+
         let (ticket_id, secret) = insert_self_service_ticket(
-            &*db_conn,
+            &txn,
             params.user_id,
             target.id,
             effective_duration,
             effective_uses,
             &params.description,
-            true,
         )
         .await?;
 
@@ -181,7 +183,9 @@ pub async fn create_ticket_request(
             resolved_at: Set(Some(OffsetDateTime::now_utc())),
             deny_reason: Set(None),
         };
-        let request_model = request.insert(&*db_conn).await?;
+        let request_model = request.insert(&txn).await?;
+
+        txn.commit().await?;
 
         info!(
             "Auto-approved ticket request {} for user {} to target {}",
@@ -222,13 +226,12 @@ pub async fn create_ticket_request(
 }
 
 async fn insert_self_service_ticket(
-    db_conn: &sea_orm::DatabaseConnection,
+    db_conn: &impl ConnectionTrait,
     user_id: Uuid,
     target_id: Uuid,
     duration_seconds: Option<i64>,
     uses: Option<i16>,
     description: &str,
-    self_service: bool,
 ) -> Result<(Uuid, Secret<String>), WarpgateError> {
     let secret = generate_ticket_secret();
     let ticket_id = Uuid::new_v4();
@@ -243,7 +246,7 @@ async fn insert_self_service_ticket(
         expiry: Set(expiry),
         uses_left: Set(uses),
         description: Set(description.to_string()),
-        self_service: Set(self_service),
+        self_service: Set(true),
     };
     ticket.insert(db_conn).await?;
 
@@ -361,20 +364,23 @@ pub async fn activate_ticket_request(
 
     let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
 
+    let txn = db_conn.begin().await?;
+
     let (ticket_id, secret) = insert_self_service_ticket(
-        &*db_conn,
+        &txn,
         request.user_id,
         request.target_id,
         effective_duration,
         max_uses,
         &request.description,
-        false,
     )
     .await?;
 
     let mut active: TicketRequest::ActiveModel = request.into();
     active.ticket_id = Set(Some(ticket_id));
-    let updated = active.update(&*db_conn).await?;
+    let updated = active.update(&txn).await?;
+
+    txn.commit().await?;
 
     info!(
         "User activated approved ticket request {}, ticket {} created",

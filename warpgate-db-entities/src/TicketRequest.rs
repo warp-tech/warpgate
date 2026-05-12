@@ -14,8 +14,6 @@ pub enum TicketRequestStatus {
     Approved,
     #[sea_orm(string_value = "denied")]
     Denied,
-    #[sea_orm(string_value = "expired")]
-    Expired,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]

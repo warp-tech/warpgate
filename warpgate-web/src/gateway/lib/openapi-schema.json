@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.3-26-g0c726dea-modified"
+    "version": "v0.23.4-27-g5537fd80-modified"
   },
   "servers": [
     {
@@ -839,7 +839,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/TicketRequestResponse"
+                  "$ref": "#/components/schemas/TicketRequest"
                 }
               }
             }
@@ -973,7 +973,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/TicketRequestResponse"
+                  "$ref": "#/components/schemas/ActivatedTicketModel"
                 }
               }
             }
@@ -1128,6 +1128,21 @@
   },
   "components": {
     "schemas": {
+      "ActivatedTicketModel": {
+        "type": "object",
+        "title": "ActivatedTicketModel",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/TicketRequest"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
       "AdminPermissions": {
         "type": "object",
         "title": "AdminPermissions",
@@ -1953,9 +1968,6 @@
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TicketRequest"
-          },
-          "secret": {
-            "type": "string"
           }
         }
       },
@@ -1964,8 +1976,7 @@
         "enum": [
           "Pending",
           "Approved",
-          "Denied",
-          "Expired"
+          "Denied"
         ]
       },
       "TicketRequestTarget": {

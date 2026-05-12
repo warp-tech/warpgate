@@ -36,18 +36,14 @@ struct CreateTicketRequestBody {
 }
 
 #[derive(Object)]
-struct TicketRequestResponse {
+struct ActivatedTicketModel {
     request: TicketRequest::Model,
     secret: Option<String>,
 }
 
-impl From<TicketRequestResult> for TicketRequestResponse {
-    fn from(result: TicketRequestResult) -> Self {
-        Self {
-            request: result.request,
-            secret: result.secret.map(|s| s.expose_secret().to_string()),
-        }
-    }
+#[derive(Object)]
+struct TicketRequestResponse {
+    request: TicketRequest::Model,
 }
 
 #[derive(Serialize, Object)]
@@ -63,7 +59,7 @@ struct MyTicketModel {
 #[derive(ApiResponse)]
 enum CreateTicketRequestResponse {
     #[oai(status = 201)]
-    Created(Json<TicketRequestResponse>),
+    Created(Json<TicketRequest::Model>),
     #[oai(status = 400)]
     BadRequest(Json<String>),
     #[oai(status = 401)]
@@ -101,7 +97,7 @@ enum GetMyTicketsResponse {
 #[derive(ApiResponse)]
 enum ActivateTicketRequestResponse {
     #[oai(status = 200)]
-    Ok(Json<TicketRequestResponse>),
+    Ok(Json<ActivatedTicketModel>),
     #[oai(status = 401)]
     Unauthorized,
     #[oai(status = 404)]
@@ -169,7 +165,7 @@ impl Api {
         .await;
 
         match result {
-            Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(result.into()))),
+            Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(result.request))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
                 Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
             }
@@ -235,7 +231,6 @@ impl Api {
 
         Ok(GetTicketRequestResponse::Ok(Json(TicketRequestResponse {
             request,
-            secret: None,
         })))
     }
 
@@ -262,7 +257,7 @@ impl Api {
 
         match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
             Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
-                TicketRequestResponse {
+                ActivatedTicketModel {
                     request,
                     secret: Some(secret.expose_secret().to_string()),
                 },
