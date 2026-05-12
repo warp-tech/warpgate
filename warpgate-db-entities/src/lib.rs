@@ -19,6 +19,7 @@ pub mod Target;
 pub mod TargetGroup;
 pub mod TargetRoleAssignment;
 pub mod Ticket;
+pub mod TicketRequest;
 pub mod User;
 pub mod UserAdminRoleAssignment;
 pub mod UserRoleAssignment;

@@ -3,9 +3,9 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::SimpleExpr;
+use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 use warpgate_common::{
@@ -14,10 +14,10 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket};
+use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct TargetDataRequest {
@@ -26,6 +26,10 @@ struct TargetDataRequest {
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
     group_id: Option<Uuid>,
+    ticket_max_duration_seconds: Option<i64>,
+    ticket_requests_disabled: Option<bool>,
+    ticket_require_approval: Option<bool>,
+    ticket_max_uses: Option<i16>,
 }
 
 #[derive(ApiResponse)]
@@ -68,14 +72,13 @@ impl ListApi {
         if let Some(ref search) = *search {
             let search_pattern = format!("%{}%", search.to_lowercase());
             targets = targets
-                .filter(
-                    Condition::any()
-                        .add(Target::Column::Name.like(&search_pattern))
-                        .add(Target::Column::Description.like(&search_pattern)),
-                )
+                .filter(case_insensitive_search(
+                    search,
+                    [Target::Column::Name, Target::Column::Description],
+                ))
                 .order_by_asc({
                     let case_expr: SimpleExpr = Expr::case(
-                        Expr::col((Target::Entity, Target::Column::Name)).like(&search_pattern),
+                        Expr::expr(Func::lower(Expr::col(Target::Column::Name))).like(&search_pattern),
                         0,
                     )
                     .finally(1)
@@ -144,6 +147,10 @@ impl ListApi {
             options: Set(serde_json::to_value(options.clone()).map_err(WarpgateError::from)?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
+            ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
+            ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
+            ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
+            ticket_max_uses: Set(body.ticket_max_uses),
         };
 
         let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -256,6 +263,10 @@ impl DetailApi {
         model.options = Set(serde_json::to_value(options).map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
+        model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
+        model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
+        model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
+        model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(&*db).await?;
 
         drop(db);
@@ -298,6 +309,11 @@ impl DetailApi {
 
         Ticket::Entity::delete_many()
             .filter(Ticket::Column::TargetId.eq(target.id))
+            .exec(&*db)
+            .await?;
+
+        TicketRequest::Entity::delete_many()
+            .filter(TicketRequest::Column::TargetId.eq(target.id))
             .exec(&*db)
             .await?;
 

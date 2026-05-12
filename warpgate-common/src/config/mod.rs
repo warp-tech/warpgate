@@ -201,6 +201,8 @@ pub struct AdminRole {
     pub config_edit: bool,
 
     pub admin_roles_manage: bool,
+
+    pub ticket_requests_manage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
@@ -223,6 +225,7 @@ pub enum AdminPermission {
     TicketsDelete,
     ConfigEdit,
     AdminRolesManage,
+    TicketRequestsManage,
 }
 
 impl AdminRole {
@@ -245,6 +248,7 @@ impl AdminRole {
             AdminPermission::TicketsDelete => self.tickets_delete,
             AdminPermission::ConfigEdit => self.config_edit,
             AdminPermission::AdminRolesManage => self.admin_roles_manage,
+            AdminPermission::TicketRequestsManage => self.ticket_requests_manage,
         }
     }
 }

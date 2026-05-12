@@ -120,7 +120,7 @@ pub async fn authorize_ticket(
             (&User::try_from(ticket_user)?).into(),
         )))
     } else {
-        warn!("Ticket not found: {}", &secret.expose_secret());
+        warn!("Ticket not found");
         Ok(None)
     }
 }

@@ -9,7 +9,7 @@ use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::LogEntry;
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 pub struct Api;
 
@@ -86,12 +86,14 @@ impl Api {
         if let Some(ref search) = body.search
             && !search.is_empty()
         {
-            q = q.filter(
-                LogEntry::Column::Text
-                    .contains(search)
-                    .or(LogEntry::Column::Username.contains(search))
-                    .or(LogEntry::Column::Values.contains(search)),
-            );
+            q = q.filter(case_insensitive_search(
+                search,
+                [
+                    LogEntry::Column::Text,
+                    LogEntry::Column::Username,
+                    LogEntry::Column::Values,
+                ],
+            ));
         }
 
         let logs = q.all(&*db).await?;

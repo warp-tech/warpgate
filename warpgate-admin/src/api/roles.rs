@@ -13,7 +13,7 @@ use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct RoleDataRequest {
@@ -55,8 +55,7 @@ impl ListApi {
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            roles = roles.filter(Role::Column::Name.like(search));
+            roles = roles.filter(case_insensitive_search(search, [Role::Column::Name]));
         }
 
         let roles = roles.all(&*db).await?;
