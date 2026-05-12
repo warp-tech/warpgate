@@ -49,13 +49,13 @@ pub async fn construct_external_url(
         return Err(WarpgateError::ExternalHostUnknown);
     };
 
-    if let Some(list) = domain_whitelist {
-        if !list.contains(&host) {
-            return Err(WarpgateError::ExternalHostNotWhitelisted(
-                host,
-                list.to_vec(),
-            ));
-        }
+    if let Some(list) = domain_whitelist
+        && !list.contains(&host)
+    {
+        return Err(WarpgateError::ExternalHostNotWhitelisted(
+            host,
+            list.to_vec(),
+        ));
     }
 
     let mut url = format!("{scheme}://{host}");

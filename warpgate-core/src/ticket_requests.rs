@@ -122,12 +122,12 @@ pub async fn create_ticket_request(
                     "Minimum ticket duration is 60 seconds".into(),
                 ));
             }
-            if let Some(max_duration) = max_duration {
-                if duration > max_duration {
-                    return Err(CreateTicketRequestError::InvalidInput(format!(
-                        "Requested duration exceeds maximum of {max_duration} seconds",
-                    )));
-                }
+            if let Some(max_duration) = max_duration
+                && duration > max_duration
+            {
+                return Err(CreateTicketRequestError::InvalidInput(format!(
+                    "Requested duration exceeds maximum of {max_duration} seconds",
+                )));
             }
             Some(duration)
         }

@@ -18,7 +18,7 @@ use super::common::get_user;
 use crate::api::AnySecurityScheme;
 use crate::common::endpoint_auth;
 
-fn is_ticket_session(ctx: &AuthenticatedRequestContext) -> bool {
+const fn is_ticket_session(ctx: &AuthenticatedRequestContext) -> bool {
     matches!(
         &ctx.auth,
         warpgate_common_http::RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
@@ -188,7 +188,7 @@ impl Api {
         match result {
             Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(CreatedRequest {
                 request: result.request,
-                auto_approved_ticket_secret: result.auto_approved_secret.clone(),
+                auto_approved_ticket_secret: result.auto_approved_secret,
             }))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
                 Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
@@ -307,7 +307,7 @@ impl Api {
             Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
                 ActivatedTicketModel {
                     request,
-                    secret: Some(secret.expose_secret().to_string()),
+                    secret: Some(secret.expose_secret().clone()),
                 },
             ))),
             Err(ActivateTicketRequestError::NotFound) => {

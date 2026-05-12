@@ -82,22 +82,20 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted full Host header value (including port if present),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
-        let mut host: Option<String> = req.header(HOST).map(ToString::to_string).or_else(|| {
-            let uri = req.original_uri();
-            let h = uri.host()?;
-            Some(match uri.port() {
-                Some(port) => format!("{h}:{port}"),
-                None => h.to_string(),
-            })
-        });
-
         if self.should_trust_x_forwarded
             && let Some(xfh) = req.header(&X_FORWARDED_HOST)
         {
-            host = Some(xfh.to_string());
+            Some(xfh.to_string())
+        } else {
+            req.header(HOST).map(ToString::to_string).or_else(|| {
+                let uri = req.original_uri();
+                let h = uri.host()?;
+                Some(match uri.port() {
+                    Some(port) => format!("{h}:{port}"),
+                    None => h.to_string(),
+                })
+            })
         }
-
-        host
     }
 
     /// Returns the trusted hostname only (port stripped),
@@ -121,21 +119,17 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted protocol scheme for the request, preferring X-Forwarded-Proto
     /// if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_proto(&self, req: &Request) -> Scheme {
-        let mut scheme = req
-            .original_uri()
-            .scheme()
-            .cloned()
-            .unwrap_or(Scheme::HTTPS);
-
-        if self.should_trust_x_forwarded {
-            if let Some(proto) = req.header(&X_FORWARDED_PROTO)
-                && let Ok(s) = Scheme::try_from(proto)
-            {
-                scheme = s;
-            }
+        if self.should_trust_x_forwarded
+            && let Some(proto) = req.header(&X_FORWARDED_PROTO)
+            && let Ok(s) = Scheme::try_from(proto)
+        {
+            s
+        } else {
+            req.original_uri()
+                .scheme()
+                .cloned()
+                .unwrap_or(Scheme::HTTPS)
         }
-
-        scheme
     }
 }
 

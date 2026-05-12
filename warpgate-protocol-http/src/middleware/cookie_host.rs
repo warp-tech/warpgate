@@ -131,12 +131,11 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                 headers.append(http::header::SET_COOKIE, header_value);
             }
             for cookie_str in &cookie_values {
-                if let Ok(cookie) = Cookie::parse(cookie_str) {
-                    if cookie.name() != SESSION_COOKIE_NAME {
-                        if let Ok(header_value) = cookie_str.parse::<http::HeaderValue>() {
-                            headers.append(http::header::SET_COOKIE, header_value);
-                        }
-                    }
+                if let Ok(cookie) = Cookie::parse(cookie_str)
+                    && cookie.name() != SESSION_COOKIE_NAME
+                    && let Ok(header_value) = cookie_str.parse::<http::HeaderValue>()
+                {
+                    headers.append(http::header::SET_COOKIE, header_value);
                 }
             }
         }

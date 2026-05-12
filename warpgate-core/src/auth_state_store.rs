@@ -22,7 +22,7 @@ const fn normalize_ip(ip: IpAddr) -> IpAddr {
             Some(v4) => IpAddr::V4(v4),
             None => ip,
         },
-        _ => ip,
+        IpAddr::V4(_) => ip,
     }
 }
 
