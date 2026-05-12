@@ -110,6 +110,7 @@ impl ListApi {
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let default_roles = Role::Entity::grant_default_roles(&db, user.id).await?;
 
         AuditEvent::UserCreated {
             user_id: user.id,
@@ -117,6 +118,18 @@ impl ListApi {
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();
+
+        for role in default_roles {
+            AuditEvent::AccessRoleGranted {
+                grantee_id: user.id,
+                grantee_username: user.username.clone(),
+                role_id: role.id,
+                role_name: role.name,
+                actor_user_id: ctx.auth.user_id(),
+                related_access_roles: format_related_ids(&[role.id]),
+            }
+            .emit();
+        }
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
