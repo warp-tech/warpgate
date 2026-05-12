@@ -44,6 +44,10 @@ pub struct Model {
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -87,6 +91,10 @@ impl TryFrom<Model> for Target {
             options,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
             group_id: model.group_id,
+            ticket_max_duration_seconds: model.ticket_max_duration_seconds,
+            ticket_requests_disabled: model.ticket_requests_disabled,
+            ticket_require_approval: model.ticket_require_approval,
+            ticket_max_uses: model.ticket_max_uses,
         })
     }
 }

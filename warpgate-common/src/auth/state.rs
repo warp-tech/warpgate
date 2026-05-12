@@ -9,7 +9,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::{SessionId, User, WarpgateError};
+use crate::{SessionId, User};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -159,12 +159,9 @@ impl AuthState {
         new_result
     }
 
-    pub fn construct_web_approval_url(
-        &self,
-        mut external_url: Url,
-    ) -> Result<url::Url, WarpgateError> {
+    pub fn construct_web_approval_url(&self, mut external_url: Url) -> url::Url {
         external_url.set_path("@warpgate");
         external_url.set_fragment(Some(&format!("/login/{}", self.id())));
-        Ok(external_url)
+        external_url
     }
 }

@@ -21,6 +21,12 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub ticket_self_service_enabled: bool,
+    pub ticket_auto_approve_existing_access: bool,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
+    pub ticket_require_description: bool,
+    pub ticket_request_show_all_targets: bool,
     pub show_session_menu: bool,
 }
 
@@ -32,6 +38,12 @@ struct ParameterUpdate {
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub minimize_password_login: Option<bool>,
+    pub ticket_self_service_enabled: Option<bool>,
+    pub ticket_auto_approve_existing_access: Option<bool>,
+    pub ticket_max_duration_seconds: Option<Option<i64>>,
+    pub ticket_max_uses: Option<Option<i16>>,
+    pub ticket_require_description: Option<bool>,
+    pub ticket_request_show_all_targets: Option<bool>,
     pub show_session_menu: Option<bool>,
 }
 
@@ -67,6 +79,12 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             minimize_password_login: parameters.minimize_password_login,
+            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
+            ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
+            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
+            ticket_max_uses: parameters.ticket_max_uses,
+            ticket_require_description: parameters.ticket_require_description,
+            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             show_session_menu: parameters.show_session_menu,
         })))
     }
@@ -97,6 +115,16 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
+        parameters.ticket_self_service_enabled =
+            body.ticket_self_service_enabled.map_or(NotSet, Set);
+        parameters.ticket_auto_approve_existing_access =
+            body.ticket_auto_approve_existing_access.map_or(NotSet, Set);
+        parameters.ticket_max_duration_seconds =
+            body.ticket_max_duration_seconds.map_or(NotSet, Set);
+        parameters.ticket_max_uses = body.ticket_max_uses.map_or(NotSet, Set);
+        parameters.ticket_require_description = body.ticket_require_description.map_or(NotSet, Set);
+        parameters.ticket_request_show_all_targets =
+            body.ticket_request_show_all_targets.map_or(NotSet, Set);
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;

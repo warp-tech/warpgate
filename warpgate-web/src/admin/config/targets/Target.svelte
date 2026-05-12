@@ -14,6 +14,7 @@
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
     interface Props {
         params: { id: string };
@@ -27,12 +28,16 @@
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
+    let ticketDurationText = $state('')
 
     async function init () {
         [target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
+        ticketDurationText = target.ticketMaxDurationSeconds
+            ? formatDurationAsHumantime(target.ticketMaxDurationSeconds)
+            : ''
     }
 
     async function loadRoles () {
@@ -327,6 +332,75 @@
                     Default database name used in connection examples. This is only for display purposes and does not restrict which databases users can access. Leave empty to use the global default.
                 </small>
             </FormGroup>
+        {/if}
+
+        {#if $serverInfo?.ticketSelfServiceEnabled}
+        <h5 class="mt-3">Self-service tickets</h5>
+        <label
+            for="ticketRequestsDisabled"
+            class="d-flex align-items-center mb-2"
+        >
+            <Input
+                id="ticketRequestsDisabled"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    target!.ticketRequestsDisabled = !target!.ticketRequestsDisabled
+                    update()
+                }}
+                checked={target.ticketRequestsDisabled} />
+            <div>Disable ticket requests for this target</div>
+        </label>
+
+        <label
+            for="ticketRequireApproval"
+            class="d-flex align-items-center mb-2"
+        >
+            <Input
+                id="ticketRequireApproval"
+                class="mb-0 me-2"
+                type="switch"
+                on:change={() => {
+                    target!.ticketRequireApproval = !target!.ticketRequireApproval
+                    update()
+                }}
+                checked={target.ticketRequireApproval} />
+            <div>Always require admin approval</div>
+        </label>
+
+        <FormGroup floating label="Max self-service ticket duration">
+            <input
+                class="form-control"
+                type="text"
+                placeholder="Use global default"
+                bind:value={ticketDurationText}
+                onchange={() => {
+                    const seconds = parseHumantimeDuration(ticketDurationText)
+                    target!.ticketMaxDurationSeconds = seconds ?? undefined
+                    update()
+                }}
+            />
+            <small class="form-text text-muted">
+                Examples: 30m, 8h, 1d. Leave empty to use the global default.
+            </small>
+        </FormGroup>
+
+        <FormGroup floating label="Max uses per ticket">
+            <input
+                type="number"
+                min="1"
+                class="form-control"
+                value={target.ticketMaxUses ?? ''}
+                onchange={e => {
+                    const v = parseInt(e.currentTarget.value)
+                    target!.ticketMaxUses = isNaN(v) ? undefined : v
+                    update()
+                }}
+            />
+            <small class="form-text text-muted">
+                Leave empty to use the global default.
+            </small>
+        </FormGroup>
         {/if}
 
         <FormGroup>

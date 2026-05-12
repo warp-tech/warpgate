@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.6-6-gfde9e530-modified"
+    "version": "v0.23.4-28-gd1f9c231-modified"
   },
   "servers": [
     {
@@ -945,6 +945,138 @@
           }
         ],
         "operationId": "delete_ticket"
+      }
+    },
+    "/ticket-requests": {
+      "get": {
+        "parameters": [
+          {
+            "name": "status",
+            "schema": {
+              "$ref": "#/components/schemas/TicketRequestStatus"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ticket_requests"
+      }
+    },
+    "/ticket-requests/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_ticket_request"
+      }
+    },
+    "/ticket-requests/{id}/deny": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyTicketRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "deny_ticket_request"
       }
     },
     "/ssh/known-hosts": {
@@ -3852,7 +3984,8 @@
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "id": {
@@ -3915,6 +4048,9 @@
           },
           "admin_roles_manage": {
             "type": "boolean"
+          },
+          "ticket_requests_manage": {
+            "type": "boolean"
           }
         }
       },
@@ -3939,7 +4075,8 @@
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "name": {
@@ -3997,6 +4134,9 @@
             "type": "boolean"
           },
           "admin_roles_manage": {
+            "type": "boolean"
+          },
+          "ticket_requests_manage": {
             "type": "boolean"
           }
         }
@@ -4256,6 +4396,15 @@
         ],
         "properties": {
           "password": {
+            "type": "string"
+          }
+        }
+      },
+      "DenyTicketRequestBody": {
+        "type": "object",
+        "title": "DenyTicketRequestBody",
+        "properties": {
+          "reason": {
             "type": "string"
           }
         }
@@ -4863,6 +5012,26 @@
           "minimize_password_login": {
             "type": "boolean"
           },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
+          },
           "show_session_menu": {
             "type": "boolean"
           }
@@ -4877,6 +5046,10 @@
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
           "minimize_password_login",
+          "ticket_self_service_enabled",
+          "ticket_auto_approve_existing_access",
+          "ticket_require_description",
+          "ticket_request_show_all_targets",
           "show_session_menu"
         ],
         "properties": {
@@ -4897,6 +5070,26 @@
             "type": "boolean"
           },
           "minimize_password_login": {
+            "type": "boolean"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
             "type": "boolean"
           },
           "show_session_menu": {
@@ -5185,7 +5378,9 @@
           "name",
           "description",
           "allow_roles",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval"
         ],
         "properties": {
           "id": {
@@ -5214,6 +5409,20 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },
@@ -5241,6 +5450,20 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },
@@ -5639,6 +5862,7 @@
           "description",
           "target_id",
           "target",
+          "self_service",
           "created"
         ],
         "properties": {
@@ -5667,6 +5891,9 @@
             "type": "integer",
             "format": "int16"
           },
+          "self_service": {
+            "type": "boolean"
+          },
           "expiry": {
             "type": "string",
             "format": "date-time"
@@ -5692,6 +5919,69 @@
             "type": "string"
           }
         }
+      },
+      "TicketRequest": {
+        "type": "object",
+        "title": "TicketRequest",
+        "required": [
+          "id",
+          "user_id",
+          "target_id",
+          "description",
+          "status",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requested_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketRequestStatus"
+          },
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deny_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "TicketRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Denied"
+        ]
       },
       "Tls": {
         "type": "object",

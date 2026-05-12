@@ -64,6 +64,10 @@
             asyncComponent: () => import('./ProfileCredentials.svelte') as any,
             conditions: [requireLogin],
         }),
+        '/ticket-requests': wrap({
+            asyncComponent: () => import('./TicketRequests.svelte') as any,
+            conditions: [requireLogin],
+        }),
         '/login': wrap({
             asyncComponent: () => import('./Login.svelte') as any,
         }),
@@ -168,7 +172,7 @@
 
 <style lang="scss">
     .container {
-        width: 500px;
+        width: 600px;
         max-width: 100vw;
     }
 </style>

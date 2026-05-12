@@ -263,7 +263,6 @@ impl DetailApi {
 
         let db = ctx.services().db.lock().await;
 
-        // Check if user is LDAP-linked
         if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
             return Ok(DeleteCredentialResponse::Forbidden(Json(msg)));
         }

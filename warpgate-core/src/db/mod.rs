@@ -3,8 +3,8 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ConnectOptions, Database, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    TransactionTrait,
+    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, ModelTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use time::OffsetDateTime;
 use tracing::error;
@@ -95,7 +95,7 @@ pub async fn cleanup_db(
     retention: &Duration,
     audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{LogEntry, Recording, Session};
+    use warpgate_db_entities::{LogEntry, Recording, Session, Ticket, TicketRequest};
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
@@ -110,6 +110,35 @@ pub async fn cleanup_db(
         .filter(Expr::col(LogEntry::Column::Timestamp).lt(recording_cutoff))
         .exec(db)
         .await?;
+
+    {
+        let active_ticket_ids = Ticket::Entity::find()
+            .select()
+            .column(Ticket::Column::Id)
+            .filter(
+                Expr::col(Ticket::Column::Expiry)
+                    .is_null()
+                    .or(Expr::col(Ticket::Column::Expiry).gt(OffsetDateTime::now_utc())),
+            )
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|x| x.id)
+            .collect::<Vec<_>>();
+
+        let mut request_deletion = TicketRequest::Entity::delete_many()
+            .filter(Expr::col(TicketRequest::Column::Created).lt(audit_cutoff));
+
+        if !active_ticket_ids.is_empty() {
+            request_deletion = request_deletion.filter(
+                Expr::col(TicketRequest::Column::TicketId)
+                    .is_null()
+                    .or(Expr::col(TicketRequest::Column::TicketId).is_not_in(active_ticket_ids)),
+            );
+        }
+
+        request_deletion.exec(db).await?;
+    }
 
     let recordings_to_delete = Recording::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())

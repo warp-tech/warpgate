@@ -67,6 +67,10 @@ pub async fn has_admin_permission(
             AdminPermission::ConfigEdit => AdminRole::Column::ConfigEdit.eq(true),
 
             AdminPermission::AdminRolesManage => AdminRole::Column::AdminRolesManage.eq(true),
+
+            AdminPermission::TicketRequestsManage => {
+                AdminRole::Column::TicketRequestsManage.eq(true)
+            }
         });
     }
 

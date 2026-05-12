@@ -132,7 +132,6 @@ impl DatabaseConfigProvider {
         let mut ldap_server_id = None;
         let mut ldap_object_uuid = None;
 
-        // Try to find user in LDAP servers
         for ldap_server in ldap_servers {
             let ldap_config = warpgate_ldap::LdapConfig::try_from(&ldap_server).map_err(|e| {
                 warn!(
