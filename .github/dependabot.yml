@@ -40,7 +40,7 @@ updates:
     schedule:
       interval: daily
 
-  - package-ecosystem: poetry
+  - package-ecosystem: pip
     directory: /tests
     labels: ["type/deps"]
     exclude-paths:
