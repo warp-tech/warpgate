@@ -12,7 +12,7 @@ bytes.workspace = true
 clap = { version = "4.0", features = ["derive", "env"], default-features = false }
 config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.15", default-features = false }
-console-subscriber = { version = "0.4", optional = true, default-features = false }
+console-subscriber = { version = "0.5", optional = true, default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
 enum_dispatch.workspace = true
