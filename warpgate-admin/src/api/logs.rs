@@ -1,9 +1,7 @@
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
@@ -11,7 +9,7 @@ use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::LogEntry;
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 pub struct Api;
 
@@ -88,25 +86,14 @@ impl Api {
         if let Some(ref search) = body.search
             && !search.is_empty()
         {
-            let search_pattern = format!("%{}%", search.to_lowercase());
-            q = q.filter(
-                Condition::any()
-                    .add(
-                        Expr::expr(Func::lower(Expr::col((LogEntry::Entity, LogEntry::Column::Text))))
-                            .like(&search_pattern),
-                    )
-                    .add(
-                        Expr::expr(Func::lower(Expr::col((
-                            LogEntry::Entity,
-                            LogEntry::Column::Username,
-                        ))))
-                        .like(&search_pattern),
-                    )
-                    .add(
-                        Expr::expr(Func::lower(Expr::col((LogEntry::Entity, LogEntry::Column::Values))))
-                            .like(&search_pattern),
-                    ),
-            );
+            q = q.filter(case_insensitive_search(
+                search,
+                [
+                    LogEntry::Column::Text,
+                    LogEntry::Column::Username,
+                    LogEntry::Column::Values,
+                ],
+            ));
         }
 
         let logs = q.all(&*db).await?;

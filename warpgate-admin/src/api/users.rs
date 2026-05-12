@@ -2,8 +2,6 @@ use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
@@ -19,7 +17,7 @@ use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -68,11 +66,7 @@ impl ListApi {
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
         if let Some(ref search) = *search {
-            let search_pattern = format!("%{}%", search.to_lowercase());
-            users = users.filter(
-                Expr::expr(Func::lower(Expr::col((User::Entity, User::Column::Username))))
-                    .like(search_pattern),
-            );
+            users = users.filter(case_insensitive_search(search, [User::Column::Username]));
         }
 
         let users = users.all(&*db).await.map_err(WarpgateError::from)?;

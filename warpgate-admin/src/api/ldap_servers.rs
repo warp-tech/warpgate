@@ -2,8 +2,6 @@ use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
@@ -15,7 +13,7 @@ use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct ImportLdapUsersRequest {
@@ -303,11 +301,7 @@ impl ListApi {
         let mut query = LdapServer::Entity::find().order_by_asc(LdapServer::Column::Name);
 
         if let Some(ref search) = *search {
-            let search_pattern = format!("%{}%", search.to_lowercase());
-            query = query.filter(
-                Expr::expr(Func::lower(Expr::col((LdapServer::Entity, LdapServer::Column::Name))))
-                    .like(search_pattern),
-            );
+            query = query.filter(case_insensitive_search(search, [LdapServer::Column::Name]));
         }
 
         let servers = query.all(&*db).await.map_err(WarpgateError::from)?;

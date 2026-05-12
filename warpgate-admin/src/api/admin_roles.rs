@@ -2,8 +2,6 @@ use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
 use sea_orm::{
     ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
@@ -14,7 +12,7 @@ use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct AdminRoleDataRequest {
@@ -114,11 +112,7 @@ impl ListApi {
         let mut roles = AdminRole::Entity::find().order_by_asc(AdminRole::Column::Name);
 
         if let Some(ref search) = *search {
-            let search_pattern = format!("%{}%", search.to_lowercase());
-            roles = roles.filter(
-                Expr::expr(Func::lower(Expr::col((AdminRole::Entity, AdminRole::Column::Name))))
-                    .like(search_pattern),
-            );
+            roles = roles.filter(case_insensitive_search(search, [AdminRole::Column::Name]));
         }
 
         let roles = roles.all(&*db).await?;
