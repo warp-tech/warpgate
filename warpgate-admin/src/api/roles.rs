@@ -2,6 +2,8 @@ use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::Func;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
@@ -54,8 +56,11 @@ impl ListApi {
         let mut roles = Role::Entity::find().order_by_asc(Role::Column::Name);
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            roles = roles.filter(Role::Column::Name.like(search));
+            let search_pattern = format!("%{}%", search.to_lowercase());
+            roles = roles.filter(
+                Expr::expr(Func::lower(Expr::col((Role::Entity, Role::Column::Name))))
+                    .like(search_pattern),
+            );
         }
 
         let roles = roles.all(&*db).await?;

@@ -3,7 +3,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::SimpleExpr;
+use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
@@ -70,12 +70,22 @@ impl ListApi {
             targets = targets
                 .filter(
                     Condition::any()
-                        .add(Target::Column::Name.like(&search_pattern))
-                        .add(Target::Column::Description.like(&search_pattern)),
+                        .add(
+                            Expr::expr(Func::lower(Expr::col((Target::Entity, Target::Column::Name))))
+                                .like(&search_pattern),
+                        )
+                        .add(
+                            Expr::expr(Func::lower(Expr::col((
+                                Target::Entity,
+                                Target::Column::Description,
+                            ))))
+                            .like(&search_pattern),
+                        ),
                 )
                 .order_by_asc({
                     let case_expr: SimpleExpr = Expr::case(
-                        Expr::col((Target::Entity, Target::Column::Name)).like(&search_pattern),
+                        Expr::expr(Func::lower(Expr::col((Target::Entity, Target::Column::Name))))
+                            .like(&search_pattern),
                         0,
                     )
                     .finally(1)

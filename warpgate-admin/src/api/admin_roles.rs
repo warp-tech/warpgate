@@ -2,8 +2,10 @@ use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::Func;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
@@ -112,8 +114,11 @@ impl ListApi {
         let mut roles = AdminRole::Entity::find().order_by_asc(AdminRole::Column::Name);
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            roles = roles.filter(AdminRole::Column::Name.like(search));
+            let search_pattern = format!("%{}%", search.to_lowercase());
+            roles = roles.filter(
+                Expr::expr(Func::lower(Expr::col((AdminRole::Entity, AdminRole::Column::Name))))
+                    .like(search_pattern),
+            );
         }
 
         let roles = roles.all(&*db).await?;
