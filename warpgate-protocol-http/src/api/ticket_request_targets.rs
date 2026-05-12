@@ -46,7 +46,9 @@ impl Api {
     ) -> Result<GetTicketRequestTargetsResponse, WarpgateError> {
         if matches!(
             &ctx.auth,
-            warpgate_common_http::RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
+            warpgate_common_http::RequestAuthorization::Session(
+                SessionAuthorization::Ticket { .. }
+            )
         ) {
             return Ok(GetTicketRequestTargetsResponse::Unauthorized);
         }

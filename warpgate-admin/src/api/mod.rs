@@ -40,10 +40,7 @@ pub fn get() -> impl OpenApi {
             (roles::ListApi, roles::DetailApi),
             (admin_roles::ListApi, admin_roles::DetailApi),
             (tickets_list::Api, tickets_detail::Api),
-            (
-                ticket_requests_list::Api,
-                ticket_requests_detail::Api,
-            ),
+            (ticket_requests_list::Api, ticket_requests_detail::Api),
             (known_hosts_list::Api, known_hosts_detail::Api),
             ssh_keys::Api,
             logs::Api,

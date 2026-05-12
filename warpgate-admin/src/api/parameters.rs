@@ -117,14 +117,12 @@ impl Api {
         parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
         parameters.ticket_self_service_enabled =
             body.ticket_self_service_enabled.map_or(NotSet, Set);
-        parameters.ticket_auto_approve_existing_access = body
-            .ticket_auto_approve_existing_access
-            .map_or(NotSet, Set);
+        parameters.ticket_auto_approve_existing_access =
+            body.ticket_auto_approve_existing_access.map_or(NotSet, Set);
         parameters.ticket_max_duration_seconds =
             body.ticket_max_duration_seconds.map_or(NotSet, Set);
         parameters.ticket_max_uses = body.ticket_max_uses.map_or(NotSet, Set);
-        parameters.ticket_require_description =
-            body.ticket_require_description.map_or(NotSet, Set);
+        parameters.ticket_require_description = body.ticket_require_description.map_or(NotSet, Set);
         parameters.ticket_request_show_all_targets =
             body.ticket_request_show_all_targets.map_or(NotSet, Set);
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);

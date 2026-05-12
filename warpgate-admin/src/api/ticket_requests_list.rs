@@ -2,7 +2,7 @@ use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::list_ticket_requests;
 use warpgate_db_entities::TicketRequest;
@@ -10,7 +10,6 @@ use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
-use warpgate_common::AdminPermission;
 
 pub struct Api;
 
