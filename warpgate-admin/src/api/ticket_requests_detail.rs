@@ -13,11 +13,7 @@ use crate::api::common::require_admin_permission;
 
 fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<Uuid> {
     let id = ctx.auth.user_id();
-    if id.is_nil() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_nil() { None } else { Some(id) }
 }
 
 pub struct Api;

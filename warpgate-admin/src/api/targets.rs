@@ -78,7 +78,8 @@ impl ListApi {
                 ))
                 .order_by_asc({
                     let case_expr: SimpleExpr = Expr::case(
-                        Expr::expr(Func::lower(Expr::col(Target::Column::Name))).like(&search_pattern),
+                        Expr::expr(Func::lower(Expr::col(Target::Column::Name)))
+                            .like(&search_pattern),
                         0,
                     )
                     .finally(1)

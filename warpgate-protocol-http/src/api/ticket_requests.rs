@@ -6,11 +6,11 @@ use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
+use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{
-    activate_ticket_request, create_ticket_request, ActivateTicketRequestError,
-    CreateTicketRequestError, CreateTicketRequestParams,
+    ActivateTicketRequestError, CreateTicketRequestError, CreateTicketRequestParams,
+    activate_ticket_request, create_ticket_request,
 };
 use warpgate_db_entities::{Target, Ticket, TicketRequest};
 

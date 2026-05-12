@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-28-gd1f9c231-modified"
+    "version": "v0.23.4-13-g4ea467e5-modified"
   },
   "servers": [
     {
@@ -4075,8 +4075,7 @@
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage",
-          "ticket_requests_manage"
+          "admin_roles_manage"
         ],
         "properties": {
           "name": {
@@ -5150,7 +5149,8 @@
         "required": [
           "id",
           "name",
-          "description"
+          "description",
+          "is_default"
         ],
         "properties": {
           "id": {
@@ -5162,6 +5162,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -5177,6 +5180,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },

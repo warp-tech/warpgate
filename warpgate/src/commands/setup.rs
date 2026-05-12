@@ -356,6 +356,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     let access_role = Role::ActiveModel {
         id: Set(Uuid::new_v4()),
         name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
+        is_default: Set(false),
         ..Default::default()
     }
     .insert(&db)

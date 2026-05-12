@@ -19,6 +19,7 @@ use crate::api::common::{case_insensitive_search, require_admin_permission};
 struct RoleDataRequest {
     name: String,
     description: Option<String>,
+    is_default: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -85,6 +86,7 @@ impl ListApi {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
+            is_default: Set(body.is_default.unwrap_or(false)),
         };
 
         let role = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -172,9 +174,11 @@ impl DetailApi {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
+        let current_is_default = role.is_default;
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
+        model.is_default = Set(body.is_default.unwrap_or(current_is_default));
         let role = model.update(&*db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))

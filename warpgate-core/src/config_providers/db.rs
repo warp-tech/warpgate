@@ -193,6 +193,8 @@ impl DatabaseConfigProvider {
         .insert(db)
         .await?;
 
+        let default_roles = entities::Role::Entity::grant_default_roles(db, user.id).await?;
+
         entities::SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
@@ -210,6 +212,17 @@ impl DatabaseConfigProvider {
             info!(
                 "Auto-created SSO user {} (no LDAP link)",
                 preferred_username
+            );
+        }
+
+        if !default_roles.is_empty() {
+            info!(
+                "Assigned default role(s) to auto-created SSO user {}: {:?}",
+                preferred_username,
+                default_roles
+                    .iter()
+                    .map(|role| &role.name)
+                    .collect::<Vec<_>>()
             );
         }
 

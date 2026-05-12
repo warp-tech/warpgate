@@ -46,6 +46,7 @@ mod m00041_fix_user_role_assignment_dates;
 mod m00042_database_target_auth_again;
 mod m00043_unique_usernames;
 mod m00044_ticket_requests;
+mod m00045_role_default_flag;
 
 pub struct Migrator;
 
@@ -97,6 +98,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00042_database_target_auth_again::Migration),
             Box::new(m00043_unique_usernames::Migration),
             Box::new(m00044_ticket_requests::Migration),
+            Box::new(m00045_role_default_flag::Migration),
         ]
     }
 }

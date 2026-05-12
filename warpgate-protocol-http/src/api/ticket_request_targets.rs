@@ -1,11 +1,11 @@
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::{Target as TargetConfig, WarpgateError};
-use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
+use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{Parameters, Target};
 

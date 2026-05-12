@@ -42,6 +42,8 @@ pub async fn command(
         values.insert(&*db).await.map_err(WarpgateError::from)?
     };
 
+    Role::Entity::grant_default_roles(&db, db_user.id).await?;
+
     PasswordCredential::ActiveModel {
         user_id: Set(db_user.id),
         id: Set(Uuid::new_v4()),

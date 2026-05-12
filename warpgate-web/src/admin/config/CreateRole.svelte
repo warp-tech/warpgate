@@ -14,6 +14,7 @@ async function create () {
         const role = await api.createRole({
             roleDataRequest: {
                 name,
+                isDefault: false,
             },
         })
         replace(`/config/access-roles/${role.id}`)
