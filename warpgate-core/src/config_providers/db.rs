@@ -623,9 +623,6 @@ impl ConfigProvider for DatabaseConfigProvider {
                     )
                     .await?;
                 }
-                (Some(_), false) if role.is_default => {
-                    debug!("Keeping default role {role_name} for user {username} during SSO sync");
-                }
                 (Some(assignment), false) => {
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();

@@ -21,13 +21,13 @@ pub async fn command(
 
     let db = services.db.lock().await;
 
-    let (db_user, created) = if let Some(x) = User::Entity::find()
+    let db_user = if let Some(x) = User::Entity::find()
         .filter(User::Column::Username.eq(username))
         .all(&*db)
         .await?
         .first()
     {
-        (x.to_owned(), false)
+        x.to_owned()
     } else {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -39,15 +39,10 @@ pub async fn command(
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
         };
-        (
-            values.insert(&*db).await.map_err(WarpgateError::from)?,
-            true,
-        )
+        values.insert(&*db).await.map_err(WarpgateError::from)?
     };
 
-    if created {
-        Role::Entity::grant_default_roles(&db, db_user.id).await?;
-    }
+    Role::Entity::grant_default_roles(&db, db_user.id).await?;
 
     PasswordCredential::ActiveModel {
         user_id: Set(db_user.id),

@@ -102,7 +102,9 @@ where
 {
     let search_pattern = format!("%{}%", search.to_lowercase());
 
-    columns.into_iter().fold(Condition::any(), |condition, column| {
-        condition.add(Expr::expr(Func::lower(Expr::col(column))).like(search_pattern.clone()))
-    })
+    columns
+        .into_iter()
+        .fold(Condition::any(), |condition, column| {
+            condition.add(Expr::expr(Func::lower(Expr::col(column))).like(search_pattern.clone()))
+        })
 }

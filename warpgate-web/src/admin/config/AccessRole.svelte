@@ -84,15 +84,17 @@
             <Input bind:value={role!.description} />
         </FormGroup>
 
-        <div class="form-check mb-3">
-            <input
-                id="isDefault"
-                class="form-check-input"
-                type="checkbox"
-                bind:checked={role!.isDefault}
-            />
-            <label class="form-check-label" for="isDefault">
-                Default role
+        <div class="mb-4">
+            <label
+                class="d-flex align-items-center"
+                for="isDefault"
+            >
+                <Input
+                    id="isDefault"
+                    type="switch"
+                    bind:checked={role!.isDefault}
+                />
+                <div>Automatically assign to all new users</div>
             </label>
         </div>
     </Loadable>
@@ -121,8 +123,7 @@
         >Remove</AsyncButton>
     </div>
 
-
-    <h4 class="mt-4">Assigned users</h4>
+    <h4 class="mt-5">Assigned users</h4>
 
     <ItemList load={loadUsers}>
         {#snippet item(user)}
