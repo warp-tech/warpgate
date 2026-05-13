@@ -70,7 +70,7 @@ rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
 rand_core = { version = "0.10" }
 dialoguer = { version = "0.12", default-features = false, features = ["editor", "password"] }
-tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
+tokio = { version = "1.52", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
 governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
 rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
 x509-parser = "0.17.0"
