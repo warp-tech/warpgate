@@ -47,3 +47,8 @@ updates:
       - api_sdk
     schedule:
       interval: "daily"
+    groups:
+      version-bumps:
+        applies-to: version-updates
+        update-types:
+          - patch
