@@ -33,4 +33,4 @@ rsasl = { git = "https://github.com/Eugeny/rsasl.git", rev = "cbf4b0f3e05c73b33a
 ] }
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
