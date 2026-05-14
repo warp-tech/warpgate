@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use poem::Request;
 use poem::http::header::HOST;
-use poem::http::uri::Scheme;
+use poem::http::uri::{Authority, Scheme};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_common::http_headers::{X_FORWARDED_HOST, X_FORWARDED_PROTO};
@@ -81,6 +81,10 @@ impl UnauthenticatedRequestContext {
 
     /// Returns the trusted full Host header value (including port if present),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
+    fn parse_host_authority(host_header: &str) -> Option<Authority> {
+        host_header.parse::<Authority>().ok()
+    }
+
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
         if self.should_trust_x_forwarded
             && let Some(xfh) = req.header(&X_FORWARDED_HOST)
@@ -89,11 +93,7 @@ impl UnauthenticatedRequestContext {
         } else {
             req.header(HOST).map(ToString::to_string).or_else(|| {
                 let uri = req.original_uri();
-                let h = uri.host()?;
-                Some(match uri.port() {
-                    Some(port) => format!("{h}:{port}"),
-                    None => h.to_string(),
-                })
+                uri.authority().map(|authority| authority.to_string())
             })
         }
     }
@@ -101,19 +101,15 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted hostname only (port stripped),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_hostname(&self, req: &Request) -> Option<String> {
-        self.trusted_host_header(req)
-            .map(|h| h.split(':').next().unwrap_or(&h).to_string())
+        let host_header = self.trusted_host_header(req)?;
+        Self::parse_host_authority(&host_header).map(|authority| authority.host().to_string())
     }
 
     /// Returns the trusted port only,
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_port(&self, req: &Request) -> Option<u16> {
         let host_header = self.trusted_host_header(req)?;
-        if let Some(port_str) = host_header.split(':').nth(1) {
-            port_str.parse().ok()
-        } else {
-            None
-        }
+        Self::parse_host_authority(&host_header).and_then(|authority| authority.port_u16())
     }
 
     /// Returns the trusted protocol scheme for the request, preferring X-Forwarded-Proto
