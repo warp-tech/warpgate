@@ -1,5 +1,5 @@
 use poem::FromRequest;
-use poem::http::uri::Scheme;
+use poem::http::uri::{Authority, Scheme};
 use poem::web::Data;
 use url::Url;
 use warpgate_common::WarpgateError;
@@ -32,12 +32,15 @@ pub async fn construct_external_url(
         ))
     } else {
         config.store.external_host.as_ref().map(|external_host| {
-            #[allow(clippy::unwrap_used)]
-            let external_host = external_host.split(':').next().unwrap();
+            let external_host = if let Ok(authority) = external_host.parse::<Authority>() {
+                authority.host().to_string()
+            } else {
+                external_host.to_owned()
+            };
 
             (
                 Some(Scheme::HTTPS),
-                Some(external_host.to_owned()),
+                Some(external_host),
                 config
                     .store
                     .http
