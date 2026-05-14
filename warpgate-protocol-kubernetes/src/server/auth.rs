@@ -149,15 +149,11 @@ pub async fn create_authenticated_client(
             // Combine into a single PEM bundle for reqwest::Identity
             let cert_pem = auth.certificate.expose_secret();
             let key_pem = auth.private_key.expose_secret();
-            let mut pem_bundle = String::new();
-            pem_bundle.push_str(cert_pem);
-            if !pem_bundle.ends_with('\n') {
-                pem_bundle.push('\n');
-            }
-            pem_bundle.push_str(key_pem);
-            if !pem_bundle.ends_with('\n') {
-                pem_bundle.push('\n');
-            }
+            let pem_bundle = format!(
+                "{}\n{}\n",
+                cert_pem.trim_end_matches('\n'),
+                key_pem.trim_end_matches('\n')
+            );
 
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
                 .context("Invalid client certificate/key for Kubernetes upstream")?;
