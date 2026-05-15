@@ -22,7 +22,7 @@ cryptography = "^46"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^5.0.2"
-black = "^24"
+black = "^26"
 
 [tool.poetry.group.dev.dependencies]
 pytest-asyncio = "^0.26.0"
