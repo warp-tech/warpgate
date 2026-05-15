@@ -18,10 +18,10 @@ export class ReconnectingWebSocket {
     private socket: WebSocket | null = null
     private timer: ReturnType<typeof setTimeout> | null = null
     private closed = false
-    private url: string
-    private onOpen: () => void
-    private onMessage: (data: string) => void
-    private maxAttempts = 5
+    private readonly url: string
+    private readonly onOpen: () => void
+    private readonly onMessage: (data: string) => void
+    private readonly maxAttempts = 5
 
     constructor (opts: ReconnectingWebSocketOptions) {
         this.url = opts.url
