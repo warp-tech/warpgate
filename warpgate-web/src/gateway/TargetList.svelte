@@ -13,7 +13,7 @@ import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
 import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
-let selectedTarget: TargetSnapshot|undefined = $state()
+let instructionsTarget: TargetSnapshot|undefined = $state()
 
 async function openWebSsh (target: TargetSnapshot) {
     const { sessionId } = await api.createWebSshSession({
@@ -64,9 +64,15 @@ function selectTarget (target: TargetSnapshot) {
         } else {
             loadURL(`/?warpgate-target=${target.name}`)
         }
+    } else if (target.kind === TargetKind.Ssh) {
+        openWebSsh(target)
     } else {
-        selectedTarget = target
+        instructionsTarget = target
     }
+}
+
+function showInstructions (target: TargetSnapshot) {
+    instructionsTarget = target
 }
 
 function loadURL (url: string) {
@@ -162,7 +168,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     </DropdownToggle>
                     <DropdownMenu end>
                         <DropdownItem onclick={() => openWebSsh(target)}>Web terminal</DropdownItem>
-                        <DropdownItem onclick={() => { selectedTarget = target }}>Connection instructions</DropdownItem>
+                        <DropdownItem onclick={() => showInstructions(target)}>Connection instructions</DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
             {:else if target.kind === TargetKind.Http}
@@ -184,25 +190,25 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         title="No other targets yet" />
 {/if}
 
-<Modal isOpen={!!selectedTarget} toggle={() => selectedTarget = undefined} size="lg">
+<Modal isOpen={!!instructionsTarget} toggle={() => instructionsTarget = undefined} size="lg">
     <ModalBody>
-        {#if selectedTarget}
+        {#if instructionsTarget}
         <ConnectionInstructions
-            targetName={selectedTarget.name}
+            targetName={instructionsTarget.name}
             username={$serverInfo?.username}
-            targetKind={selectedTarget.kind ?? TargetKind.Ssh}
+            targetKind={instructionsTarget.kind ?? TargetKind.Ssh}
             targetDefaultDatabaseName={
-                (selectedTarget.kind === TargetKind.MySql || selectedTarget.kind === TargetKind.Postgres)
-                    ? selectedTarget.defaultDatabaseName : undefined}
+                (instructionsTarget.kind === TargetKind.MySql || instructionsTarget.kind === TargetKind.Postgres)
+                    ? instructionsTarget.defaultDatabaseName : undefined}
         />
         {/if}
     </ModalBody>
     <ModalFooter>
-        {#if selectedTarget?.kind === TargetKind.Ssh}
+        {#if instructionsTarget?.kind === TargetKind.Ssh}
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openWebSsh(selectedTarget!)}
+                onclick={() => openWebSsh(instructionsTarget!)}
             >
                 <Fa icon={faTerminal} />
                 Open Web Terminal
@@ -212,7 +218,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
             color="secondary"
             class="modal-button"
             block
-            on:click={() => { selectedTarget = undefined }}
+            on:click={() => { instructionsTarget = undefined }}
         >
             Close
         </Button>
