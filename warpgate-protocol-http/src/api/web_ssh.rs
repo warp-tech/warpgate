@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -41,6 +42,8 @@ enum CreateWebSshSessionResponse {
     Forbidden,
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 429)]
+    TooManyRequests,
 }
 
 #[derive(ApiResponse)]
@@ -76,14 +79,15 @@ impl Api {
         body: Json<CreateWebSshSessionBody>,
         manager: Data<&Arc<WebSshClientManager>>,
         _sec_scheme: AnySecurityScheme,
-    ) -> Result<CreateWebSshSessionResponse, WarpgateError> {
+    ) -> poem::Result<CreateWebSshSessionResponse> {
         let (Some(username), user_id) = (ctx.auth.username(), ctx.auth.user_id()) else {
             return Ok(CreateWebSshSessionResponse::Forbidden);
         };
 
         let Some(target) = Target::Entity::find_by_id(body.target_id)
             .one(&*ctx.services().db.lock().await)
-            .await?
+            .await
+            .context("querying target")?
         else {
             return Ok(CreateWebSshSessionResponse::NotFound);
         };
@@ -100,7 +104,7 @@ impl Api {
             return Ok(CreateWebSshSessionResponse::Forbidden);
         }
 
-        match manager
+        let session_id = manager
             .create_session(
                 services,
                 user_id,
@@ -108,16 +112,18 @@ impl Api {
                 &target.name,
                 remote_addr.0.as_socket_addr().cloned(),
             )
-            .await
-        {
-            Ok(session_id) => Ok(CreateWebSshSessionResponse::Created(Json(
-                WebSshSessionCreated { session_id },
-            ))),
-            Err(e) if e.to_string().contains("not found") => {
-                Ok(CreateWebSshSessionResponse::NotFound)
+            .await;
+
+        let session_id = match session_id {
+            Ok(id) => id,
+            Err(WarpgateError::SessionLimitReached) => {
+                return Ok(CreateWebSshSessionResponse::TooManyRequests);
             }
-            Err(e) => Err(WarpgateError::InconsistentState(e.to_string())),
-        }
+            Err(e) => return Err(e.into()),
+        };
+        Ok(CreateWebSshSessionResponse::Created(Json(
+            WebSshSessionCreated { session_id },
+        )))
     }
 
     #[oai(
@@ -132,7 +138,7 @@ impl Api {
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebSshClientManager>>,
         _sec_scheme: AnySecurityScheme,
-    ) -> Result<GetWebSshSessionResponse, WarpgateError> {
+    ) -> poem::Result<GetWebSshSessionResponse> {
         let Some(session) = manager.get_session(*session_id).await else {
             return Ok(GetWebSshSessionResponse::NotFound);
         };
@@ -159,7 +165,7 @@ impl Api {
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebSshClientManager>>,
         _sec_scheme: AnySecurityScheme,
-    ) -> Result<DeleteWebSshSessionResponse, WarpgateError> {
+    ) -> poem::Result<DeleteWebSshSessionResponse> {
         let Some(session) = manager.get_session(*session_id).await else {
             return Ok(DeleteWebSshSessionResponse::NotFound);
         };
