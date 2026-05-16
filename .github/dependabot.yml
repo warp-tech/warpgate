@@ -52,3 +52,4 @@ updates:
         applies-to: version-updates
         update-types:
           - patch
+          - minor
