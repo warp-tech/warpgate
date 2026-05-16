@@ -7541,7 +7541,7 @@ dependencies = [
  "rsasl",
  "rustls 0.23.40",
  "rustls-native-certs",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls 0.26.4",
