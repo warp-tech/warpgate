@@ -7644,6 +7644,7 @@ dependencies = [
  "futures",
  "poem",
  "poem-openapi",
+ "russh",
  "sea-orm",
  "serde",
  "serde_json",

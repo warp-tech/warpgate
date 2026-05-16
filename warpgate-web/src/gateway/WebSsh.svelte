@@ -22,6 +22,8 @@
         | { type: 'input'; channel_id: string; data: string }
         | { type: 'resize'; channel_id: string; cols: number; rows: number }
         | { type: 'close_channel'; channel_id: string }
+        | { type: 'accept_host_key' }
+        | { type: 'reject_host_key' }
 
     type ServerMessage =
         | { type: 'connection_state'; state: ConnectionState }
@@ -31,6 +33,7 @@
         | { type: 'eof'; channel_id: string }
         | { type: 'exit_status'; channel_id: string; code: number }
         | { type: 'error'; message: string }
+        | { type: 'host_key_unknown'; host: string; port: number; key_type: string; key_base64: string }
 
     interface ChannelState {
         id: string
@@ -44,6 +47,7 @@
     let activeChannelId: string | null = $state(null)
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
+    let pendingHostKey: Extract<ServerMessage, { type: 'host_key_unknown' }> | null = $state(null)
     const tabs: Record<string, SshTerminalTab> = {}
 
     // svelte-ignore state_referenced_locally
@@ -114,6 +118,9 @@
             case 'error':
                 ws.state = ConnectionState.Error
                 connectionError = msg.message
+                break
+            case 'host_key_unknown':
+                pendingHostKey = msg
                 break
         }
     }
@@ -308,6 +315,36 @@
     </ModalBody>
     <ModalFooter>
         <Button color="secondary" class="modal-button" onclick={() => showInstructions = false}>Close</Button>
+    </ModalFooter>
+</Modal>
+{/if}
+
+{#if pendingHostKey}
+<Modal isOpen={true} backdrop="static" keyboard={false}>
+    <ModalBody>
+        <div class="mb-3">
+            There is currently no trusted {pendingHostKey.key_type} key for the SSH server at {pendingHostKey.host}:{pendingHostKey.port}. Trust this key?
+        </div>
+        <code>{pendingHostKey.key_type} {pendingHostKey.key_base64}</code>
+    </ModalBody>
+    <ModalFooter>
+        <Button
+            color="danger"
+            class="modal-button"
+            onclick={() => {
+                send({ type: 'reject_host_key' })
+                pendingHostKey = null
+                disconnect()
+            }}
+        >Reject and disconnect</Button>
+        <Button
+            color="primary"
+            class="modal-button"
+            onclick={() => {
+                send({ type: 'accept_host_key' })
+                pendingHostKey = null
+            }}
+        >Accept and connect</Button>
     </ModalFooter>
 </Modal>
 {/if}

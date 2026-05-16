@@ -8,9 +8,11 @@ use poem::web::{Data, Path};
 use poem::{IntoResponse, handler};
 use uuid::Uuid;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_protocol_ssh::known_hosts::KnownHosts;
 
 use crate::manager::WebSshClientManager;
 use crate::protocol::{ClientMessage, ServerMessage};
+use crate::session::WebSshSession;
 
 #[handler]
 pub async fn ws_handler(
@@ -36,6 +38,7 @@ pub async fn ws_handler(
     session.cancel_disconnect_timer().await;
 
     let manager = (*manager).clone();
+    let db = ctx.services().db.clone();
 
     Ok(ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
@@ -46,7 +49,6 @@ pub async fn ws_handler(
                 let _ = sink.send(Message::Text(json)).await;
             }
         }
-
         let mut keepalive = tokio::time::interval(Duration::from_secs(30));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         keepalive.tick().await; // consume the immediate first tick
@@ -70,7 +72,7 @@ pub async fn ws_handler(
                     match maybe_msg {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
-                                && let Some(reply) = handle_client_message(&session, client_msg).await
+                                && let Some(reply) = handle_client_message(&session, &db, client_msg).await
                                 && let Ok(json) = serde_json::to_string(&reply) {
                                 if sink.send(Message::Text(json)).await.is_err() {
                                     break;
@@ -91,12 +93,18 @@ pub async fn ws_handler(
             }
         }
 
+        // reject any pending host key prompt on disconnect
+        if let Some(pending) = session.take_pending_host_key().await {
+            let _ = pending.reply.send(false);
+        }
+
         session.start_disconnect_timer(manager.clone()).await;
     }))
 }
 
 async fn handle_client_message(
-    session: &crate::session::WebSshSession,
+    session: &WebSshSession,
+    db: &std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseConnection>>,
     msg: ClientMessage,
 ) -> Option<ServerMessage> {
     match msg {
@@ -120,6 +128,25 @@ async fn handle_client_message(
         }
         ClientMessage::CloseChannel { channel_id } => {
             session.close_channel(channel_id).await;
+            None
+        }
+        ClientMessage::AcceptHostKey => {
+            if let Some(pending) = session.take_pending_host_key().await {
+                let known_hosts = KnownHosts::new(db);
+                if let Err(e) = known_hosts
+                    .trust(&pending.host, pending.port, &pending.key)
+                    .await
+                {
+                    tracing::error!(?e, "Failed to save accepted host key");
+                }
+                let _ = pending.reply.send(true);
+            }
+            None
+        }
+        ClientMessage::RejectHostKey => {
+            if let Some(pending) = session.take_pending_host_key().await {
+                let _ = pending.reply.send(false);
+            }
             None
         }
     }

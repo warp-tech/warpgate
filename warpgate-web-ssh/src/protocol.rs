@@ -41,16 +41,40 @@ pub enum ClientMessage {
     CloseChannel {
         channel_id: Uuid,
     },
+    AcceptHostKey,
+    RejectHostKey,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    ConnectionState { state: RCState },
-    Output { channel_id: Uuid, data: Base64Bytes },
-    ChannelOpened { channel_id: Uuid },
-    ChannelClosed { channel_id: Uuid },
-    Eof { channel_id: Uuid },
-    ExitStatus { channel_id: Uuid, code: u32 },
-    Error { message: String },
+    ConnectionState {
+        state: RCState,
+    },
+    Output {
+        channel_id: Uuid,
+        data: Base64Bytes,
+    },
+    ChannelOpened {
+        channel_id: Uuid,
+    },
+    ChannelClosed {
+        channel_id: Uuid,
+    },
+    Eof {
+        channel_id: Uuid,
+    },
+    ExitStatus {
+        channel_id: Uuid,
+        code: u32,
+    },
+    Error {
+        message: String,
+    },
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        key_type: String,
+        key_base64: String,
+    },
 }

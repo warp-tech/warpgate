@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
+use russh::keys::PublicKey;
 use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify, oneshot};
@@ -21,6 +22,13 @@ use crate::WebSshClientManager;
 use crate::protocol::ServerMessage;
 
 pub const OUTPUT_BUFFER_CAPACITY: usize = 2048;
+
+pub struct PendingHostKey {
+    pub reply: oneshot::Sender<bool>,
+    pub key: PublicKey,
+    pub host: String,
+    pub port: u16,
+}
 
 pub struct WebSshSessionHandle {
     abort_tx: UnboundedSender<()>,
@@ -57,6 +65,7 @@ pub struct WebSshSession {
     channel_counter: Arc<AtomicUsize>,
     recordings: Arc<Mutex<SessionRecordings>>,
     channel_recorders: Arc<Mutex<HashMap<Uuid, TerminalRecorder>>>,
+    pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
 }
 
 impl WebSshSession {
@@ -83,6 +92,7 @@ impl WebSshSession {
             channel_counter: Arc::new(AtomicUsize::new(0)),
             recordings,
             channel_recorders: Arc::new(Mutex::new(HashMap::new())),
+            pending_host_key: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -140,6 +150,14 @@ impl WebSshSession {
 
     pub fn wait_buffer(&self) -> Notified<'_> {
         self.output_notify.notified()
+    }
+
+    pub async fn set_pending_host_key(&self, pending: PendingHostKey) {
+        *self.pending_host_key.lock().await = Some(pending);
+    }
+
+    pub async fn take_pending_host_key(&self) -> Option<PendingHostKey> {
+        self.pending_host_key.lock().await.take()
     }
 
     pub async fn with_recorder<F: AsyncFnOnce(&TerminalRecorder)>(&self, channel_id: Uuid, f: F) {

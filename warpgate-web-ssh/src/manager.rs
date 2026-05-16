@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
+use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
@@ -243,17 +244,38 @@ fn spawn_event_loop(
                             match mode {
                                 SshHostKeyVerificationMode::AutoAccept => {
                                     let known_hosts = KnownHosts::new(&services.db);
-                                    known_hosts
+                                    if let Err(e) = known_hosts
                                         .trust(
                                             &ssh_options.host,
                                             ssh_options.port,
                                             &key,
                                         )
-                                        .await?;
+                                        .await
+                                    {
+                                        error!(%session_id, ?e, "Failed to save host key");
+                                    }
                                     let _ = reply.send(true);
                                 }
-                                _ => {
-                                    warn!(%session_id, "Unknown host key rejected (verification mode: {:?})", mode);
+                                SshHostKeyVerificationMode::Prompt => {
+                                    session
+                                        .push_event(ServerMessage::HostKeyUnknown {
+                                            host: ssh_options.host.clone(),
+                                            port: ssh_options.port,
+                                            key_type: key.algorithm().to_string(),
+                                            key_base64: key.public_key_base64(),
+                                        })
+                                        .await;
+                                    session
+                                        .set_pending_host_key(crate::session::PendingHostKey {
+                                            reply,
+                                            key,
+                                            host: ssh_options.host.clone(),
+                                            port: ssh_options.port,
+                                        })
+                                        .await;
+                                }
+                                SshHostKeyVerificationMode::AutoReject => {
+                                    warn!(%session_id, "Unknown host key rejected (auto-reject mode)");
                                     let _ = reply.send(false);
                                 }
                             }
