@@ -147,14 +147,14 @@ impl AuthState {
 
     fn maybe_update_verification_state(&mut self) -> AuthResult {
         let new_result = self.current_verification_state();
-        if Some(new_result.clone()) != self.last_result {
+        if self.last_result.as_ref() != Some(&new_result) {
             debug!(
                 "Verification state changed for auth state {}: {:?} -> {:?}",
                 self.id, self.last_result, &new_result
             );
             let _ = self.state_change_signal.send(new_result.clone());
+            self.last_result = Some(new_result.clone());
         }
-        self.last_result = Some(new_result.clone());
 
         new_result
     }
