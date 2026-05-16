@@ -21,7 +21,7 @@ aiohttp = "^3.11.18"
 cryptography = "^46"
 
 [tool.poetry.dev-dependencies]
-flake8 = "^5.0.2"
+flake8 = "^7.3.0"
 black = "^26"
 
 [tool.poetry.group.dev.dependencies]
