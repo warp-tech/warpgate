@@ -25,7 +25,7 @@ flake8 = "^7.3.0"
 black = "^26"
 
 [tool.poetry.group.dev.dependencies]
-pytest-asyncio = "^0.26.0"
+pytest-asyncio = ">=0.26,<1.4"
 pytest-timeout = "^2.4.0"
 pyright = "^1.1.408"
 
