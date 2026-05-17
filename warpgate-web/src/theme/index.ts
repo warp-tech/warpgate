@@ -21,18 +21,16 @@ function loadThemeFile (name: ThemeFileName) {
     return import('./theme.light.scss?inline')
 }
 
-async function loadTheme (name: ThemeFileName) {
+export async function loadTheme (name: ThemeFileName): Promise<void> {
     const theme = (await loadThemeFile(name)).default
     styleElement.innerHTML = theme
 }
-
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
     if (get(currentTheme) === 'auto') {
         loadTheme(event.matches ? 'dark' : 'light')
     }
 })
-
 
 export function setCurrentTheme (theme: ThemeName): void {
     localStorage.setItem('theme', theme)

@@ -38,6 +38,8 @@ use warpgate_tls::{
     TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_web::Assets;
+use warpgate_web_ssh::WebSshClientManager;
+use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
 use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
@@ -172,8 +174,10 @@ impl ProtocolServer for HTTPProtocolServer {
         };
 
         // /@warpgate/ routes
+        let web_ssh_manager = Arc::new(WebSshClientManager::new());
         let at_warpgate_endpoints = || {
             let services = self.services.clone();
+            let web_ssh_manager = web_ssh_manager.clone();
             let api_service = {
                 OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
                     .server("/@warpgate/api")
@@ -204,6 +208,10 @@ impl ProtocolServer for HTTPProtocolServer {
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
                 )
                 .at(
+                    "/api/web-ssh/sessions/:session_id/stream",
+                    endpoint_auth(ssh_web_client_ws_handler),
+                )
+                .at(
                     "",
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
                         .with(cache_bust()),
@@ -231,6 +239,7 @@ impl ProtocolServer for HTTPProtocolServer {
                         }
                     }
                 })
+                .data(web_ssh_manager)
         };
 
         let app = Route::new()

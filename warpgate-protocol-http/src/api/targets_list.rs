@@ -7,6 +7,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
+use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -29,6 +30,7 @@ pub struct GroupInfo {
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
+    pub id: Uuid,
     pub name: String,
     pub description: String,
     pub kind: Target::TargetKind,
@@ -121,6 +123,7 @@ impl Api {
                 });
 
                 TargetSnapshot {
+                    id: t.id,
                     name: t.name.clone(),
                     description: t.description.clone(),
                     kind: (&t.options).into(),

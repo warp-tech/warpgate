@@ -199,9 +199,9 @@ export interface ProtocolProperties {
 }
 
 export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
-    ssh: { sessionsCanBeClosed: true },
-    http: { sessionsCanBeClosed: true },
-    mysql: { sessionsCanBeClosed: true },
-    postgres: { sessionsCanBeClosed: true },
-    kubernetes: { sessionsCanBeClosed: false },
+    SSH: { sessionsCanBeClosed: true },
+    HTTP: { sessionsCanBeClosed: true },
+    MySQL: { sessionsCanBeClosed: true },
+    PostgreSQL: { sessionsCanBeClosed: true },
+    Kubernetes: { sessionsCanBeClosed: false },
 }
