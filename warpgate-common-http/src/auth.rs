@@ -7,6 +7,44 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_common::http_headers::{X_FORWARDED_HOST, X_FORWARDED_PROTO};
 
+pub(crate) fn first_forwarded_header_value(value: &str) -> Option<&str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
+fn trusted_host_header(should_trust_x_forwarded: bool, req: &Request) -> Option<String> {
+    if should_trust_x_forwarded
+        && let Some(host) = req
+            .header(&X_FORWARDED_HOST)
+            .and_then(first_forwarded_header_value)
+    {
+        return Some(host.to_string());
+    }
+
+    req.header(HOST).map(ToString::to_string).or_else(|| {
+        let uri = req.original_uri();
+        uri.authority().map(|authority| authority.to_string())
+    })
+}
+
+fn trusted_proto(should_trust_x_forwarded: bool, req: &Request) -> Scheme {
+    if should_trust_x_forwarded
+        && let Some(proto) = req
+            .header(&X_FORWARDED_PROTO)
+            .and_then(first_forwarded_header_value)
+        && let Ok(s) = Scheme::try_from(proto)
+    {
+        s
+    } else {
+        req.original_uri()
+            .scheme()
+            .cloned()
+            .unwrap_or(Scheme::HTTPS)
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthStateId(pub Uuid);
 
@@ -86,16 +124,7 @@ impl UnauthenticatedRequestContext {
     }
 
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
-        if self.should_trust_x_forwarded
-            && let Some(xfh) = req.header(&X_FORWARDED_HOST)
-        {
-            Some(xfh.to_string())
-        } else {
-            req.header(HOST).map(ToString::to_string).or_else(|| {
-                let uri = req.original_uri();
-                uri.authority().map(|authority| authority.to_string())
-            })
-        }
+        trusted_host_header(self.should_trust_x_forwarded, req)
     }
 
     /// Returns the trusted hostname only (port stripped),
@@ -115,17 +144,7 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted protocol scheme for the request, preferring X-Forwarded-Proto
     /// if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_proto(&self, req: &Request) -> Scheme {
-        if self.should_trust_x_forwarded
-            && let Some(proto) = req.header(&X_FORWARDED_PROTO)
-            && let Ok(s) = Scheme::try_from(proto)
-        {
-            s
-        } else {
-            req.original_uri()
-                .scheme()
-                .cloned()
-                .unwrap_or(Scheme::HTTPS)
-        }
+        trusted_proto(self.should_trust_x_forwarded, req)
     }
 }
 
@@ -167,4 +186,66 @@ impl RequestAuthorization {
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
+#[cfg(test)]
+mod tests {
+    use poem::Request;
+    use poem::http::header::HOST;
+
+    use super::*;
+
+    fn trusted_header_request(
+        forwarded_host: Option<&str>,
+        forwarded_proto: Option<&str>,
+    ) -> Request {
+        let mut builder = Request::builder()
+            .uri_str("http://internal.example")
+            .header(HOST, "fallback.example");
+
+        if let Some(value) = forwarded_host {
+            builder = builder.header(&X_FORWARDED_HOST, value);
+        }
+        if let Some(value) = forwarded_proto {
+            builder = builder.header(&X_FORWARDED_PROTO, value);
+        }
+
+        builder.finish()
+    }
+
+    #[test]
+    fn trusted_host_uses_first_forwarded_host() {
+        let req = trusted_header_request(Some("public.example, proxy.local"), None);
+
+        assert_eq!(
+            trusted_host_header(true, &req),
+            Some("public.example".to_string())
+        );
+    }
+
+    #[test]
+    fn trusted_host_falls_back_when_forwarded_host_is_empty() {
+        let req = trusted_header_request(Some(" , "), None);
+
+        assert_eq!(
+            trusted_host_header(true, &req),
+            Some("fallback.example".to_string())
+        );
+    }
+
+    #[test]
+    fn trusted_proto_uses_first_forwarded_proto() {
+        let req = trusted_header_request(None, Some("https, http"));
+
+        assert_eq!(trusted_proto(true, &req), Scheme::HTTPS);
+    }
+
+    #[test]
+    fn first_forwarded_header_value_skips_empty_items() {
+        assert_eq!(
+            first_forwarded_header_value(" , public.example, proxy.local"),
+            Some("public.example")
+        );
+        assert_eq!(first_forwarded_header_value(" , "), None);
+    }
 }
