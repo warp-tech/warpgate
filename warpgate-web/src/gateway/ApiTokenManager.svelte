@@ -9,6 +9,7 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
+    import { serverInfo } from 'gateway/lib/store'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
@@ -84,5 +85,6 @@
 <CreateApiTokenModal
     bind:isOpen={creatingToken}
     create={createToken}
+    maxDurationSeconds={$serverInfo?.maxApiTokenDurationSeconds}
 />
 {/if}

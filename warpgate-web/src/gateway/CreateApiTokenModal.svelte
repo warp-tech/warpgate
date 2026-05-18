@@ -14,14 +14,24 @@
     interface Props {
         isOpen: boolean
         create: (label: string, expiry: Date) => void
+        maxDurationSeconds?: number | null
     }
 
     let {
         isOpen = $bindable(true),
         create,
+        maxDurationSeconds = null,
     }: Props = $props()
     let label = $state('')
-    let expiry = $state(new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString())
+
+    const defaultDurationMs = maxDurationSeconds
+        ? Math.min(maxDurationSeconds * 1000, 1000 * 60 * 60 * 24 * 7)
+        : 1000 * 60 * 60 * 24 * 7
+
+    let expiry = $state(new Date(Date.now() + defaultDurationMs).toISOString())
+    let maxExpiry = $derived(maxDurationSeconds
+        ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString().slice(0, 16)
+        : undefined)
     let field: HTMLInputElement|undefined = $state()
     let validated = $state(false)
 
@@ -55,7 +65,13 @@
             <FormGroup floating label="Expiry" spacing="0">
                 <Input
                     type="datetime-local"
+                    max={maxExpiry}
                     bind:value={expiry}  />
+                {#if maxDurationSeconds}
+                    <small class="text-muted">
+                        Maximum: {Math.floor(maxDurationSeconds / 86400)} days
+                    </small>
+                {/if}
             </FormGroup>
         </ModalBody>
         <ModalFooter>

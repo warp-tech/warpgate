@@ -6,9 +6,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
+use time::Duration;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
-use warpgate_db_entities::ApiToken;
+use warpgate_db_entities::{ApiToken, Parameters};
 
 use super::common::get_user;
 use crate::common::endpoint_auth;
@@ -58,6 +59,8 @@ struct TokenAndSecret {
 enum CreateApiTokenResponse {
     #[oai(status = 201)]
     Created(Json<TokenAndSecret>),
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
     #[oai(status = 401)]
     Unauthorized,
 }
@@ -115,6 +118,17 @@ impl Api {
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
+
+        let parameters = Parameters::Entity::get(&db).await?;
+        if let Some(max_seconds) = parameters.max_api_token_duration_seconds {
+            let max_expiry = OffsetDateTime::now_utc() + Duration::seconds(max_seconds);
+            if body.expiry > max_expiry {
+                let max_days = max_seconds / 86400;
+                return Ok(CreateApiTokenResponse::BadRequest(Json(format!(
+                    "Token expiry exceeds maximum allowed duration ({max_days} days)"
+                ))));
+            }
+        }
 
         let secret = generate_ticket_secret();
         let object = ApiToken::ActiveModel {
