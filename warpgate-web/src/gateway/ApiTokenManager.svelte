@@ -18,7 +18,7 @@
     let lastCreatedSecret: string | undefined = $state()
     const now = Date.now()
 
-    const urlParams = new URLSearchParams(get(querystring))
+    const urlParams = new URLSearchParams(get(querystring) ?? '')
     const autoCreate = urlParams.get('create') === 'true'
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')
