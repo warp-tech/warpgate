@@ -10,11 +10,38 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
     import { serverInfo } from 'gateway/lib/store'
+    import { querystring } from 'svelte-spa-router'
+    import { get } from 'svelte/store'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
     let lastCreatedSecret: string | undefined = $state()
     const now = Date.now()
+
+    const urlParams = new URLSearchParams(get(querystring))
+    const autoCreate = urlParams.get('create') === 'true'
+    const paramLabel = urlParams.get('label') ?? ''
+    const paramExpiry = urlParams.get('expiry')
+
+    function parseExpiryParam (val: string | null): number | undefined {
+        if (!val) return undefined
+        const match = val.match(/^(\d+)([dhm])$/)
+        if (match) {
+            const num = parseInt(match[1])
+            switch (match[2]) {
+                case 'd': return num * 86400000
+                case 'h': return num * 3600000
+                case 'm': return num * 60000
+            }
+        }
+        return undefined
+    }
+
+    const initialExpiryMs = parseExpiryParam(paramExpiry)
+
+    if (autoCreate) {
+        creatingToken = true
+    }
 
     async function deleteToken (token: ExistingApiToken) {
         tokens = tokens.filter(c => c.id !== token.id)
@@ -86,5 +113,7 @@
     bind:isOpen={creatingToken}
     create={createToken}
     maxDurationSeconds={$serverInfo?.maxApiTokenDurationSeconds}
+    initialLabel={paramLabel}
+    {initialExpiryMs}
 />
 {/if}

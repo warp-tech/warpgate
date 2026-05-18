@@ -15,19 +15,24 @@
         isOpen: boolean
         create: (label: string, expiry: Date) => void
         maxDurationSeconds?: number | null
+        initialLabel?: string
+        initialExpiryMs?: number
     }
 
     let {
         isOpen = $bindable(true),
         create,
         maxDurationSeconds = null,
+        initialLabel = '',
+        initialExpiryMs,
     }: Props = $props()
-    let label = $state('')
 
-    const defaultDurationMs = maxDurationSeconds
-        ? Math.min(maxDurationSeconds * 1000, 1000 * 60 * 60 * 24 * 7)
-        : 1000 * 60 * 60 * 24 * 7
+    const defaultDurationMs = initialExpiryMs
+        ?? (maxDurationSeconds
+            ? Math.min(maxDurationSeconds * 1000, 1000 * 60 * 60 * 24 * 7)
+            : 1000 * 60 * 60 * 24 * 7)
 
+    let label = $state(initialLabel)
     let expiry = $state(new Date(Date.now() + defaultDurationMs).toISOString())
     let maxExpiry = $derived(maxDurationSeconds
         ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString().slice(0, 16)
