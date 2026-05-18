@@ -15,8 +15,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Alias::new("max_api_token_duration_seconds"))
                             .big_integer()
-                            .null()
-                            .default(604800),
+                            .null(),
                     )
                     .to_owned(),
             )

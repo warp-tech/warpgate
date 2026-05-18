@@ -1,6 +1,7 @@
 <script lang="ts">
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
+    import { stringifyError } from 'common/errors'
     import { faKey } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
@@ -16,6 +17,7 @@
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
     let lastCreatedSecret: string | undefined = $state()
+    let error: string | undefined = $state()
     const now = Date.now()
 
     const urlParams = new URLSearchParams(get(querystring) ?? '')
@@ -50,9 +52,14 @@
     }
 
     async function createToken (label: string, expiry: Date) {
-        const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
-        lastCreatedSecret = secret
-        tokens = [...tokens, token]
+        try {
+            error = undefined
+            const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
+            lastCreatedSecret = secret
+            tokens = [...tokens, token]
+        } catch (err: any) {
+            error = await stringifyError(err)
+        }
     }
 </script>
 
@@ -63,6 +70,10 @@
         e.preventDefault()
     }}>Create token</Button>
 </div>
+
+{#if error}
+<Alert color="danger">{error}</Alert>
+{/if}
 
 {#if lastCreatedSecret}
 <Alert color="info">

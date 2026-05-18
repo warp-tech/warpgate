@@ -3,10 +3,9 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use time::Duration;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_db_entities::{ApiToken, Parameters};
@@ -123,9 +122,8 @@ impl Api {
         if let Some(max_seconds) = parameters.max_api_token_duration_seconds {
             let max_expiry = OffsetDateTime::now_utc() + Duration::seconds(max_seconds);
             if body.expiry > max_expiry {
-                let max_days = max_seconds / 86400;
                 return Ok(CreateApiTokenResponse::BadRequest(Json(format!(
-                    "Token expiry exceeds maximum allowed duration ({max_days} days)"
+                    "Token expiry exceeds maximum allowed duration of {max_seconds} seconds"
                 ))));
             }
         }

@@ -54,7 +54,7 @@ impl Entity {
                     ticket_require_description: Set(false),
                     ticket_request_show_all_targets: Set(false),
                     show_session_menu: Set(true),
-                    max_api_token_duration_seconds: Set(Some(604800)),
+                    max_api_token_duration_seconds: Set(None),
                 }
                 .insert(db)
                 .await
