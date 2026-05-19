@@ -9,9 +9,9 @@ use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify, oneshot};
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_core::SessionHandle;
+use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
@@ -52,6 +52,9 @@ pub struct WebSshSession {
     target_name: String,
     target_kind: TargetKind,
 
+    // prevents the handle from getting dropped too early
+    _server_handle: Arc<Mutex<WarpgateServerHandle>>,
+
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     abort_tx: UnboundedSender<()>,
 
@@ -74,6 +77,7 @@ impl WebSshSession {
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
+        server_handle: Arc<Mutex<WarpgateServerHandle>>,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
         abort_tx: UnboundedSender<()>,
         recordings: Arc<Mutex<SessionRecordings>>,
@@ -83,6 +87,7 @@ impl WebSshSession {
             user_id,
             target_name,
             target_kind,
+            _server_handle: server_handle,
             command_tx,
             abort_tx,
             output_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(OUTPUT_BUFFER_CAPACITY))),
@@ -222,6 +227,8 @@ impl WebSshSession {
 
     pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Uuid {
         let channel_id = Uuid::new_v4();
+
+        info!(session=%self.id, channel=%channel_id, "Opening session channel");
 
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell))
             .await;

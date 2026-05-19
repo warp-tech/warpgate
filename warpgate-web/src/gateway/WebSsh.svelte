@@ -263,7 +263,7 @@
 
                 {#if ws.state === ConnectionState.Connected}
                     <button
-                        class="btn btn-secondary"
+                        class="btn btn-secondary px-3"
                         onclick={requestNewChannel}
                     >
                         <Fa icon={faPlus} />

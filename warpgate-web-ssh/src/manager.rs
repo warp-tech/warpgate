@@ -106,6 +106,7 @@ impl WebSshClientManager {
             user_id,
             target_name.to_owned(),
             TargetKind::from(&target.options),
+            server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
             services.recordings.clone(),

@@ -31,6 +31,11 @@
     import * as Zmodem from 'zmodem.js'
     import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 
+    enum ZmodemFeedResult {
+        Consumed = 'consumed',
+        Passthrough = 'passthrough'
+    }
+
     class ZmodemSession {
         private sentry: any
         private session: any = null
@@ -53,7 +58,7 @@
                     this.sendToHost(Uint8Array.from(octets))
                 },
                 on_detect: (detection: any) => {
-                    void this.handleDetect(detection)
+                    this.handleDetect(detection)
                 },
                 on_retract: () => {
                     this.session = null
@@ -62,16 +67,20 @@
             })
         }
 
-        feed (data: Uint8Array): 'consumed' | 'passthrough' {
+        feed (data: Uint8Array): ZmodemFeedResult {
             if (this.active || this.session) {
                 try {
                     this.sentry.consume(data)
                 } catch {
-                    try { this.session?.abort() } catch { /* ignore */ }
+                    try {
+                        this.session?.abort()
+                    } catch {
+                        // ignore
+                    }
                     this.session = null
                     this.active = false
                 }
-                return 'consumed'
+                return ZmodemFeedResult.Consumed
             }
 
             try {
@@ -79,7 +88,7 @@
             } catch {
                 // Ignore detection errors when no session is active.
             }
-            return 'passthrough'
+            return ZmodemFeedResult.Passthrough
         }
 
         resolveConfirm (accepted: boolean): void {
@@ -115,14 +124,22 @@
                 } else {
                     this.session.on('offer', (xfer: any) => {
                         this.receiveFile(xfer).catch(() => {
-                            try { xfer.skip() } catch { /* ignore */ }
+                            try {
+                                xfer.skip()
+                            } catch {
+                                // ignore
+                            }
                         })
                     })
                     this.session.start()
                     await new Promise(resolve => this.session.on('session_end', resolve))
                 }
             } catch {
-                try { this.session.abort() } catch { /* ignore */ }
+                try {
+                    this.session.abort()
+                } catch {
+                    //ignore
+                }
             } finally {
                 this.session = null
                 this.active = false
@@ -136,15 +153,21 @@
                     chunks.push(Uint8Array.from(chunk))
                 },
             })
+
             const { name } = xfer.get_details() as { name: string }
             const blob = new Blob(chunks as unknown as BlobPart[], { type: 'application/octet-stream' })
+
             const url = URL.createObjectURL(blob)
             const link = document.createElement('a')
             link.href = url
             link.download = name
             document.body.appendChild(link)
             link.click()
-            setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url) }, 100)
+
+            setTimeout(() => {
+                document.body.removeChild(link)
+                URL.revokeObjectURL(url)
+            }, 100)
         }
 
         private async sendFile (): Promise<void> {
@@ -164,7 +187,7 @@
             const xfer = await this.session.send_offer({
                 name: file.name,
                 size: file.size,
-                mode: 'octet',
+                mode: parseInt('0666', 8),
                 mtime: Math.floor(file.lastModified / 1000),
             })
 
@@ -242,7 +265,7 @@
     })
 
     export function write (data: Uint8Array): void {
-        if (zmodem.feed(data) === 'passthrough') {
+        if (zmodem.feed(data) === ZmodemFeedResult.Passthrough) {
             terminal.write(data)
         }
     }
@@ -282,8 +305,16 @@
         The remote side wants to start a ZMODEM file transfer. Accept?
     </ModalBody>
     <ModalFooter>
-        <Button color="secondary" onclick={() => zmodem.resolveConfirm(false)}>Reject</Button>
-        <Button color="primary" onclick={() => zmodem.resolveConfirm(true)}>Accept</Button>
+        <Button
+            color="secondary"
+            class="modal-button"
+            onclick={() => zmodem.resolveConfirm(false)
+        }>Reject</Button>
+        <Button
+            color="primary"
+            class="modal-button"
+            onclick={() => zmodem.resolveConfirm(true)
+        }>Accept</Button>
     </ModalFooter>
 </Modal>
 
