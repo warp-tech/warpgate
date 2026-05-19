@@ -11,8 +11,8 @@ use tokio::sync::{Mutex, Notify, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
+use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
@@ -230,6 +230,14 @@ impl WebSshSession {
 
         info!(session=%self.id, channel=%channel_id, "Opening session channel");
 
+        self.start_recording(channel_id).await;
+        self.with_recorder(channel_id, async move |r: &TerminalRecorder| {
+            if let Err(e) = r.write_pty_resize(cols, rows).await {
+                error!(%channel_id, ?e, "Failed to write initial PTY size to recording");
+            }
+        })
+        .await;
+
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell))
             .await;
         self.command(RCCommand::Channel(
@@ -241,13 +249,6 @@ impl WebSshSession {
             channel_id,
             ChannelOperation::RequestShell,
         ))
-        .await;
-        self.start_recording(channel_id).await;
-        self.with_recorder(channel_id, async move |r: &TerminalRecorder| {
-            if let Err(e) = r.write_pty_resize(cols, rows).await {
-                error!(%channel_id, ?e, "Failed to write initial PTY size to recording");
-            }
-        })
         .await;
         channel_id
     }
