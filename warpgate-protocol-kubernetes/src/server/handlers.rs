@@ -143,11 +143,10 @@ async fn _handle_normal_request_inner(
     session_id: SessionId,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
-    let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username), services)
-            .await?
-            .build()
-            .context("building reqwest client")?;
+    let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
+        .await?
+        .build()
+        .context("building reqwest client")?;
 
     debug!(
         "Target Kubernetes options: cluster_url={}, auth={:?}",
@@ -394,11 +393,10 @@ async fn _handle_websocket_request_inner(
         let _ = full_url.set_scheme("ws");
     }
 
-    let client =
-        create_authenticated_client(k8s_options, Some(&user_info.username), services)
-            .await?
-            .http1_only()
-            .build()?;
+    let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
+        .await?
+        .http1_only()
+        .build()?;
 
     let (recorder_tx, recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
     {

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.4-13-g4ea467e5-modified"
+    "version": "v0.23.4-21-ge437f0a5-modified"
   },
   "servers": [
     {
@@ -1124,6 +1124,123 @@
         ],
         "operationId": "get_ticket_request_targets"
       }
+    },
+    "/web-ssh/sessions": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebSshSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSshSessionCreated"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_web_ssh_session"
+      }
+    },
+    "/web-ssh/sessions/{session_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "session_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSshSessionInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_web_ssh_session"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "session_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_web_ssh_session"
+      }
     }
   },
   "components": {
@@ -1310,6 +1427,19 @@
           },
           "description": {
             "type": "string"
+          }
+        }
+      },
+      "CreateWebSshSessionBody": {
+        "type": "object",
+        "title": "CreateWebSshSessionBody",
+        "required": [
+          "target_id"
+        ],
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -1894,11 +2024,16 @@
         "type": "object",
         "title": "TargetSnapshot",
         "required": [
+          "id",
           "name",
           "description",
           "kind"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "type": "string"
           },
@@ -2123,6 +2258,35 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          }
+        }
+      },
+      "WebSshSessionCreated": {
+        "type": "object",
+        "title": "WebSshSessionCreated",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "WebSshSessionInfo": {
+        "type": "object",
+        "title": "WebSshSessionInfo",
+        "required": [
+          "target_name",
+          "target_kind"
+        ],
+        "properties": {
+          "target_name": {
+            "type": "string"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/TargetKind"
           }
         }
       }

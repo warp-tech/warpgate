@@ -16,6 +16,8 @@ pub enum WarpgateError {
     DatabaseError(#[from] sea_orm::DbErr),
     #[error("ticket not found: {0}")]
     InvalidTicket(Uuid),
+    #[error("invalid target")]
+    InvalidTarget,
     #[error("invalid credential type")]
     InvalidCredentialType,
     #[error(transparent)]
@@ -72,6 +74,8 @@ pub enum WarpgateError {
     IpAddrNotAllowed(String, String),
     #[error("could not parse IP network address: {0}")]
     InvalidNetworkAddress(String),
+    #[error("session limit reached")]
+    SessionLimitReached,
 }
 
 impl ResponseError for WarpgateError {
@@ -83,6 +87,7 @@ impl ResponseError for WarpgateError {
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
