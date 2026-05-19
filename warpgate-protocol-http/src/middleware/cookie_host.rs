@@ -63,7 +63,8 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             None => self.base_domain.as_ref().map(|b| Some(b.clone())),
             Some(h) if is_localhost_host(h) => Some(None),
             Some(h) => self.base_domain.as_ref().and_then(|base| {
-                if is_strict_parent(base, h) {
+                let base_trimmed = base.trim_start_matches('.');
+                if is_strict_parent(base, h) || h == base_trimmed {
                     Some(Some(base.clone()))
                 } else {
                     None
