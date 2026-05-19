@@ -62,7 +62,7 @@ impl Api {
             return Ok(StartSsoResponse::NotFound);
         };
         let mut return_url = construct_external_url(
-            Some(req),
+            None,
             &config,
             provider_config.return_domain_whitelist.as_deref(),
         )
