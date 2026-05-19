@@ -28,12 +28,160 @@
     import { Terminal } from '@xterm/xterm'
     import { FitAddon } from '@xterm/addon-fit'
     import { Unicode11Addon } from '@xterm/addon-unicode11'
+    import * as Zmodem from 'zmodem.js'
+    import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
+
+    class ZmodemSession {
+        private sentry: any
+        private session: any = null
+        private active = false
+
+        confirmPending = $state(false)
+        private confirmResolve: ((accepted: boolean) => void) | null = null
+
+        constructor (
+            private writeToTerminal: (data: Uint8Array) => void,
+            private sendToHost: (data: Uint8Array) => void,
+        ) {
+            this.sentry = new Zmodem.Sentry({
+                to_terminal: (octets: number[]) => {
+                    if (this.active && this.session) {
+                        this.writeToTerminal(Uint8Array.from(octets))
+                    }
+                },
+                sender: (octets: number[]) => {
+                    this.sendToHost(Uint8Array.from(octets))
+                },
+                on_detect: (detection: any) => {
+                    void this.handleDetect(detection)
+                },
+                on_retract: () => {
+                    this.session = null
+                    this.active = false
+                },
+            })
+        }
+
+        feed (data: Uint8Array): 'consumed' | 'passthrough' {
+            if (this.active || this.session) {
+                try {
+                    this.sentry.consume(data)
+                } catch {
+                    try { this.session?.abort() } catch { /* ignore */ }
+                    this.session = null
+                    this.active = false
+                }
+                return 'consumed'
+            }
+
+            try {
+                this.sentry.consume(data)
+            } catch {
+                // Ignore detection errors when no session is active.
+            }
+            return 'passthrough'
+        }
+
+        resolveConfirm (accepted: boolean): void {
+            this.confirmPending = false
+            this.confirmResolve?.(accepted)
+            this.confirmResolve = null
+        }
+
+        destroy (): void {
+            this.sentry.destroy?.()
+        }
+
+        private askConfirm (): Promise<boolean> {
+            return new Promise(resolve => {
+                this.confirmResolve = resolve
+                this.confirmPending = true
+            })
+        }
+
+        private async handleDetect (detection: any): Promise<void> {
+            const accepted = await this.askConfirm()
+            if (!accepted) {
+                detection.deny()
+                return
+            }
+
+            this.active = true
+            this.session = detection.confirm()
+
+            try {
+                if (this.session.type === 'send') {
+                    await this.sendFile()
+                } else {
+                    this.session.on('offer', (xfer: any) => {
+                        this.receiveFile(xfer).catch(() => {
+                            try { xfer.skip() } catch { /* ignore */ }
+                        })
+                    })
+                    this.session.start()
+                    await new Promise(resolve => this.session.on('session_end', resolve))
+                }
+            } catch {
+                try { this.session.abort() } catch { /* ignore */ }
+            } finally {
+                this.session = null
+                this.active = false
+            }
+        }
+
+        private async receiveFile (xfer: any): Promise<void> {
+            const chunks: Uint8Array[] = []
+            await xfer.accept({
+                on_input: (chunk: ArrayLike<number>) => {
+                    chunks.push(Uint8Array.from(chunk))
+                },
+            })
+            const { name } = xfer.get_details() as { name: string }
+            const blob = new Blob(chunks as unknown as BlobPart[], { type: 'application/octet-stream' })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = name
+            document.body.appendChild(link)
+            link.click()
+            setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url) }, 100)
+        }
+
+        private async sendFile (): Promise<void> {
+            const file = await new Promise<File | null>(resolve => {
+                const input = document.createElement('input')
+                input.type = 'file'
+                input.multiple = false
+                input.onchange = () => resolve(input.files?.[0] ?? null)
+                input.click()
+            })
+
+            if (!file) {
+                await this.session.close()
+                return
+            }
+
+            const xfer = await this.session.send_offer({
+                name: file.name,
+                size: file.size,
+                mode: 'octet',
+                mtime: Math.floor(file.lastModified / 1000),
+            })
+
+            if (xfer) {
+                await xfer.send(new Uint8Array(await file.arrayBuffer()))
+                await xfer.end()
+            }
+
+            await this.session.close()
+        }
+    }
 
     interface Props {
         active: boolean
         fontSize: number
         readOnly: boolean
-        onInput: (data: string) => void
+        onInput: (data: Uint8Array) => void
         onResize: (cols: number, rows: number) => void
         onTitleChange: (title: string) => void
     }
@@ -69,7 +217,16 @@
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
-    terminal.onData(data => onInput(data))
+
+    const inputEncoder = new TextEncoder()
+    const zmodem = new ZmodemSession(
+        data => terminal.write(data),
+        data => onInput(data),
+    )
+
+    terminal.onData(data => {
+        onInput(inputEncoder.encode(data))
+    })
     terminal.onTitleChange(t => onTitleChange(t))
     terminal.loadAddon(new Unicode11Addon())
     terminal.unicode.activeVersion = '11'
@@ -84,8 +241,10 @@
         terminal.options.disableStdin = readOnly
     })
 
-    export function write (data: string | Uint8Array): void {
-        terminal.write(data)
+    export function write (data: Uint8Array): void {
+        if (zmodem.feed(data) === 'passthrough') {
+            terminal.write(data)
+        }
     }
 
     export function fit (): void {
@@ -107,6 +266,7 @@
     }
 
     onDestroy(() => {
+        zmodem.destroy()
         terminal.dispose()
     })
 </script>
@@ -116,6 +276,16 @@
     class:d-none={!active}
     use:mountTerminal
 ></div>
+
+<Modal isOpen={zmodem.confirmPending} backdrop="static" keyboard={false}>
+    <ModalBody>
+        The remote side wants to start a ZMODEM file transfer. Accept?
+    </ModalBody>
+    <ModalFooter>
+        <Button color="secondary" onclick={() => zmodem.resolveConfirm(false)}>Reject</Button>
+        <Button color="primary" onclick={() => zmodem.resolveConfirm(true)}>Accept</Button>
+    </ModalFooter>
+</Modal>
 
 <style lang="scss">
     @import "../../node_modules/@xterm/xterm/css/xterm.css";

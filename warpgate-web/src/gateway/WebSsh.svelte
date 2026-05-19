@@ -84,6 +84,16 @@
         ws.send(JSON.stringify(msg))
     }
 
+    function bytesToBase64 (bytes: Uint8Array): string {
+        let binary = ''
+        const chunkSize = 0x8000
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize)
+            binary += String.fromCharCode(...chunk)
+        }
+        return btoa(binary)
+    }
+
     function requestNewChannel () {
         const size = activeChannelId ? tabs[activeChannelId]?.getSize() : null
         send({ type: 'open_channel', cols: size?.cols ?? 80, rows: size?.rows ?? 24 })
@@ -194,6 +204,28 @@
 </script>
 
 <div class="ssh-web-client d-flex flex-column" use:observeResize style={`background-color: ${THEME.background}`}>
+
+    <div class="terminal-area flex-grow-1 position-relative">
+        {#each channelOrder as id (id)}
+            {#if channels.get(id)}
+                <SshTerminalTab
+                    bind:this={tabs[id]}
+                    active={id === activeChannelId}
+                    {fontSize}
+                    readOnly={ws.state !== ConnectionState.Connected}
+                    onInput={data => send({ type: 'input', channel_id: id, data: bytesToBase64(data) })}
+                    onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
+                    onTitleChange={title => {
+                        channels.set(id, {
+                            ...channels.get(id)!,
+                            terminalTitle: title,
+                        })
+                    }}
+                />
+            {/if}
+        {/each}
+    </div>
+
     {#if connectionError}
         <div class="mx-3 mt-3">
             <InfoBox variant="warning">
@@ -205,7 +237,7 @@
             </InfoBox>
         </div>
     {:else}
-        <div class="toolbar d-flex align-items-center gap-2 p-2 border-bottom">
+        <div class="toolbar d-flex align-items-center gap-2 p-2">
             <div class="tab-bar d-flex align-items-stretch gap-2 flex-grow-1">
                 {#each channelOrder as id (id)}
                     {@const ch = channels.get(id)}
@@ -280,28 +312,6 @@
             </Dropdown>
         </div>
     {/if}
-
-    <!-- Terminal panels (only active one is visible) -->
-    <div class="terminal-area flex-grow-1 position-relative">
-        {#each channelOrder as id (id)}
-            {#if channels.get(id)}
-                <SshTerminalTab
-                    bind:this={tabs[id]}
-                    active={id === activeChannelId}
-                    {fontSize}
-                    readOnly={ws.state !== ConnectionState.Connected}
-                    onInput={data => send({ type: 'input', channel_id: id, data: btoa(data) })}
-                    onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
-                    onTitleChange={title => {
-                        channels.set(id, {
-                            ...channels.get(id)!,
-                            terminalTitle: title,
-                        })
-                    }}
-                />
-            {/if}
-        {/each}
-    </div>
 </div>
 
 {#if sessionInfo}
@@ -361,7 +371,9 @@
 
     .toolbar {
         flex-shrink: 0;
-        padding: 7px 10px;
+        margin: 10px;
+        background: black;
+        border-radius: 10px;
     }
 
     .tab-bar {
