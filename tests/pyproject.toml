@@ -7,7 +7,7 @@ authors = ["Your Name <you@example.com>"]
 [tool.poetry.dependencies]
 python = "^3.10"
 pytest = "^8"
-psutil = "^5.9.1"
+psutil = ">=5.9.1,<8.0.0"
 pyotp = "^2.6.0"
 paramiko = ">=2.11,<6.0"
 Flask = ">=2.2.1,<4.0.0"
