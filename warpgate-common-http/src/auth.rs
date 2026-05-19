@@ -1,11 +1,11 @@
 use std::ops::Deref;
 
 use poem::Request;
-use poem::http::header::HOST;
 use poem::http::uri::{Authority, Scheme};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warpgate_common::http_headers::{X_FORWARDED_HOST, X_FORWARDED_PROTO};
+
+use crate::request::{trusted_host_header, trusted_proto};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthStateId(pub Uuid);
@@ -86,16 +86,7 @@ impl UnauthenticatedRequestContext {
     }
 
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
-        if self.should_trust_x_forwarded
-            && let Some(xfh) = req.header(&X_FORWARDED_HOST)
-        {
-            Some(xfh.to_string())
-        } else {
-            req.header(HOST).map(ToString::to_string).or_else(|| {
-                let uri = req.original_uri();
-                uri.authority().map(|authority| authority.to_string())
-            })
-        }
+        trusted_host_header(self.should_trust_x_forwarded, req)
     }
 
     /// Returns the trusted hostname only (port stripped),
@@ -115,17 +106,7 @@ impl UnauthenticatedRequestContext {
     /// Returns the trusted protocol scheme for the request, preferring X-Forwarded-Proto
     /// if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_proto(&self, req: &Request) -> Scheme {
-        if self.should_trust_x_forwarded
-            && let Some(proto) = req.header(&X_FORWARDED_PROTO)
-            && let Ok(s) = Scheme::try_from(proto)
-        {
-            s
-        } else {
-            req.original_uri()
-                .scheme()
-                .cloned()
-                .unwrap_or(Scheme::HTTPS)
-        }
+        trusted_proto(self.should_trust_x_forwarded, req)
     }
 }
 
