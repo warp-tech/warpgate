@@ -30,15 +30,15 @@ impl RateLimiterRegistry {
     }
 
     // TODO granular refresh
-    pub async fn refresh(&mut self) -> Result<(), WarpgateError> {
+    pub async fn refresh(&self) -> Result<(), WarpgateError> {
         let global_quota = self.global_quota().await?;
         self.global_rate_limiter.lock().replace(global_quota)?;
 
-        for (user_id, limiter) in self.user_rate_limiters.iter() {
+        for (user_id, limiter) in &self.user_rate_limiters {
             let quota = self.quota_for_user(user_id).await?;
             limiter.lock().replace(quota)?;
         }
-        for (target_id, limiter) in self.target_rate_limiters.iter() {
+        for (target_id, limiter) in &self.target_rate_limiters {
             let quota = self.quota_for_target(target_id).await?;
             limiter.lock().replace(quota)?;
         }
@@ -49,7 +49,7 @@ impl RateLimiterRegistry {
         self.global_rate_limiter.clone()
     }
 
-    async fn global_quota(&mut self) -> Result<Option<u32>, WarpgateError> {
+    async fn global_quota(&self) -> Result<Option<u32>, WarpgateError> {
         let db = self.db.lock().await;
         let parameters = Parameters::Entity::get(&db).await?;
         Ok(parameters.rate_limit_bytes_per_second.map(|x| x as u32))
@@ -101,19 +101,28 @@ impl RateLimiterRegistry {
         &mut self,
         state: &mut SessionState,
     ) -> Result<(), WarpgateError> {
-        // TODO figure something out so that handles do not get lost if update_rate_limiters fails for whatever reason
-        let mut handles = std::mem::take(&mut state.rate_limiter_handles);
-        for handle in handles.iter_mut() {
-            self.update_rate_limiters(state, handle).await?;
+        async fn inner(
+            this: &mut RateLimiterRegistry,
+            state: &SessionState,
+            handles: &mut [RateLimiterStackHandle],
+        ) -> Result<(), WarpgateError> {
+            for handle in handles.iter_mut() {
+                this.update_rate_limiters(state, handle).await?;
+            }
+            Ok(())
         }
+
+        let mut handles = std::mem::take(&mut state.rate_limiter_handles);
+        // Defer result handling so that we can put back the handles
+        let result = inner(self, state, &mut handles).await;
         state.rate_limiter_handles = handles;
-        Ok(())
+        result
     }
 
     pub async fn update_rate_limiters(
         &mut self,
         state: &SessionState,
-        handle: &mut RateLimiterStackHandle,
+        handle: &RateLimiterStackHandle,
     ) -> Result<(), WarpgateError> {
         if let Some(user_info) = &state.user_info {
             let user_limiter = self.user(&user_info.id).await?;
@@ -139,7 +148,7 @@ impl RateLimiterRegistry {
     }
 
     /// Force refresh all rate limiters in all sessions
-    pub async fn apply_new_rate_limits(&mut self, state: &mut State) -> Result<(), WarpgateError> {
+    pub async fn apply_new_rate_limits(&mut self, state: &State) -> Result<(), WarpgateError> {
         // Refresh the global rate limiter
         self.refresh().await?;
 

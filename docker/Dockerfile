@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.91.1-bullseye@sha256:8d9b5e80062dcdb7f037b4eef92a6649632034d6811652e028706ea93db64159 AS build
+FROM rust:1.94.1-bullseye@sha256:f4f82b80e5f2945fed4ba17af177c6d6be85d98cde38ff318fc7666ce4505617 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates-java nodejs openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/* \
-    && cargo install just
+    && cargo install --locked just@1.4.0
 
 COPY . /opt/warpgate
 
@@ -26,7 +26,7 @@ RUN just npm ci \
     && just npm run build \
     && cargo build --features mysql,postgres --release
 
-FROM debian:bullseye-20251117@sha256:ee239c601913c0d3962208299eef70dcffcb7aac1787f7a02f6d3e2b518755e6
+FROM debian:bullseye-20260518@sha256:aeec37aebc55ca5cc6fcfb8d5f6ae2fd43d5017ad849e6e2fdb5325d61e144db
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
 
@@ -47,10 +47,11 @@ COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
-HEALTHCHECK CMD warpgate --config /data/warpgate.yaml healthcheck
+ENV WARPGATE_CONFIG=/data/warpgate.yaml
+
+HEALTHCHECK CMD warpgate healthcheck
 
 ENV DOCKER=1
-
 USER warpgate
-ENTRYPOINT ["warpgate", "--config", "/data/warpgate.yaml"]
+ENTRYPOINT ["warpgate"]
 CMD ["run"]

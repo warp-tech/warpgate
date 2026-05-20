@@ -1,5 +1,8 @@
 use poem_openapi::OpenApi;
 
+mod admin_roles;
+mod certificate_credentials;
+mod common;
 mod known_hosts_detail;
 mod known_hosts_list;
 mod ldap_servers;
@@ -19,6 +22,8 @@ mod ssh_keys;
 mod sso_credentials;
 mod target_groups;
 mod targets;
+mod ticket_requests_detail;
+mod ticket_requests_list;
 mod tickets_detail;
 mod tickets_list;
 pub mod users;
@@ -34,7 +39,9 @@ pub fn get() -> impl OpenApi {
             (sessions_list::Api, sessions_detail::Api),
             recordings_detail::Api,
             (roles::ListApi, roles::DetailApi),
+            (admin_roles::ListApi, admin_roles::DetailApi),
             (tickets_list::Api, tickets_detail::Api),
+            (ticket_requests_list::Api, ticket_requests_detail::Api),
             (known_hosts_list::Api, known_hosts_detail::Api),
             ssh_keys::Api,
             logs::Api,
@@ -61,6 +68,10 @@ pub fn get() -> impl OpenApi {
             ),
             parameters::Api,
             (ssh_connection_test::Api, login_protection::Api),
+        ),
+        (
+            certificate_credentials::ListApi,
+            certificate_credentials::DetailApi,
         ),
     )
 }

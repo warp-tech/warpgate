@@ -11,12 +11,12 @@ jobs:
         include:
           - arch: x86_64-linux
             target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-22.04 # older image for glibc compatibility
             cyclonedx-build: cyclonedx-linux-x64
             cargo-cross: false
           - arch: arm64-linux
             target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm # older image for glibc compatibility
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
           - arch: x86_64-macos
@@ -37,6 +37,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       - if: startsWith(matrix.os, 'ubuntu')
@@ -44,25 +45,26 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596
+      - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
 
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
-        with:
-          target: ${{ matrix.target }}
-          override: true
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           key: "build"
 
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: 24
+
       - name: Install tools
         run: |
-          cargo install --locked just
-          cargo install --locked cargo-deny@0.18.9
+          cargo install --locked just@1.4.0
           cargo install --locked cargo-cyclonedx@^0.5
           rm -rf ~/.cargo/registry
 
@@ -72,10 +74,10 @@ jobs:
           wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.27.2/${{ matrix.cyclonedx-build }} -O cyclonedx
           chmod +x cyclonedx
 
-      - name: cargo-deny
+      - name: Install CycloneDX-npm
         run: |
-          cargo deny --version
-          cargo deny check
+          cd /
+          npm i -g @cyclonedx/cyclonedx-npm@4.1.2
 
       - name: Install admin UI deps
         run: |
@@ -87,7 +89,8 @@ jobs:
 
       - name: Generate admin UI BOM
         run: |
-          NODE_ENV=dev just npx @cyclonedx/cyclonedx-npm --output-format xml > cdx/admin-ui.cdx.xml
+          just npm prune
+          cd warpgate-web && NODE_ENV=dev cyclonedx-npm --output-format xml > ../cdx/admin-ui.cdx.xml
 
       - name: Build
         uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
@@ -102,12 +105,6 @@ jobs:
           CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
           CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
 
-      - name: Attest build
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          subject-path: target/${{ matrix.target }}/release/warpgate
-
       - name: Generate Rust BOM
         run: |
           cargo cyclonedx --all-features
@@ -115,6 +112,12 @@ jobs:
 
       - name: Merge BOMs
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
+
+      - name: Attest build
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          subject-path: target/${{ matrix.target }}/release/warpgate
 
       - name: Upload artifact
         uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
@@ -135,7 +138,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
@@ -153,13 +156,13 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: recursive
 
       - name: Install tools
         run: |
-          cargo install --locked just
+          cargo install --locked just@1.4.0
 
       - name: Ensure there are no changes in config schema
         run: |

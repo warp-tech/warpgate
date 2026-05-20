@@ -1,6 +1,6 @@
+use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
-use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserPasswordCredential};
@@ -48,15 +48,15 @@ impl From<Model> for StrictModel {
     fn from(model: Model) -> Self {
         Self {
             id: model.id,
-            credential: model.clone().into(),
+            credential: model.into(),
         }
     }
 }
 
 impl From<Model> for UserPasswordCredential {
     fn from(credential: Model) -> Self {
-        UserPasswordCredential {
-            hash: credential.argon_hash.to_owned().into(),
+        Self {
+            hash: credential.argon_hash.into(),
         }
     }
 }

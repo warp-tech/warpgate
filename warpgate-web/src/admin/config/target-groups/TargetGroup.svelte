@@ -1,19 +1,21 @@
 <script lang="ts">
     import { api, BootstrapThemeColor, type TargetGroup } from 'admin/lib/api'
-    import { Button, FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Label } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import { VALID_CHOICES } from './common'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { replace } from 'svelte-spa-router'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
         params: { id: string };
     }
 
     let { params }: Props = $props()
-    let groupId = params.id
+    let groupId = $derived(params.id)
 
     let group: TargetGroup | undefined = $state()
     let error: string | undefined = $state()
@@ -142,8 +144,16 @@
             </FormGroup>
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton click={update} color="primary">Update</AsyncButton>
-                <Button color="danger" onclick={remove}>Remove</Button>
+                <AsyncButton
+                    click={update}
+                    color="primary"
+                    disabled={!$adminPermissions.targetsEdit}
+                >Update</AsyncButton>
+                <Button
+                    color="danger"
+                    onclick={remove}
+                    disabled={!$adminPermissions.targetsDelete}
+                >Remove</Button>
             </div>
         </form>
     </div>

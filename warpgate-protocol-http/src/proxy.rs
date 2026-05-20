@@ -1,5 +1,4 @@
-use std::borrow::Cow;
-use std::collections::HashSet;
+use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -7,23 +6,27 @@ use anyhow::{Context, Result};
 use cookie::Cookie;
 use data_encoding::BASE64;
 use delegate::delegate;
-use futures::{SinkExt, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
 use http::{HeaderValue, Uri};
-use once_cell::sync::Lazy;
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
-use tracing::*;
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
+use tracing::{debug, error, warn};
 use url::Url;
-use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_common::helpers::websocket::pump_websocket;
+use warpgate_common::http_headers::{
+    DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
+};
+use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
+use warpgate_common_http::logging::{get_client_ip, log_request_result};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::common::{SessionAuthorization, SessionExt};
-use crate::logging::{get_client_ip, log_request_result};
+use crate::common::SessionExt;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -79,26 +82,6 @@ impl SomeRequestBuilder for http::request::Builder {
     }
 }
 
-static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
-    #[allow(clippy::mutable_key_type)]
-    let mut s = HashSet::new();
-    s.insert(http::header::ACCEPT_ENCODING);
-    s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
-    s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
-    s.insert(http::header::SEC_WEBSOCKET_KEY);
-    s.insert(http::header::SEC_WEBSOCKET_VERSION);
-    s.insert(http::header::UPGRADE);
-    s.insert(http::header::HOST);
-    s.insert(http::header::CONNECTION);
-    s.insert(http::header::STRICT_TRANSPORT_SECURITY);
-    s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
-    s
-});
-
-static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
-static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
-
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
     let source_uri = req.uri().clone();
@@ -145,11 +128,11 @@ fn copy_client_response<R: SomeResponse>(
     server_response: &mut poem::Response,
 ) {
     let mut headers = client_response.headers().clone();
-    for h in client_response.headers().iter() {
-        if DONT_FORWARD_HEADERS.contains(h.0) {
-            if let http::header::Entry::Occupied(e) = headers.entry(h.0) {
-                e.remove_entry();
-            }
+    for h in client_response.headers() {
+        if DONT_FORWARD_HEADERS.contains(h.0)
+            && let http::header::Entry::Occupied(e) = headers.entry(h.0)
+        {
+            e.remove_entry();
         }
     }
     server_response.headers_mut().extend(headers);
@@ -201,8 +184,8 @@ fn rewrite_response(
                 cookie.set_expires(cookie::Expiration::Session);
                 *value = cookie.to_string().parse()?;
             } catch (error: anyhow::Error) {
-                warn!(?error, header=?value, "Failed to parse response cookie")
-            })
+                warn!(?error, header=?value, "Failed to parse response cookie");
+            });
         }
     }
 
@@ -228,19 +211,19 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
-fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
-    #[allow(clippy::unwrap_used)]
-    if let Some(host) = req.headers().get(http::header::HOST) {
-        target = target.header(
-            X_FORWARDED_HOST.clone(),
-            host.to_str()?.split(':').next().unwrap(),
-        );
+fn inject_forwarding_headers<B: SomeRequestBuilder>(
+    req: &Request,
+    ctx: &AuthenticatedRequestContext,
+    mut target: B,
+) -> B {
+    if let Some(host) = ctx.trusted_host_header(req) {
+        target = target.header(X_FORWARDED_HOST.clone(), host);
     }
-    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str());
+    target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
     if let Some(addr) = req.remote_addr().as_socket_addr() {
         target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
     }
-    Ok(target)
+    target
 }
 
 async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
@@ -259,6 +242,7 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
 
 pub async fn proxy_normal_request(
     req: &Request,
+    ctx: &AuthenticatedRequestContext,
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
@@ -271,12 +255,12 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    if let TlsMode::Required = options.tls.mode {
+    if options.tls.mode == TlsMode::Required {
         client = client.https_only(true);
     }
 
     client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode.clone();
+        let tls_mode = options.tls.mode;
         let uri = uri.clone();
         move |attempt| {
             if tls_mode == TlsMode::Preferred
@@ -302,7 +286,7 @@ pub async fn proxy_normal_request(
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     if let Some(authorization_header) = authorization_header {
@@ -321,13 +305,21 @@ pub async fn proxy_normal_request(
     let mut response: Response = "".into();
 
     copy_client_response(&client_response, &mut response);
-    copy_client_body(client_response, &mut response).await?;
+
+    let embed_session_menu = {
+        let db = ctx.services().db.lock().await;
+        warpgate_db_entities::Parameters::Entity::get(&db)
+            .await
+            .map(|p| p.show_session_menu)
+            .unwrap_or(true)
+    };
+    copy_client_body(client_response, &mut response, embed_session_menu).await?;
 
     log_request_result(
         req.method(),
         req.original_uri(),
-        &get_client_ip(req).await?,
-        &status,
+        get_client_ip(req, ctx.services()).await.as_deref(),
+        status,
     );
 
     rewrite_response(&mut response, options, &uri)?;
@@ -337,8 +329,12 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
+    embed_session_menu: bool,
 ) -> Result<()> {
-    if response.content_type().map(|c| c.starts_with("text/html")) == Some(true)
+    if embed_session_menu
+        && response
+            .content_type()
+            .is_some_and(|c| c.starts_with("text/html"))
         && response.status() == 200
     {
         copy_client_body_and_embed(client_response, response).await?;
@@ -348,7 +344,7 @@ async fn copy_client_body(
     response.set_body(Body::from_bytes_stream(
         client_response
             .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            .map_err(std::io::Error::other),
     ));
     Ok(())
 }
@@ -366,7 +362,10 @@ async fn copy_client_body_and_embed(
         script_manifest.file
     );
     for css_file in script_manifest.css.unwrap_or_default() {
-        inject += &format!(r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#,);
+        let _ = write!(
+            &mut inject,
+            r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#
+        );
     }
 
     let before = "</head>";
@@ -391,10 +390,11 @@ async fn copy_client_body_and_embed(
 pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, options, true)?;
-    proxy_ws_inner(req, ws, uri.clone(), options)
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options)
         .await
         .map_err(|error| {
             tracing::error!(?uri, ?error, "WebSocket proxy failed");
@@ -436,6 +436,7 @@ async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let (authorization_header, uri) = extract_basic_auth(uri)?;
@@ -462,7 +463,7 @@ async fn proxy_ws_inner(
     }
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
@@ -486,84 +487,25 @@ async fn proxy_ws_inner(
 
     let mut response = ws
         .on_upgrade(|socket| async move {
-            let (mut client_sink, mut client_source) = client.split();
-
-            let (mut server_sink, mut server_source) = socket.split();
+            let (client_sink, client_source) = client.split();
+            let (server_sink, server_source) = socket.split();
 
             if let Err(error) = {
-                let server_to_client = tokio::spawn(async move {
-                    while let Some(msg) = server_source.next().await {
-                        tracing::debug!("Server: {:?}", msg);
-                        match msg? {
-                            Message::Binary(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Binary(data.into()))
-                                    .await?;
-                            }
-                            Message::Text(text) => {
-                                client_sink
-                                    .send(tungstenite::Message::Text(text.into()))
-                                    .await?;
-                            }
-                            Message::Ping(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Ping(data.into()))
-                                    .await?;
-                            }
-                            Message::Pong(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Pong(data.into()))
-                                    .await?;
-                            }
-                            Message::Close(data) => {
-                                client_sink
-                                    .send(tungstenite::Message::Close(data.map(|data| {
-                                        tungstenite::protocol::CloseFrame {
-                                            code: u16::from(data.0).into(),
-                                            reason: Cow::Owned(data.1),
-                                        }
-                                    })))
-                                    .await?;
-                            }
-                        }
-                    }
-                    Ok::<_, anyhow::Error>(())
-                });
+                let server_to_client =
+                    tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
+                        Box::pin(async {
+                            tracing::debug!("Server: {:?}", msg);
+                            anyhow::Ok(msg)
+                        })
+                    }));
 
-                let client_to_server = tokio::spawn(async move {
-                    while let Some(msg) = client_source.next().await {
-                        tracing::debug!("Client: {:?}", msg);
-                        match msg? {
-                            tungstenite::Message::Binary(data) => {
-                                server_sink
-                                    .send(Message::Binary(data.as_slice().to_vec()))
-                                    .await?;
-                            }
-                            tungstenite::Message::Text(text) => {
-                                server_sink.send(Message::Text(text.to_string())).await?;
-                            }
-                            tungstenite::Message::Ping(data) => {
-                                server_sink
-                                    .send(Message::Ping(data.as_slice().to_vec()))
-                                    .await?;
-                            }
-                            tungstenite::Message::Pong(data) => {
-                                server_sink
-                                    .send(Message::Pong(data.as_slice().to_vec()))
-                                    .await?;
-                            }
-                            tungstenite::Message::Close(data) => {
-                                server_sink
-                                    .send(Message::Close(data.map(|data| {
-                                        (u16::from(data.code).into(), data.reason.into_owned())
-                                    })))
-                                    .await?;
-                            }
-                            tungstenite::Message::Frame(_) => unreachable!(),
-                        }
-                    }
-                    Ok::<_, anyhow::Error>(())
-                });
+                let client_to_server =
+                    tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
+                        Box::pin(async {
+                            tracing::debug!("Client: {:?}", msg);
+                            anyhow::Ok(msg)
+                        })
+                    }));
 
                 server_to_client.await??;
                 client_to_server.await??;

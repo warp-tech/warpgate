@@ -21,7 +21,7 @@ pub enum LdapError {
     InvalidConfiguration(String),
 
     #[error("LDAP error: {0}")]
-    LdapClientError(#[from] ldap3::LdapError),
+    LdapClientError(#[from] Box<ldap3::LdapError>),
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
@@ -29,12 +29,18 @@ pub enum LdapError {
     #[error("rustls setup: {0}")]
     RustlSetup(#[from] RustlsSetupError),
 
+    #[error("cannot determine username for user DN: {0}")]
+    NoUsername(String),
+
+    #[error("cannot determine UUID for user DN: {0}")]
+    NoUUID(String),
+
     #[error("Other error: {0}")]
     Other(String),
 }
 
 impl From<String> for LdapError {
     fn from(s: String) -> Self {
-        LdapError::Other(s)
+        Self::Other(s)
     }
 }

@@ -1,16 +1,15 @@
 mod commands;
 mod config;
 mod logging;
-mod protocols;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
-use tracing::*;
+use tracing::error;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::Secret;
+use warpgate_common::{GlobalParams, LogFormat, Secret};
 
 use crate::config::load_config;
 
@@ -20,11 +19,26 @@ pub struct Cli {
     #[clap(subcommand)]
     command: Commands,
 
-    #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set)]
+    #[clap(long, short, default_value = "/etc/warpgate.yaml", action=ArgAction::Set, env="WARPGATE_CONFIG")]
     config: PathBuf,
 
     #[clap(long, short, action=ArgAction::Count)]
     debug: u8,
+
+    /// Log output format (text or json)
+    #[clap(long, value_enum)]
+    log_format: Option<LogFormat>,
+
+    /// Do not tighten UNIX modes of config and data files
+    #[clap(long)]
+    skip_securing_files: bool,
+}
+
+impl Cli {
+    #[allow(clippy::wrong_self_convention)]
+    pub fn into_global_params(&self) -> anyhow::Result<GlobalParams> {
+        warpgate_common::GlobalParams::new(self.config.clone(), !self.skip_securing_files)
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -61,6 +75,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         postgres_port: Option<u16>,
 
+        /// Enable Kubernetes and set port
+        #[clap(long)]
+        kubernetes_port: Option<u16>,
+
         /// Enable session recording
         #[clap(long)]
         record_sessions: bool,
@@ -83,11 +101,6 @@ pub(crate) enum Commands {
     },
     /// Perform basic config checks
     Check,
-    /// Test the connection to a target host
-    TestTarget {
-        #[clap(action=ArgAction::Set)]
-        target_name: String,
-    },
     /// Create a new user
     CreateUser {
         #[clap(action=ArgAction::Set)]
@@ -111,8 +124,9 @@ pub(crate) enum Commands {
 
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
+    let params = cli.into_global_params()?;
 
-    init_logging(load_config(&cli.config, false).ok().as_ref(), &cli).await?;
+    init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()
@@ -125,12 +139,9 @@ async fn _main() -> Result<()> {
             Ok(())
         }
         Commands::Run { enable_admin_token } => {
-            crate::commands::run::command(&cli, *enable_admin_token).await
+            crate::commands::run::command(&params, *enable_admin_token).await
         }
-        Commands::Check => crate::commands::check::command(&cli).await,
-        Commands::TestTarget { target_name } => {
-            crate::commands::test_target::command(&cli, target_name).await
-        }
+        Commands::Check => crate::commands::check::command(&params).await,
         Commands::CreateUser {
             username,
             password: explicit_password,
@@ -150,21 +161,21 @@ async fn _main() -> Result<()> {
             };
 
             crate::commands::create_user::command(
-                &cli,
+                &params,
                 username,
                 &Secret::new(password.clone()),
-                role,
+                role.as_ref(),
             )
             .await
         }
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
-            crate::commands::setup::command(&cli).await
+            crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&cli).await,
+        Commands::ClientKeys => crate::commands::client_keys::command(&params),
         Commands::RecoverAccess { username } => {
-            crate::commands::recover_access::command(&cli, username).await
+            crate::commands::recover_access::command(&params, username.as_ref()).await
         }
-        Commands::Healthcheck => crate::commands::healthcheck::command(&cli).await,
+        Commands::Healthcheck => crate::commands::healthcheck::command(&params).await,
     }
 }
 

@@ -2,34 +2,47 @@
     import NavListItem from 'common/NavListItem.svelte'
     import { wrap } from 'svelte-spa-router/wrap'
     import Router from 'svelte-spa-router'
+    import { serverInfo } from 'gateway/lib/store'
 
     const routes = {
+        '/targets/create/:kind': wrap({
+            asyncComponent: () => import('./targets/CreateTarget.svelte') as any,
+        }),
         '/targets/create': wrap({
-            asyncComponent: () => import('./CreateTarget.svelte') as any,
+            asyncComponent: () => import('./targets/ChooseTargetKind.svelte') as any,
         }),
         '/targets/:id': wrap({
             asyncComponent: () => import('./targets/Target.svelte') as any,
         }),
-        '/roles/create': wrap({
+        '/access-roles/create': wrap({
             asyncComponent: () => import('./CreateRole.svelte') as any,
         }),
-        '/roles/:id': wrap({
-            asyncComponent: () => import('./Role.svelte') as any,
+        '/access-roles/:id': wrap({
+            asyncComponent: () => import('./AccessRole.svelte') as any,
+        }),
+        '/admin-roles/create': wrap({
+            asyncComponent: () => import('./CreateAdminRole.svelte') as any,
+        }),
+        '/admin-roles/:id': wrap({
+            asyncComponent: () => import('./AdminRole.svelte') as any,
         }),
         '/users/create': wrap({
             asyncComponent: () => import('./CreateUser.svelte') as any,
         }),
         '/users/:id': wrap({
-            asyncComponent: () => import('./User.svelte') as any,
+            asyncComponent: () => import('./users/User.svelte') as any,
+        }),
+        '/users': wrap({
+            asyncComponent: () => import('./users/Users.svelte') as any,
         }),
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte') as any,
         }),
-        '/users': wrap({
-            asyncComponent: () => import('./Users.svelte') as any,
+        '/access-roles': wrap({
+            asyncComponent: () => import('./AccessRoles.svelte') as any,
         }),
-        '/roles': wrap({
-            asyncComponent: () => import('./Roles.svelte') as any,
+        '/admin-roles': wrap({
+            asyncComponent: () => import('./AdminRoles.svelte') as any,
         }),
         '/targets': wrap({
             asyncComponent: () => import('./targets/Targets.svelte') as any,
@@ -101,14 +114,24 @@
         class="mb-2"
         title="Roles"
         description="Group users together"
-        href="/config/roles"
+        href="/config/access-roles"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="Admin roles"
+        description="Permissions for administrators"
+        href="/config/admin-roles"
         small={sidebarMode}
     />
 
     <NavListItem
         class="mb-2"
         title="Tickets"
-        description="Temporary access credentials"
+        description={$serverInfo?.ticketSelfServiceEnabled
+            ? 'Access credentials — users can request tickets from their profile'
+            : 'Temporary access credentials'}
         href="/config/tickets"
         small={sidebarMode}
     />

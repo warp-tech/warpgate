@@ -4,40 +4,31 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target, TargetOptions};
 
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum TargetKind {
     #[sea_orm(string_value = "http")]
     Http,
+    #[sea_orm(string_value = "kubernetes")]
+    Kubernetes,
     #[sea_orm(string_value = "mysql")]
     MySql,
     #[sea_orm(string_value = "ssh")]
     Ssh,
     #[sea_orm(string_value = "postgres")]
     Postgres,
-    #[sea_orm(string_value = "web_admin")]
-    WebAdmin,
 }
 
 impl From<&TargetOptions> for TargetKind {
     fn from(options: &TargetOptions) -> Self {
         match options {
             TargetOptions::Http(_) => Self::Http,
+            TargetOptions::Kubernetes(_) => Self::Kubernetes,
             TargetOptions::MySql(_) => Self::MySql,
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
-            TargetOptions::WebAdmin(_) => Self::WebAdmin,
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
-pub enum SshAuthKind {
-    #[sea_orm(string_value = "password")]
-    Password,
-    #[sea_orm(string_value = "publickey")]
-    PublicKey,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -53,6 +44,10 @@ pub struct Model {
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -96,6 +91,10 @@ impl TryFrom<Model> for Target {
             options,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
             group_id: model.group_id,
+            ticket_max_duration_seconds: model.ticket_max_duration_seconds,
+            ticket_requests_disabled: model.ticket_requests_disabled,
+            ticket_require_approval: model.ticket_require_approval,
+            ticket_max_uses: model.ticket_max_uses,
         })
     }
 }

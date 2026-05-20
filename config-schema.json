@@ -19,6 +19,7 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
@@ -27,34 +28,25 @@
         "trust_x_forwarded_headers": false
       }
     },
+    "kubernetes": {
+      "$ref": "#/$defs/KubernetesConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:8443",
+        "session_max_age": "30m"
+      }
+    },
     "log": {
       "$ref": "#/$defs/LogConfig",
       "default": {
+        "format": "text",
+        "audit_retention": "11months 30days 3h 50m 24s",
         "retention": "7days",
         "send_to": null
-      }
-    },
-    "login_protection": {
-      "$ref": "#/$defs/LoginProtectionConfig",
-      "default": {
-        "enabled": true,
-        "ip_rate_limit": {
-          "base_block_duration_minutes": 30,
-          "block_duration_multiplier": 2.0,
-          "blocked_message": null,
-          "cooldown_reset_hours": 24,
-          "max_attempts": 5,
-          "max_block_duration_hours": 24,
-          "time_window_minutes": 15
-        },
-        "retention_days": 30,
-        "user_lockout": {
-          "auto_unlock": false,
-          "locked_message": null,
-          "lockout_duration_minutes": 60,
-          "max_attempts": 10,
-          "time_window_minutes": 60
-        }
       }
     },
     "mysql": {
@@ -62,6 +54,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:33306"
@@ -72,6 +65,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:55432"
@@ -88,6 +82,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
@@ -135,6 +130,13 @@
           "type": "string",
           "default": "1day"
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -170,58 +172,45 @@
         }
       }
     },
-    "IpRateLimitConfig": {
-      "description": "Configuration for IP-based rate limiting",
+    "KubernetesConfig": {
       "type": "object",
       "properties": {
-        "base_block_duration_minutes": {
-          "description": "Base block duration in minutes (first block)",
-          "type": "integer",
-          "format": "uint32",
-          "default": 30,
-          "minimum": 0
+        "certificate": {
+          "type": "string",
+          "default": ""
         },
-        "block_duration_multiplier": {
-          "description": "Multiplier for exponential backoff (e.g., 2.0 means each block doubles)",
-          "type": "number",
-          "format": "float",
-          "default": 2.0
+        "enable": {
+          "type": "boolean",
+          "default": false
         },
-        "blocked_message": {
-          "description": "Custom message to display to blocked users",
+        "external_host": {
           "type": [
             "string",
             "null"
           ],
           "default": null
         },
-        "cooldown_reset_hours": {
-          "description": "Hours without failed attempts before block count resets to zero",
-          "type": "integer",
-          "format": "uint32",
-          "default": 24,
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
           "minimum": 0
         },
-        "max_attempts": {
-          "description": "Maximum failed attempts per IP before blocking",
-          "type": "integer",
-          "format": "uint32",
-          "default": 5,
-          "minimum": 0
+        "key": {
+          "type": "string",
+          "default": ""
         },
-        "max_block_duration_hours": {
-          "description": "Maximum block duration in hours (cap for exponential backoff)",
-          "type": "integer",
-          "format": "uint32",
-          "default": 24,
-          "minimum": 0
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:8443"
         },
-        "time_window_minutes": {
-          "description": "Time window in minutes for counting failed attempts",
-          "type": "integer",
-          "format": "uint32",
-          "default": 15,
-          "minimum": 0
+        "session_max_age": {
+          "type": "string",
+          "default": "30m"
         }
       }
     },
@@ -231,6 +220,14 @@
     "LogConfig": {
       "type": "object",
       "properties": {
+        "format": {
+          "$ref": "#/$defs/LogFormat",
+          "default": "text"
+        },
+        "audit_retention": {
+          "type": "string",
+          "default": "11months 30days 3h 50m 24s"
+        },
         "retention": {
           "type": "string",
           "default": "7days"
@@ -244,47 +241,12 @@
         }
       }
     },
-    "LoginProtectionConfig": {
-      "description": "Configuration for login protection (brute-force protection)",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Whether login protection is enabled",
-          "type": "boolean",
-          "default": true
-        },
-        "ip_rate_limit": {
-          "description": "IP-based rate limiting configuration",
-          "$ref": "#/$defs/IpRateLimitConfig",
-          "default": {
-            "base_block_duration_minutes": 30,
-            "block_duration_multiplier": 2.0,
-            "blocked_message": null,
-            "cooldown_reset_hours": 24,
-            "max_attempts": 5,
-            "max_block_duration_hours": 24,
-            "time_window_minutes": 15
-          }
-        },
-        "retention_days": {
-          "description": "Days to retain failed login attempt records",
-          "type": "integer",
-          "format": "uint32",
-          "default": 30,
-          "minimum": 0
-        },
-        "user_lockout": {
-          "description": "User account lockout configuration",
-          "$ref": "#/$defs/UserLockoutConfig",
-          "default": {
-            "auto_unlock": false,
-            "locked_message": null,
-            "lockout_duration_minutes": 60,
-            "max_attempts": 10,
-            "time_window_minutes": 60
-          }
-        }
-      }
+    "LogFormat": {
+      "type": "string",
+      "enum": [
+        "text",
+        "json"
+      ]
     },
     "MySqlConfig": {
       "type": "object",
@@ -296,6 +258,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -327,6 +296,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -361,6 +337,20 @@
         }
       }
     },
+    "RoleMapping": {
+      "description": "A role mapping value that accepts either a single role or a list of roles.\n In YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "SniCertificateConfig": {
       "type": "object",
       "properties": {
@@ -382,6 +372,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -439,11 +436,51 @@
               "type": "string",
               "const": "google"
             },
+            "admin_email": {
+              "description": "A Google Workspace admin email for domain-wide delegation",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
             "client_id": {
               "type": "string"
             },
             "client_secret": {
               "type": "string"
+            },
+            "role_mappings": {
+              "description": "Maps Google group email addresses to Warpgate role names.\n Use \"*\" as a key to set a default role for any group not explicitly mapped.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
+            "service_account_email": {
+              "description": "Service account email for Google Directory API group lookups",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service_account_key": {
+              "description": "PEM private key from the service account JSON key file",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -520,6 +557,15 @@
                 "type": "string"
               }
             },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
             "client_id": {
               "type": "string"
             },
@@ -535,7 +581,7 @@
                 "null"
               ],
               "additionalProperties": {
-                "type": "string"
+                "$ref": "#/$defs/RoleMapping"
               }
             },
             "scopes": {
@@ -566,6 +612,9 @@
           "type": "boolean",
           "default": false
         },
+        "default_credential_policy": {
+          "description": "Default credential policy for auto-created users.\n Keys: \"http\", \"ssh\", \"mysql\", \"postgres\"\n Values: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+        },
         "label": {
           "type": [
             "string",
@@ -586,6 +635,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "return_url_prefix": {
+          "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
+          "default": "@"
         }
       },
       "required": [
@@ -593,45 +646,12 @@
         "provider"
       ]
     },
-    "UserLockoutConfig": {
-      "description": "Configuration for user account lockout",
-      "type": "object",
-      "properties": {
-        "auto_unlock": {
-          "description": "Whether to automatically unlock after lockout duration",
-          "type": "boolean",
-          "default": false
-        },
-        "locked_message": {
-          "description": "Custom message to display to locked users",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "lockout_duration_minutes": {
-          "description": "Lockout duration in minutes (if auto_unlock is enabled)",
-          "type": "integer",
-          "format": "uint32",
-          "default": 60,
-          "minimum": 0
-        },
-        "max_attempts": {
-          "description": "Maximum failed attempts per user before lockout",
-          "type": "integer",
-          "format": "uint32",
-          "default": 10,
-          "minimum": 0
-        },
-        "time_window_minutes": {
-          "description": "Time window in minutes for counting failed attempts",
-          "type": "integer",
-          "format": "uint32",
-          "default": 60,
-          "minimum": 0
-        }
-      }
+    "SsoProviderReturnUrlPrefix": {
+      "type": "string",
+      "enum": [
+        "@",
+        "_"
+      ]
     }
   }
 }

@@ -5,6 +5,8 @@ $body-color: #555;
 $font-family-sans-serif: "Work Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 $link-color: $body-color;
 $list-group-bg: transparent;
+$list-group-active-bg: rgba(#000, .125);
+$list-group-active-color: $body-color;
 
 $blue:    #3573ac !default;
 $purple:  #5C398F !default;

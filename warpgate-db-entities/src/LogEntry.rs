@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::query::JsonValue;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -12,10 +12,14 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub text: String,
+    pub target: String,
     pub values: JsonValue,
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: OffsetDateTime,
     pub session_id: Uuid,
     pub username: Option<String>,
+    pub related_users: Option<String>,
+    pub related_access_roles: Option<String>,
+    pub related_admin_roles: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -23,20 +23,29 @@ class Test:
                 user.id, sdk.NewPasswordCredential(password="123")
             )
             api.add_user_role(user.id, role.id)
-            target = api.create_target(sdk.TargetDataRequest(
-                name=f"postgres-{uuid4()}",
-                options=sdk.TargetOptions(sdk.TargetOptionsTargetPostgresOptions(
-                    kind="Postgres",
-                    host="localhost",
-                    port=db_port,
-                    username="user",
-                    password="123",
-                    tls=sdk.Tls(
-                        mode=sdk.TlsMode.PREFERRED,
-                        verify=False,
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"postgres-{uuid4()}",
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetPostgresOptions(
+                            kind="Postgres",
+                            host="localhost",
+                            port=db_port,
+                            username="user",
+                            auth=sdk.DatabaseTargetAuth(
+                                sdk.DatabaseTargetAuthDatabaseTargetPasswordAuth(
+                                    kind="Password",
+                                    password="123",
+                                )
+                            ),
+                            tls=sdk.Tls(
+                                mode=sdk.TlsMode.PREFERRED,
+                                verify=False,
+                            ),
+                        )
                     ),
-                )),
-            ))
+                )
+            )
             api.add_target_role(target.id, role.id)
 
         wait_port(db_port, recv=False)

@@ -9,15 +9,16 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time;
 use tokio_rustls::server::TlsStream;
-use tracing::*;
+use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use crate::client::{ConnectionOptions, PostgresClient};
@@ -59,11 +60,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
     pub fn make_logging_span(&self) -> tracing::Span {
         let client_ip = self.remote_address.ip().to_string();
-        match self.username {
-            Some(ref username) => {
-                info_span!("PostgreSQL", session=%self.id, session_username=%username, %client_ip)
-            }
-            None => info_span!("PostgreSQL", session=%self.id, %client_ip),
+        if let Some(ref username) = self.username {
+            info_span!("PostgreSQL", session=%self.id, session_username=%username, %client_ip)
+        } else {
+            info_span!("PostgreSQL", session=%self.id, %client_ip)
         }
     }
 
@@ -96,7 +96,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         self.username = username.clone();
         self.database = startup.parameters.get("database").cloned();
 
-        self.run_authorization(startup, &username.unwrap_or("".into()))
+        self.run_authorization(startup, &username.unwrap_or_else(|| "".into()))
             .await
     }
 
@@ -179,6 +179,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         &username,
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],
+                        Some(self.remote_address.ip()),
                     )
                     .await?
                     .1;
@@ -295,12 +296,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .await
                                     .subscribe(auth_state_id);
 
-                                let login_url_result =
-                                    state_arc.lock().await.construct_web_approval_url(
-                                        &*self.services.config.lock().await,
-                                    );
-                                let login_url = match login_url_result {
-                                    Ok(login_url) => login_url,
+                                let ext_url_result = construct_external_url(
+                                    None,
+                                    &*self.services.config.lock().await,
+                                    None,
+                                )
+                                .await;
+
+                                let login_url = match ext_url_result {
+                                    Ok(ext_url) => {
+                                        state_arc.lock().await.construct_web_approval_url(ext_url)
+                                    }
                                     Err(error) => {
                                         error!(?error, "Failed to construct external URL");
                                         return fail(&mut self).await;
@@ -361,15 +367,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     .await
                     .map_err(PostgresError::other)?
                 {
-                    Some((ticket, user_info)) => {
-                        info!("Authorized for {} with a ticket", ticket.target);
+                    Some((ticket, target, user_info)) => {
+                        info!("Authorized for {} with a ticket", target.name);
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(PostgresError::other)?;
 
                         self.stream
                             .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, user_info, ticket.target).await
+                        self.run_authorized(startup, user_info, target.name).await
                     }
                     _ => fail(&mut self).await,
                 }
@@ -511,7 +517,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 break;
             }
 
-            let remaining_timeout = idle_timeout - elapsed;
+            let remaining_timeout = idle_timeout.saturating_sub(elapsed);
             let select_timeout = remaining_timeout.min(check_interval);
 
             tokio::select! {
@@ -519,7 +525,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     match c_to_s {
                         Ok(Ok(Some(msg))) => {
                             last_activity = std::time::Instant::now(); // Update activity on client message
-                            self.maybe_log_client_msg(&msg.0);
+                            Self::maybe_log_client_msg(&msg.0);
                             client.send(msg).await?;
                         }
                         Ok(Ok(None)) => {
@@ -531,15 +537,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         }
                         Err(_) => {
                             // Timeout - check if we've exceeded idle timeout
-                            continue;
                         }
-                    };
+                    }
                 },
                 s_to_c = client.recv() => {
                     match s_to_c {
                         Ok(Some(msg)) => {
                             last_activity = std::time::Instant::now(); // Update activity on server message
-                            self.maybe_log_server_msg(&msg.0);
+                            Self::maybe_log_server_msg(&msg.0);
                             self.stream.push(msg)?;
                             self.stream.flush().await?;
                         }
@@ -550,7 +555,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                             error!(error=%err, "Error receiving message");
                             break
                         }
-                    };
+                    }
                 }
             };
         }
@@ -558,7 +563,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         Ok(())
     }
 
-    fn maybe_log_client_msg(&self, msg: &PgWireFrontendMessage) {
+    fn maybe_log_client_msg(msg: &PgWireFrontendMessage) {
         debug!(?msg, "C->S message");
         match msg {
             PgWireFrontendMessage::Parse(query) => {
@@ -574,7 +579,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         }
     }
 
-    fn maybe_log_server_msg(&self, msg: &PgWireBackendMessage) {
+    fn maybe_log_server_msg(msg: &PgWireBackendMessage) {
         debug!(?msg, "S->C message");
         if let PgWireBackendMessage::ErrorResponse(error) = msg {
             info!(?error, "PostgreSQL error");

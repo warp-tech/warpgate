@@ -1,12 +1,12 @@
 [package]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-tls"
-version = "0.17.0"
+version = "0.23.4"
+publish = false
 
 [dependencies]
-once_cell = { version = "1.17", default-features = false }
-poem = { version = "3.1", features = ["rustls"], default-features = false }
+poem.workspace = true
 poem-openapi.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true

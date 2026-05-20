@@ -42,7 +42,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + UpgradableStream<TS>,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(stream: S) -> Self {
+    pub const fn new(stream: S) -> Self {
         Self::Raw(stream)
     }
 }
@@ -58,7 +58,7 @@ where
     ) -> Result<Self, MaybeTlsStreamError> {
         if let Self::Raw(stream) = std::mem::replace(&mut self, Self::Upgrading) {
             let stream = stream.upgrade(tls_config).await?;
-            Ok(MaybeTlsStream::Tls(stream))
+            Ok(Self::Tls(stream))
         } else {
             Err(MaybeTlsStreamError::AlreadyUpgraded)
         }
@@ -76,9 +76,9 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<tokio::io::Result<()>> {
         match self.get_mut() {
-            MaybeTlsStream::Tls(tls) => Pin::new(tls).poll_read(cx, buf),
-            MaybeTlsStream::Raw(stream) => Pin::new(stream).poll_read(cx, buf),
-            _ => unreachable!(),
+            Self::Tls(tls) => Pin::new(tls).poll_read(cx, buf),
+            Self::Raw(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Upgrading => unreachable!(),
         }
     }
 }
@@ -94,9 +94,9 @@ where
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         match self.get_mut() {
-            MaybeTlsStream::Tls(tls) => Pin::new(tls).poll_write(cx, buf),
-            MaybeTlsStream::Raw(stream) => Pin::new(stream).poll_write(cx, buf),
-            _ => unreachable!(),
+            Self::Tls(tls) => Pin::new(tls).poll_write(cx, buf),
+            Self::Raw(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Upgrading => unreachable!(),
         }
     }
 
@@ -105,9 +105,9 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut() {
-            MaybeTlsStream::Tls(tls) => Pin::new(tls).poll_flush(cx),
-            MaybeTlsStream::Raw(stream) => Pin::new(stream).poll_flush(cx),
-            _ => unreachable!(),
+            Self::Tls(tls) => Pin::new(tls).poll_flush(cx),
+            Self::Raw(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Upgrading => unreachable!(),
         }
     }
 
@@ -116,9 +116,9 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut() {
-            MaybeTlsStream::Tls(tls) => Pin::new(tls).poll_shutdown(cx),
-            MaybeTlsStream::Raw(stream) => Pin::new(stream).poll_shutdown(cx),
-            _ => unreachable!(),
+            Self::Tls(tls) => Pin::new(tls).poll_shutdown(cx),
+            Self::Raw(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Upgrading => unreachable!(),
         }
     }
 }

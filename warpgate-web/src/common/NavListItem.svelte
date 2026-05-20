@@ -4,19 +4,26 @@
     import { link } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { classnames } from './sveltestrap-s5-ports/_sveltestrapUtils'
+    import type { Snippet } from 'svelte'
 
     interface Props {
         class?: string,
-        title: string
-        description?: string
-        href: string
-        small?: boolean
+        title?: string,
+        titleSnippet?: Snippet<[]>,
+        description?: string,
+        descriptionSnippet?: Snippet<[]>,
+        addonSnippet?: Snippet<[]>,
+        href: string,
+        small?: boolean,
     }
 
     let {
         title,
+        titleSnippet,
         'class': className,
         description,
+        descriptionSnippet,
+        addonSnippet,
         href,
         small,
     }: Props = $props()
@@ -35,11 +42,22 @@
     use:active
 >
     <div class="text">
-        <div class="title">{title}</div>
-        {#if description}
-            <div class="description text-muted">{description}</div>
-        {/if}
+        <div class="title">
+            {#if titleSnippet}
+                {@render titleSnippet()}
+            {:else}
+                {title}
+            {/if}
+        </div>
+        <div class="description text-muted">
+            {#if descriptionSnippet}
+                {@render descriptionSnippet()}
+            {:else if description}
+                {description}
+            {/if}
+        </div>
     </div>
+    {@render addonSnippet?.()}
     <div class="icon">
         <Fa class="icon" icon={faArrowRight} />
     </div>
@@ -55,6 +73,7 @@
         padding: 0.8rem 1.5rem 1rem;
         border-radius: var(--bs-border-radius);
         align-items: center;
+        gap: 1rem;
 
         .text {
             flex-grow: 1;

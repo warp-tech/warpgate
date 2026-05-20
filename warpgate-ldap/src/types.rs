@@ -13,13 +13,13 @@ pub enum LdapUsernameAttribute {
 }
 
 impl LdapUsernameAttribute {
-    pub fn attribute_name(&self) -> &'static str {
+    pub const fn attribute_name(self) -> &'static str {
         match self {
-            LdapUsernameAttribute::Cn => "cn",
-            LdapUsernameAttribute::Uid => "uid",
-            LdapUsernameAttribute::Email => "mail",
-            LdapUsernameAttribute::UserPrincipalName => "userPrincipalName",
-            LdapUsernameAttribute::SamAccountName => "sAMAccountName",
+            Self::Cn => "cn",
+            Self::Uid => "uid",
+            Self::Email => "mail",
+            Self::UserPrincipalName => "userPrincipalName",
+            Self::SamAccountName => "sAMAccountName",
         }
     }
 }
@@ -51,6 +51,7 @@ pub struct LdapConfig {
     pub user_filter: String,
     pub username_attribute: LdapUsernameAttribute,
     pub ssh_key_attribute: String,
+    pub uuid_attribute: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +60,6 @@ pub struct LdapUser {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub dn: String,
-    pub object_uuid: Option<Uuid>,
+    pub object_uuid: Uuid,
     pub ssh_public_keys: Vec<String>,
 }

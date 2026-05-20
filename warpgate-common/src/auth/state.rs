@@ -1,13 +1,15 @@
 use std::collections::HashSet;
+use std::fmt::Write;
 
-use chrono::{DateTime, Utc};
-use rand::Rng;
+use rand::RngExt;
+use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use url::Url;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::{SessionId, User, WarpgateConfig, WarpgateError};
+use crate::{SessionId, User};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -24,7 +26,7 @@ pub struct AuthStateUserInfo {
 
 impl From<&User> for AuthStateUserInfo {
     fn from(user: &User) -> Self {
-        AuthStateUserInfo {
+        Self {
             id: user.id,
             username: user.username.clone(),
         }
@@ -39,7 +41,7 @@ pub struct AuthState {
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
     valid_credentials: Vec<AuthCredential>,
-    started: DateTime<Utc>,
+    started: OffsetDateTime,
     identification_string: String,
     last_result: Option<AuthResult>,
     state_change_signal: broadcast::Sender<AuthResult>,
@@ -47,9 +49,9 @@ pub struct AuthState {
 
 fn generate_identification_string() -> String {
     let mut s = String::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _ in 0..4 {
-        s.push_str(&format!("{:X}", rng.gen_range(0..16)));
+        let _ = write!(&mut s, "{:X}", rng.random_range(0..16));
     }
     s
 }
@@ -71,7 +73,7 @@ impl AuthState {
             force_rejected: false,
             policy,
             valid_credentials: vec![],
-            started: Utc::now(),
+            started: OffsetDateTime::now_utc(),
             identification_string: generate_identification_string(),
             last_result: None,
             state_change_signal,
@@ -80,15 +82,15 @@ impl AuthState {
         this
     }
 
-    pub fn id(&self) -> &Uuid {
+    pub const fn id(&self) -> &Uuid {
         &self.id
     }
 
-    pub fn session_id(&self) -> &Option<SessionId> {
-        &self.session_id
+    pub const fn session_id(&self) -> Option<&SessionId> {
+        self.session_id.as_ref()
     }
 
-    pub fn user_info(&self) -> &AuthStateUserInfo {
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
         &self.user_info
     }
 
@@ -96,7 +98,7 @@ impl AuthState {
         &self.protocol
     }
 
-    pub fn started(&self) -> &DateTime<Utc> {
+    pub const fn started(&self) -> &OffsetDateTime {
         &self.started
     }
 
@@ -109,7 +111,7 @@ impl AuthState {
         self.maybe_update_verification_state();
     }
 
-    pub fn reject(&mut self) {
+    pub const fn reject(&mut self) {
         self.force_rejected = true;
     }
 
@@ -130,7 +132,7 @@ impl AuthState {
                     username=%self.user_info.username,
                     credentials=%self.valid_credentials
                         .iter()
-                        .map(|x| x.safe_description())
+                        .map(AuthCredential::safe_description)
                         .collect::<Vec<_>>()
                         .join(", "),
                     "Authenticated",
@@ -145,25 +147,21 @@ impl AuthState {
 
     fn maybe_update_verification_state(&mut self) -> AuthResult {
         let new_result = self.current_verification_state();
-        if Some(new_result.clone()) != self.last_result {
+        if self.last_result.as_ref() != Some(&new_result) {
             debug!(
                 "Verification state changed for auth state {}: {:?} -> {:?}",
                 self.id, self.last_result, &new_result
             );
             let _ = self.state_change_signal.send(new_result.clone());
+            self.last_result = Some(new_result.clone());
         }
-        self.last_result = Some(new_result.clone());
 
         new_result
     }
 
-    pub fn construct_web_approval_url(
-        &self,
-        config: &WarpgateConfig,
-    ) -> Result<url::Url, WarpgateError> {
-        let mut external_url = config.construct_external_url(None, None)?;
+    pub fn construct_web_approval_url(&self, mut external_url: Url) -> url::Url {
         external_url.set_path("@warpgate");
         external_url.set_fragment(Some(&format!("/login/{}", self.id())));
-        Ok(external_url)
+        external_url
     }
 }

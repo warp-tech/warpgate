@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions } from 'admin/lib/api'
+    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { formatDistance, formatDistanceToNow } from 'date-fns'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
-    import LogViewer from './LogViewer.svelte'
+    import LogViewer from './log-viewer/LogViewer.svelte'
     import RelativeDate from './RelativeDate.svelte'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -15,6 +15,8 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+    import { PROTOCOL_PROPERTIES } from 'common/protocols'
+    import { recordingMetadataToFieldSet, recordingTypeLabel } from 'common/recordings'
 
     interface Props {
         params: { id: string }
@@ -53,6 +55,10 @@
             if (session.target.options.kind === 'Http') {
                 const options = session.target.options as unknown as TargetHTTPOptions
                 address = options.url
+            }
+            if (session.target.options.kind === 'Kubernetes') {
+                const options = session.target.options as unknown as TargetKubernetesOptions
+                address = options.clusterUrl
             }
             return `${session.target.name} (${address})`
         } else {
@@ -108,7 +114,7 @@
                 </span>
             </div>
         </div>
-        {#if !session.ended}
+        {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
             <div class="ms-auto">
                 <AsyncButton color="warning" click={close}>
                     Close now
@@ -121,14 +127,25 @@
         <h3 class="mt-4">Recordings</h3>
         <div class="list-group list-group-flush">
             {#each recordings as recording (recording.id)}
+                {@const metadata = JSON.parse(recording.metadata)}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/recordings/{recording.id}"
                     use:link>
-                    <div class="main">
+                    <div class="main gap-1">
                         <strong>
-                            {recording.name}
+                            {recordingTypeLabel(recording)}
+                            {#if !metadata}
+                                : {recording.name}
+                            {/if}
                         </strong>
+                        {#if metadata}
+                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
+                                <div>
+                                    <span class="text-muted">{item[0]}:</span> {item[1]}
+                                </div>
+                            {/each}
+                        {/if}
                         <small class="meta ms-auto">
                             {timeAgo(recording.started)}
                         </small>

@@ -8,7 +8,7 @@ pub struct MySqlSessionHandle {
 impl MySqlSessionHandle {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<()>) {
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
-        (MySqlSessionHandle { abort_tx }, abort_rx)
+        (Self { abort_tx }, abort_rx)
     }
 }
 

@@ -7,14 +7,13 @@ use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::info;
 use warpgate_common::SessionId;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
 
 use crate::common::PROTOCOL_NAME;
-use crate::session_handle::{
-    HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
-};
+use crate::session_handle::{HttpSessionHandle, SessionHandleCommand};
 
 #[derive(Clone)]
 pub struct SharedSessionStorage(pub Arc<Mutex<Box<MemoryStorage>>>);
@@ -60,7 +59,7 @@ impl SessionStorage for SharedSessionStorage {
 pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
     session_timestamps: HashMap<SessionId, Instant>,
-    this: Weak<Mutex<SessionStore>>,
+    this: Weak<Mutex<Self>>,
 }
 
 static SESSION_ID_SESSION_KEY: &str = "session_id";
@@ -88,7 +87,7 @@ impl SessionStore {
             // } else if request_counter == 5 {
             // Start logging sessions when they've got 5 requests
             // self.create_handle_for(&req).await?;
-        };
+        }
 
         Ok(req)
     }
@@ -96,24 +95,24 @@ impl SessionStore {
     pub async fn create_handle_for(
         &mut self,
         req: &Request,
-    ) -> poem::Result<WarpgateServerHandleFromRequest> {
+        ctx: &UnauthenticatedRequestContext,
+    ) -> poem::Result<Arc<Mutex<WarpgateServerHandle>>> {
         let session = <&Session>::from_request_without_body(req).await?;
 
         if let Some(handle) = self.handle_for(session) {
-            return Ok(handle.into());
+            return Ok(handle);
         }
 
-        let services = Data::<&Services>::from_request_without_body(req).await?;
         let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
         let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 
         let server_handle = State::register_session(
-            &services.state,
+            &ctx.services().state,
             &PROTOCOL_NAME,
             SessionStateInit {
-                remote_address: remote_address.0.as_socket_addr().cloned(),
+                remote_address: remote_address.0.as_socket_addr().copied(),
                 handle: Box::new(session_handle),
             },
         )
@@ -150,7 +149,7 @@ impl SessionStore {
 
         self.session_timestamps.insert(id, Instant::now());
 
-        Ok(server_handle.into())
+        Ok(server_handle)
     }
 
     pub fn handle_for(&self, session: &Session) -> Option<Arc<Mutex<WarpgateServerHandle>>> {
@@ -166,10 +165,10 @@ impl SessionStore {
         }
     }
 
-    pub async fn vacuum(&mut self, session_max_age: Duration) {
+    pub fn vacuum(&mut self, session_max_age: Duration) {
         let now = Instant::now();
         let mut to_remove = vec![];
-        for (id, timestamp) in self.session_timestamps.iter() {
+        for (id, timestamp) in &self.session_timestamps {
             if now.duration_since(*timestamp) > session_max_age {
                 to_remove.push(*id);
             }

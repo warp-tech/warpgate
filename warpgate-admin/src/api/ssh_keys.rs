@@ -1,14 +1,13 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
-use tokio::sync::Mutex;
-use warpgate_common::{WarpgateConfig, WarpgateError};
+use warpgate_common::WarpgateError;
+use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -33,11 +32,14 @@ impl Api {
     )]
     async fn api_ssh_get_own_keys(
         &self,
-        config: Data<&Arc<Mutex<WarpgateConfig>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
-        let config = config.lock().await;
-        let keys = warpgate_protocol_ssh::load_keys(&config, "client")?;
+        require_admin_permission(&ctx, None).await?;
+
+        let config = ctx.services().config.lock().await;
+        let keys =
+            warpgate_protocol_ssh::load_keys(&config, &ctx.services().global_params, "client")?;
 
         let keys = keys
             .into_iter()

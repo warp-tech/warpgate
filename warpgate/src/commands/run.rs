@@ -1,17 +1,16 @@
-use std::path::PathBuf;
-
 use anyhow::{Context, Result};
 use futures::{FutureExt, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
-use tracing::*;
+use tracing::{debug, error, info, warn};
 use warpgate_common::version::warpgate_version;
-use warpgate_common::ListenEndpoint;
+use warpgate_common::{GlobalParams, ListenEndpoint};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
+use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
@@ -30,7 +29,7 @@ async fn run_protocol_server<T: ProtocolServer + Send + 'static>(
         .with_context(|| format!("protocol server: {name}"))
 }
 
-pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Result<()> {
+pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<()> {
     let version = warpgate_version();
     info!(%version, "Warpgate");
 
@@ -41,7 +40,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         })
     });
 
-    let config = match load_config(&cli.config, true) {
+    let config = match load_config(params, true) {
         Ok(config) => config,
         Err(error) => {
             error!(?error, "Failed to load config file");
@@ -49,7 +48,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         }
     };
 
-    let services = Services::new(config.clone(), admin_token).await?;
+    let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
     install_database_logger(services.db.clone());
 
@@ -62,7 +61,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
 
     protocol_futures.push(
         run_protocol_server(
-            HTTPProtocolServer::new(&services).await?,
+            HTTPProtocolServer::new(&services),
             config.store.http.listen.clone(),
         )
         .boxed(),
@@ -81,7 +80,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
     if config.store.mysql.enable {
         protocol_futures.push(
             run_protocol_server(
-                MySQLProtocolServer::new(&services).await?,
+                MySQLProtocolServer::new(&services),
                 config.store.mysql.listen.clone(),
             )
             .boxed(),
@@ -91,10 +90,18 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
     if config.store.postgres.enable {
         protocol_futures.push(
             run_protocol_server(
-                PostgresProtocolServer::new(&services).await?,
+                PostgresProtocolServer::new(&services),
                 config.store.postgres.listen.clone(),
             )
             .boxed(),
+        );
+    }
+
+    if config.store.kubernetes.enable {
+        protocol_futures.push(
+            KubernetesProtocolServer::new(&services)
+                .run(config.store.kubernetes.listen.clone())
+                .boxed(),
         );
     }
 
@@ -103,17 +110,23 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         async move {
             loop {
                 let retention = { services.config.lock().await.store.log.retention };
-                let interval = retention / 10;
+                let audit_retention = { services.config.lock().await.store.log.audit_retention };
+                let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
-                    &mut *services.db.lock().await,
-                    &mut *services.recordings.lock().await,
+                    &*services.db.lock().await,
+                    &*services.recordings.lock().await,
                     &retention,
+                    &audit_retention,
                 )
                 .await
                 {
-                    Err(error) => error!(?error, "Failed to cleanup the database"),
-                    Ok(_) => debug!("Database cleaned up, next in {:?}", interval),
+                    Err(error) => {
+                        error!(?error, "Failed to cleanup the database");
+                    }
+                    _ => {
+                        debug!("Database cleaned up, next in {:?}", interval);
+                    }
                 }
                 tokio::time::sleep(interval).await;
             }
@@ -146,10 +159,7 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
         anyhow::bail!("No protocols are enabled in the config file, exiting");
     }
 
-    tokio::spawn(watch_config_and_reload(
-        PathBuf::from(&cli.config),
-        services.clone(),
-    ));
+    tokio::spawn(watch_config_and_reload(services.clone()));
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
 
@@ -178,25 +188,23 @@ pub(crate) async fn command(cli: &crate::Cli, enable_admin_token: bool) -> Resul
     Ok(())
 }
 
-pub async fn watch_config_and_reload(path: PathBuf, services: Services) -> Result<()> {
-    let mut reload_event = watch_config(path, services.config.clone())?;
+pub async fn watch_config_and_reload(services: Services) -> Result<()> {
+    let mut reload_event = watch_config(&services.global_params, services.config.clone())?;
 
-    while let Ok(()) = reload_event.recv().await {
+    while reload_event.recv().await == Ok(()) {
         let state = services.state.lock().await;
         let mut cp = services.config_provider.lock().await;
         // TODO no longer happens since everything is in the DB
-        for (id, session) in state.sessions.iter() {
+        for (id, session) in &state.sessions {
             let mut session = session.lock().await;
             if let (Some(user_info), Some(target)) =
                 (session.user_info.as_ref(), session.target.as_ref())
-            {
-                if !cp
+                && !cp
                     .authorize_target(&user_info.username, &target.name)
                     .await?
-                {
-                    warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
-                    session.handle.close();
-                }
+            {
+                warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
+                session.handle.close();
             }
         }
     }

@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
@@ -12,6 +12,8 @@ pub enum RecordingKind {
     Terminal,
     #[sea_orm(string_value = "traffic")]
     Traffic,
+    #[sea_orm(string_value = "kubernetes")]
+    Kubernetes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -21,10 +23,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
-    pub started: DateTime<Utc>,
-    pub ended: Option<DateTime<Utc>>,
+    pub started: OffsetDateTime,
+    pub ended: Option<OffsetDateTime>,
     pub session_id: Uuid,
     pub kind: RecordingKind,
+    #[sea_orm(column_type = "Text")]
+    pub metadata: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

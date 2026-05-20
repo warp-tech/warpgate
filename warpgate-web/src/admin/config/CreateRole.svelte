@@ -14,9 +14,10 @@ async function create () {
         const role = await api.createRole({
             roleDataRequest: {
                 name,
+                isDefault: false,
             },
         })
-        replace(`/config/roles/${role.id}`)
+        replace(`/config/access-roles/${role.id}`)
     } catch (err) {
         error = await stringifyError(err)
     }

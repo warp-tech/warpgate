@@ -24,7 +24,6 @@ async function load () {
         api.getTargets(),
         api.getUsers(),
     ])
-    targets = targets.filter(x => x.options.kind !== TargetKind.WebAdmin)
     targets.sort(firstBy('name'))
     users.sort(firstBy('username'))
 }
@@ -40,8 +39,8 @@ async function create () {
     try {
         result = await api.createTicket({
             createTicketRequest: {
-                username: selectedUser.username,
-                targetName: selectedTarget.name,
+                userId: selectedUser.id,
+                targetId: selectedTarget.id,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
                 numberOfUses: selectedNumberOfUses,
                 description: selectedDescription,
@@ -71,10 +70,13 @@ async function create () {
         {#if selectedTarget && selectedUser}
         <ConnectionInstructions
             targetName={selectedTarget.name}
-            targetKind={TargetKind[selectedTarget.options.kind]}
+            targetKind={selectedTarget.options.kind}
             username={selectedUser.username}
             targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
             ticketSecret={result.secret}
+            targetDefaultDatabaseName={
+                (selectedTarget.options.kind === TargetKind.MySql || selectedTarget.options.kind === TargetKind.Postgres)
+                    ? selectedTarget.options.defaultDatabaseName : undefined}
         />
         {/if}
 

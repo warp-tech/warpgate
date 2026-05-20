@@ -20,6 +20,7 @@
     let description = $state('')
     let usernameAttribute = $state(LdapUsernameAttribute.Cn)
     let sshKeyAttribute = $state('sshPublicKey')
+    let uuidAttribute = $state('')
     let error = $state<string | null>(null)
     let tls: Tls = $state({
         mode: TlsMode.Preferred,
@@ -69,6 +70,7 @@
                     description: description || undefined,
                     usernameAttribute,
                     sshKeyAttribute,
+                    uuidAttribute,
                 },
             })
 
@@ -106,6 +108,7 @@
             bind:userFilter
             bind:usernameAttribute
             bind:sshKeyAttribute
+            bind:uuidAttribute
         />
 
         {#if testResult}

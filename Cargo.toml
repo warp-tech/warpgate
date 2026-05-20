@@ -1,10 +1,12 @@
-# cargo-features = ["profile-rustflags"]
+cargo-features = ["profile-rustflags"]
 
 [workspace]
 members = [
     "warpgate",
     "warpgate-admin",
+    "warpgate-aws",
     "warpgate-common",
+    "warpgate-common-http",
     "warpgate-tls",
     "warpgate-core",
     "warpgate-db-migrations",
@@ -12,28 +14,32 @@ members = [
     "warpgate-database-protocols",
     "warpgate-ldap",
     "warpgate-protocol-http",
+    "warpgate-protocol-kubernetes",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-ssh",
     "warpgate-sso",
     "warpgate-web",
+    "warpgate-web-ssh",
 ]
 default-members = ["warpgate"]
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
 bytes = { version = "1.4", default-features = false }
 data-encoding = { version = "2.3", default-features = false, features = ["alloc", "std"] }
+ipnet = "2"
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
-russh = { version = "0.55.0", features = ["des", "rsa", "aws-lc-rs"], default-features = false }
+russh = { version = "0.60.1", features = ["des", "rsa", "aws-lc-rs"], default-features = false }
 futures = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1.17", features = ["net"], default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
 enum_dispatch = { version = "0.3.13", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["tls12"] }
 sqlx = { version = "0.8", features = ["tls-rustls-aws-lc-rs"], default-features = false }
-sea-orm = { version = "1.0", default-features = false, features = ["runtime-tokio", "macros"] }
+sea-orm = { version = "1.0", default-features = false, features = ["runtime-tokio", "macros", "with-time"] }
 sea-orm-migration = { version = "1.0", default-features = false, features = [
     "cli",
 ] }
@@ -46,12 +52,13 @@ poem = { version = "3.1", features = [
     "embed",
     "server",
 ], default-features = false }
+hex = { version = "0.4", default-features = false }
 poem-openapi = { version = "5.1", features = [
     "stoplight-elements",
-    "chrono",
     "uuid",
     "static-files",
     "cookie",
+    "time",
 ], default-features = false }
 password-hash = { version = "0.5", features = ["std"], default-features = false }
 delegate = { version = "0.13", default-features = false }
@@ -60,22 +67,32 @@ schemars = { version = "0.9.0", default-features = false, features = ["derive", 
 ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 rustls-pki-types = { version = "1.13", default-features = false, features = ["alloc", "std"] }
 thiserror = { version = "2", default-features = false }
-rand = { version = "0.8", default-features = false }
-rand_chacha = { version = "0.3", default-features = false }
-rand_core = { version = "0.6", features = ["std"], default-features = false }
-dialoguer = { version = "0.11", default-features = false, features = ["editor", "password"] }
-tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
+rand = { version = "0.10", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
+rand_core = { version = "0.10" }
+dialoguer = { version = "0.12", default-features = false, features = ["editor", "password"] }
+tokio = { version = "1.52", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
 governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
 rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
-x509-parser = { version = "0.17.0", default-features = false }
+x509-parser = "0.17.0"
 uuid = { version = "1.3", features = ["v4", "serde"], default-features = false }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.13", features = [
     "http2",                               # required for connecting to targets behind AWS ELB
-    "rustls-tls-native-roots-no-provider",
+    "rustls-no-provider",
     "stream",
     "gzip",
 ], default-features = false }
+reqwest_12 = { package = "reqwest", version = "0.12", features = [
+    "http2",
+    "rustls-tls-native-roots-no-provider",
+    "stream",
+    "gzip",
+], default-features = false } # separate copy to control features on openidconnect->oauth2->reqwest
 regex = { version = "1.6", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
+reqwest-websocket = "0.6.0"
+time = "0.3"
+url = { version = "2.4", default-features = false }
 
 [profile.release]
 lto = true
@@ -85,3 +102,21 @@ strip = "debuginfo"
 [profile.coverage]
 inherits = "dev"
 # rustflags = ["-Cinstrument-coverage"]
+
+[profile.dev.package.aws-sdk-ec2]
+rustflags = ["-Zhint-mostly-unused"]
+
+[profile.release.package.aws-sdk-ec2]
+rustflags = ["-Zhint-mostly-unused"]
+
+[profile.dev.package.aws-sdk-rds]
+rustflags = ["-Zhint-mostly-unused"]
+
+[profile.release.package.aws-sdk-rds]
+rustflags = ["-Zhint-mostly-unused"]
+
+[profile.dev.package.aws-sdk-eks]
+rustflags = ["-Zhint-mostly-unused"]
+
+[profile.release.package.aws-sdk-eks]
+rustflags = ["-Zhint-mostly-unused"]

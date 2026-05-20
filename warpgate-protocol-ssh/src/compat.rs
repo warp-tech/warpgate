@@ -9,6 +9,6 @@ where
     C: Display + Send + Sync + 'static,
 {
     fn context(self, context: C) -> anyhow::Result<T> {
-        self.map_err(|_| anyhow::anyhow!("unspecified error").context(context))
+        self.map_err(|()| anyhow::anyhow!("unspecified error").context(context))
     }
 }

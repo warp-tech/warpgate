@@ -3,15 +3,17 @@ use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use warpgate_common::Secret;
-use warpgate_core::{authorize_ticket, consume_ticket, Services};
+use warpgate_common_http::SessionAuthorization;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_core::{authorize_ticket, consume_ticket};
 
 use crate::common::SessionExt;
 
 pub struct TicketMiddleware {}
 
 impl TicketMiddleware {
-    pub fn new() -> Self {
-        TicketMiddleware {}
+    pub const fn new() -> Self {
+        Self {}
     }
 }
 
@@ -41,42 +43,41 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         let session = <&Session>::from_request_without_body(&req).await?;
         let session = session.clone();
 
+        let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+
         {
             let params: QueryParams = req.params()?;
 
-            let mut ticket_value = None;
-            if let Some(t) = params.ticket {
-                ticket_value = Some(t);
-            }
+            let mut ticket_value = params.ticket;
+
             for h in req.headers().get_all(http::header::AUTHORIZATION) {
                 let header_value = h.to_str().unwrap_or("").to_string();
-                if let Some((token_type, token_value)) = header_value.split_once(' ') {
-                    if &token_type.to_lowercase() == "warpgate" {
-                        ticket_value = Some(token_value.to_string());
-                        session_is_temporary = true;
-                    }
+                if let Some((token_type, token_value)) = header_value.split_once(' ')
+                    && &token_type.to_lowercase() == "warpgate"
+                {
+                    ticket_value = Some(token_value.to_string());
+                    session_is_temporary = true;
                 }
             }
 
-            if let Some(ticket) = ticket_value {
-                let services = Data::<&Services>::from_request_without_body(&req).await?;
-
-                if let Some((ticket_model, _user_info)) = {
+            if let Some(ticket) = ticket_value
+                && let Some((_ticket_model, target, user_info)) = {
                     let ticket_secret = Secret::new(ticket);
-                    if let Some((ticket, user_info)) =
-                        authorize_ticket(&services.db, &ticket_secret).await?
+                    if let Some((ticket, target, user_info)) =
+                        authorize_ticket(&ctx.services().db, &ticket_secret).await?
                     {
-                        consume_ticket(&services.db, &ticket.id).await?;
-                        Some((ticket, user_info))
+                        consume_ticket(&ctx.services().db, &ticket.id).await?;
+                        Some((ticket, target, user_info))
                     } else {
                         None
                     }
-                } {
-                    session.set_auth(crate::common::SessionAuthorization::Ticket {
-                        username: ticket_model.username,
-                        target_name: ticket_model.target,
-                    });
                 }
+            {
+                session.set_auth(SessionAuthorization::Ticket {
+                    user_id: user_info.id,
+                    username: user_info.username,
+                    target_name: target.name,
+                });
             }
         }
 

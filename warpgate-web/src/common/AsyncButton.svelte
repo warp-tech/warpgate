@@ -19,11 +19,13 @@ interface Props {
     outline?: boolean
     type?: 'button' | 'submit' | 'reset'
     class?: string
+    size?: 'sm' | 'lg'
+    id?: string
     children: () => any
 }
 
 // eslint-disable-next-line svelte/no-unused-props
-let { children, click, color  = 'secondary', disabled = false, outline = false, type = 'submit', 'class': cls = '' }: Props = $props()
+let { children, click, color  = 'secondary', disabled = false, outline = false, type = 'submit', 'class': cls = '', id = '', size }: Props = $props()
 
 let button: HTMLElement | undefined = $state()
 let lastWidth = $state(0)
@@ -70,11 +72,13 @@ async function _click () {
 <Button
     on:click={_click}
     bind:inner={button}
-    style="min-width: {lastWidth}px; min-height: 40px;"
+    style="min-width: {lastWidth}px;"
     class={cls}
     outline={outline}
     color={color}
     type={type}
+    size={size}
+    id={id}
     disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
 >
     {#if st === State.Normal || st === State.Progress}

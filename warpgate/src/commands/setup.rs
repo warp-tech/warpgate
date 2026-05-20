@@ -1,6 +1,6 @@
 #![allow(clippy::collapsible_else_if)]
 
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::io::Write;
 use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -8,19 +8,25 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
-use tracing::*;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, EntityTrait};
+use tracing::{error, info};
+use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    HttpConfig, ListenEndpoint, MySqlConfig, PostgresConfig, Secret, SshConfig, WarpgateConfigStore,
+    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
+    Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
+use warpgate_core::db::connect_to_db;
+use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
-use crate::Commands;
+use crate::{Cli, Commands};
 
-fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
+fn prompt_endpoint(prompt: &str, default: &ListenEndpoint) -> ListenEndpoint {
     loop {
         let v = dialoguer::Input::with_theme(&ColorfulTheme::default())
             .default(format!("{default:?}"))
@@ -36,13 +42,13 @@ fn prompt_endpoint(prompt: &str, default: ListenEndpoint) -> ListenEndpoint {
                 }
             },
             Err(err) => {
-                error!("Failed to resolve this endpoint: {err}")
+                error!("Failed to resolve this endpoint: {err}");
             }
         }
     }
 }
 
-pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
+pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     let version = warpgate_version();
     info!("Welcome to Warpgate {version}");
 
@@ -105,7 +111,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     let db_path = data_path.join("db");
     create_dir_all(&db_path)?;
-    secure_directory(&db_path)?;
+    if params.should_secure_files() {
+        secure_directory(&db_path)?;
+    }
 
     store.database_url = Secret::new(match &cli.command {
         Commands::UnattendedSetup {
@@ -134,7 +142,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
                 "Endpoint to listen for HTTP connections on",
-                HttpConfig::default().listen,
+                &HttpConfig::default().listen,
             );
         }
     }
@@ -162,7 +170,7 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             if store.ssh.enable {
                 store.ssh.listen = prompt_endpoint(
                     "Endpoint to listen for SSH connections on",
-                    SshConfig::default().listen,
+                    &SshConfig::default().listen,
                 );
             }
         }
@@ -186,11 +194,12 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             if store.mysql.enable {
                 store.mysql.listen = prompt_endpoint(
                     "Endpoint to listen for MySQL connections on",
-                    MySqlConfig::default().listen,
+                    &MySqlConfig::default().listen,
                 );
             }
         }
     }
+
     if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
         if let Some(postgres_port) = postgres_port {
             store.postgres.enable = true;
@@ -211,7 +220,36 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             if store.postgres.enable {
                 store.postgres.listen = prompt_endpoint(
                     "Endpoint to listen for PostgreSQL connections on",
-                    PostgresConfig::default().listen,
+                    &PostgresConfig::default().listen,
+                );
+            }
+        }
+    }
+
+    if let Commands::UnattendedSetup {
+        kubernetes_port, ..
+    } = &cli.command
+    {
+        if let Some(kubernetes_port) = kubernetes_port {
+            store.kubernetes.enable = true;
+            store.kubernetes.listen = ListenEndpoint::from(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                *kubernetes_port,
+            ));
+        }
+    } else {
+        if is_docker() {
+            store.kubernetes.enable = true;
+        } else {
+            store.kubernetes.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept Kubernetes connections?")
+                .interact()?;
+
+            if store.kubernetes.enable {
+                store.kubernetes.listen = prompt_endpoint(
+                    "Endpoint to listen for Kubernetes connections on",
+                    &KubernetesConfig::default().listen,
                 );
             }
         }
@@ -229,6 +267,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
 
     store.postgres.certificate = store.http.certificate.clone();
     store.postgres.key = store.http.key.clone();
+
+    store.kubernetes.certificate = store.http.certificate.clone();
+    store.kubernetes.key = store.http.key.clone();
 
     // ---
 
@@ -260,8 +301,8 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
                     admin_password
                 } else {
                     error!(
-                    "You must supply the admin password either through the --admin-password option"
-                );
+                        "You must supply the admin password either through the --admin-password option"
+                    );
                     error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
                     std::process::exit(1);
                 }
@@ -291,17 +332,42 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     File::create(&cli.config)?.write_all(yaml.as_bytes())?;
     info!("Saved into {}", cli.config.display());
 
-    let config = load_config(&cli.config, true)?;
-    warpgate_protocol_ssh::generate_keys(&config, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, "client")?;
+    let config = load_config(params, true)?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
+    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     // Create the admin user
     crate::commands::create_user::command(
-        cli,
+        params,
         BUILTIN_ADMIN_USERNAME,
         &admin_password,
-        &Some(BUILTIN_ADMIN_ROLE_NAME.to_string()),
+        Some(&BUILTIN_ADMIN_ROLE_NAME.to_string()),
     )
+    .await?;
+
+    let db = connect_to_db(&config, params).await?;
+
+    #[allow(clippy::expect_used)]
+    let user = User::Entity::find()
+        .one(&db)
+        .await?
+        .expect("Admin user should exist");
+
+    let access_role = Role::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
+        is_default: Set(false),
+        ..Default::default()
+    }
+    .insert(&db)
+    .await?;
+
+    UserRoleAssignment::ActiveModel {
+        user_id: Set(user.id),
+        role_id: Set(access_role.id),
+        ..Default::default()
+    }
+    .insert(&db)
     .await?;
 
     {
@@ -311,14 +377,16 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
             "localhost".to_string(),
         ])?;
 
-        let certificate_path = config
-            .paths_relative_to
+        let certificate_path = params
+            .paths_relative_to()
             .join(&config.store.http.certificate);
-        let key_path = config.paths_relative_to.join(&config.store.http.key);
+        let key_path = params.paths_relative_to().join(&config.store.http.key);
         std::fs::write(&certificate_path, cert.cert.pem())?;
         std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
-        secure_file(&certificate_path)?;
-        secure_file(&key_path)?;
+        if params.should_secure_files() {
+            secure_file(&certificate_path)?;
+            secure_file(&key_path)?;
+        }
     }
 
     info!("");
@@ -328,7 +396,9 @@ pub(crate) async fn command(cli: &crate::Cli) -> Result<()> {
     info!("");
     info!("You can now start Warpgate with:");
     if is_docker() {
-        info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate");
+        info!(
+            "docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate"
+        );
     } else {
         info!(
             "  {} --config {} run",

@@ -1,23 +1,25 @@
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use russh::keys::{encode_pkcs8_pem, load_secret_key, HashAlg, PrivateKey};
+use russh::keys::{HashAlg, PrivateKey, encode_pkcs8_pem, load_secret_key};
 use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::WarpgateConfig;
+use warpgate_common::{GlobalParams, WarpgateConfig};
 
-fn get_keys_path(config: &WarpgateConfig) -> PathBuf {
-    let mut path = config.paths_relative_to.clone();
+fn get_keys_path(config: &WarpgateConfig, params: &GlobalParams) -> PathBuf {
+    let mut path = params.paths_relative_to().clone();
     path.push(&config.store.ssh.keys);
     path
 }
 
-pub fn generate_keys(config: &WarpgateConfig, prefix: &str) -> Result<()> {
-    let path = get_keys_path(config);
+pub fn generate_keys(config: &WarpgateConfig, params: &GlobalParams, prefix: &str) -> Result<()> {
+    let path = get_keys_path(config, params);
     create_dir_all(&path)?;
-    secure_directory(&path)?;
+    if params.should_secure_files() {
+        secure_directory(&path)?;
+    }
 
     for (algo, name) in [
         (russh::keys::Algorithm::Ed25519, format!("{prefix}-ed25519")),
@@ -36,7 +38,9 @@ pub fn generate_keys(config: &WarpgateConfig, prefix: &str) -> Result<()> {
             let f = File::create(&key_path)?;
             encode_pkcs8_pem(&key, f)?;
         }
-        secure_file(&key_path)?;
+        if params.should_secure_files() {
+            secure_file(&key_path)?;
+        }
     }
 
     Ok(())
@@ -44,11 +48,21 @@ pub fn generate_keys(config: &WarpgateConfig, prefix: &str) -> Result<()> {
 
 pub fn load_keys(
     config: &WarpgateConfig,
+    params: &GlobalParams,
     prefix: &str,
 ) -> Result<Vec<PrivateKey>, russh::keys::Error> {
-    let path = get_keys_path(config);
+    let path = get_keys_path(config, params);
     Ok(vec![
         load_secret_key(path.join(format!("{prefix}-ed25519")), None)?,
         load_secret_key(path.join(format!("{prefix}-rsa")), None)?,
     ])
+}
+
+pub fn load_preferred_key(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+    prefix: &str,
+) -> Result<PrivateKey, russh::keys::Error> {
+    let path = get_keys_path(config, params);
+    load_secret_key(path.join(format!("{prefix}-ed25519")), None)
 }

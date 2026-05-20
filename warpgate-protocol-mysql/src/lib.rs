@@ -8,13 +8,13 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use client::{ConnectionOptions, MySqlClient};
 use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
-use tracing::*;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions};
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use rustls::server::NoClientAuth;
+use tracing::{Instrument, error, info, warn};
+use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
@@ -27,10 +27,10 @@ pub struct MySQLProtocolServer {
 }
 
 impl MySQLProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(MySQLProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 
@@ -38,10 +38,9 @@ impl ProtocolServer for MySQLProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
             let config = self.services.config.lock().await;
-            let certificate_path = config
-                .paths_relative_to
-                .join(&config.store.mysql.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.mysql.key);
+            let paths_rel_to = self.services.global_params.paths_relative_to();
+            let certificate_path = paths_rel_to.join(&config.store.mysql.certificate);
+            let key_path = paths_rel_to.join(&config.store.mysql.key);
 
             TlsCertificateAndPrivateKey {
                 certificate: TlsCertificateBundle::from_file(&certificate_path)
@@ -76,6 +75,9 @@ impl ProtocolServer for MySQLProtocolServer {
             let remote_address = stream.peer_addr().context("getting peer address")?;
 
             stream.set_nodelay(true)?;
+            if detect_port_knock(&stream).await {
+                continue;
+            }
 
             let tls_config = tls_config.clone();
             let services = self.services.clone();
@@ -93,7 +95,10 @@ impl ProtocolServer for MySQLProtocolServer {
                 .await
                 .context("registering session")?;
 
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+                let wrapped_stream = {
+                    let guard = server_handle.lock().await;
+                    guard.wrap_stream(stream).await?
+                };
 
                 let session = MySqlSession::new(
                     server_handle,
@@ -106,7 +111,7 @@ impl ProtocolServer for MySQLProtocolServer {
                 let span = session.make_logging_span();
                 tokio::select! {
                     result = session.run().instrument(span) => match result {
-                        Ok(_) => info!("Session ended"),
+                        Ok(()) => info!("Session ended"),
                         Err(e) => error!(error=%e, "Session failed"),
                     },
                     _ = abort_rx.recv() => {
@@ -119,18 +124,6 @@ impl ProtocolServer for MySQLProtocolServer {
         }
     }
 
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::MySql(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not a MySQL target".to_owned(),
-            ));
-        };
-        MySqlClient::connect(&options, ConnectionOptions::default())
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
-        Ok(())
-    }
-
     fn name(&self) -> &'static str {
         "MySQL"
     }
@@ -138,6 +131,6 @@ impl ProtocolServer for MySQLProtocolServer {
 
 impl Debug for MySQLProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MySQLProtocolServer")
+        f.debug_struct("MySQLProtocolServer").finish()
     }
 }

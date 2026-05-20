@@ -5,6 +5,8 @@
     import Fa from 'svelte-fa'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import { serverInfo } from 'gateway/lib/store'
 
     interface Props {
         id: string,
@@ -39,13 +41,15 @@
 
 <h4 class="mt-4">Authentication</h4>
 
+{#if $adminPermissions.targetsEdit}
 <div class="mb-3">
     {#if !hostKeyCheckInvalidated}
-        <TargetSshHostKeyChecker id={id} options={options} />
+    <TargetSshHostKeyChecker id={id} options={options} />
     {:else}
-        <Alert color="secondary">Save changes to see the host key validation status</Alert>
+    <Alert color="secondary">Save changes to see the host key validation status</Alert>
     {/if}
 </div>
+{/if}
 
 <FormGroup floating label="Username">
     <input class="form-control"
@@ -59,6 +63,9 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            {#if $serverInfo?.runningOnEc2}
+                <option value="IamRole">IAM Role (experimental)</option>
+            {/if}
         </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}

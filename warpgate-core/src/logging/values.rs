@@ -40,7 +40,7 @@ pub struct RecordVisitor<'a> {
 }
 
 impl<'a> RecordVisitor<'a> {
-    pub fn new(values: &'a mut SerializedRecordValues) -> Self {
+    pub const fn new(values: &'a mut SerializedRecordValues) -> Self {
         Self { values }
     }
 }

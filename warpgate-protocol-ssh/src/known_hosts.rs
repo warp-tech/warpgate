@@ -25,7 +25,7 @@ impl KnownHosts {
     }
 
     pub async fn validate(
-        &mut self,
+        &self,
         host: &str,
         port: u16,
         key: &PublicKey,
@@ -52,7 +52,7 @@ impl KnownHosts {
     }
 
     pub async fn trust(
-        &mut self,
+        &self,
         host: &str,
         port: u16,
         key: &PublicKey,

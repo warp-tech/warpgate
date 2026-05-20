@@ -2,9 +2,9 @@ use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
 pub mod log_entry {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
     use sea_orm::query::JsonValue;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -14,7 +14,7 @@ pub mod log_entry {
         pub id: Uuid,
         pub text: String,
         pub values: JsonValue,
-        pub timestamp: DateTime<Utc>,
+        pub timestamp: OffsetDateTime,
         pub session_id: Uuid,
         pub username: Option<String>,
     }

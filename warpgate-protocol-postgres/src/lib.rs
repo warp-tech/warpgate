@@ -10,16 +10,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use client::{ConnectionOptions, PostgresClient};
 use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
+use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
-use tracing::*;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions};
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State, TargetTestError};
+use tracing::{Instrument, error, info, warn};
+use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
 };
@@ -29,10 +29,10 @@ pub struct PostgresProtocolServer {
 }
 
 impl PostgresProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(PostgresProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 
@@ -40,10 +40,9 @@ impl ProtocolServer for PostgresProtocolServer {
     async fn run(self, address: ListenEndpoint) -> Result<()> {
         let certificate_and_key = {
             let config = self.services.config.lock().await;
-            let certificate_path = config
-                .paths_relative_to
-                .join(&config.store.postgres.certificate);
-            let key_path = config.paths_relative_to.join(&config.store.postgres.key);
+            let paths_rel_to = self.services.global_params.paths_relative_to();
+            let certificate_path = paths_rel_to.join(&config.store.postgres.certificate);
+            let key_path = paths_rel_to.join(&config.store.postgres.key);
 
             TlsCertificateAndPrivateKey {
                 certificate: TlsCertificateBundle::from_file(&certificate_path)
@@ -78,6 +77,10 @@ impl ProtocolServer for PostgresProtocolServer {
                 return Ok(());
             };
 
+            if detect_port_knock(&stream).await {
+                continue;
+            }
+
             let remote_address = stream.peer_addr().context("getting peer address")?;
 
             // Enable TCP keepalive to prevent idle connections from timing out
@@ -107,7 +110,10 @@ impl ProtocolServer for PostgresProtocolServer {
                 )
                 .await?;
 
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+                let wrapped_stream = {
+                    let guard = server_handle.lock().await;
+                    guard.wrap_stream(stream).await?
+                };
 
                 let session = PostgresSession::new(
                     server_handle,
@@ -121,7 +127,7 @@ impl ProtocolServer for PostgresProtocolServer {
                 let span = session.make_logging_span();
                 tokio::select! {
                     result = session.run().instrument(span) => match result {
-                        Ok(_) => info!("Session ended"),
+                        Ok(()) => info!("Session ended"),
                         Err(e) => error!(error=%e, "Session failed"),
                     },
                     _ = abort_rx.recv() => {
@@ -134,22 +140,6 @@ impl ProtocolServer for PostgresProtocolServer {
         }
     }
 
-    async fn test_target(&self, target: Target) -> Result<(), TargetTestError> {
-        let TargetOptions::Postgres(options) = target.options else {
-            return Err(TargetTestError::Misconfigured(
-                "Not a PostgreSQL target".to_owned(),
-            ));
-        };
-        let mut conn_options = ConnectionOptions::default();
-        conn_options
-            .parameters
-            .insert("database".into(), "postgres".into());
-        PostgresClient::connect(&options, conn_options)
-            .await
-            .map_err(|e| TargetTestError::ConnectionError(format!("{e}")))?;
-        Ok(())
-    }
-
     fn name(&self) -> &'static str {
         "PostgreSQL"
     }
@@ -157,6 +147,6 @@ impl ProtocolServer for PostgresProtocolServer {
 
 impl Debug for PostgresProtocolServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PostgresProtocolServer")
+        f.debug_struct("PostgresProtocolServer").finish()
     }
 }

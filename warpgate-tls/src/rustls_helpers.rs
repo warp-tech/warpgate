@@ -1,15 +1,15 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 
-use super::{RustlsSetupError, ROOT_CERT_STORE};
+use super::{ROOT_CERT_STORE, RustlsSetupError};
 
 #[derive(Debug)]
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);

@@ -1,6 +1,6 @@
+use russh::Channel;
 use russh::client::{Msg, Session};
 use russh::keys::{PublicKey, PublicKeyBase64};
-use russh::Channel;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -47,7 +47,7 @@ impl russh::client::Handler for ClientHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        let mut known_hosts = KnownHosts::new(&self.services.db);
+        let known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
                 server_public_key.clone(),

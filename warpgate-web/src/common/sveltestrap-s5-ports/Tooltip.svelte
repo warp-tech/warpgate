@@ -48,6 +48,7 @@
     /**
     * @type {string}
     */
+    // svelte-ignore state_referenced_locally
     let popperPlacement = $state(placement)
     /**
     * @type {any}

@@ -1,0 +1,24 @@
+name: Clippy
+
+on: [pull_request]
+permissions:
+  contents: read
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          rustup component add clippy
+          cargo install --locked just@1.4.0
+          cargo install --locked cargo-cranky@0.3.0
+
+      - name: Clippy
+        run: |
+          just clippy

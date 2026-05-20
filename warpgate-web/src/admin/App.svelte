@@ -28,6 +28,24 @@
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte') as any,
         }),
+        '/log/user/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'user',
+            },
+        }),
+        '/log/access-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'access-role',
+            },
+        }),
+        '/log/admin-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'admin-role',
+            },
+        }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte') as any,
         }),
@@ -47,7 +65,9 @@
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
-            <AuthBar />
+            <div class="ms-auto">
+                <AuthBar />
+            </div>
         </header>
         <main>
             <Router {routes}/>

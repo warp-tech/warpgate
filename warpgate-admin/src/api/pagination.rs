@@ -1,5 +1,5 @@
-use poem_openapi::types::{ParseFromJSON, ToJSON};
 use poem_openapi::Object;
+use poem_openapi::types::{ParseFromJSON, ToJSON};
 use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QuerySelect, Select};
 use warpgate_common::WarpgateError;
 
@@ -21,7 +21,7 @@ impl<T: ParseFromJSON + ToJSON + Send + Sync> PaginatedResponse<T> {
         params: PaginationParams,
         db: &'_ C,
         postprocess: P,
-    ) -> Result<PaginatedResponse<T>, WarpgateError>
+    ) -> Result<Self, WarpgateError>
     where
         E: EntityTrait<Model = M>,
         C: ConnectionTrait,
@@ -40,7 +40,7 @@ impl<T: ParseFromJSON + ToJSON + Send + Sync> PaginatedResponse<T> {
         let items = query.all(db).await?;
 
         let items = items.into_iter().map(postprocess).collect::<Vec<_>>();
-        Ok(PaginatedResponse {
+        Ok(Self {
             items,
             offset,
             total,

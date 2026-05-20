@@ -1,5 +1,5 @@
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -9,6 +9,21 @@ pub struct Model {
     pub id: Uuid,
     pub allow_own_credential_management: bool,
     pub rate_limit_bytes_per_second: Option<i64>,
+    #[sea_orm(column_type = "Text")]
+    pub ca_certificate_pem: String,
+    #[sea_orm(column_type = "Text")]
+    pub ca_private_key_pem: String,
+    pub ssh_client_auth_publickey: bool,
+    pub ssh_client_auth_password: bool,
+    pub ssh_client_auth_keyboard_interactive: bool,
+    pub minimize_password_login: bool,
+    pub ticket_self_service_enabled: bool,
+    pub ticket_auto_approve_existing_access: bool,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
+    pub ticket_require_description: bool,
+    pub ticket_request_show_all_targets: bool,
+    pub show_session_menu: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -25,6 +40,19 @@ impl Entity {
                     id: Set(Uuid::new_v4()),
                     allow_own_credential_management: Set(true),
                     rate_limit_bytes_per_second: Set(None),
+                    ca_certificate_pem: Set("".into()),
+                    ca_private_key_pem: Set("".into()),
+                    ssh_client_auth_publickey: Set(true),
+                    ssh_client_auth_password: Set(true),
+                    ssh_client_auth_keyboard_interactive: Set(true),
+                    minimize_password_login: Set(false),
+                    ticket_self_service_enabled: Set(false),
+                    ticket_auto_approve_existing_access: Set(true),
+                    ticket_max_duration_seconds: Set(Some(28800)),
+                    ticket_max_uses: Set(None),
+                    ticket_require_description: Set(false),
+                    ticket_request_show_all_targets: Set(false),
+                    show_session_menu: Set(true),
                 }
                 .insert(db)
                 .await

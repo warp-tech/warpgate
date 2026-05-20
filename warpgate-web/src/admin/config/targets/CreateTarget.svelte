@@ -1,0 +1,151 @@
+<script lang="ts">
+    import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
+    import { replace } from 'svelte-spa-router'
+    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { stringifyError } from 'common/errors'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { onMount } from 'svelte'
+    import { TargetKind } from 'gateway/lib/api'
+    import { adminPermissions } from '../../lib/store'
+
+    interface Props {
+        params: { kind: string }
+    }
+
+    let { params }: Props = $props()
+
+    let error: string|null = $state(null)
+    let name = $state('')
+    let groups: TargetGroup[] = $state([])
+    let selectedGroupId: string | undefined = $state()
+
+    async function create () {
+        try {
+            const options: TargetOptions|undefined = {
+                Ssh: {
+                    kind: TargetKind.Ssh,
+                    host: '192.168.0.1',
+                    port: 22,
+                    username: 'root',
+                    auth: {
+                        kind: 'PublicKey' as const,
+                    },
+                },
+                Http: {
+                    kind: TargetKind.Http,
+                    url: 'http://192.168.0.1',
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                },
+                MySql: {
+                    kind: TargetKind.MySql,
+                    host: '192.168.0.1',
+                    port: 3306,
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    username: 'root',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
+                Postgres: {
+                    kind: TargetKind.Postgres,
+                    host: '192.168.0.1',
+                    port: 5432,
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    username: 'postgres',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
+                Kubernetes: {
+                    kind: TargetKind.Kubernetes,
+                    clusterUrl: 'https://kubernetes.example.com:6443',
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    auth: {
+                        kind: 'Certificate' as const,
+                        certificate: '',
+                        privateKey: '',
+                    },
+                },
+            }[params.kind]
+            if (!options) {
+                return
+            }
+            const target = await api.createTarget({
+                targetDataRequest: {
+                    name,
+                    options,
+                    groupId: selectedGroupId,
+                },
+            })
+            replace(`/config/targets/${target.id}`)
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    }
+
+    onMount(async () => {
+        try {
+            groups = await api.listTargetGroups()
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    })
+</script>
+
+<div class="container-max-md">
+    {#if !$adminPermissions.targetsCreate}
+        <Alert color="warning">You do not have permission to create targets.</Alert>
+    {/if}
+    {#if error}
+    <Alert color="danger">{error}</Alert>
+    {/if}
+
+    <div class="page-summary-bar">
+        <h1>add a target</h1>
+    </div>
+
+    <div class="narrow-page">
+        <Form on:submit={e => {
+            create()
+            e.preventDefault()
+        }}>
+            <!-- Defualt button for key handling -->
+            <Button class="d-none" type="submit"></Button>
+
+            <FormGroup floating label="Name">
+                <!-- svelte-ignore a11y_autofocus -->
+                <input class="form-control" autofocus required bind:value={name} />
+            </FormGroup>
+
+            {#if groups.length > 0}
+            <FormGroup floating label="Group">
+                <select class="form-control" bind:value={selectedGroupId}>
+                    <option value={undefined}>No group</option>
+                    {#each groups as group (group.id)}
+                        <option value={group.id}>{group.name}</option>
+                    {/each}
+                </select>
+            </FormGroup>
+            {/if}
+
+            <Button
+                color="primary"
+                type="submit"
+            >Create target</Button>
+        </Form>
+    </div>
+</div>

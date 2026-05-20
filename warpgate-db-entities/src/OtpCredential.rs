@@ -1,6 +1,6 @@
+use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
-use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserTotpCredential};
@@ -41,7 +41,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for UserTotpCredential {
     fn from(credential: Model) -> Self {
-        UserTotpCredential {
+        Self {
             key: credential.secret_key.into(),
         }
     }
