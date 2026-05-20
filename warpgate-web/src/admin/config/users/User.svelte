@@ -277,11 +277,9 @@
             <Alert color="danger" dismissible on:dismiss={() => error = null}>{error}</Alert>
         {/if}
 
-        <SectionedForm class="user-form">
-            {#snippet summary()}
-                <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
-            {/snippet}
+        <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
 
+        <SectionedForm class="user-form">
             <Section id="info" title="General">
                 <div class="d-flex align-items-center gap-3">
                     <FormGroup floating label="Username" class="flex-grow-1">

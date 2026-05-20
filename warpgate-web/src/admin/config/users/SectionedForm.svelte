@@ -25,7 +25,7 @@
             return
         }
 
-        showSectionLinks = tabsElement.getBoundingClientRect().bottom <= 0
+        showSectionLinks = tabsElement.getBoundingClientRect().top <= 0
 
         const tabsBottomInViewport = showSectionLinks
             ? tabsElement.getBoundingClientRect().bottom
@@ -114,9 +114,9 @@
 
 <div class="sectioned-form-container {props.class ?? ''}">
     {#if sections.length > 0}
-        <div class="sectioned-form-tabs-slot">
+        <div class="sectioned-form-tabs-slot {showSectionLinks ? 'is-visible' : 'is-hidden'}">
             <nav
-                class="sectioned-form-tabs {showSectionLinks ? 'is-visible' : 'is-hidden'}"
+                class="sectioned-form-tabs"
                 bind:this={tabsElement}
             >
                 <div class="nav nav-pills gap-2 p-2 overflow-x-auto">
@@ -155,24 +155,26 @@
         z-index: 10;
         height: 60px;
         margin-bottom: -60px;
+        transition: opacity 120ms ease-out;
+    }
+
+    .sectioned-form-tabs-slot.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .sectioned-form-tabs-slot.is-visible {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .sectioned-form-tabs {
         border-bottom: 1px solid var(--bs-border-color);
         background: var(--bs-body-bg);
         transition: opacity 120ms ease;
-    }
 
-    .sectioned-form-tabs.is-hidden {
-        opacity: 0;
-        pointer-events: none;
-        visibility: hidden;
-    }
-
-    .sectioned-form-tabs.is-visible {
-        opacity: 1;
-        pointer-events: auto;
-        visibility: visible;
+        flex-wrap: nowrap;
+        white-space: nowrap;
     }
 
     .sectioned-form-content {

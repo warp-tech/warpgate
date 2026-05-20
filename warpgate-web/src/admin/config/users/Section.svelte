@@ -26,8 +26,7 @@
     }
 
     .sectioned-form-section {
-        padding: 1.5rem;
-        border-bottom: 1px solid var(--bs-border-color);
+        padding: 0 0 1.5rem;
     }
 
     .sectioned-form-section:last-child {
