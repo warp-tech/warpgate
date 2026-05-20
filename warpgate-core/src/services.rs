@@ -6,6 +6,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use warpgate_common::{GlobalParams, WarpgateConfig};
+use warpgate_db_entities::Parameters;
 
 use crate::db::{connect_to_db, populate_db};
 use crate::login_protection::LoginProtectionService;
@@ -60,10 +61,13 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
-        // Initialize login protection service
-        let login_protection_config = config.lock().await.store.login_protection.clone();
+        // Initialize login protection service from DB parameters
+        let db_params = {
+            let db_lock = db.lock().await;
+            Parameters::Entity::get(&*db_lock).await?
+        };
         let login_protection =
-            Arc::new(LoginProtectionService::new(login_protection_config, db.clone()).await?);
+            Arc::new(LoginProtectionService::new(&db_params, db.clone()).await?);
 
         // Background cleanup task for login protection (runs every hour)
         if login_protection.is_enabled() {

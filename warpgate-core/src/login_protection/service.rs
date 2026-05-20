@@ -2,16 +2,16 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     Set, TransactionTrait,
 };
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 use uuid::Uuid;
-use warpgate_common::{LoginProtectionConfig, WarpgateError};
-use warpgate_db_entities::{FailedLoginAttempt, IpBlock, UserLockout};
+use warpgate_common::{IpRateLimitConfig, LoginProtectionConfig, UserLockoutConfig, WarpgateError};
+use warpgate_db_entities::{FailedLoginAttempt, IpBlock, Parameters, UserLockout};
 
 use super::cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
 
@@ -49,11 +49,35 @@ pub struct LoginProtectionService {
 }
 
 impl LoginProtectionService {
-    /// Create service with config and database, initializes cache from DB
+    fn config_from_params(params: &Parameters::Model) -> LoginProtectionConfig {
+        LoginProtectionConfig {
+            enabled: params.login_protection_enabled,
+            retention_days: params.login_protection_retention_days as u32,
+            ip_rate_limit: IpRateLimitConfig {
+                max_attempts: params.lp_ip_max_attempts as u32,
+                time_window_minutes: params.lp_ip_time_window_minutes as u32,
+                base_block_duration_minutes: params.lp_ip_base_block_duration_minutes as u32,
+                block_duration_multiplier: params.lp_ip_block_duration_multiplier as f32,
+                max_block_duration_hours: params.lp_ip_max_block_duration_hours as u32,
+                cooldown_reset_hours: params.lp_ip_cooldown_reset_hours as u32,
+                blocked_message: params.lp_ip_blocked_message.clone(),
+            },
+            user_lockout: UserLockoutConfig {
+                max_attempts: params.lp_user_max_attempts as u32,
+                time_window_minutes: params.lp_user_time_window_minutes as u32,
+                auto_unlock: params.lp_user_auto_unlock,
+                lockout_duration_minutes: params.lp_user_lockout_duration_minutes as u32,
+                locked_message: params.lp_user_locked_message.clone(),
+            },
+        }
+    }
+
+    /// Create service from DB parameters, initializes cache from DB
     pub async fn new(
-        config: LoginProtectionConfig,
+        params: &Parameters::Model,
         db: Arc<Mutex<DatabaseConnection>>,
     ) -> Result<Self, WarpgateError> {
+        let config = Self::config_from_params(params);
         let cache = LoginProtectionCache::new();
 
         if config.enabled {
@@ -101,7 +125,7 @@ impl LoginProtectionService {
 
         // Check database as fallback (cache might be stale)
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let block = IpBlock::Entity::find()
             .filter(IpBlock::Column::IpAddress.eq(ip.to_string()))
             .filter(IpBlock::Column::ExpiresAt.gt(now))
@@ -152,7 +176,7 @@ impl LoginProtectionService {
 
         // Check database as fallback
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let lockout = UserLockout::Entity::find()
             .filter(UserLockout::Column::Username.eq(username))
             .one(&*db)
@@ -199,7 +223,7 @@ impl LoginProtectionService {
 
         let db = self.db.lock().await;
         let txn = db.begin().await?;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // 1. Insert failed attempt record
         let record = FailedLoginAttempt::ActiveModel {
@@ -214,7 +238,7 @@ impl LoginProtectionService {
 
         // 2. Check IP threshold
         let ip_window_start =
-            now - chrono::Duration::minutes(self.config.ip_rate_limit.time_window_minutes as i64);
+            now - time::Duration::minutes(self.config.ip_rate_limit.time_window_minutes as i64);
         let ip_count: u64 = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::RemoteIp.eq(attempt.remote_ip.to_string()))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(ip_window_start))
@@ -228,7 +252,7 @@ impl LoginProtectionService {
 
         // 3. Check user threshold
         let user_window_start =
-            now - chrono::Duration::minutes(self.config.user_lockout.time_window_minutes as i64);
+            now - time::Duration::minutes(self.config.user_lockout.time_window_minutes as i64);
         let user_count: u64 = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Username.eq(&attempt.username))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(user_window_start))
@@ -264,7 +288,7 @@ impl LoginProtectionService {
         &self,
         db: &C,
         ip: &IpAddr,
-        now: DateTime<Utc>,
+        now: OffsetDateTime,
     ) -> Result<(), WarpgateError> {
         let ip_str = ip.to_string();
 
@@ -277,7 +301,7 @@ impl LoginProtectionService {
         let (block_count, new_block) = if let Some(existing) = existing {
             // Check if cooldown period has passed - reset block count
             let cooldown_duration =
-                chrono::Duration::hours(self.config.ip_rate_limit.cooldown_reset_hours as i64);
+                time::Duration::hours(self.config.ip_rate_limit.cooldown_reset_hours as i64);
             let block_count = if now - existing.last_attempt_at > cooldown_duration {
                 1 // Reset to first block
             } else {
@@ -289,7 +313,7 @@ impl LoginProtectionService {
         };
 
         let block_duration = calculate_block_duration(block_count as u32, &self.config.ip_rate_limit);
-        let expires_at = now + block_duration;
+        let expires_at = now + time::Duration::try_from(block_duration).unwrap_or(time::Duration::ZERO);
 
         if new_block {
             let record = IpBlock::ActiveModel {
@@ -346,7 +370,7 @@ impl LoginProtectionService {
         db: &C,
         username: &str,
         failed_count: i32,
-        now: DateTime<Utc>,
+        now: OffsetDateTime,
     ) -> Result<(), WarpgateError> {
         // Check for existing lockout
         let existing = UserLockout::Entity::find()
@@ -361,7 +385,7 @@ impl LoginProtectionService {
 
         let expires_at = if self.config.user_lockout.auto_unlock {
             Some(
-                now + chrono::Duration::minutes(
+                now + time::Duration::minutes(
                     self.config.user_lockout.lockout_duration_minutes as i64,
                 ),
             )
@@ -467,7 +491,7 @@ impl LoginProtectionService {
     /// Get current security status for admin UI
     pub async fn get_security_status(&self) -> Result<SecurityStatus, WarpgateError> {
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Count active blocked IPs
         let blocked_ip_count = IpBlock::Entity::find()
@@ -486,14 +510,14 @@ impl LoginProtectionService {
             .await?;
 
         // Count failed attempts in last hour
-        let one_hour_ago = now - chrono::Duration::hours(1);
+        let one_hour_ago = now - time::Duration::hours(1);
         let failed_attempts_last_hour = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Timestamp.gte(one_hour_ago))
             .count(&*db)
             .await?;
 
         // Count failed attempts in last 24 hours
-        let one_day_ago = now - chrono::Duration::hours(24);
+        let one_day_ago = now - time::Duration::hours(24);
         let failed_attempts_last_24h = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Timestamp.gte(one_day_ago))
             .count(&*db)
@@ -510,7 +534,7 @@ impl LoginProtectionService {
     /// List all currently blocked IPs
     pub async fn list_blocked_ips(&self) -> Result<Vec<IpBlockInfo>, WarpgateError> {
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         let blocks = IpBlock::Entity::find()
             .filter(IpBlock::Column::ExpiresAt.gt(now))
@@ -547,7 +571,7 @@ impl LoginProtectionService {
     /// List all currently locked users
     pub async fn list_locked_users(&self) -> Result<Vec<UserLockInfo>, WarpgateError> {
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         let lockouts = UserLockout::Entity::find()
             .filter(
@@ -590,7 +614,7 @@ impl LoginProtectionService {
         }
 
         let db = self.db.lock().await;
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Delete expired IP blocks
         let expired_blocks = IpBlock::Entity::delete_many()
@@ -607,7 +631,7 @@ impl LoginProtectionService {
 
         // Delete old failed login attempts beyond retention period
         let retention_cutoff =
-            now - chrono::Duration::days(self.config.retention_days as i64);
+            now - time::Duration::days(self.config.retention_days as i64);
         let old_attempts = FailedLoginAttempt::Entity::delete_many()
             .filter(FailedLoginAttempt::Column::Timestamp.lt(retention_cutoff))
             .exec(&*db)
@@ -705,7 +729,6 @@ mod tests {
     fn test_calculate_block_duration_first_block() {
         let config = default_config();
         let duration = calculate_block_duration(1, &config);
-        // First block: 30 min * 2^0 = 30 min = 1800 sec
         assert_eq!(duration.as_secs(), 1800);
     }
 
@@ -713,7 +736,6 @@ mod tests {
     fn test_calculate_block_duration_second_block() {
         let config = default_config();
         let duration = calculate_block_duration(2, &config);
-        // Second block: 30 min * 2^1 = 60 min = 3600 sec
         assert_eq!(duration.as_secs(), 3600);
     }
 
@@ -721,7 +743,6 @@ mod tests {
     fn test_calculate_block_duration_third_block() {
         let config = default_config();
         let duration = calculate_block_duration(3, &config);
-        // Third block: 30 min * 2^2 = 120 min = 7200 sec
         assert_eq!(duration.as_secs(), 7200);
     }
 
@@ -729,7 +750,6 @@ mod tests {
     fn test_calculate_block_duration_fifth_block() {
         let config = default_config();
         let duration = calculate_block_duration(5, &config);
-        // Fifth block: 30 min * 2^4 = 480 min = 8 hours = 28800 sec
         assert_eq!(duration.as_secs(), 28800);
     }
 
@@ -737,8 +757,6 @@ mod tests {
     fn test_calculate_block_duration_capped_at_max() {
         let config = default_config();
         let duration = calculate_block_duration(10, &config);
-        // 10th block would be: 30 min * 2^9 = 15360 min = 256 hours
-        // But max is 24 hours = 86400 sec
         assert_eq!(duration.as_secs(), 86400);
     }
 
@@ -747,7 +765,6 @@ mod tests {
         let mut config = default_config();
         config.block_duration_multiplier = 1.5;
         let duration = calculate_block_duration(3, &config);
-        // Third block: 30 min * 1.5^2 = 30 * 2.25 = 67.5 min = 4050 sec
         assert_eq!(duration.as_secs(), 4050);
     }
 
@@ -755,7 +772,6 @@ mod tests {
     fn test_calculate_block_duration_zero_block_count() {
         let config = default_config();
         let duration = calculate_block_duration(0, &config);
-        // Zero defaults to base duration
         assert_eq!(duration.as_secs(), 1800);
     }
 }

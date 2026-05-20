@@ -2,7 +2,7 @@ use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -24,6 +24,22 @@ pub struct Model {
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
     pub show_session_menu: bool,
+    pub login_protection_enabled: bool,
+    pub login_protection_retention_days: i32,
+    pub lp_ip_max_attempts: i32,
+    pub lp_ip_time_window_minutes: i32,
+    pub lp_ip_base_block_duration_minutes: i32,
+    pub lp_ip_block_duration_multiplier: f64,
+    pub lp_ip_max_block_duration_hours: i32,
+    pub lp_ip_cooldown_reset_hours: i32,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub lp_ip_blocked_message: Option<String>,
+    pub lp_user_max_attempts: i32,
+    pub lp_user_time_window_minutes: i32,
+    pub lp_user_auto_unlock: bool,
+    pub lp_user_lockout_duration_minutes: i32,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub lp_user_locked_message: Option<String>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -53,6 +69,20 @@ impl Entity {
                     ticket_require_description: Set(false),
                     ticket_request_show_all_targets: Set(false),
                     show_session_menu: Set(true),
+                    login_protection_enabled: Set(true),
+                    login_protection_retention_days: Set(30),
+                    lp_ip_max_attempts: Set(5),
+                    lp_ip_time_window_minutes: Set(15),
+                    lp_ip_base_block_duration_minutes: Set(30),
+                    lp_ip_block_duration_multiplier: Set(2.0),
+                    lp_ip_max_block_duration_hours: Set(24),
+                    lp_ip_cooldown_reset_hours: Set(24),
+                    lp_ip_blocked_message: Set(None),
+                    lp_user_max_attempts: Set(10),
+                    lp_user_time_window_minutes: Set(60),
+                    lp_user_auto_unlock: Set(false),
+                    lp_user_lockout_duration_minutes: Set(60),
+                    lp_user_locked_message: Set(None),
                 }
                 .insert(db)
                 .await

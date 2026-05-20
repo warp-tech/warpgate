@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -21,7 +21,7 @@ pub struct Model {
     pub credential_type: String,
 
     /// When the attempt occurred
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: OffsetDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

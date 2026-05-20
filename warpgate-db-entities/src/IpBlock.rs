@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -16,16 +16,16 @@ pub struct Model {
     pub block_count: i32,
 
     /// When the current block started
-    pub blocked_at: DateTime<Utc>,
+    pub blocked_at: OffsetDateTime,
 
     /// When the current block expires
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: OffsetDateTime,
 
     /// Reason for the block
     pub reason: String,
 
     /// Last failed attempt time (for cooldown reset tracking)
-    pub last_attempt_at: DateTime<Utc>,
+    pub last_attempt_at: OffsetDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

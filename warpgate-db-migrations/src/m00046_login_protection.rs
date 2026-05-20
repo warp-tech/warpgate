@@ -2,8 +2,8 @@ use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
 pub mod failed_login_attempt {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -15,7 +15,7 @@ pub mod failed_login_attempt {
         pub remote_ip: String,
         pub protocol: String,
         pub credential_type: String,
-        pub timestamp: DateTime<Utc>,
+        pub timestamp: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -25,8 +25,8 @@ pub mod failed_login_attempt {
 }
 
 pub mod ip_block {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -37,10 +37,10 @@ pub mod ip_block {
         #[sea_orm(unique)]
         pub ip_address: String,
         pub block_count: i32,
-        pub blocked_at: DateTime<Utc>,
-        pub expires_at: DateTime<Utc>,
+        pub blocked_at: OffsetDateTime,
+        pub expires_at: OffsetDateTime,
         pub reason: String,
-        pub last_attempt_at: DateTime<Utc>,
+        pub last_attempt_at: OffsetDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -50,8 +50,8 @@ pub mod ip_block {
 }
 
 pub mod user_lockout {
-    use chrono::{DateTime, Utc};
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -61,8 +61,8 @@ pub mod user_lockout {
         pub id: Uuid,
         #[sea_orm(unique)]
         pub username: String,
-        pub locked_at: DateTime<Utc>,
-        pub expires_at: Option<DateTime<Utc>>,
+        pub locked_at: OffsetDateTime,
+        pub expires_at: Option<OffsetDateTime>,
         pub reason: String,
         pub failed_attempt_count: i32,
     }
@@ -77,7 +77,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00021_login_protection"
+        "m00046_login_protection"
     }
 }
 
@@ -87,12 +87,10 @@ impl MigrationTrait for Migration {
         let builder = manager.get_database_backend();
         let schema = Schema::new(builder);
 
-        // Create failed_login_attempts table
         manager
             .create_table(schema.create_table_from_entity(failed_login_attempt::Entity))
             .await?;
 
-        // Create composite index for IP-based queries: "failed attempts from IP in time window"
         manager
             .create_index(
                 Index::create()
@@ -104,7 +102,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create composite index for user-based queries: "failed attempts for user in time window"
         manager
             .create_index(
                 Index::create()
@@ -116,12 +113,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create ip_blocks table
         manager
             .create_table(schema.create_table_from_entity(ip_block::Entity))
             .await?;
 
-        // Create index for finding blocks to clean up (expired blocks)
         manager
             .create_index(
                 Index::create()
@@ -132,12 +127,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create user_lockouts table
         manager
             .create_table(schema.create_table_from_entity(user_lockout::Entity))
             .await?;
 
-        // Create index for finding lockouts to clean up (expired lockouts)
         manager
             .create_index(
                 Index::create()
@@ -152,7 +145,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Drop indexes first
         manager
             .drop_index(
                 Index::drop()
@@ -189,7 +181,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Drop tables
         manager
             .drop_table(Table::drop().table(user_lockout::Entity).to_owned())
             .await?;

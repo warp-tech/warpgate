@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -15,8 +15,8 @@ pub struct Api;
 #[derive(Object)]
 struct BlockedIpInfo {
     ip_address: String,
-    blocked_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
+    blocked_at: OffsetDateTime,
+    expires_at: OffsetDateTime,
     block_count: i32,
     reason: String,
 }
@@ -24,8 +24,8 @@ struct BlockedIpInfo {
 #[derive(Object)]
 struct LockedUserInfo {
     username: String,
-    locked_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
+    locked_at: OffsetDateTime,
+    expires_at: Option<OffsetDateTime>,
     reason: String,
 }
 

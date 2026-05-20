@@ -780,7 +780,10 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub log: LogConfig,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
+    #[deprecated(
+        note = "Login protection is now configured via the admin API parameters. This field is ignored."
+    )]
     pub login_protection: LoginProtectionConfig,
 }
 

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use chrono::{DateTime, Utc};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use time::OffsetDateTime;
 use tokio::sync::RwLock;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::{IpBlock, UserLockout};
@@ -11,8 +11,8 @@ use warpgate_db_entities::{IpBlock, UserLockout};
 #[derive(Clone, Debug)]
 pub struct IpBlockInfo {
     pub ip_address: IpAddr,
-    pub blocked_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub blocked_at: OffsetDateTime,
+    pub expires_at: OffsetDateTime,
     pub block_count: i32,
     pub reason: String,
     pub message: String,
@@ -22,8 +22,8 @@ pub struct IpBlockInfo {
 #[derive(Clone, Debug)]
 pub struct UserLockInfo {
     pub username: String,
-    pub locked_at: DateTime<Utc>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub locked_at: OffsetDateTime,
+    pub expires_at: Option<OffsetDateTime>,
     pub reason: String,
     pub message: String,
 }
@@ -32,7 +32,7 @@ pub struct UserLockInfo {
 #[derive(Clone, Debug, Default)]
 pub struct AttemptCounter {
     pub count: u32,
-    pub window_start: Option<DateTime<Utc>>,
+    pub window_start: Option<OffsetDateTime>,
 }
 
 /// In-memory cache for fast lookups during attacks
@@ -60,7 +60,7 @@ impl LoginProtectionCache {
         default_blocked_message: &str,
         default_locked_message: &str,
     ) -> Result<(), WarpgateError> {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Load active IP blocks
         let blocks = IpBlock::Entity::find()
@@ -125,7 +125,7 @@ impl LoginProtectionCache {
     pub async fn is_ip_blocked(&self, ip: &IpAddr) -> Option<IpBlockInfo> {
         let blocked_ips = self.blocked_ips.read().await;
         if let Some(info) = blocked_ips.get(ip) {
-            if info.expires_at > Utc::now() {
+            if info.expires_at > OffsetDateTime::now_utc() {
                 return Some(info.clone());
             }
         }
@@ -141,7 +141,7 @@ impl LoginProtectionCache {
                 return Some(info.clone());
             }
             // If expiry is in the future, still locked
-            if info.expires_at.unwrap() > Utc::now() {
+            if info.expires_at.unwrap() > OffsetDateTime::now_utc() {
                 return Some(info.clone());
             }
         }
@@ -156,11 +156,11 @@ impl LoginProtectionCache {
     ) -> u32 {
         let mut counts = self.ip_attempt_counts.write().await;
         let counter = counts.entry(*ip).or_default();
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Reset counter if window has expired
         if let Some(window_start) = counter.window_start {
-            let window_duration = chrono::Duration::minutes(time_window_minutes as i64);
+            let window_duration = time::Duration::minutes(time_window_minutes as i64);
             if now - window_start > window_duration {
                 counter.count = 0;
                 counter.window_start = Some(now);
@@ -181,11 +181,11 @@ impl LoginProtectionCache {
     ) -> u32 {
         let mut counts = self.user_attempt_counts.write().await;
         let counter = counts.entry(username.to_string()).or_default();
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Reset counter if window has expired
         if let Some(window_start) = counter.window_start {
-            let window_duration = chrono::Duration::minutes(time_window_minutes as i64);
+            let window_duration = time::Duration::minutes(time_window_minutes as i64);
             if now - window_start > window_duration {
                 counter.count = 0;
                 counter.window_start = Some(now);
@@ -230,7 +230,7 @@ impl LoginProtectionCache {
 
     /// Clear expired entries from the cache
     pub async fn clear_expired(&self) {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
 
         // Clear expired IP blocks
         let mut blocked_ips = self.blocked_ips.write().await;
@@ -257,7 +257,7 @@ impl LoginProtectionCache {
 
     /// Get all currently blocked IPs
     pub async fn list_blocked_ips(&self) -> Vec<IpBlockInfo> {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let blocked_ips = self.blocked_ips.read().await;
         blocked_ips
             .values()
@@ -268,7 +268,7 @@ impl LoginProtectionCache {
 
     /// Get all currently locked users
     pub async fn list_locked_users(&self) -> Vec<UserLockInfo> {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let locked_users = self.locked_users.read().await;
         locked_users
             .values()
@@ -293,18 +293,17 @@ mod tests {
         let cache = LoginProtectionCache::new();
         let ip: IpAddr = "192.168.1.1".parse().unwrap();
 
-        // Add an expired block
+        let now = OffsetDateTime::now_utc();
         let info = IpBlockInfo {
             ip_address: ip,
-            blocked_at: Utc::now() - chrono::Duration::hours(2),
-            expires_at: Utc::now() - chrono::Duration::hours(1),
+            blocked_at: now - time::Duration::hours(2),
+            expires_at: now - time::Duration::hours(1),
             block_count: 1,
             reason: "test".to_string(),
             message: "test".to_string(),
         };
         cache.block_ip(ip, info).await;
 
-        // Should return None because it's expired
         assert!(cache.is_ip_blocked(&ip).await.is_none());
     }
 
@@ -313,18 +312,17 @@ mod tests {
         let cache = LoginProtectionCache::new();
         let ip: IpAddr = "192.168.1.1".parse().unwrap();
 
-        // Add an active block
+        let now = OffsetDateTime::now_utc();
         let info = IpBlockInfo {
             ip_address: ip,
-            blocked_at: Utc::now(),
-            expires_at: Utc::now() + chrono::Duration::hours(1),
+            blocked_at: now,
+            expires_at: now + time::Duration::hours(1),
             block_count: 1,
             reason: "test".to_string(),
             message: "test".to_string(),
         };
         cache.block_ip(ip, info).await;
 
-        // Should return Some because it's still active
         assert!(cache.is_ip_blocked(&ip).await.is_some());
     }
 
@@ -332,17 +330,16 @@ mod tests {
     async fn test_is_user_locked_returns_none_for_expired() {
         let cache = LoginProtectionCache::new();
 
-        // Add an expired lockout
+        let now = OffsetDateTime::now_utc();
         let info = UserLockInfo {
             username: "testuser".to_string(),
-            locked_at: Utc::now() - chrono::Duration::hours(2),
-            expires_at: Some(Utc::now() - chrono::Duration::hours(1)),
+            locked_at: now - time::Duration::hours(2),
+            expires_at: Some(now - time::Duration::hours(1)),
             reason: "test".to_string(),
             message: "test".to_string(),
         };
         cache.lock_user("testuser".to_string(), info).await;
 
-        // Should return None because it's expired
         assert!(cache.is_user_locked("testuser").await.is_none());
     }
 
@@ -350,17 +347,16 @@ mod tests {
     async fn test_is_user_locked_returns_some_for_permanent() {
         let cache = LoginProtectionCache::new();
 
-        // Add a permanent lockout (no expiry)
+        let now = OffsetDateTime::now_utc();
         let info = UserLockInfo {
             username: "testuser".to_string(),
-            locked_at: Utc::now(),
+            locked_at: now,
             expires_at: None,
             reason: "test".to_string(),
             message: "test".to_string(),
         };
         cache.lock_user("testuser".to_string(), info).await;
 
-        // Should return Some because it's permanent
         assert!(cache.is_user_locked("testuser").await.is_some());
     }
 
@@ -369,11 +365,11 @@ mod tests {
         let cache = LoginProtectionCache::new();
         let ip: IpAddr = "192.168.1.1".parse().unwrap();
 
-        // Block IP
+        let now = OffsetDateTime::now_utc();
         let info = IpBlockInfo {
             ip_address: ip,
-            blocked_at: Utc::now(),
-            expires_at: Utc::now() + chrono::Duration::hours(1),
+            blocked_at: now,
+            expires_at: now + time::Duration::hours(1),
             block_count: 1,
             reason: "test".to_string(),
             message: "test".to_string(),
@@ -381,7 +377,6 @@ mod tests {
         cache.block_ip(ip, info).await;
         assert!(cache.is_ip_blocked(&ip).await.is_some());
 
-        // Unblock IP
         cache.unblock_ip(&ip).await;
         assert!(cache.is_ip_blocked(&ip).await.is_none());
     }
@@ -391,11 +386,9 @@ mod tests {
         let cache = LoginProtectionCache::new();
         let ip: IpAddr = "192.168.1.1".parse().unwrap();
 
-        // First attempt
         let count = cache.increment_ip_attempts(&ip, 15).await;
         assert_eq!(count, 1);
 
-        // Second attempt
         let count = cache.increment_ip_attempts(&ip, 15).await;
         assert_eq!(count, 2);
     }

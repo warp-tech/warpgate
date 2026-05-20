@@ -22,7 +22,7 @@ use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{ConfigProvider, Services};
 
-use crate::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip;
 
 use super::common::logout;
 use crate::common::{SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request};
@@ -149,8 +149,9 @@ impl Api {
     ) -> poem::Result<LoginResponse> {
         let services = ctx.services();
         let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-        let client_ip_str = get_client_ip(req).await?;
-        let client_ip: Option<IpAddr> = client_ip_str.parse().ok();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
 
         // Check if IP is blocked
         if let Some(ip) = client_ip {
@@ -270,8 +271,9 @@ impl Api {
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let services = ctx.services();
-        let client_ip_str = get_client_ip(req).await?;
-        let client_ip: Option<IpAddr> = client_ip_str.parse().ok();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
 
         // Check if IP is blocked
         if let Some(ip) = client_ip {

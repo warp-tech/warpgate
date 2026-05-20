@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.4-21-ge437f0a5-modified"
+    "version": "v0.23.4-48-g04814be1-modified"
   },
   "servers": [
     {
@@ -1153,6 +1153,9 @@
           },
           "404": {
             "description": ""
+          },
+          "429": {
+            "description": ""
           }
         },
         "security": [
@@ -1351,6 +1354,8 @@
           "WebUserApprovalNeeded",
           "PublicKeyNeeded",
           "Success",
+          "IpBlocked",
+          "UserLocked",
           "IpRejected"
         ]
       },

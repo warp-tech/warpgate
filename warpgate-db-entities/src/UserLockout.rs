@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -13,10 +13,10 @@ pub struct Model {
     pub username: String,
 
     /// When the lockout started
-    pub locked_at: DateTime<Utc>,
+    pub locked_at: OffsetDateTime,
 
     /// When the lockout expires (None = manual unlock required)
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<OffsetDateTime>,
 
     /// Reason for the lockout
     pub reason: String,
