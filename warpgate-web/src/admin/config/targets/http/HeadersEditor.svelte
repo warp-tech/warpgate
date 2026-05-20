@@ -77,8 +77,6 @@
     })
 </script>
 
-<h4 class="mt-4">Additional headers</h4>
-
 <small class="form-text text-muted d-block mt-2 mb-3">
     Headers are added to all requests forwarded to the target. <a href="https://warpgate.null.page/targets/http/#built-in-headers" target="_blank" rel="noopener noreferrer">Some headers</a> are automatically set by Warpgate.
 </small>
