@@ -268,271 +268,266 @@
             </InfoBox>
             {/if}
 
-            <h4 class="mt-4">Login protection</h4>
-            <label
-                for="loginProtectionEnabled"
-                class="d-flex align-items-center mb-2"
-            >
-                <Input
-                    id="loginProtectionEnabled"
-                    class="mb-0 me-2"
-                    type="switch"
-                    on:change={() => {
-                        parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
-                        update()
-                    }}
-                    checked={parameters.loginProtectionEnabled} />
-                <div>Enable brute-force protection</div>
-            </label>
-            <InfoBox class="mt-3 mb-3">
-                When enabled, repeated failed login attempts will block the source IP and lock affected user accounts according to the thresholds below.
-                Manage blocked IPs and locked users from the <a href="/@warpgate/admin/#/config/login-protection">Login protection</a> page.
-            </InfoBox>
+            <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+                <h4 class="mb-0">Login protection</h4>
+                <label for="loginProtectionEnabled" class="d-flex align-items-center mb-0">
+                    <Input
+                        id="loginProtectionEnabled"
+                        class="mb-0 me-2"
+                        type="switch"
+                        on:change={() => {
+                            parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
+                            update()
+                        }}
+                        checked={parameters.loginProtectionEnabled} />
+                    <small>Enabled</small>
+                </label>
+            </div>
+            <small class="form-text text-muted d-block mb-2">
+                Block source IPs and lock user accounts after repeated failed logins (exponential backoff).
+                Manage active blocks/lockouts on the <a href="/@warpgate/admin/#/config/login-protection">Login protection</a> page.
+            </small>
 
             {#if parameters.loginProtectionEnabled}
-            <FormGroup floating label="Retention (days)">
-                <input
-                    id="loginProtectionRetentionDays"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.loginProtectionRetentionDays}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.loginProtectionRetentionDays = v
-                            update()
-                        }
-                    }}
-                />
-                <small class="form-text text-muted">
-                    How long failed login attempts, blocks, and lockouts are kept in the database.
-                </small>
-            </FormGroup>
+            <div class="row g-2 mb-2">
+                <div class="col-md-3">
+                    <FormGroup floating label="Retention (days)">
+                        <input
+                            id="loginProtectionRetentionDays"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.loginProtectionRetentionDays}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.loginProtectionRetentionDays = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+            </div>
 
-            <h5 class="mt-4">IP rate limiting</h5>
-            <InfoBox class="mt-2 mb-3">
-                Block source IPs after too many failed attempts within a time window. Subsequent blocks last longer (exponential backoff).
-            </InfoBox>
+            <h6 class="mt-3 mb-1 text-muted text-uppercase" style="font-size:.75rem;letter-spacing:.05em;">IP rate limiting</h6>
+            <div class="row g-2 mb-2">
+                <div class="col-md-3">
+                    <FormGroup floating label="Max attempts">
+                        <input
+                            id="lpIpMaxAttempts"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpIpMaxAttempts}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpMaxAttempts = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Time window (min)">
+                        <input
+                            id="lpIpTimeWindowMinutes"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpIpTimeWindowMinutes}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpTimeWindowMinutes = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Base block (min)">
+                        <input
+                            id="lpIpBaseBlockDurationMinutes"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpIpBaseBlockDurationMinutes}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpBaseBlockDurationMinutes = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Multiplier">
+                        <input
+                            id="lpIpBlockDurationMultiplier"
+                            type="number"
+                            min="1"
+                            step="0.1"
+                            class="form-control"
+                            value={parameters.lpIpBlockDurationMultiplier}
+                            onchange={e => {
+                                const v = parseFloat(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpBlockDurationMultiplier = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Max block (h)">
+                        <input
+                            id="lpIpMaxBlockDurationHours"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpIpMaxBlockDurationHours}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpMaxBlockDurationHours = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Cooldown reset (h)">
+                        <input
+                            id="lpIpCooldownResetHours"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpIpCooldownResetHours}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpIpCooldownResetHours = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-6">
+                    <FormGroup floating label="Blocked-IP message (optional)">
+                        <input
+                            id="lpIpBlockedMessage"
+                            type="text"
+                            class="form-control"
+                            placeholder="IP temporarily blocked due to failed logins"
+                            value={parameters.lpIpBlockedMessage ?? ''}
+                            onchange={e => {
+                                const v = e.currentTarget.value.trim()
+                                parameters!.lpIpBlockedMessage = v === '' ? undefined : v
+                                update()
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+            </div>
 
-            <FormGroup floating label="Max attempts before block">
-                <input
-                    id="lpIpMaxAttempts"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpIpMaxAttempts}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpMaxAttempts = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-
-            <FormGroup floating label="Attempt time window (minutes)">
-                <input
-                    id="lpIpTimeWindowMinutes"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpIpTimeWindowMinutes}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpTimeWindowMinutes = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-
-            <FormGroup floating label="Base block duration (minutes)">
-                <input
-                    id="lpIpBaseBlockDurationMinutes"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpIpBaseBlockDurationMinutes}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpBaseBlockDurationMinutes = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-
-            <FormGroup floating label="Block duration multiplier">
-                <input
-                    id="lpIpBlockDurationMultiplier"
-                    type="number"
-                    min="1"
-                    step="0.1"
-                    class="form-control"
-                    value={parameters.lpIpBlockDurationMultiplier}
-                    onchange={e => {
-                        const v = parseFloat(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpBlockDurationMultiplier = v
-                            update()
-                        }
-                    }}
-                />
-                <small class="form-text text-muted">
-                    Each repeat block multiplies the previous duration by this factor (e.g. 2.0 doubles each time).
-                </small>
-            </FormGroup>
-
-            <FormGroup floating label="Max block duration (hours)">
-                <input
-                    id="lpIpMaxBlockDurationHours"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpIpMaxBlockDurationHours}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpMaxBlockDurationHours = v
-                            update()
-                        }
-                    }}
-                />
-                <small class="form-text text-muted">
-                    Cap on exponential backoff. Blocks will never exceed this duration.
-                </small>
-            </FormGroup>
-
-            <FormGroup floating label="Cooldown reset (hours)">
-                <input
-                    id="lpIpCooldownResetHours"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpIpCooldownResetHours}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpIpCooldownResetHours = v
-                            update()
-                        }
-                    }}
-                />
-                <small class="form-text text-muted">
-                    After this period without failed attempts, the block-count for the IP is reset.
-                </small>
-            </FormGroup>
-
-            <FormGroup floating label="Custom blocked-IP message (optional)">
-                <input
-                    id="lpIpBlockedMessage"
-                    type="text"
-                    class="form-control"
-                    placeholder="Default: Your IP has been temporarily blocked due to too many failed login attempts."
-                    value={parameters.lpIpBlockedMessage ?? ''}
-                    onchange={e => {
-                        const v = e.currentTarget.value.trim()
-                        parameters!.lpIpBlockedMessage = v === '' ? undefined : v
-                        update()
-                    }}
-                />
-            </FormGroup>
-
-            <h5 class="mt-4">User lockout</h5>
-            <InfoBox class="mt-2 mb-3">
-                Lock specific user accounts after repeated failed attempts targeting them, independent of source IP.
-            </InfoBox>
-
-            <FormGroup floating label="Max attempts before lockout">
-                <input
-                    id="lpUserMaxAttempts"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpUserMaxAttempts}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpUserMaxAttempts = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-
-            <FormGroup floating label="Attempt time window (minutes)">
-                <input
-                    id="lpUserTimeWindowMinutes"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpUserTimeWindowMinutes}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpUserTimeWindowMinutes = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-
-            <label
-                for="lpUserAutoUnlock"
-                class="d-flex align-items-center mb-2 mt-2"
-            >
-                <Input
-                    id="lpUserAutoUnlock"
-                    class="mb-0 me-2"
-                    type="switch"
-                    on:change={() => {
-                        parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock
-                        update()
-                    }}
-                    checked={parameters.lpUserAutoUnlock} />
-                <div>Auto-unlock after lockout duration</div>
-            </label>
-            <InfoBox class="mt-2 mb-3">
-                When off, locked users stay locked until an admin manually unlocks them.
-            </InfoBox>
-
-            {#if parameters.lpUserAutoUnlock}
-            <FormGroup floating label="Lockout duration (minutes)">
-                <input
-                    id="lpUserLockoutDurationMinutes"
-                    type="number"
-                    min="1"
-                    class="form-control"
-                    value={parameters.lpUserLockoutDurationMinutes}
-                    onchange={e => {
-                        const v = parseInt(e.currentTarget.value)
-                        if (!isNaN(v) && v >= 1) {
-                            parameters!.lpUserLockoutDurationMinutes = v
-                            update()
-                        }
-                    }}
-                />
-            </FormGroup>
-            {/if}
-
-            <FormGroup floating label="Custom locked-user message (optional)">
-                <input
-                    id="lpUserLockedMessage"
-                    type="text"
-                    class="form-control"
-                    placeholder="Default: This account has been temporarily locked due to too many failed login attempts."
-                    value={parameters.lpUserLockedMessage ?? ''}
-                    onchange={e => {
-                        const v = e.currentTarget.value.trim()
-                        parameters!.lpUserLockedMessage = v === '' ? undefined : v
-                        update()
-                    }}
-                />
-            </FormGroup>
+            <h6 class="mt-3 mb-1 text-muted text-uppercase" style="font-size:.75rem;letter-spacing:.05em;">User lockout</h6>
+            <div class="row g-2 mb-2 align-items-center">
+                <div class="col-md-3">
+                    <FormGroup floating label="Max attempts">
+                        <input
+                            id="lpUserMaxAttempts"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpUserMaxAttempts}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpUserMaxAttempts = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                <div class="col-md-3">
+                    <FormGroup floating label="Time window (min)">
+                        <input
+                            id="lpUserTimeWindowMinutes"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpUserTimeWindowMinutes}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpUserTimeWindowMinutes = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                {#if parameters.lpUserAutoUnlock}
+                <div class="col-md-3">
+                    <FormGroup floating label="Lockout (min)">
+                        <input
+                            id="lpUserLockoutDurationMinutes"
+                            type="number"
+                            min="1"
+                            class="form-control"
+                            value={parameters.lpUserLockoutDurationMinutes}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                if (!isNaN(v) && v >= 1) {
+                                    parameters!.lpUserLockoutDurationMinutes = v
+                                    update()
+                                }
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+                {/if}
+                <div class="col-md-3 d-flex align-items-center">
+                    <label for="lpUserAutoUnlock" class="d-flex align-items-center mb-0">
+                        <Input
+                            id="lpUserAutoUnlock"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock
+                                update()
+                            }}
+                            checked={parameters.lpUserAutoUnlock} />
+                        <small>Auto-unlock</small>
+                    </label>
+                </div>
+                <div class="col-md-6">
+                    <FormGroup floating label="Locked-user message (optional)">
+                        <input
+                            id="lpUserLockedMessage"
+                            type="text"
+                            class="form-control"
+                            placeholder="Account temporarily locked due to failed logins"
+                            value={parameters.lpUserLockedMessage ?? ''}
+                            onchange={e => {
+                                const v = e.currentTarget.value.trim()
+                                parameters!.lpUserLockedMessage = v === '' ? undefined : v
+                                update()
+                            }}
+                        />
+                    </FormGroup>
+                </div>
+            </div>
             {/if}
         {/if}
         </Loadable>
