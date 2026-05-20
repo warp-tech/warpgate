@@ -73,12 +73,12 @@
 
     onMount(() => {
         // Find all section elements
-        const sectionElements = containerElement?.querySelectorAll('[data-section]')
+        const sectionElements = containerElement?.querySelectorAll('[data-section]') as NodeListOf<HTMLElement>
         if (sectionElements) {
             sections = Array.from(sectionElements).map((el) => ({
-                id: (el as HTMLElement).dataset.section!,
-                title: (el as HTMLElement).dataset.sectionTitle!,
-                element: el as HTMLElement,
+                id: el.dataset.section!,
+                title: el.dataset.sectionTitle!,
+                element: el,
             }))
             const firstSection = sections[0]
             if (firstSection) {

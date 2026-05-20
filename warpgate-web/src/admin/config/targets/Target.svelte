@@ -16,8 +16,8 @@
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
-    import SectionedForm from '../users/SectionedForm.svelte'
-    import Section from '../users/Section.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import Section from 'admin/lib/Section.svelte'
     import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
     interface Props {

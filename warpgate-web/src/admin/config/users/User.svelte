@@ -21,8 +21,8 @@
     import { formatDistanceToNow } from 'date-fns'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
-    import SectionedForm from './SectionedForm.svelte'
-    import Section from './Section.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import Section from 'admin/lib/Section.svelte'
 
     interface Props {
         params: { id: string };
