@@ -1,5 +1,6 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { link } from 'svelte-spa-router'
     import { api, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
@@ -372,7 +373,7 @@
                         onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpUserLockedMessage = v === '' ? undefined : v; update() }} />
                 </div>
                 <div class="lp-foot text-muted">
-                    Manage active blocks &amp; lockouts on the <a href="/@warpgate/admin/#/config/login-protection">Login protection</a> page.
+                    Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
                 </div>
             </div>
             {/if}
