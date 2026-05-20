@@ -501,6 +501,7 @@ class ProcessManager:
         server_options = _json.dumps(
             {
                 "AccessTokenJwtType": "JWT",
+                "IssuerUri": f"http://localhost:{port}",
                 "Discovery": {"ShowKeySet": True},
                 "Authentication": {
                     "CookieSameSiteMode": "Lax",
@@ -565,7 +566,7 @@ class ProcessManager:
                 "CLIENTS_CONFIGURATION_PATH=/tmp/config/clients-config.json",
                 "-v",
                 f"{oidc_data_dir}:/tmp/config:ro",
-                "ghcr.io/soluto/oidc-server-mock:0.10.1",
+                "xdevsoftware/oidc-server-mock:1.2.6",
             ]
         )
 

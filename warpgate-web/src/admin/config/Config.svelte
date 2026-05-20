@@ -2,6 +2,7 @@
     import NavListItem from 'common/NavListItem.svelte'
     import { wrap } from 'svelte-spa-router/wrap'
     import Router from 'svelte-spa-router'
+    import { serverInfo } from 'gateway/lib/store'
 
     const routes = {
         '/targets/create/:kind': wrap({
@@ -125,7 +126,9 @@
     <NavListItem
         class="mb-2"
         title="Tickets"
-        description="Temporary access credentials"
+        description={$serverInfo?.ticketSelfServiceEnabled
+            ? 'Access credentials — users can request tickets from their profile'
+            : 'Temporary access credentials'}
         href="/config/tickets"
         small={sidebarMode}
     />

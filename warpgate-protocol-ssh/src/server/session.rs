@@ -15,7 +15,7 @@ use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::{MethodKind, MethodSet, Sig};
 use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::auth::{
@@ -26,17 +26,18 @@ use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
     WarpgateError,
 };
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
 };
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::{ansi_paint, ServiceOutput};
+use super::service_output::{ServiceOutput, ansi_paint};
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
@@ -127,7 +128,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
-    ) -> Result<impl Future<Output = Result<()>>> {
+    ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.id();
 
         let span_ = info_span!("SSH", session=%id);
@@ -449,22 +450,22 @@ impl ServerSession {
                         Ok(())
                     }
                     Err(x) => Err(x.into()),
-                }
+                };
             }
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
                 self.channel_pty_size_map
                     .insert(channel_id, request.clone());
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+                    && let Err(error) = recorder
                         .write_pty_resize(request.col_width, request.row_height)
                         .await
-                    {
-                        error!(%channel_id, ?error, "Failed to record terminal data");
-                        self.channel_recorders.remove(&channel_id);
-                    }
+                {
+                    error!(%channel_id, ?error, "Failed to record terminal data");
+                    self.channel_recorders.remove(&channel_id);
                 }
+
                 self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestPty(request),
@@ -523,7 +524,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::AuthKeyboardInteractive(username, response, reply) => {
-                let _ = reply.send(self._auth_keyboard_interactive(username, response).await);
+                let _ = reply.send(self._auth_keyboard_interactive(username, response).await?);
             }
 
             ServerHandlerEvent::Data(channel, data, reply) => {
@@ -702,21 +703,20 @@ impl ServerSession {
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel)
+                    && let Err(error) = recorder
                         .write(TerminalRecordingStreamId::Output, &data)
                         .await
-                    {
-                        error!(%channel, ?error, "Failed to record terminal data");
-                        self.channel_recorders.remove(&channel);
-                    }
+                {
+                    error!(%channel, ?error, "Failed to record terminal data");
+                    self.channel_recorders.remove(&channel);
                 }
 
-                if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder.write_rx(&data).await {
-                        error!(%channel, ?error, "Failed to record traffic data");
-                        self.traffic_connection_recorders.remove(&channel);
-                    }
+                if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel)
+                    && let Err(error) = recorder.write_rx(&data).await
+                {
+                    error!(%channel, ?error, "Failed to record traffic data");
+                    self.traffic_connection_recorders.remove(&channel);
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
@@ -810,14 +810,13 @@ impl ServerSession {
             }
             RCEvent::Done => {}
             RCEvent::ExtendedData { channel, data, ext } => {
-                if let Some(recorder) = self.channel_recorders.get_mut(&channel) {
-                    if let Err(error) = recorder
+                if let Some(recorder) = self.channel_recorders.get_mut(&channel)
+                    && let Err(error) = recorder
                         .write(TerminalRecordingStreamId::Error, &data)
                         .await
-                    {
-                        error!(%channel, ?error, "Failed to record session data");
-                        self.channel_recorders.remove(&channel);
-                    }
+                {
+                    error!(%channel, ?error, "Failed to record session data");
+                    self.channel_recorders.remove(&channel);
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone() {
@@ -960,7 +959,9 @@ impl ServerSession {
         }
 
         if self.pty_channels.is_empty() {
-            warn!("Target host key is not trusted, but there is no active PTY channel to show the trust prompt on.");
+            warn!(
+                "Target host key is not trusted, but there is no active PTY channel to show the trust prompt on."
+            );
             warn!(
                 "Connect to this target with an interactive session once to accept the host key."
             );
@@ -1121,14 +1122,13 @@ impl ServerSession {
         let channel_id = self.map_channel(server_channel_id)?;
         self.channel_pty_size_map
             .insert(channel_id, request.clone());
-        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder
+        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder
                 .write_pty_resize(request.col_width, request.row_height)
                 .await
-            {
-                error!(%channel_id, ?error, "Failed to record terminal data");
-                self.channel_recorders.remove(&channel_id);
-            }
+        {
+            error!(%channel_id, ?error, "Failed to record terminal data");
+            self.channel_recorders.remove(&channel_id);
         }
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
@@ -1280,21 +1280,20 @@ impl ServerSession {
             return Ok(());
         }
 
-        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder
+        if let Some(recorder) = self.channel_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder
                 .write(TerminalRecordingStreamId::Input, &data)
                 .await
-            {
-                error!(channel=%channel_id, ?error, "Failed to record terminal data");
-                self.channel_recorders.remove(&channel_id);
-            }
+        {
+            error!(channel=%channel_id, ?error, "Failed to record terminal data");
+            self.channel_recorders.remove(&channel_id);
         }
 
-        if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id) {
-            if let Err(error) = recorder.write_tx(&data).await {
-                error!(channel=%channel_id, ?error, "Failed to record traffic data");
-                self.traffic_connection_recorders.remove(&channel_id);
-            }
+        if let Some(recorder) = self.traffic_connection_recorders.get_mut(&channel_id)
+            && let Err(error) = recorder.write_tx(&data).await
+        {
+            error!(channel=%channel_id, ?error, "Failed to record traffic data");
+            self.traffic_connection_recorders.remove(&channel_id);
         }
 
         if self.pty_channels.contains(&channel_id) {
@@ -1499,7 +1498,7 @@ impl ServerSession {
         &mut self,
         ssh_username: Secret<String>,
         response: Option<Secret<String>>,
-    ) -> russh::server::Auth {
+    ) -> Result<russh::server::Auth> {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
 
@@ -1508,7 +1507,7 @@ impl ServerSession {
             .contains(&MethodKind::KeyboardInteractive)
         {
             warn!("Client attempted keyboard-interactive auth even though it was not advertised");
-            return russh::server::Auth::reject();
+            return Ok(russh::server::Auth::reject());
         }
 
         let cred;
@@ -1528,7 +1527,7 @@ impl ServerSession {
 
         self.keyboard_interactive_state = KeyboardInteractiveState::None;
 
-        match self.try_auth_lazy(&selector, cred).await {
+        Ok(match self.try_auth_lazy(&selector, cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
@@ -1541,10 +1540,10 @@ impl ServerSession {
                     }
                 } else if kinds.contains(&CredentialKind::WebUserApproval) {
                     let Some(auth_state) = self.auth_state.as_ref() else {
-                        return russh::server::Auth::Reject {
+                        return Ok(russh::server::Auth::Reject {
                             proceed_with_methods: None,
                             partial_success: false,
-                        };
+                        });
                     };
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
@@ -1558,18 +1557,20 @@ impl ServerSession {
                     self.keyboard_interactive_state =
                         KeyboardInteractiveState::WebAuthRequested(event);
 
-                    let login_url = match auth_state
-                        .lock()
-                        .await
-                        .construct_web_approval_url(&*self.services.config.lock().await)
+                    let login_url = match construct_external_url(
+                        None,
+                        &*self.services.config.lock().await,
+                        None,
+                    )
+                    .await
                     {
-                        Ok(login_url) => login_url,
+                        Ok(ext_url) => auth_state.lock().await.construct_web_approval_url(ext_url),
                         Err(error) => {
                             error!(?error, "Failed to construct external URL");
-                            return russh::server::Auth::Reject {
+                            return Ok(russh::server::Auth::Reject {
                                 proceed_with_methods: None,
                                 partial_success: false,
-                            };
+                            });
                         }
                     };
 
@@ -1577,12 +1578,12 @@ impl ServerSession {
                         name: Cow::Borrowed("Warpgate authentication"),
                         instructions: Cow::Owned(format!(
                             concat!(
-                            "-----------------------------------------------------------------------\n",
-                            "Warpgate authentication: please open the following URL in your browser:\n",
-                            "{}\n\n",
-                            "Make sure you're seeing this security key: {}\n",
-                            "-----------------------------------------------------------------------\n"
-                        ),
+                                "-----------------------------------------------------------------------\n",
+                                "Warpgate authentication: please open the following URL in your browser:\n",
+                                "{}\n\n",
+                                "Make sure you're seeing this security key: {}\n",
+                                "-----------------------------------------------------------------------\n"
+                            ),
                             login_url,
                             identification_string
                                 .chars()
@@ -1606,7 +1607,7 @@ impl ServerSession {
                     partial_success: false,
                 }
             }
-        }
+        })
     }
 
     fn get_remaining_auth_methods(&self, kinds: HashSet<CredentialKind>) -> MethodSet {
@@ -1707,15 +1708,14 @@ impl ServerSession {
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
-                if let Some(credential) = credential {
-                    if cp
+                if let Some(credential) = credential
+                    && cp
                         .lock()
                         .await
                         .validate_credential(username, &credential)
                         .await?
-                    {
-                        state.add_valid_credential(credential);
-                    }
+                {
+                    state.add_valid_credential(credential);
                 }
 
                 let user_auth_result = state.verify();
@@ -1840,7 +1840,7 @@ impl ServerSession {
     }
 
     fn send_command(&self, command: RCCommand) -> Result<(), RCCommand> {
-        self.rc_tx.send((command, None)).map_err(|e| e.0 .0)
+        self.rc_tx.send((command, None)).map_err(|e| e.0.0)
     }
 
     async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
@@ -1924,7 +1924,7 @@ impl Future for PendingCommand {
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         match self.get_mut() {
-            Self::Waiting(ref mut rx) => match Pin::new(rx).poll(cx) {
+            Self::Waiting(rx) => match Pin::new(rx).poll(cx) {
                 Poll::Ready(result) => {
                     Poll::Ready(result.unwrap_or(Err(SshClientError::MpscError)))
                 }

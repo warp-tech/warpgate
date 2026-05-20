@@ -17,8 +17,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
-use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
 
@@ -86,7 +86,10 @@ async fn _handle_connection(
     let (event_tx, event_rx) = unbounded_channel();
 
     let handler = ServerHandler { event_tx };
-    let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+    let wrapped_stream = {
+        let guard = server_handle.lock().await;
+        guard.wrap_stream(stream).await?
+    };
 
     let session = match ServerSession::start(
         remote_address,
@@ -186,7 +189,9 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
     }
 
     if methods_vec.is_empty() {
-        warn!("All SSH authentication methods are disabled in parameters. Enabling all methods as fallback.");
+        warn!(
+            "All SSH authentication methods are disabled in parameters. Enabling all methods as fallback."
+        );
     }
 
     Ok(MethodSet::from(&methods_vec[..]))

@@ -5,10 +5,11 @@ use rand::RngExt;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use url::Url;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
-use crate::{SessionId, User, WarpgateConfig, WarpgateError};
+use crate::{SessionId, User};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -146,25 +147,21 @@ impl AuthState {
 
     fn maybe_update_verification_state(&mut self) -> AuthResult {
         let new_result = self.current_verification_state();
-        if Some(new_result.clone()) != self.last_result {
+        if self.last_result.as_ref() != Some(&new_result) {
             debug!(
                 "Verification state changed for auth state {}: {:?} -> {:?}",
                 self.id, self.last_result, &new_result
             );
             let _ = self.state_change_signal.send(new_result.clone());
+            self.last_result = Some(new_result.clone());
         }
-        self.last_result = Some(new_result.clone());
 
         new_result
     }
 
-    pub fn construct_web_approval_url(
-        &self,
-        config: &WarpgateConfig,
-    ) -> Result<url::Url, WarpgateError> {
-        let mut external_url = config.construct_external_url(None, None)?;
+    pub fn construct_web_approval_url(&self, mut external_url: Url) -> url::Url {
         external_url.set_path("@warpgate");
         external_url.set_fragment(Some(&format!("/login/{}", self.id())));
-        Ok(external_url)
+        external_url
     }
 }

@@ -115,6 +115,9 @@ async function loadNewer () {
 }
 
 async function loadOlder (searchMode = false) {
+    if (endReached && !searchMode) {
+        return
+    }
     loading = true
     try {
         const getLogsRequest: GetLogsRequest = {
@@ -129,9 +132,14 @@ async function loadOlder (searchMode = false) {
             endReached = false
             items = []
         }
+
+        const lengthBefore = items?.length ?? 0
         addItems(newItems)
+
         visibleItems = items
-        if (!newItems.length) {
+        if (lengthBefore === (items?.length ?? 0)) {
+            // newItems.length is not necessarily 0 here
+            // e.g. when fetching logs with "before" filter
             endReached = true
         }
     } finally {
@@ -483,7 +491,7 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                 {#if !loading}
                     <div class="load-older-footer">
                         <IntersectionObserver element={loadOlderButton} on:observe={event => {
-                            if (!loading && !error && event.detail.isIntersecting) {
+                            if (!loading && !error && event.detail.isIntersecting && !endReached) {
                                 loadOlder()
                             }
                         }}>

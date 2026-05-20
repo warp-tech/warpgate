@@ -79,6 +79,11 @@ impl MigrationTrait for Migration {
                 continue;
             };
 
+            if proto_obj.contains_key("auth") {
+                // Skip already migrated entries (this can happen in m00042)
+                continue;
+            }
+
             let mut new_proto = proto_obj.clone();
 
             // Extract the old password field

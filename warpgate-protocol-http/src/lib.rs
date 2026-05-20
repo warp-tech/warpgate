@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
-pub use common::{SsoLoginState, PROTOCOL_NAME};
+pub use common::{PROTOCOL_NAME, SsoLoginState};
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
@@ -23,11 +23,12 @@ use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::{debug, Instrument};
+use tracing::{Instrument, debug};
 use warpgate_admin::admin_api_app;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, ListenEndpoint, WarpgateConfig};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
@@ -37,8 +38,10 @@ use warpgate_tls::{
     TlsCertificateBundle, TlsPrivateKey,
 };
 use warpgate_web::Assets;
+use warpgate_web_ssh::WebSshClientManager;
+use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
-use crate::common::{endpoint_auth, page_auth, SESSION_COOKIE_NAME};
+use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
 use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
 use crate::session::{SessionStore, SharedSessionStorage};
@@ -134,7 +137,7 @@ impl ProtocolServer for HTTPProtocolServer {
         // work for the base host and its subdomains, not sibling domains.
         let base_cookie_domain: Option<String> = {
             let config = self.services.config.lock().await;
-            match config.construct_external_url(None, None) {
+            match construct_external_url(None, &config, None).await {
                 Ok(url) => {
                     if let Some(host) = url.host_str() {
                         // Use the base host directly with a leading dot (e.g., ".warp.tavahealth.com")
@@ -154,20 +157,27 @@ impl ProtocolServer for HTTPProtocolServer {
                         );
                         Some(domain)
                     } else {
-                        tracing::warn!("Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication.");
+                        tracing::warn!(
+                            "Failed to determine cookie domain - external_host may not be configured. Cookies will be scoped to request host, which may prevent cross-subdomain authentication."
+                        );
                         None
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.", e);
+                    tracing::warn!(
+                        "Failed to construct external URL for cookie domain: {:?}. Cookies will be scoped to request host.",
+                        e
+                    );
                     None
                 }
             }
         };
 
         // /@warpgate/ routes
+        let web_ssh_manager = Arc::new(WebSshClientManager::new());
         let at_warpgate_endpoints = || {
             let services = self.services.clone();
+            let web_ssh_manager = web_ssh_manager.clone();
             let api_service = {
                 OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
                     .server("/@warpgate/api")
@@ -198,6 +208,10 @@ impl ProtocolServer for HTTPProtocolServer {
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
                 )
                 .at(
+                    "/api/web-ssh/sessions/:session_id/stream",
+                    endpoint_auth(ssh_web_client_ws_handler),
+                )
+                .at(
                     "",
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
                         .with(cache_bust()),
@@ -225,6 +239,7 @@ impl ProtocolServer for HTTPProtocolServer {
                         }
                     }
                 })
+                .data(web_ssh_manager)
         };
 
         let app = Route::new()

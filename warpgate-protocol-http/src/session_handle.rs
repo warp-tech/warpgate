@@ -5,7 +5,7 @@ use poem::error::GetDataError;
 use poem::session::Session;
 use poem::web::Data;
 use poem::{FromRequest, Request};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use warpgate_core::{SessionHandle, WarpgateServerHandle};
 
 use crate::session::SessionStore;

@@ -128,7 +128,7 @@ impl Default for DatabaseTargetAuth {
 }
 
 impl DatabaseTargetAuth {
-    pub fn password(&self) -> Option<&str> {
+    pub const fn password(&self) -> Option<&str> {
         match self {
             Self::Password(auth) => Some(auth.password.as_str()),
             Self::IamRole(_) => None,
@@ -176,7 +176,11 @@ impl TargetMySqlOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: password,
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
             }));
         }
     }
@@ -225,7 +229,11 @@ impl TargetPostgresOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: password,
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
             }));
         }
     }
@@ -281,6 +289,10 @@ pub struct Target {
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]

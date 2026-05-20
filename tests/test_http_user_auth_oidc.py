@@ -1,6 +1,7 @@
 import html
 import re
 import requests
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from uuid import uuid4
 
 from .api_client import admin_client, sdk
@@ -85,7 +86,20 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     authenticated cookies and *redirect_url* is warpgate's SSO-return URL
     (already followed).
     """
-    from urllib.parse import urlparse, parse_qs
+
+    wg_session, redirect_url = _follow_oidc_login_redirects(
+        wg_url, oidc_port, username=username, password=password
+    )
+
+    resp = wg_session.get(redirect_url, allow_redirects=False)
+    return wg_session, resp
+
+
+def _follow_oidc_login_redirects(
+    wg_url, oidc_port, *, username="User1", password="pwd"
+):
+    """Drive the full OIDC authorization-code flow against the mock
+    and return the final Warpgate return URL without actually requesting it"""
 
     wg_session = requests.Session()
     wg_session.verify = False
@@ -97,27 +111,28 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
 
     # Follow to OIDC mock login page
     oidc_session = requests.Session()
+    oidc_session.verify = False
     resp = oidc_session.get(auth_url)
     assert resp.status_code == 200
     login_page_url = resp.url
     login_html = resp.text
 
     # Extract anti-forgery token (attribute order may vary)
+    # These are oidc mock specific
     token_match = re.search(
-        r'name="__RequestVerificationToken"[^>]*value="([^"]*)"',
+        r'name="__RequestVerificationToken"[^>]*value="([^\"]*)"',
         login_html,
     )
-    if not token_match:
-        token_match = re.search(
-            r'value="([^"]*)"[^>]*name="__RequestVerificationToken"',
-            login_html,
-        )
     assert token_match, "Could not find __RequestVerificationToken in login form"
     verification_token = html.unescape(token_match.group(1))
 
-    # The OIDC mock may use "Input.ReturnUrl" (Duende IdentityServer
-    # convention) or plain "ReturnUrl".  Try both, then fall back to URL.
-    return_url = None
+    action = login_page_url
+    m = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', login_html, re.I)
+    if m:
+        action = m.group(1)
+        if action.startswith("/"):
+            action = f"http://localhost:{oidc_port}{action}"
+
     m = re.search(
         r'name="Input.ReturnUrl"[^>]*value="([^"]*)"',
         login_html,
@@ -125,20 +140,13 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     assert m, "Could not find ReturnUrl in login form"
     return_url = html.unescape(m.group(1))
 
-    # Detect whether the mock uses the "Input." field-name prefix
-    uses_input_prefix = 'name="Input.' in login_html
-
-    def _field(name):
-        return f"Input.{name}" if uses_input_prefix else name
-
-    # Submit credentials
     resp = oidc_session.post(
         login_page_url,
         data={
-            _field("Username"): username,
-            _field("Password"): password,
-            _field("Button") if uses_input_prefix else "button": "login",
-            _field("ReturnUrl"): return_url,
+            "Input.Username": username,
+            "Input.Password": password,
+            "Input.Button": "login",
+            "Input.ReturnUrl": return_url,
             "__RequestVerificationToken": verification_token,
         },
         allow_redirects=False,
@@ -147,7 +155,7 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     # Chase redirects until we land back at warpgate's SSO return endpoint
     redirect_url = None
     for _ in range(15):
-        if resp.status_code not in (301, 302, 303, 307, 308):
+        if resp.status_code // 100 != 3:
             break
         location = resp.headers["Location"]
         if location.startswith("/"):
@@ -162,20 +170,7 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     )
     assert "code=" in redirect_url, "Redirect URL missing authorization code"
 
-    # The OIDC redirect_uri uses 127.0.0.1 but we started the SSO flow on
-    # wg_url (localhost).  Rewrite so the session cookies (set for localhost)
-    # are sent with this request.
-    parsed_redirect = urlparse(redirect_url)
-    parsed_wg = urlparse(wg_url)
-    redirect_url = redirect_url.replace(
-        f"{parsed_redirect.scheme}://{parsed_redirect.netloc}",
-        f"{parsed_wg.scheme}://{parsed_wg.netloc}",
-        1,
-    )
-
-    # Complete the SSO flow on warpgate
-    resp = wg_session.get(redirect_url, allow_redirects=False)
-    return wg_session, resp
+    return wg_session, redirect_url
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +223,54 @@ class TestHTTPUserAuthOIDC:
         )
         assert resp.status_code // 100 == 2
         assert resp.json()["path"] == "/some/path"
+
+    def test_oidc_auth_rejects_invalid_state(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+    ):
+        wg_http_port = alloc_port()
+        oidc_port = processes.start_oidc_server(wg_http_port)
+        wg = _start_wg_with_oidc(processes, wg_http_port, oidc_port)
+        wg_url = f"https://127.0.0.1:{wg.http_port}"
+
+        with admin_client(wg_url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_sso_credential(
+                user.id,
+                sdk.NewSsoCredential(
+                    email="sam.tailor@gmail.com",
+                    provider="test-oidc",
+                ),
+            )
+            api.add_user_role(user.id, role.id)
+            _create_echo_target(api, echo_server_port, role.id)
+
+        wg_session, redirect_url = _follow_oidc_login_redirects(
+            wg_url,
+            oidc_port,
+            username="User1",
+            password="pwd",
+        )
+
+        parsed = urlparse(redirect_url)
+        params = parse_qs(parsed.query)
+        params["state"] = ["invalid-state"]
+        redirect_url = urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                urlencode(params, doseq=True),
+                parsed.fragment,
+            )
+        )
+
+        resp = wg_session.get(redirect_url, allow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert "login_error" in resp.headers.get("Location", "")
 
     def test_oidc_auth_wrong_credentials(
         self,

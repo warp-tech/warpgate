@@ -4,6 +4,7 @@
     interface Props {
         id: string
         title: string
+        bodyTitle?: string
         class?: string
         hideHeading?: boolean
         children?: Snippet
@@ -14,7 +15,7 @@
 
 <section data-section={props.id} data-section-title={props.title} class="sectioned-form-section {props.class ?? ''}" id={`${props.id}-heading`}>
     {#if !props.hideHeading}
-        <h4>{props.title}</h4>
+        <h4>{props.bodyTitle ?? props.title}</h4>
     {/if}
     {@render props.children?.()}
 </section>

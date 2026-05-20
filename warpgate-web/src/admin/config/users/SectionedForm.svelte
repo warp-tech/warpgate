@@ -3,7 +3,6 @@
 
     interface Props {
         class?: string
-        summary?: Snippet
         children?: Snippet
     }
 
@@ -18,7 +17,6 @@
     let sections: Section[] = $state([])
     let activeSection = $state<string | null>(null)
     let showSectionLinks = $state(false)
-    let summaryContentElement: HTMLElement | null = $state(null)
     let containerElement: HTMLElement | null = $state(null)
     let tabsElement: HTMLElement | null = $state(null)
 
@@ -27,11 +25,7 @@
             return
         }
 
-        if (summaryContentElement && props.summary) {
-            showSectionLinks = summaryContentElement.getBoundingClientRect().bottom <= 0
-        } else {
-            showSectionLinks = true
-        }
+        showSectionLinks = tabsElement.getBoundingClientRect().bottom <= 0
 
         const tabsBottomInViewport = showSectionLinks
             ? tabsElement.getBoundingClientRect().bottom
@@ -143,14 +137,6 @@
         </div>
     {/if}
 
-    {#if props.summary}
-        <div class="sectioned-form-summary-slot">
-            <div class="sectioned-form-summary" bind:this={summaryContentElement}>
-                {@render props.summary()}
-            </div>
-        </div>
-    {/if}
-
     <!-- Content -->
     <div class="sectioned-form-content" bind:this={containerElement}>
         {@render props.children?.()}
@@ -167,7 +153,8 @@
         position: sticky;
         top: 0;
         z-index: 10;
-        min-height: 3.5rem;
+        height: 60px;
+        margin-bottom: -60px;
     }
 
     .sectioned-form-tabs {

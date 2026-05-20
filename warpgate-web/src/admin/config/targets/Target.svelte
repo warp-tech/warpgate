@@ -13,10 +13,12 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import SectionedForm from '../users/SectionedForm.svelte'
     import Section from '../users/Section.svelte'
+    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
     interface Props {
         params: { id: string };
@@ -30,12 +32,16 @@
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
+    let ticketDurationText = $state('')
 
     async function init () {
         [target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
+        ticketDurationText = target.ticketMaxDurationSeconds
+            ? formatDurationAsHumantime(target.ticketMaxDurationSeconds)
+            : ''
     }
 
     async function loadRoles () {
@@ -163,6 +169,7 @@
                         </FormGroup>
                     </div>
 
+
                     {#if groups.length > 0}
                     <div class="col-md-4">
                         <FormGroup floating label="Group">
@@ -199,6 +206,9 @@
                             <Input type="text" placeholder={'foo.' + $serverInfo.externalHost} bind:value={target.options.externalHost} />
                         </FormGroup>
                     {/if}
+
+                    <h4 class="mt-4">Additional headers</h4>
+                    <HttpHeadersEditor bind:value={target.options.headers} />
                 {/if}
 
                 {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
@@ -277,7 +287,7 @@
                 {/if}
             </Section>
 
-            <Section id="roles" title="Roles">
+            <Section id="roles" title="Roles" bodyTitle="Allow access for roles">
                 <Loadable promise={loadRoles()}>
                     {#snippet children(roles)}
                         <div class="list-group list-group-flush mb-3">
@@ -344,6 +354,107 @@
                     />
                 </FormGroup>
             </Section>
+
+            {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                <Section id="advanced" title="Advanced">
+                    {#if target.options.kind === 'Postgres'}
+                        <FormGroup floating label="Idle timeout">
+                            <input
+                                class="form-control"
+                                type="text"
+                                placeholder="10m"
+                                bind:value={target.options.idleTimeout}
+                                title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                            />
+                            <small class="form-text text-muted">
+                                How long an authenticated session can remain idle before requiring re-authentication. Examples: 30m, 1h, 2h30m. Leave empty for default (10m).
+                            </small>
+                        </FormGroup>
+                    {/if}
+
+                    <FormGroup floating label="Default database name for connection examples">
+                        <input
+                            class="form-control"
+                            type="text"
+                            placeholder="database-name"
+                            bind:value={target.options.defaultDatabaseName}
+                        />
+                        <small class="form-text text-muted">
+                            Default database name used in connection examples. This is only for display purposes and does not restrict which databases users can access. Leave empty to use the global default.
+                        </small>
+                    </FormGroup>
+                </Section>
+            {/if}
+
+            {#if $serverInfo?.ticketSelfServiceEnabled}
+            <Section id="self-service-tickets" title="Self-service tickets">
+                <label
+                    for="ticketRequestsDisabled"
+                    class="d-flex align-items-center mb-2"
+                >
+                    <Input
+                        id="ticketRequestsDisabled"
+                        class="mb-0 me-2"
+                        type="switch"
+                        on:change={() => {
+                            target!.ticketRequestsDisabled = !target!.ticketRequestsDisabled
+                            update()
+                        }}
+                        checked={target.ticketRequestsDisabled} />
+                    <div>Disable ticket requests for this target</div>
+                </label>
+
+                <label
+                    for="ticketRequireApproval"
+                    class="d-flex align-items-center mb-2"
+                >
+                    <Input
+                        id="ticketRequireApproval"
+                        class="mb-0 me-2"
+                        type="switch"
+                        on:change={() => {
+                            target!.ticketRequireApproval = !target!.ticketRequireApproval
+                            update()
+                        }}
+                        checked={target.ticketRequireApproval} />
+                    <div>Always require admin approval</div>
+                </label>
+
+                <FormGroup floating label="Max self-service ticket duration">
+                    <input
+                        class="form-control"
+                        type="text"
+                        placeholder="Use global default"
+                        bind:value={ticketDurationText}
+                        onchange={() => {
+                            const seconds = parseHumantimeDuration(ticketDurationText)
+                            target!.ticketMaxDurationSeconds = seconds ?? undefined
+                            update()
+                        }}
+                    />
+                    <small class="form-text text-muted">
+                        Examples: 30m, 8h, 1d. Leave empty to use the global default.
+                    </small>
+                </FormGroup>
+
+                <FormGroup floating label="Max uses per ticket">
+                    <input
+                        type="number"
+                        min="1"
+                        class="form-control"
+                        value={target.ticketMaxUses ?? ''}
+                        onchange={e => {
+                            const v = parseInt(e.currentTarget.value)
+                            target!.ticketMaxUses = isNaN(v) ? undefined : v
+                            update()
+                        }}
+                    />
+                    <small class="form-text text-muted">
+                        Leave empty to use the global default.
+                    </small>
+                </FormGroup>
+            </Section>
+            {/if}
         </SectionedForm>
     {/if}
     </Loadable>

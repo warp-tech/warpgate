@@ -13,17 +13,17 @@ use http::{HeaderValue, Uri};
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
     DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
 };
-use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
+use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
 use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::common::SessionExt;
@@ -129,10 +129,10 @@ fn copy_client_response<R: SomeResponse>(
 ) {
     let mut headers = client_response.headers().clone();
     for h in client_response.headers() {
-        if DONT_FORWARD_HEADERS.contains(h.0) {
-            if let http::header::Entry::Occupied(e) = headers.entry(h.0) {
-                e.remove_entry();
-            }
+        if DONT_FORWARD_HEADERS.contains(h.0)
+            && let http::header::Entry::Occupied(e) = headers.entry(h.0)
+        {
+            e.remove_entry();
         }
     }
     server_response.headers_mut().extend(headers);

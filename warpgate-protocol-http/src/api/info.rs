@@ -1,18 +1,19 @@
 use anyhow::Context;
+use poem::Request;
 use poem::session::Session;
 use poem::web::Data;
-use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{AdminRole, LdapServer, Parameters, User};
 
-use crate::common::{is_user_admin, SessionExt};
+use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
 
@@ -71,6 +72,7 @@ pub struct AdminPermissions {
 
     config_edit: bool,
     admin_roles_manage: bool,
+    ticket_requests_manage: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -85,6 +87,11 @@ pub struct Info {
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
+    ticket_self_service_enabled: bool,
+    ticket_max_duration_seconds: Option<i64>,
+    ticket_max_uses: Option<i16>,
+    ticket_require_description: bool,
+    ticket_request_show_all_targets: bool,
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
@@ -108,8 +115,8 @@ impl Api {
         auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
         let config = ctx.services().config.lock().await;
-        let external_host = config
-            .construct_external_url(Some(req), None)
+        let external_host = construct_external_url(Some(req), &config, None)
+            .await
             .ok()
             .as_ref()
             .and_then(url::Url::host)
@@ -138,11 +145,7 @@ impl Api {
                     has_targets: targets.len() > 1,
                     has_users: users.len() > 1,
                 };
-                if state.completed() {
-                    None
-                } else {
-                    Some(state)
-                }
+                if state.completed() { None } else { Some(state) }
             } else {
                 None
             }
@@ -228,6 +231,7 @@ impl Api {
                             combined.tickets_delete |= r.tickets_delete;
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
+                            combined.ticket_requests_manage |= r.ticket_requests_manage;
                         }
                     }
                     combined
@@ -242,7 +246,9 @@ impl Api {
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
-            username: session.get_username(),
+            username: auth_ctx
+                .as_ref()
+                .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
             minimize_password_login: parameters.minimize_password_login,
@@ -288,6 +294,11 @@ impl Api {
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
+            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
+            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
+            ticket_max_uses: parameters.ticket_max_uses,
+            ticket_require_description: parameters.ticket_require_description,
+            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,

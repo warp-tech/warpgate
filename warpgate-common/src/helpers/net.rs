@@ -8,7 +8,7 @@ pub async fn detect_port_knock(stream: &TcpStream) -> bool {
     let mut buf = [0u8; 1];
     match timeout(Duration::from_millis(500), stream.peek(&mut buf)).await {
         // Closed
-        Ok(Ok(0)) | Ok(Err(_)) => {
+        Ok(Ok(0) | Err(_)) => {
             debug!("Client closed connection immediately");
             true
         }

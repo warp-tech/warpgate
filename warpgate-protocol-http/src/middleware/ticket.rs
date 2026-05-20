@@ -3,8 +3,8 @@ use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use warpgate_common::Secret;
-use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::SessionAuthorization;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::{authorize_ticket, consume_ticket};
 
 use crate::common::SessionExt;
@@ -52,16 +52,16 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
 
             for h in req.headers().get_all(http::header::AUTHORIZATION) {
                 let header_value = h.to_str().unwrap_or("").to_string();
-                if let Some((token_type, token_value)) = header_value.split_once(' ') {
-                    if &token_type.to_lowercase() == "warpgate" {
-                        ticket_value = Some(token_value.to_string());
-                        session_is_temporary = true;
-                    }
+                if let Some((token_type, token_value)) = header_value.split_once(' ')
+                    && &token_type.to_lowercase() == "warpgate"
+                {
+                    ticket_value = Some(token_value.to_string());
+                    session_is_temporary = true;
                 }
             }
 
-            if let Some(ticket) = ticket_value {
-                if let Some((_ticket_model, target, user_info)) = {
+            if let Some(ticket) = ticket_value
+                && let Some((_ticket_model, target, user_info)) = {
                     let ticket_secret = Secret::new(ticket);
                     if let Some((ticket, target, user_info)) =
                         authorize_ticket(&ctx.services().db, &ticket_secret).await?
@@ -71,13 +71,13 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     } else {
                         None
                     }
-                } {
-                    session.set_auth(SessionAuthorization::Ticket {
-                        user_id: user_info.id,
-                        username: user_info.username,
-                        target_name: target.name,
-                    });
                 }
+            {
+                session.set_auth(SessionAuthorization::Ticket {
+                    user_id: user_info.id,
+                    username: user_info.username,
+                    target_name: target.name,
+                });
             }
         }
 

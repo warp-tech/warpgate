@@ -162,7 +162,7 @@ impl MigrationTrait for Migration {
                         )
                         .await?;
                     }
-                    _ => unreachable!(),
+                    DbBackend::Sqlite => unreachable!(),
                 }
                 db.execute_unprepared(
                     "DELETE FROM tickets WHERE user_id IS NULL OR target_id IS NULL",

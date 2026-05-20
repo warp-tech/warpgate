@@ -95,6 +95,11 @@ export const ADMIN_PERMISSIONS = [
         category: 'Configuration' as const,
     },
     {
+        key: 'ticketRequestsManage' as const,
+        label: 'Manage',
+        category: 'Ticket requests' as const,
+    },
+    {
         key: 'adminRolesManage' as const,
         label: 'Manage admin roles',
         category: 'Configuration', dangerous: true } as const,

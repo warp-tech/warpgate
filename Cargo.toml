@@ -20,6 +20,7 @@ members = [
     "warpgate-protocol-ssh",
     "warpgate-sso",
     "warpgate-web",
+    "warpgate-web-ssh",
 ]
 default-members = ["warpgate"]
 resolver = "2"
@@ -69,8 +70,8 @@ thiserror = { version = "2", default-features = false }
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
 rand_core = { version = "0.10" }
-dialoguer = { version = "0.11", default-features = false, features = ["editor", "password"] }
-tokio = { version = "1.20", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
+dialoguer = { version = "0.12", default-features = false, features = ["editor", "password"] }
+tokio = { version = "1.52", features = ["tracing", "signal", "macros", "rt-multi-thread", "io-util"], default-features = false }
 governor = { version = "0.10.0", default-features = false, features = ["std", "quanta", "jitter"] }
 rcgen = { version = "0.13", features = ["zeroize", "crypto", "aws_lc_rs", "pem", "x509-parser"], default-features = false }
 x509-parser = "0.17.0"
@@ -91,6 +92,7 @@ regex = { version = "1.6", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots", "connect"], default-features = false }
 reqwest-websocket = "0.6.0"
 time = "0.3"
+url = { version = "2.4", default-features = false }
 
 [profile.release]
 lto = true

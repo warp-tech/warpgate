@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
-use notify::{recommended_watcher, RecursiveMode, Watcher};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use notify::{RecursiveMode, Watcher, recommended_watcher};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{error, info, warn};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
@@ -47,11 +47,11 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
             map.insert(Value::String("http".into()), web_admin);
         }
 
-        if let Some(Value::Sequence(ref mut users)) = map.get_mut(Value::String("users".into())) {
+        if let Some(Value::Sequence(users)) = map.get_mut(Value::String("users".into())) {
             for user in users {
-                if let Value::Mapping(ref mut user) = user {
-                    if let Some(new_require) = match user.get(Value::String("require".into())) {
-                        Some(Value::Sequence(ref old_requires)) => Some(Value::Mapping(
+                if let Value::Mapping(user) = user
+                    && let Some(new_require) = match user.get(Value::String("require".into())) {
+                        Some(Value::Sequence(old_requires)) => Some(Value::Mapping(
                             vec![
                                 (
                                     Value::String("ssh".into()),
@@ -66,9 +66,9 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
                             .collect(),
                         )),
                         x => x.cloned(),
-                    } {
-                        user.insert(Value::String("require".into()), new_require);
                     }
+                {
+                    user.insert(Value::String("require".into()), new_require);
                 }
             }
         }

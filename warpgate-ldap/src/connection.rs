@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
 use tracing::{debug, info, warn};
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 
 use crate::error::{LdapError, Result};
 use crate::types::LdapConfig;

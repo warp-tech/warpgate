@@ -1,8 +1,8 @@
 [package]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-sso"
-version = "0.23.1"
+version = "0.23.4"
 publish = false
 
 [dependencies]
@@ -23,3 +23,4 @@ jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"]
 data-encoding.workspace = true
 futures.workspace = true
 schemars.workspace = true
+subtle = "2"

@@ -13,7 +13,7 @@ use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct ImportLdapUsersRequest {
@@ -301,8 +301,7 @@ impl ListApi {
         let mut query = LdapServer::Entity::find().order_by_asc(LdapServer::Column::Name);
 
         if let Some(ref search) = *search {
-            let search_pattern = format!("%{search}%");
-            query = query.filter(LdapServer::Column::Name.like(search_pattern));
+            query = query.filter(case_insensitive_search(search, [LdapServer::Column::Name]));
         }
 
         let servers = query.all(&*db).await.map_err(WarpgateError::from)?;
@@ -662,7 +661,7 @@ impl QueryApi {
             Err(e) => {
                 return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
                     "Failed to query users: {e}"
-                ))))
+                ))));
             }
         };
         let mut users = users.into_iter().map(Into::into).collect::<Vec<_>>();

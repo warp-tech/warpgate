@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tracing::{debug, info};
 
-use crate::{instance_cache, AwsError};
+use crate::{AwsError, instance_cache};
 
 #[derive(Debug, Clone)]
 pub struct Ec2InstanceInfo {
