@@ -6,7 +6,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
+use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::AnySecurityScheme;
 
@@ -82,10 +82,10 @@ impl Api {
     )]
     async fn list_blocked_ips(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ListBlockedIpsResponse, WarpgateError> {
-        let blocked_ips = services.login_protection.list_blocked_ips().await?;
+        let blocked_ips = ctx.services().login_protection.list_blocked_ips().await?;
         let result: Vec<BlockedIpInfo> = blocked_ips
             .into_iter()
             .map(|info| BlockedIpInfo {
@@ -106,7 +106,7 @@ impl Api {
     )]
     async fn unblock_ip(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         ip: Path<String>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UnblockIpResponse, WarpgateError> {
@@ -115,7 +115,7 @@ impl Api {
             Err(_) => return Ok(UnblockIpResponse::InvalidIp),
         };
 
-        services.login_protection.unblock_ip(&ip_addr).await?;
+        ctx.services().login_protection.unblock_ip(&ip_addr).await?;
         Ok(UnblockIpResponse::Ok)
     }
 
@@ -126,10 +126,10 @@ impl Api {
     )]
     async fn list_locked_users(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ListLockedUsersResponse, WarpgateError> {
-        let locked_users = services.login_protection.list_locked_users().await?;
+        let locked_users = ctx.services().login_protection.list_locked_users().await?;
         let result: Vec<LockedUserInfo> = locked_users
             .into_iter()
             .map(|info| LockedUserInfo {
@@ -149,11 +149,11 @@ impl Api {
     )]
     async fn unlock_user(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         username: Path<String>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UnlockUserResponse, WarpgateError> {
-        services
+        ctx.services()
             .login_protection
             .unlock_user(&username.0)
             .await?;
@@ -167,10 +167,10 @@ impl Api {
     )]
     async fn get_security_status(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<SecurityStatusResponse, WarpgateError> {
-        let status = services.login_protection.get_security_status().await?;
+        let status = ctx.services().login_protection.get_security_status().await?;
         Ok(SecurityStatusResponse::Ok(Json(SecurityStatus {
             blocked_ip_count: status.blocked_ip_count,
             locked_user_count: status.locked_user_count,

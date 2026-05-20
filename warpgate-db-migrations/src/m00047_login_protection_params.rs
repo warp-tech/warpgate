@@ -23,82 +23,165 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(true),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("login_protection_retention_days"))
                             .integer()
                             .not_null()
                             .default(30),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_max_attempts"))
                             .integer()
                             .not_null()
                             .default(5),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_time_window_minutes"))
                             .integer()
                             .not_null()
                             .default(15),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_base_block_duration_minutes"))
                             .integer()
                             .not_null()
                             .default(30),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_block_duration_multiplier"))
                             .double()
                             .not_null()
                             .default(2.0),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_max_block_duration_hours"))
                             .integer()
                             .not_null()
                             .default(24),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_ip_cooldown_reset_hours"))
                             .integer()
                             .not_null()
                             .default(24),
                     )
-                    .add_column(
-                        ColumnDef::new(Alias::new("lp_ip_blocked_message"))
-                            .text()
-                            .null(),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
+                    .add_column(ColumnDef::new(Alias::new("lp_ip_blocked_message")).text().null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_user_max_attempts"))
                             .integer()
                             .not_null()
                             .default(10),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_user_time_window_minutes"))
                             .integer()
                             .not_null()
                             .default(60),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_user_auto_unlock"))
                             .boolean()
                             .not_null()
                             .default(false),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("lp_user_lockout_duration_minutes"))
                             .integer()
                             .not_null()
                             .default(60),
                     )
-                    .add_column(
-                        ColumnDef::new(Alias::new("lp_user_locked_message"))
-                            .text()
-                            .null(),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
+                    .add_column(ColumnDef::new(Alias::new("lp_user_locked_message")).text().null())
                     .to_owned(),
             )
             .await
@@ -110,18 +193,109 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(parameters::Entity)
                     .drop_column(Alias::new("login_protection_enabled"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("login_protection_retention_days"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_max_attempts"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_time_window_minutes"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_base_block_duration_minutes"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_block_duration_multiplier"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_max_block_duration_hours"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_cooldown_reset_hours"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_ip_blocked_message"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_user_max_attempts"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_user_time_window_minutes"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_user_auto_unlock"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_user_lockout_duration_minutes"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .drop_column(Alias::new("lp_user_locked_message"))
                     .to_owned(),
             )
