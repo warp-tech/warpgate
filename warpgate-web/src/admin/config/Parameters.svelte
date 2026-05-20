@@ -268,264 +268,111 @@
             </InfoBox>
             {/if}
 
-            <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
-                <h4 class="mb-0">Login protection</h4>
-                <label for="loginProtectionEnabled" class="d-flex align-items-center mb-0">
-                    <Input
-                        id="loginProtectionEnabled"
-                        class="mb-0 me-2"
-                        type="switch"
-                        on:change={() => {
-                            parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
-                            update()
-                        }}
-                        checked={parameters.loginProtectionEnabled} />
-                    <small>Enabled</small>
-                </label>
-            </div>
-            <small class="form-text text-muted d-block mb-2">
-                Block source IPs and lock user accounts after repeated failed logins (exponential backoff).
-                Manage active blocks/lockouts on the <a href="/@warpgate/admin/#/config/login-protection">Login protection</a> page.
-            </small>
+            <h4 class="mt-4">Login protection</h4>
+            <label
+                for="loginProtectionEnabled"
+                class="d-flex align-items-center"
+            >
+                <Input
+                    id="loginProtectionEnabled"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
+                        update()
+                    }}
+                    checked={parameters.loginProtectionEnabled} />
+                <div>Brute-force protection (IP rate-limit + user lockout)</div>
+            </label>
 
             {#if parameters.loginProtectionEnabled}
-            <div class="row g-2 mb-2">
-                <div class="col-md-3">
-                    <FormGroup floating label="Retention (days)">
-                        <input
-                            id="loginProtectionRetentionDays"
-                            type="number"
-                            min="1"
-                            class="form-control"
-                            value={parameters.loginProtectionRetentionDays}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.loginProtectionRetentionDays = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-            </div>
-
-            <h6 class="mt-3 mb-1 text-muted text-uppercase" style="font-size:.75rem;letter-spacing:.05em;">IP rate limiting</h6>
-            <div class="row g-2 mb-2">
-                <div class="col-md-3">
-                    <FormGroup floating label="Max attempts">
-                        <input
-                            id="lpIpMaxAttempts"
-                            type="number"
-                            min="1"
-                            class="form-control"
+            <div class="lp-block mt-2 mb-2">
+                <div class="lp-row">
+                    <span class="lp-label">IP rate-limit</span>
+                    <span class="lp-sentence">
+                        Block after
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpIpMaxAttempts}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpMaxAttempts = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Time window (min)">
-                        <input
-                            id="lpIpTimeWindowMinutes"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxAttempts = v; update() } }} />
+                        failed attempts in
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpIpTimeWindowMinutes}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpTimeWindowMinutes = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Base block (min)">
-                        <input
-                            id="lpIpBaseBlockDurationMinutes"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; update() } }} />
+                        min for
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpIpBaseBlockDurationMinutes}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpBaseBlockDurationMinutes = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Multiplier">
-                        <input
-                            id="lpIpBlockDurationMultiplier"
-                            type="number"
-                            min="1"
-                            step="0.1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; update() } }} />
+                        min, ×
+                        <input type="number" min="1" step="0.1" class="lp-num lp-num-wide"
                             value={parameters.lpIpBlockDurationMultiplier}
-                            onchange={e => {
-                                const v = parseFloat(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpBlockDurationMultiplier = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Max block (h)">
-                        <input
-                            id="lpIpMaxBlockDurationHours"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBlockDurationMultiplier = v; update() } }} />
+                        on repeat, capped at
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpIpMaxBlockDurationHours}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpMaxBlockDurationHours = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Cooldown reset (h)">
-                        <input
-                            id="lpIpCooldownResetHours"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; update() } }} />
+                        h, reset after
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpIpCooldownResetHours}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpIpCooldownResetHours = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; update() } }} />
+                        h idle.
+                    </span>
                 </div>
-                <div class="col-md-6">
-                    <FormGroup floating label="Blocked-IP message (optional)">
-                        <input
-                            id="lpIpBlockedMessage"
-                            type="text"
-                            class="form-control"
-                            placeholder="IP temporarily blocked due to failed logins"
-                            value={parameters.lpIpBlockedMessage ?? ''}
-                            onchange={e => {
-                                const v = e.currentTarget.value.trim()
-                                parameters!.lpIpBlockedMessage = v === '' ? undefined : v
-                                update()
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-            </div>
-
-            <h6 class="mt-3 mb-1 text-muted text-uppercase" style="font-size:.75rem;letter-spacing:.05em;">User lockout</h6>
-            <div class="row g-2 mb-2 align-items-center">
-                <div class="col-md-3">
-                    <FormGroup floating label="Max attempts">
-                        <input
-                            id="lpUserMaxAttempts"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                <div class="lp-row">
+                    <span class="lp-label">User lockout</span>
+                    <span class="lp-sentence">
+                        Lock account after
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpUserMaxAttempts}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpUserMaxAttempts = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                <div class="col-md-3">
-                    <FormGroup floating label="Time window (min)">
-                        <input
-                            id="lpUserTimeWindowMinutes"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserMaxAttempts = v; update() } }} />
+                        failed attempts in
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpUserTimeWindowMinutes}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpUserTimeWindowMinutes = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
-                </div>
-                {#if parameters.lpUserAutoUnlock}
-                <div class="col-md-3">
-                    <FormGroup floating label="Lockout (min)">
-                        <input
-                            id="lpUserLockoutDurationMinutes"
-                            type="number"
-                            min="1"
-                            class="form-control"
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserTimeWindowMinutes = v; update() } }} />
+                        min.
+                        <label class="lp-inline-switch">
+                            <Input
+                                id="lpUserAutoUnlock"
+                                class="mb-0 me-1"
+                                type="switch"
+                                on:change={() => { parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock; update() }}
+                                checked={parameters.lpUserAutoUnlock} />
+                            Auto-unlock
+                        </label>
+                        {#if parameters.lpUserAutoUnlock}
+                        after
+                        <input type="number" min="1" class="lp-num"
                             value={parameters.lpUserLockoutDurationMinutes}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                if (!isNaN(v) && v >= 1) {
-                                    parameters!.lpUserLockoutDurationMinutes = v
-                                    update()
-                                }
-                            }}
-                        />
-                    </FormGroup>
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserLockoutDurationMinutes = v; update() } }} />
+                        min.
+                        {/if}
+                    </span>
                 </div>
-                {/if}
-                <div class="col-md-3 d-flex align-items-center">
-                    <label for="lpUserAutoUnlock" class="d-flex align-items-center mb-0">
-                        <Input
-                            id="lpUserAutoUnlock"
-                            class="mb-0 me-2"
-                            type="switch"
-                            on:change={() => {
-                                parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock
-                                update()
-                            }}
-                            checked={parameters.lpUserAutoUnlock} />
-                        <small>Auto-unlock</small>
-                    </label>
+                <div class="lp-row">
+                    <span class="lp-label">Retention</span>
+                    <span class="lp-sentence">
+                        Keep blocks, lockouts, and attempt history for
+                        <input type="number" min="1" class="lp-num"
+                            value={parameters.loginProtectionRetentionDays}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.loginProtectionRetentionDays = v; update() } }} />
+                        days.
+                    </span>
                 </div>
-                <div class="col-md-6">
-                    <FormGroup floating label="Locked-user message (optional)">
-                        <input
-                            id="lpUserLockedMessage"
-                            type="text"
-                            class="form-control"
-                            placeholder="Account temporarily locked due to failed logins"
-                            value={parameters.lpUserLockedMessage ?? ''}
-                            onchange={e => {
-                                const v = e.currentTarget.value.trim()
-                                parameters!.lpUserLockedMessage = v === '' ? undefined : v
-                                update()
-                            }}
-                        />
-                    </FormGroup>
+                <div class="lp-row lp-row-msg">
+                    <span class="lp-label">Blocked-IP message</span>
+                    <input type="text" class="form-control form-control-sm lp-msg"
+                        placeholder="IP temporarily blocked due to failed logins"
+                        value={parameters.lpIpBlockedMessage ?? ''}
+                        onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpIpBlockedMessage = v === '' ? undefined : v; update() }} />
+                </div>
+                <div class="lp-row lp-row-msg">
+                    <span class="lp-label">Locked-user message</span>
+                    <input type="text" class="form-control form-control-sm lp-msg"
+                        placeholder="Account temporarily locked due to failed logins"
+                        value={parameters.lpUserLockedMessage ?? ''}
+                        onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpUserLockedMessage = v === '' ? undefined : v; update() }} />
+                </div>
+                <div class="lp-foot text-muted">
+                    Manage active blocks &amp; lockouts on the <a href="/@warpgate/admin/#/config/login-protection">Login protection</a> page.
                 </div>
             </div>
             {/if}
@@ -533,3 +380,71 @@
         </Loadable>
     </PermissionGate>
 </div>
+
+<style>
+    .lp-block {
+        display: flex;
+        flex-direction: column;
+        gap: .35rem;
+        padding: .65rem .85rem;
+        border-radius: .375rem;
+        background: rgba(127, 127, 127, .06);
+    }
+    .lp-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: .35rem .75rem;
+        line-height: 1.9;
+    }
+    .lp-row-msg {
+        align-items: center;
+    }
+    .lp-label {
+        flex: 0 0 9rem;
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--bs-secondary-color, #888);
+        line-height: 1.6;
+    }
+    .lp-sentence {
+        flex: 1 1 0;
+        min-width: 0;
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: .25rem .35rem;
+    }
+    .lp-num {
+        width: 4rem;
+        padding: .1rem .35rem;
+        font-size: .9rem;
+        text-align: right;
+        border: 1px solid var(--bs-border-color, rgba(127,127,127,.3));
+        border-radius: .25rem;
+        background: var(--bs-body-bg, transparent);
+        color: inherit;
+    }
+    .lp-num-wide { width: 4.5rem; }
+    .lp-num:focus {
+        outline: none;
+        border-color: var(--bs-primary, #0d6efd);
+        box-shadow: 0 0 0 .15rem rgba(13, 110, 253, .15);
+    }
+    .lp-msg {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .lp-inline-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: .25rem;
+        margin: 0;
+        padding-left: .5rem;
+    }
+    .lp-foot {
+        font-size: .8rem;
+        margin-top: .15rem;
+    }
+</style>
