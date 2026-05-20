@@ -13,6 +13,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
 
@@ -199,6 +200,8 @@
                     <Input type="text" placeholder={'foo.' + $serverInfo.externalHost} bind:value={target.options.externalHost} />
                 </FormGroup>
             {/if}
+
+            <HttpHeadersEditor bind:value={target.options.headers} />
         {/if}
 
         {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
