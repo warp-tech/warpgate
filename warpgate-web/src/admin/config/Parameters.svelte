@@ -1,5 +1,6 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { link } from 'svelte-spa-router'
     import { api, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
@@ -267,7 +268,203 @@
                 When enabled, the username and password fields are hidden behind a link on the login page, with the focus on the SSO buttons.
             </InfoBox>
             {/if}
+
+            <h4 class="mt-4">Login protection</h4>
+            <label
+                for="loginProtectionEnabled"
+                class="d-flex align-items-center"
+            >
+                <Input
+                    id="loginProtectionEnabled"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
+                        update()
+                    }}
+                    checked={parameters.loginProtectionEnabled} />
+                <div>Brute-force protection (IP rate-limit + user lockout)</div>
+            </label>
+
+            {#if parameters.loginProtectionEnabled}
+            <div class="lp-block mt-2 mb-2">
+                <div class="lp-row">
+                    <span class="lp-label" aria-hidden="true">IP rate-limit</span>
+                    <span class="lp-sentence" role="group" aria-label="IP rate-limit policy">
+                        Block after
+                        <input type="number" min="1" max="1000" class="form-control form-control-sm lp-num"
+                            aria-label="Max failed attempts from one IP before blocking"
+                            value={parameters.lpIpMaxAttempts}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxAttempts = v; update() } else { e.currentTarget.value = String(parameters!.lpIpMaxAttempts) } }} />
+                        failed attempts in
+                        <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
+                            aria-label="Time window for counting failed attempts, in minutes"
+                            value={parameters.lpIpTimeWindowMinutes}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpIpTimeWindowMinutes) } }} />
+                        min for
+                        <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
+                            aria-label="Initial block duration in minutes"
+                            value={parameters.lpIpBaseBlockDurationMinutes}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpIpBaseBlockDurationMinutes) } }} />
+                        min, ×
+                        <input type="number" min="1" max="10" step="0.1" class="form-control form-control-sm lp-num lp-num-wide"
+                            aria-label="Multiplier applied to the block duration on each repeat offense"
+                            title="Each repeat block multiplies the previous duration by this factor (e.g. 2.0 doubles each time)"
+                            value={parameters.lpIpBlockDurationMultiplier}
+                            onchange={e => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBlockDurationMultiplier = v; update() } else { e.currentTarget.value = String(parameters!.lpIpBlockDurationMultiplier) } }} />
+                        on repeat, capped at
+                        <input type="number" min="1" max="720" class="form-control form-control-sm lp-num"
+                            aria-label="Maximum block duration in hours"
+                            value={parameters.lpIpMaxBlockDurationHours}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; update() } else { e.currentTarget.value = String(parameters!.lpIpMaxBlockDurationHours) } }} />
+                        h, reset after
+                        <input type="number" min="1" max="720" class="form-control form-control-sm lp-num"
+                            aria-label="Hours of inactivity after which the repeat-offense counter resets"
+                            value={parameters.lpIpCooldownResetHours}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; update() } else { e.currentTarget.value = String(parameters!.lpIpCooldownResetHours) } }} />
+                        h idle.
+                    </span>
+                </div>
+                <div class="lp-row">
+                    <span class="lp-label" aria-hidden="true">User lockout</span>
+                    <span class="lp-sentence" role="group" aria-label="User lockout policy">
+                        Lock account after
+                        <input type="number" min="1" max="1000" class="form-control form-control-sm lp-num"
+                            aria-label="Max failed attempts against a single user before locking the account"
+                            value={parameters.lpUserMaxAttempts}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserMaxAttempts = v; update() } else { e.currentTarget.value = String(parameters!.lpUserMaxAttempts) } }} />
+                        failed attempts in
+                        <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
+                            aria-label="Time window for counting failed attempts against a single user, in minutes"
+                            value={parameters.lpUserTimeWindowMinutes}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserTimeWindowMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpUserTimeWindowMinutes) } }} />
+                        min.
+                        <label class="lp-inline-switch" for="lpUserAutoUnlock">
+                            <Input
+                                id="lpUserAutoUnlock"
+                                class="mb-0 me-1"
+                                type="switch"
+                                on:change={() => { parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock; update() }}
+                                checked={parameters.lpUserAutoUnlock} />
+                            Auto-unlock
+                        </label>
+                        {#if parameters.lpUserAutoUnlock}
+                        after
+                        <input type="number" min="1" max="10080" class="form-control form-control-sm lp-num"
+                            aria-label="Auto-unlock delay in minutes"
+                            value={parameters.lpUserLockoutDurationMinutes}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserLockoutDurationMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpUserLockoutDurationMinutes) } }} />
+                        min.
+                        {/if}
+                    </span>
+                </div>
+                <div class="lp-row">
+                    <span class="lp-label" aria-hidden="true">Retention</span>
+                    <span class="lp-sentence" role="group" aria-label="History retention policy">
+                        Keep blocks, lockouts, and attempt history for
+                        <input type="number" min="1" max="3650" class="form-control form-control-sm lp-num"
+                            aria-label="Days to retain failed-attempt, block, and lockout history"
+                            value={parameters.loginProtectionRetentionDays}
+                            onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.loginProtectionRetentionDays = v; update() } else { e.currentTarget.value = String(parameters!.loginProtectionRetentionDays) } }} />
+                        days.
+                    </span>
+                </div>
+                <div class="lp-row lp-row-msg">
+                    <label class="lp-label" for="lpIpBlockedMessage">Blocked-IP message</label>
+                    <input id="lpIpBlockedMessage" type="text" class="form-control form-control-sm lp-msg"
+                        placeholder="IP temporarily blocked due to failed logins"
+                        value={parameters.lpIpBlockedMessage ?? ''}
+                        onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpIpBlockedMessage = v === '' ? undefined : v; update() }} />
+                </div>
+                <div class="lp-row lp-row-msg">
+                    <label class="lp-label" for="lpUserLockedMessage">Locked-user message</label>
+                    <input id="lpUserLockedMessage" type="text" class="form-control form-control-sm lp-msg"
+                        placeholder="Account temporarily locked due to failed logins"
+                        value={parameters.lpUserLockedMessage ?? ''}
+                        onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpUserLockedMessage = v === '' ? undefined : v; update() }} />
+                </div>
+                <div class="lp-foot text-muted">
+                    Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
+                </div>
+            </div>
+            {/if}
         {/if}
         </Loadable>
     </PermissionGate>
 </div>
+
+<style>
+    .lp-block {
+        display: flex;
+        flex-direction: column;
+        gap: .4rem;
+        padding: .75rem .9rem;
+        border-radius: .375rem;
+        background: rgba(127, 127, 127, .06);
+    }
+    .lp-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: .35rem .75rem;
+        line-height: 1.9;
+    }
+    .lp-row-msg {
+        align-items: center;
+    }
+    .lp-label {
+        flex: 0 0 9rem;
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--bs-secondary-color, #888);
+        line-height: 1.6;
+        margin: 0;
+    }
+    .lp-sentence {
+        flex: 1 1 0;
+        min-width: 0;
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: .25rem .35rem;
+    }
+    .lp-num {
+        width: 4.5rem;
+        text-align: right;
+        display: inline-block;
+        padding-inline: .4rem;
+    }
+    .lp-num-wide { width: 5rem; }
+    .lp-num:invalid {
+        border-color: var(--bs-danger, #dc3545);
+    }
+    .lp-msg {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .lp-inline-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: .25rem;
+        margin: 0;
+        padding-left: .5rem;
+    }
+    .lp-foot {
+        font-size: .8rem;
+        margin-top: .15rem;
+    }
+    @media (max-width: 575.98px) {
+        .lp-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: .15rem;
+        }
+        .lp-label {
+            flex: 0 0 auto;
+        }
+        .lp-sentence {
+            line-height: 1.7;
+        }
+    }
+</style>

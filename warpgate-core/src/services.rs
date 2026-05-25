@@ -4,9 +4,12 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tracing::{info, warn};
 use warpgate_common::{GlobalParams, WarpgateConfig};
+use warpgate_db_entities::Parameters;
 
 use crate::db::{connect_to_db, populate_db};
+use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
@@ -21,6 +24,7 @@ pub struct Services {
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
 }
 
@@ -57,6 +61,43 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
+        // Initialize login protection service from DB parameters
+        let db_params = {
+            let db_lock = db.lock().await;
+            Parameters::Entity::get(&*db_lock).await?
+        };
+        let login_protection =
+            Arc::new(LoginProtectionService::new(&db_params, db.clone()).await?);
+
+        // Background cleanup task for login protection (runs every hour)
+        if login_protection.is_enabled() {
+            let login_protection_clone = login_protection.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(3600));
+                loop {
+                    interval.tick().await;
+                    match login_protection_clone.cleanup_expired().await {
+                        Ok(stats) => {
+                            if stats.expired_blocks_removed > 0
+                                || stats.expired_lockouts_removed > 0
+                                || stats.old_attempts_removed > 0
+                            {
+                                info!(
+                                    expired_blocks = stats.expired_blocks_removed,
+                                    expired_lockouts = stats.expired_lockouts_removed,
+                                    old_attempts = stats.old_attempts_removed,
+                                    "Login protection cleanup completed"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Login protection cleanup failed: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(Self {
             db: db.clone(),
             recordings,
@@ -66,6 +107,7 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),
+            login_protection,
             global_params: Arc::new(params),
         })
     }

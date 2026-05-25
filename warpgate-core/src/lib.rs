@@ -4,6 +4,7 @@ pub mod consts;
 mod data;
 pub mod db;
 pub mod logging;
+pub mod login_protection;
 mod protocols;
 pub mod rate_limiting;
 pub mod recordings;
