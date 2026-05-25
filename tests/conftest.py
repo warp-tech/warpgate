@@ -797,7 +797,7 @@ def shared_wg(processes: ProcessManager):
 # endpoint.  previously everyone called ``admin_client(url)`` directly;
 # a fixture lets us compute the URL from ``shared_wg`` once and removes
 # boilerplate from individual tests.
-from .api_client import admin_client as _admin_client_context
+from .api_client import admin_client as _admin_client_context  # noqa: E402
 
 
 @pytest.fixture
