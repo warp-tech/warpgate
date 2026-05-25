@@ -65,10 +65,9 @@ enum Event {
     Client(RCEvent),
 }
 
-enum KeyboardInteractiveState {
-    None,
-    OtpRequested,
-    WebAuthRequested(u8), // retry_count
+struct PendingKeyboardInteractiveAuth {
+    otp_prompt_sent: bool,
+    web_approval_retry_count: Option<u8>,
 }
 
 struct CachedSuccessfulTicketAuth {
@@ -106,7 +105,7 @@ pub struct ServerSession {
     service_output: ServiceOutput,
     channel_writer: ChannelWriter,
     auth_state: Option<Arc<Mutex<AuthState>>>,
-    keyboard_interactive_state: KeyboardInteractiveState,
+    keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
 }
@@ -181,7 +180,7 @@ impl ServerSession {
             service_output: ServiceOutput::new(),
             channel_writer: ChannelWriter::new(),
             auth_state: None,
-            keyboard_interactive_state: KeyboardInteractiveState::None,
+            keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
         };
@@ -539,8 +538,8 @@ impl ServerSession {
                 let _ = reply.send(self._auth_password(username, password).await);
             }
 
-            ServerHandlerEvent::AuthKeyboardInteractive(username, response, reply) => {
-                let _ = reply.send(self._auth_keyboard_interactive(username, response).await?);
+            ServerHandlerEvent::AuthKeyboardInteractive(username, responses, reply) => {
+                let _ = reply.send(self._auth_keyboard_interactive(username, responses).await?);
             }
 
             ServerHandlerEvent::Data(channel, data, reply) => {
@@ -1513,7 +1512,7 @@ impl ServerSession {
     async fn _auth_keyboard_interactive(
         &mut self,
         ssh_username: Secret<String>,
-        response: Option<Secret<String>>,
+        responses: Vec<Secret<String>>,
     ) -> Result<russh::server::Auth> {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
@@ -1526,26 +1525,18 @@ impl ServerSession {
             return Ok(russh::server::Auth::reject());
         }
 
-        let cred;
-        let mut pending_web_auth_retries: Option<u8> = None;
-        let prev_state = std::mem::replace(
-            &mut self.keyboard_interactive_state,
-            KeyboardInteractiveState::None,
-        );
-        match prev_state {
-            KeyboardInteractiveState::None => {
-                cred = None;
+        let keyboard_interactive_state = self.keyboard_interactive_state.take();
+        let maybe_otp_cred = keyboard_interactive_state.as_ref().and_then(|s| {
+            if s.otp_prompt_sent {
+                responses.into_iter().next().map(AuthCredential::Otp)
+            } else {
+                None
             }
-            KeyboardInteractiveState::OtpRequested => {
-                cred = response.map(AuthCredential::Otp);
-            }
-            KeyboardInteractiveState::WebAuthRequested(retries) => {
-                cred = None;
-                pending_web_auth_retries = Some(retries);
-            }
-        }
+        });
+        let pending_web_auth_retries =
+            keyboard_interactive_state.and_then(|s| s.web_approval_retry_count);
 
-        Ok(match self.try_auth_lazy(&selector, cred).await {
+        Ok(match self.try_auth_lazy(&selector, maybe_otp_cred).await {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
@@ -1560,8 +1551,13 @@ impl ServerSession {
                     });
                 };
 
+                let mut next_pending = PendingKeyboardInteractiveAuth {
+                    otp_prompt_sent: false,
+                    web_approval_retry_count: None,
+                };
+
                 if kinds.contains(&CredentialKind::Totp) {
-                    self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
+                    next_pending.otp_prompt_sent = true;
                     auth_name = "Two-factor authentication".into();
                     auth_prompts.push(("One-time password: ".into(), true));
                 }
@@ -1599,15 +1595,14 @@ impl ServerSession {
                         auth_instructions.push_str(
                             "\n[!] Browser authentication was not confirmed, please try again.\n",
                         );
-                        self.keyboard_interactive_state =
-                            KeyboardInteractiveState::WebAuthRequested(retries + 1);
+                        next_pending.web_approval_retry_count = Some(retries + 1);
                     } else {
-                        self.keyboard_interactive_state =
-                            KeyboardInteractiveState::WebAuthRequested(0);
+                        next_pending.web_approval_retry_count = Some(0);
                     };
                 }
 
                 if !auth_prompts.is_empty() {
+                    self.keyboard_interactive_state = Some(next_pending);
                     russh::server::Auth::Partial {
                         name: auth_name.into(),
                         instructions: auth_instructions.into(),
