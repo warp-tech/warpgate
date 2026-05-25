@@ -25,6 +25,7 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 warpgate-admin = { path = "../warpgate-admin", default-features = false }
+warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http" }

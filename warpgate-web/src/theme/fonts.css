@@ -5,3 +5,15 @@
     font-weight: 700;
     src: url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff2) format('woff2'), url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff) format('woff');
 }
+
+/* This fallback font includes Powerline characters */
+@font-face {
+    font-family: "monospace-fallback";
+    src: url(../fonts/CaskaydiaCove-Regular.otf) format("opentype");
+    font-weight: normal;
+}
+@font-face {
+    font-family: "monospace-fallback";
+    src: url(../fonts/CaskaydiaCove-Bold.otf) format("opentype");
+    font-weight: bold;
+}

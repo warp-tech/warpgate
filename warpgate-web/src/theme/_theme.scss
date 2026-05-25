@@ -45,7 +45,7 @@
 @import "bootstrap/scss/transitions";
 @import "bootstrap/scss/dropdown";
 @import "bootstrap/scss/button-group";
-// @import "bootstrap/scss/nav";
+@import "bootstrap/scss/nav";
 // @import "bootstrap/scss/navbar";
 @import "bootstrap/scss/card";
 // @import "bootstrap/scss/accordion";
@@ -281,4 +281,24 @@ ul.pagination {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+.nav-pills {
+    background: var(--bs-body-bg);
+
+    .nav-link {
+        text-decoration: underline;
+        text-decoration-color: var(--#{$prefix}secondary-color);
+
+        background: var(--#{$prefix}btn-bg);
+        color: var(--#{$prefix}btn-color);
+
+
+        &:active, &.active {
+            background: var(--bs-list-group-action-active-bg);
+            .title {
+                color: var(--bs-list-group-action-active-color);
+            }
+        }
+    }
 }

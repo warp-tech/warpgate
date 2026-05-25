@@ -30,11 +30,7 @@ pub enum ServerHandlerEvent {
     AuthPublicKey(Secret<String>, PublicKey, oneshot::Sender<Auth>),
     AuthPublicKeyOffer(Secret<String>, PublicKey, oneshot::Sender<Auth>),
     AuthPassword(Secret<String>, Secret<String>, oneshot::Sender<Auth>),
-    AuthKeyboardInteractive(
-        Secret<String>,
-        Option<Secret<String>>,
-        oneshot::Sender<Auth>,
-    ),
+    AuthKeyboardInteractive(Secret<String>, Vec<Secret<String>>, oneshot::Sender<Auth>),
     Data(ServerChannelId, Bytes, oneshot::Sender<()>),
     ExtendedData(ServerChannelId, Bytes, u32, oneshot::Sender<()>),
     ChannelClose(ServerChannelId, oneshot::Sender<()>),
@@ -231,9 +227,13 @@ impl russh::server::Handler for ServerHandler {
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let response = response
-            .and_then(|mut r| r.next())
-            .and_then(|b| String::from_utf8(b.to_vec()).ok())
-            .map(Secret::new);
+            .map(|response| {
+                response
+                    .filter_map(|b| String::from_utf8(b.to_vec()).ok())
+                    .map(Secret::new)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         let (tx, rx) = oneshot::channel();
 

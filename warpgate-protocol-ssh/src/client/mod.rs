@@ -18,7 +18,10 @@ use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
 use russh::{MethodKind, Preferred, Sig, kex};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use serde::Serialize;
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
+};
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tracing::*;
@@ -113,7 +116,7 @@ pub enum RCCommand {
     Disconnect,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum RCState {
     NotInitialized,
     Connecting,
@@ -129,7 +132,7 @@ enum InnerEvent {
 
 pub struct RemoteClient {
     id: SessionId,
-    tx: UnboundedSender<RCEvent>,
+    tx: Sender<RCEvent>,
     session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
@@ -144,14 +147,14 @@ pub struct RemoteClient {
 }
 
 pub struct RemoteClientHandles {
-    pub event_rx: UnboundedReceiver<RCEvent>,
+    pub event_rx: Receiver<RCEvent>,
     pub command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     pub abort_tx: UnboundedSender<()>,
 }
 
 impl RemoteClient {
     pub fn create(id: SessionId, services: Services) -> io::Result<RemoteClientHandles> {
-        let (event_tx, event_rx) = unbounded_channel();
+        let (event_tx, event_rx) = channel(1024);
         let (command_tx, mut command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = unbounded_channel();
 
@@ -194,24 +197,25 @@ impl RemoteClient {
         })
     }
 
-    fn set_disconnected(&mut self) {
+    async fn set_disconnected(&mut self) {
         self.session = None;
         for (id, op) in self.pending_ops.drain(..) {
             if matches!(op, ChannelOperation::OpenShell) {
-                let _ = self.tx.send(RCEvent::Close(id));
+                let _ = self.tx.try_send(RCEvent::Close(id));
             }
             if let ChannelOperation::OpenDirectTCPIP { .. } = op {
-                let _ = self.tx.send(RCEvent::Close(id));
+                let _ = self.tx.try_send(RCEvent::Close(id));
             }
         }
-        let _ = self.set_state(RCState::Disconnected);
-        let _ = self.tx.send(RCEvent::Done);
+        let _ = self.set_state(RCState::Disconnected).await;
+        let _ = self.tx.send(RCEvent::Done).await;
     }
 
-    fn set_state(&mut self, state: RCState) -> Result<(), SshClientError> {
+    async fn set_state(&mut self, state: RCState) -> Result<(), SshClientError> {
         self.state = state.clone();
         self.tx
             .send(RCEvent::State(state))
+            .await
             .map_err(|_| SshClientError::MpscError)?;
         Ok(())
     }
@@ -290,7 +294,7 @@ impl RemoteClient {
                 .map_err(|error| {
                     error!(?error, "error in command loop");
                     let err = anyhow::anyhow!("Error in command loop: {error}");
-                    let _ = self.tx.send(RCEvent::Error(error));
+                    let _ = self.tx.try_send(RCEvent::Error(error));
                     err
                 })?;
                 info!("Client session closed");
@@ -314,29 +318,33 @@ impl RemoteClient {
                 debug!("Client handler event: {:?}", client_event);
                 match client_event {
                     ClientHandlerEvent::Disconnect => {
-                        self._on_disconnect();
+                        self._on_disconnect().await;
                     }
                     ClientHandlerEvent::ForwardedTcpIp(channel, params) => {
                         info!("New forwarded connection: {params:?}");
                         let id = self.setup_server_initiated_channel(channel).await?;
-                        let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params));
+                        let _ = self.tx.send(RCEvent::ForwardedTcpIp(id, params)).await;
                     }
                     ClientHandlerEvent::ForwardedStreamlocal(channel, params) => {
                         info!("New forwarded socket connection: {params:?}");
                         let id = self.setup_server_initiated_channel(channel).await?;
-                        let _ = self.tx.send(RCEvent::ForwardedStreamlocal(id, params));
+                        let _ = self
+                            .tx
+                            .send(RCEvent::ForwardedStreamlocal(id, params))
+                            .await;
                     }
                     ClientHandlerEvent::ForwardedAgent(channel) => {
                         info!("New forwarded agent connection");
                         let id = self.setup_server_initiated_channel(channel).await?;
-                        let _ = self.tx.send(RCEvent::ForwardedAgent(id));
+                        let _ = self.tx.send(RCEvent::ForwardedAgent(id)).await;
                     }
                     ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
                         info!("New X11 connection from {originator_address}:{originator_port:?}");
                         let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self
                             .tx
-                            .send(RCEvent::X11(id, originator_address, originator_port));
+                            .send(RCEvent::X11(id, originator_address, originator_port))
+                            .await;
                     }
                     event => {
                         error!(?event, "Unhandled client handler event");
@@ -372,6 +380,7 @@ impl RemoteClient {
             RCCommand::Connect(options) => match self.connect(options).await {
                 Ok(()) => {
                     self.set_state(RCState::Connected)
+                        .await
                         .map_err(SshClientError::other)?;
                     let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
                     for (id, op) in ops {
@@ -393,8 +402,8 @@ impl RemoteClient {
                 }
                 Err(e) => {
                     debug!("Connect error: {}", e);
-                    let _ = self.tx.send(RCEvent::ConnectionError(e));
-                    self.set_disconnected();
+                    let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
+                    self.set_disconnected().await;
 
                     return Ok(true);
                 }
@@ -432,7 +441,7 @@ impl RemoteClient {
             Ok(address) => address,
             Err(error) => {
                 error!(?error, address=%address_str, "Cannot resolve target address");
-                self.set_disconnected();
+                self.set_disconnected().await;
                 return Err(error);
             }
         };
@@ -524,17 +533,17 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }
                 }
                 Some(()) = self.abort_rx.recv() => {
                     info!("Abort requested");
-                    self.set_disconnected();
+                    self.set_disconnected().await;
                     return Err(ConnectionError::Aborted)
                 }
                 session = &mut fut_connect => {
@@ -909,12 +918,12 @@ impl RemoteClient {
                 .await
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
-            self.set_disconnected();
+            self.set_disconnected().await;
         }
     }
 
-    fn _on_disconnect(&mut self) {
-        self.set_disconnected();
+    async fn _on_disconnect(&mut self) {
+        self.set_disconnected().await;
     }
 }
 

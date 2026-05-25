@@ -7,6 +7,8 @@ use poem::{Addr, Request};
 use tracing::*;
 use warpgate_core::{Services, WarpgateServerHandle};
 
+use crate::request::trusted_client_ip;
+
 pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
     let trust_x_forwarded_headers = {
         let config = services.config.lock().await;
@@ -28,13 +30,7 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
 
     let remote_ip = socket_addr.map(|x| x.ip().to_string());
 
-    if trust_x_forwarded_headers {
-        req.header("x-forwarded-for")
-            .map(str::to_string)
-            .or(remote_ip)
-    } else {
-        remote_ip
-    }
+    trusted_client_ip(req, remote_ip, trust_x_forwarded_headers)
 }
 
 pub async fn span_for_request(
