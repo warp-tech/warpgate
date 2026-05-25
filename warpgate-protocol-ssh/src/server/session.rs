@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::hash_map::Entry::Vacant;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -17,6 +16,7 @@ use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::*;
+use url::Url;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
@@ -115,18 +115,16 @@ fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
     format!("[{id} - {remote_address}]")
 }
 
-fn format_web_auth_instructions<U: std::fmt::Display>(login_url: Option<U>, identification_string: &str) -> String {
+fn format_web_auth_instructions(login_url: Option<Url>, identification_string: &str) -> String {
     let spaced_key = identification_string
         .chars()
         .map(|c| c.to_string())
         .collect::<Vec<_>>()
         .join(" ");
-    let url_line = login_url
-        .map(|u| format!("{u}\n"))
-        .unwrap_or_default();
+    let url_line = login_url.map(|u| format!("{u}\n")).unwrap_or_default();
     format!(
         "-----------------------------------------------------------------------\n\
-         Warpgate authentication: please verify the SSH authentication request in your browser.\n\
+         Please verify the SSH authentication request in your browser.\n\
          {url_line}\n\
          Make sure you're seeing this security key: {spaced_key}\n\
          -----------------------------------------------------------------------\n"
@@ -1551,110 +1549,69 @@ impl ServerSession {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
+                let mut auth_name = "Warpgate authentication".to_string();
+                let mut auth_instructions = String::new();
+                let mut auth_prompts = vec![];
+
+                let Some(auth_state) = self.auth_state.as_ref() else {
+                    return Ok(russh::server::Auth::Reject {
+                        proceed_with_methods: None,
+                        partial_success: false,
+                    });
+                };
+
                 if kinds.contains(&CredentialKind::Totp) {
                     self.keyboard_interactive_state = KeyboardInteractiveState::OtpRequested;
-                    let instructions = if let Some(auth_state) = self.auth_state.as_ref() {
-                        let show_web_auth = kinds.contains(&CredentialKind::WebUserApproval);
-                        let identification_string = if show_web_auth {
-                            auth_state.lock().await.identification_string().to_owned()
-                        } else {
-                            String::new()
-                        };
-                        if identification_string.is_empty() {
-                            Cow::Borrowed("")
-                        } else {
-                            let login_url = match construct_external_url(
-                                None,
-                                &*self.services.config.lock().await,
-                                None,
-                            )
-                            .await
-                            {
-                                Ok(ext_url) => Some(
-                                    auth_state.lock().await.construct_web_approval_url(ext_url),
-                                ),
-                                Err(error) => {
-                                    warn!(?error, "Failed to construct external URL");
-                                    None
-                                }
-                            };
-                            Cow::Owned(format_web_auth_instructions(
-                                login_url,
-                                &identification_string,
-                            ))
-                        }
-                    } else {
-                        Cow::Borrowed("")
-                    };
-                    russh::server::Auth::Partial {
-                        name: Cow::Borrowed("Two-factor authentication"),
-                        instructions,
-                        prompts: Cow::Owned(vec![(Cow::Borrowed("One-time password: "), true)]),
-                    }
-                } else if kinds.contains(&CredentialKind::WebUserApproval) {
-                    let Some(auth_state) = self.auth_state.as_ref() else {
-                        return Ok(russh::server::Auth::Reject {
-                            proceed_with_methods: None,
-                            partial_success: false,
-                        });
-                    };
+                    auth_name = "Two-factor authentication".into();
+                    auth_prompts.push(("One-time password: ".into(), true));
+                }
+
+                if kinds.contains(&CredentialKind::WebUserApproval) {
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
 
+                    let ext_url =
+                        construct_external_url(None, &*self.services.config.lock().await, None)
+                            .await
+                            .inspect_err(|error| {
+                                warn!(?error, "Failed to construct external URL");
+                            })
+                            .ok();
+
+                    let auth_state = auth_state.lock().await;
+                    let login_url =
+                        ext_url.map(|ext_url| auth_state.construct_web_approval_url(ext_url));
+
+                    auth_instructions.push_str(&format_web_auth_instructions(
+                        login_url,
+                        &identification_string,
+                    ));
+                    auth_prompts.push(("Press Enter when done: ".into(), true));
+
                     const MAX_RETRIES: u8 = 3;
-                    let (instructions, retries) = if let Some(retries) = pending_web_auth_retries {
+                    if let Some(retries) = pending_web_auth_retries {
                         if retries >= MAX_RETRIES {
+                            drop(auth_state);
                             self.auth_state = None;
                             return Ok(russh::server::Auth::reject());
                         }
-                        let login_url = match construct_external_url(
-                            None,
-                            &*self.services.config.lock().await,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(ext_url) => {
-                                Some(auth_state.lock().await.construct_web_approval_url(ext_url))
-                            }
-                            Err(error) => {
-                                warn!(?error, "Failed to construct external URL");
-                                None
-                            }
-                        };
-                        let msg = format!(
-                            "Browser authentication was not confirmed, please try again.\n\n{}",
-                            format_web_auth_instructions(login_url, &identification_string)
-                        );
-                        (msg, retries + 1)
-                    } else {
-                        let login_url = match construct_external_url(
-                            None,
-                            &*self.services.config.lock().await,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(ext_url) => {
-                                Some(auth_state.lock().await.construct_web_approval_url(ext_url))
-                            }
-                            Err(error) => {
-                                warn!(?error, "Failed to construct external URL");
-                                None
-                            }
-                        };
-                        (
-                            format_web_auth_instructions(login_url, &identification_string),
-                            0,
-                        )
-                    };
-                    self.keyboard_interactive_state =
-                        KeyboardInteractiveState::WebAuthRequested(retries);
 
+                        auth_instructions.push_str(
+                            "\n[!] Browser authentication was not confirmed, please try again.\n",
+                        );
+                        self.keyboard_interactive_state =
+                            KeyboardInteractiveState::WebAuthRequested(retries + 1);
+                    } else {
+                        self.keyboard_interactive_state =
+                            KeyboardInteractiveState::WebAuthRequested(0);
+                    };
+                }
+
+                if !auth_prompts.is_empty() {
                     russh::server::Auth::Partial {
-                        name: Cow::Borrowed("Warpgate authentication"),
-                        instructions: Cow::Owned(instructions),
-                        prompts: Cow::Owned(vec![(Cow::Borrowed("Press Enter when done: "), true)]),
+                        name: auth_name.into(),
+                        instructions: auth_instructions.into(),
+                        prompts: auth_prompts.into(),
                     }
                 } else {
                     russh::server::Auth::Reject {
