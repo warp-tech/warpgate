@@ -12,6 +12,8 @@ import urllib3
 import uuid
 import base64
 
+from .api_client import admin_client as _admin_client_context
+
 # cryptography is used to generate client certificates/CSRs locally
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -463,6 +465,7 @@ class ProcessManager:
         extra_scopes=None,
         users_override=None,
         extra_identity_resources=None,
+        redirect_uris=None,
     ):
         port = alloc_port()
         container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
@@ -488,7 +491,7 @@ class ProcessManager:
                 "AllowedGrantTypes": ["authorization_code"],
                 "AllowedScopes": allowed_scopes,
                 "ClientClaimsPrefix": "",
-                "RedirectUris": [
+                "RedirectUris": redirect_uris or [
                     f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
                 ],
             }
@@ -797,7 +800,6 @@ def shared_wg(processes: ProcessManager):
 # endpoint.  previously everyone called ``admin_client(url)`` directly;
 # a fixture lets us compute the URL from ``shared_wg`` once and removes
 # boilerplate from individual tests.
-from .api_client import admin_client as _admin_client_context
 
 
 @pytest.fixture

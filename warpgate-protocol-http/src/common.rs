@@ -15,7 +15,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
-use warpgate_common::{ProtocolName, WarpgateError};
+use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
@@ -38,6 +38,11 @@ pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-to
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
+pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
+    let base = base_domain.trim_start_matches('.');
+    host == base || host.ends_with(&format!(".{base}"))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -332,5 +337,27 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         Ok(ep.data(ctx).call(req).await?)
     } else {
         Ok(ep.call(req).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_is_subdomain_of_or_equal;
+
+    #[test]
+    fn test_host_is_subdomain_of_or_equal() {
+        assert!(host_is_subdomain_of_or_equal("example.com", "example.com"));
+        assert!(host_is_subdomain_of_or_equal(
+            "foo.example.com",
+            "example.com"
+        ));
+        assert!(host_is_subdomain_of_or_equal(
+            "foo.example.com",
+            ".example.com"
+        ));
+        assert!(!host_is_subdomain_of_or_equal(
+            "evil-example.com",
+            "example.com"
+        ));
     }
 }

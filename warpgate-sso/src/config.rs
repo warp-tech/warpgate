@@ -54,12 +54,23 @@ impl Display for SsoProviderReturnUrlPrefix {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub enum SsoReturnUrlDomainPreference {
+    #[default]
+    #[serde(rename = "external_host")]
+    ExternalHost,
+    #[serde(rename = "host_header")]
+    HostHeader,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
     pub provider: SsoInternalProviderConfig,
     pub return_domain_whitelist: Option<Vec<String>>,
+    #[serde(default)]
+    pub return_url_domain: SsoReturnUrlDomainPreference,
     #[serde(default)]
     pub return_url_prefix: SsoProviderReturnUrlPrefix,
     #[serde(default)]
