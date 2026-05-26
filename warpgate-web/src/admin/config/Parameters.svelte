@@ -114,6 +114,27 @@
                 Disabling password authentication can help prevent brute-force attacks.
             </InfoBox>
 
+            <div class="mt-3"></div>
+
+            <label
+                for="recordScp"
+                class="d-flex align-items-center mt-2"
+            >
+                <Input
+                    id="recordScp"
+                    class="mb-0 me-2"
+                    type="switch"
+                    on:change={() => {
+                        parameters!.recordScp = !parameters!.recordScp
+                        update()
+                    }}
+                    checked={parameters.recordScp} />
+                <div>Record legacy SCP transfers</div>
+            </label>
+            <InfoBox class="mt-3 mb-3">
+                Legacy SCP works over an exec channel and would be normally recorded like any other command. Disable to prevent SCP recordings from wasting storage space.
+            </InfoBox>
+
             <h4 class="mt-4">Self-service tickets</h4>
             <label
                 for="ticketSelfServiceEnabled"
