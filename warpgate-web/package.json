@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "devbuild": "vite build --mode development --minify false",
-    "watch": "vite build -w --mode development --minify false",
+    "devbuild": "NODE_ENV=development vite build --mode development --minify false",
+    "watch": "NODE_ENV=development vite build -w --mode development --minify false",
     "check": "svelte-check --compiler-warnings 'a11y-no-noninteractive-element-interactions:ignore,a11y-click-events-have-key-events:ignore,a11y-no-static-element-interactions:ignore' --tsconfig ./tsconfig.json",
     "lint": "eslint src && svelte-check",
     "postinstall": "npm run openapi:client:gateway && npm run openapi:client:admin",
