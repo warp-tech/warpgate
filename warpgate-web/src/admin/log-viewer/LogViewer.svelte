@@ -14,7 +14,7 @@ import TargetBadge from './TargetBadge.svelte'
 import AsyncButton from 'common/AsyncButton.svelte'
 import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 import Fa from 'svelte-fa'
-import { faRotateRight } from '@fortawesome/free-solid-svg-icons'
+import { faDownload, faRotateRight } from '@fortawesome/free-solid-svg-icons'
 
 interface Props {
     filters?: {
@@ -32,6 +32,7 @@ let { filters }: Props = $props()
 const MAX_LOGS = 500
 const POLL_INTERVAL_MS = 3000
 const PAGE_SIZE = 500
+const EXPORT_PAGE_SIZE = 500
 
 let error: string|null = $state(null)
 let items: LogEntry[]|undefined
@@ -51,6 +52,16 @@ let virtualizerStore = createVirtualizer<HTMLDivElement, HTMLDivElement>({
 })
 
 let virtualItems = $derived($virtualizerStore.getVirtualItems())
+
+async function getLogs(extra: Partial<GetLogsRequest> = {}) {
+    const getLogsRequest: GetLogsRequest = {
+        ...filters ?? {},
+        search: searchQuery,
+        ...extra,
+    }
+
+    return api.getLogs({ getLogsRequest })
+}
 
 function rowMeasure (node: HTMLDivElement) {
     $virtualizerStore.measureElement(node)
@@ -99,14 +110,10 @@ function addItems (newItems: LogEntry[]) {
 async function loadNewer () {
     loading = true
     try {
-        const getLogsRequest: GetLogsRequest = {
-            ...filters ?? {},
+        const newItems = await getLogs({
             after: items?.at(0)?.timestamp,
             limit: PAGE_SIZE,
-            search: searchQuery,
-        }
-
-        const newItems = await api.getLogs({ getLogsRequest })
+        })
         addItems(newItems)
         visibleItems = items
     } finally {
@@ -120,14 +127,10 @@ async function loadOlder (searchMode = false) {
     }
     loading = true
     try {
-        const getLogsRequest: GetLogsRequest = {
-            ...filters ?? {},
+        const newItems = await getLogs({
             before: searchMode ? undefined : items?.at(-1)?.timestamp,
             limit: PAGE_SIZE,
-            search: searchQuery,
-        }
-
-        const newItems = await api.getLogs({ getLogsRequest })
+        })
         if (searchMode) {
             endReached = false
             items = []
@@ -164,6 +167,58 @@ function search () {
 
 function stringifyDate (date: Date) {
     return date.toLocaleString()
+}
+
+function downloadBlob(content: string, filename: string) {
+    const blob = new Blob([content], { type: 'application/x-ndjson' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+}
+
+function filenameTimestamp () {
+    return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+async function downloadLogs () {
+    error = null
+
+    const chunks: string[] = []
+    let before: Date | undefined
+    const baseRequest: Partial<GetLogsRequest> = {
+        ...filters ?? {},
+        search: searchQuery,
+    }
+
+    try {
+        while (true) {
+            const logs = await getLogs({
+                ...baseRequest,
+                before,
+                limit: EXPORT_PAGE_SIZE,
+            })
+            if (!logs.length) {
+                break
+            }
+
+            chunks.push(logs.map(log => JSON.stringify(log)).join('\n'))
+
+            if (logs.length < EXPORT_PAGE_SIZE) {
+                break
+            }
+
+            before = logs.at(-1)?.timestamp
+        }
+
+        downloadBlob(chunks.join('\n') + (chunks.length ? '\n' : ''), `warpgate-logs-${filenameTimestamp()}.ndjson`)
+    } catch (e) {
+        error = await stringifyError(e)
+    }
 }
 
 loadOlder().catch(async e => {
@@ -331,6 +386,18 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     </AsyncButton>
     <Tooltip target="clearAndReloadButton" delay={500}>
         Clear view and reload latest log
+    </Tooltip>
+    <AsyncButton
+        id="downloadLogsButton"
+        color="link"
+        click={downloadLogs}
+        size="sm"
+        disabled={loading && !visibleItems}
+    >
+        <Fa icon={faDownload} fw />
+    </AsyncButton>
+    <Tooltip target="downloadLogsButton" delay={500}>
+        Download all matching logs
     </Tooltip>
 </div>
 
