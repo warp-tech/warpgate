@@ -34,6 +34,7 @@ use warpgate_core::recordings::{
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
+use warpgate_db_entities::Parameters;
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
@@ -1159,29 +1160,44 @@ impl ServerSession {
         data: Bytes,
     ) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
-        match std::str::from_utf8(&data) {
-            Err(e) => {
-                error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
-                anyhow::bail!(e)
-            }
-            Ok::<&str, _>(command) => {
-                debug!(channel=%channel_id, %command, "Requested exec");
-                let _ = self.maybe_connect_remote().await;
-                let _ = self.send_command(RCCommand::Channel(
-                    channel_id,
-                    ChannelOperation::RequestExec(command.to_string()),
-                ));
-            }
-        }
+        let command = std::str::from_utf8(&data).inspect_err(|_| {
+            error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
+        })?;
+        debug!(channel=%channel_id, %command, "Requested exec");
 
-        self.start_terminal_recording(
+        let is_scp = command == "scp" || command.starts_with("scp ");
+        let _ = self.maybe_connect_remote().await;
+        let _ = self.send_command(RCCommand::Channel(
             channel_id,
-            SshRecordingMetadata::Exec {
-                // HACK russh ChannelId is opaque except via Display
-                channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
-            },
-        )
-        .await;
+            ChannelOperation::RequestExec(command.to_string()),
+        ));
+
+        let should_record = if is_scp {
+            let db = self.services.db.lock().await;
+            let should_record = Parameters::Entity::get(&*db)
+                .await
+                .map(|p| p.record_scp)
+                .unwrap_or(true);
+
+            if !should_record {
+                info!(channel=%channel_id, "Not recording SCP exec session, command was '{command}'");
+            }
+
+            should_record
+        } else {
+            true
+        };
+
+        if should_record {
+            self.start_terminal_recording(
+                channel_id,
+                SshRecordingMetadata::Exec {
+                    // HACK russh ChannelId is opaque except via Display
+                    channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
+                },
+            )
+            .await;
+        }
         Ok(())
     }
 

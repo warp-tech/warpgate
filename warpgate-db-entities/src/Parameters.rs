@@ -25,6 +25,7 @@ pub struct Model {
     pub ticket_request_show_all_targets: bool,
     pub show_session_menu: bool,
     pub max_api_token_duration_seconds: Option<i64>,
+    pub record_scp: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -55,6 +56,7 @@ impl Entity {
                     ticket_request_show_all_targets: Set(false),
                     show_session_menu: Set(true),
                     max_api_token_duration_seconds: Set(None),
+                    record_scp: Set(true),
                 }
                 .insert(db)
                 .await

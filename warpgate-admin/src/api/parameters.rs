@@ -29,6 +29,7 @@ struct ParameterValues {
     pub ticket_request_show_all_targets: bool,
     pub show_session_menu: bool,
     pub max_api_token_duration_seconds: Option<i64>,
+    pub record_scp: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -47,6 +48,7 @@ struct ParameterUpdate {
     pub ticket_request_show_all_targets: Option<bool>,
     pub show_session_menu: Option<bool>,
     pub max_api_token_duration_seconds: Option<Option<i64>>,
+    pub record_scp: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -89,6 +91,7 @@ impl Api {
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             show_session_menu: parameters.show_session_menu,
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
+            record_scp: parameters.record_scp,
         })))
     }
 
@@ -131,6 +134,7 @@ impl Api {
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
         parameters.max_api_token_duration_seconds =
             body.max_api_token_duration_seconds.map_or(NotSet, Set);
+        parameters.record_scp = body.record_scp.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);
