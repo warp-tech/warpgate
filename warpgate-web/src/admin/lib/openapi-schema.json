@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-21-ge437f0a5-modified"
+    "version": "v0.23.4-33-gf91c3fd4-modified"
   },
   "servers": [
     {
@@ -5033,6 +5033,10 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -5093,6 +5097,10 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
