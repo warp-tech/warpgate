@@ -10,9 +10,9 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
-    import { serverInfo } from 'gateway/lib/store'
     import { querystring } from 'svelte-spa-router'
     import { get } from 'svelte/store'
+    import { parseHumantimeDuration } from 'common/duration'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
@@ -25,21 +25,7 @@
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')
 
-    function parseExpiryParam (val: string | null): number | undefined {
-        if (!val) return undefined
-        const match = val.match(/^(\d+)([dhm])$/)
-        if (match) {
-            const num = parseInt(match[1])
-            switch (match[2]) {
-                case 'd': return num * 86400000
-                case 'h': return num * 3600000
-                case 'm': return num * 60000
-            }
-        }
-        return undefined
-    }
-
-    const initialExpiryMs = parseExpiryParam(paramExpiry)
+    const initialExpiryMs = paramExpiry ? parseHumantimeDuration(paramExpiry) : undefined
 
     if (autoCreate) {
         creatingToken = true
@@ -123,7 +109,6 @@
 <CreateApiTokenModal
     bind:isOpen={creatingToken}
     create={createToken}
-    maxDurationSeconds={$serverInfo?.maxApiTokenDurationSeconds}
     initialLabel={paramLabel}
     {initialExpiryMs}
 />

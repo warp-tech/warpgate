@@ -18,7 +18,7 @@
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Section from 'admin/lib/Section.svelte'
-    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
+    import { humantimeDuration } from 'common/duration'
 
     interface Props {
         params: { id: string };
@@ -32,16 +32,12 @@
     let roleIsAllowed: Record<string, any> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
-    let ticketDurationText = $state('')
 
     async function init () {
         [target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
-        ticketDurationText = target.ticketMaxDurationSeconds
-            ? formatDurationAsHumantime(target.ticketMaxDurationSeconds)
-            : ''
     }
 
     async function loadRoles () {
@@ -425,12 +421,7 @@
                         class="form-control"
                         type="text"
                         placeholder="Use global default"
-                        bind:value={ticketDurationText}
-                        onchange={() => {
-                            const seconds = parseHumantimeDuration(ticketDurationText)
-                            target!.ticketMaxDurationSeconds = seconds ?? undefined
-                            update()
-                        }}
+                        use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target!.ticketMaxDurationSeconds = v; update() } }}
                     />
                     <small class="form-text text-muted">
                         Examples: 30m, 8h, 1d. Leave empty to use the global default.

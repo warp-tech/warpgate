@@ -9,34 +9,35 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
+    import { serverInfo } from 'gateway/lib/store'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 
     interface Props {
         isOpen: boolean
         create: (label: string, expiry: Date) => void
-        maxDurationSeconds?: number | null
         initialLabel?: string
         initialExpiryMs?: number
     }
 
+    let defaultDurationMs = 1000 * 60 * 60 * 24 * 7
+    const maxDurationMs = $serverInfo?.maxApiTokenDurationSeconds ? ($serverInfo.maxApiTokenDurationSeconds * 1000) : null
+    defaultDurationMs = maxDurationMs ? Math.min(maxDurationMs, defaultDurationMs) : defaultDurationMs
+
     let {
         isOpen = $bindable(true),
         create,
-        maxDurationSeconds = null,
         initialLabel = '',
-        initialExpiryMs,
+        initialExpiryMs = defaultDurationMs,
     }: Props = $props()
 
-    const defaultDurationMs = initialExpiryMs
-        ?? (maxDurationSeconds
-            ? Math.min(maxDurationSeconds * 1000, 1000 * 60 * 60 * 24 * 7)
-            : 1000 * 60 * 60 * 24 * 7)
+    let validatedInitialExpiryMs = $derived(maxDurationMs ? Math.min(initialExpiryMs, maxDurationMs) : initialExpiryMs)
 
+    // svelte-ignore state_referenced_locally
     let label = $state(initialLabel)
-    let expiry = $state(new Date(Date.now() + defaultDurationMs).toISOString())
-    let maxExpiry = $derived(maxDurationSeconds
-        ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString().slice(0, 16)
-        : undefined)
+    // svelte-ignore state_referenced_locally
+    let expiry = $state(new Date(Date.now() + validatedInitialExpiryMs).toISOString().slice(0, 16))
+    let maxExpiryDate = $derived(maxDurationMs ? new Date(Date.now() + maxDurationMs) : undefined)
+    let maxExpiry = $derived(maxExpiryDate?.toISOString().slice(0, 16))
     let field: HTMLInputElement|undefined = $state()
     let validated = $state(false)
 
@@ -72,9 +73,9 @@
                     type="datetime-local"
                     max={maxExpiry}
                     bind:value={expiry}  />
-                {#if maxDurationSeconds}
+                {#if maxDurationMs !== Number.POSITIVE_INFINITY}
                     <small class="text-muted">
-                        Maximum: {Math.floor(maxDurationSeconds / 86400)} days
+                        Maximum: {Math.floor(maxDurationMs / 86400 / 1000)} days
                     </small>
                 {/if}
             </FormGroup>

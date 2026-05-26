@@ -6,22 +6,17 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import { formatDurationAsHumantime, parseHumantimeDuration } from 'common/duration'
+    import { humantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
     const initPromise = init()
 
-    let durationText = $state('')
-
     async function init () {
         parameters = await api.getParameters({})
         const ssoProviders = await gatewayApi.getSsoProviders()
         hasSsoProviders = ssoProviders.length > 0
-        durationText = parameters.ticketMaxDurationSeconds
-            ? formatDurationAsHumantime(parameters.ticketMaxDurationSeconds)
-            : ''
     }
 
     async function update() {
@@ -29,12 +24,6 @@
             parameterUpdate: parameters!,
         })
         await reloadServerInfo()
-    }
-
-    function onDurationChange () {
-        const seconds = parseHumantimeDuration(durationText)
-        parameters!.ticketMaxDurationSeconds = seconds ?? undefined
-        update()
     }
 </script>
 
@@ -202,8 +191,7 @@
                     type="text"
                     class="form-control"
                     placeholder="e.g. 8h, 30m, 1d"
-                    bind:value={durationText}
-                    onchange={onDurationChange}
+                    use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters!.ticketMaxDurationSeconds = v; update() } }}
                 />
                 <small class="form-text text-muted">
                     Global default. Can be overridden per target. Examples: 30m, 8h, 1d, 2h30m.
@@ -225,6 +213,17 @@
             </FormGroup>
 
             {/if}
+
+            <h4 class="mt-4">API tokens</h4>
+
+            <FormGroup floating label="Maximum API token duration (blank = unlimited)">
+                <input
+                    type="text"
+                    class="form-control"
+                    placeholder="e.g. 8h, 30m, 1d"
+                    use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters!.maxApiTokenDurationSeconds = v; update() } }}
+                />
+            </FormGroup>
 
             <h4 class="mt-4">HTTP</h4>
             <label
