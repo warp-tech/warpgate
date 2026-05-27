@@ -70,3 +70,30 @@ pub async fn construct_external_url(
     }
     Url::parse(&url).map_err(WarpgateError::UrlParse)
 }
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{Secret, WarpgateConfig, WarpgateConfigStore};
+
+    use super::*;
+
+    fn test_config(external_host: Option<&str>) -> WarpgateConfig {
+        let mut config = WarpgateConfig {
+            store: WarpgateConfigStore::default(),
+        };
+        config.store.external_host = external_host.map(str::to_owned);
+        config.store.database_url = Secret::new("sqlite:ext-test".to_owned());
+        config
+    }
+
+    #[tokio::test]
+    async fn construct_external_url_uses_config_external_host_without_request() {
+        let config = test_config(Some("config.example"));
+
+        let url = construct_external_url(None, &config, None)
+            .await
+            .expect("external url");
+
+        assert_eq!(url.as_str(), "https://config.example:8888/");
+    }
+}
