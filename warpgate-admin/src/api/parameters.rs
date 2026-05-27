@@ -27,6 +27,7 @@ struct ParameterValues {
     pub ticket_max_uses: Option<i16>,
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
+    pub target_click_action: Parameters::TargetClickAction,
     pub show_session_menu: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
@@ -46,6 +47,7 @@ struct ParameterUpdate {
     pub ticket_max_uses: Option<Option<i16>>,
     pub ticket_require_description: Option<bool>,
     pub ticket_request_show_all_targets: Option<bool>,
+    pub target_click_action: Option<Parameters::TargetClickAction>,
     pub show_session_menu: Option<bool>,
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
@@ -89,6 +91,7 @@ impl Api {
             ticket_max_uses: parameters.ticket_max_uses,
             ticket_require_description: parameters.ticket_require_description,
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
+            target_click_action: parameters.target_click_action,
             show_session_menu: parameters.show_session_menu,
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
@@ -131,6 +134,7 @@ impl Api {
         parameters.ticket_require_description = body.ticket_require_description.map_or(NotSet, Set);
         parameters.ticket_request_show_all_targets =
             body.ticket_request_show_all_targets.map_or(NotSet, Set);
+        parameters.target_click_action = body.target_click_action.map_or(NotSet, Set);
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
         parameters.max_api_token_duration_seconds =
             body.max_api_token_duration_seconds.map_or(NotSet, Set);

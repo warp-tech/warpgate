@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-33-gf91c3fd4-modified"
+    "version": "v0.23.4-58-ga76e4927-modified"
   },
   "servers": [
     {
@@ -5031,12 +5031,18 @@
           "ticket_request_show_all_targets": {
             "type": "boolean"
           },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
           "show_session_menu": {
             "type": "boolean"
           },
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "record_scp": {
+            "type": "boolean"
           }
         }
       },
@@ -5053,7 +5059,9 @@
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
           "ticket_request_show_all_targets",
-          "show_session_menu"
+          "target_click_action",
+          "show_session_menu",
+          "record_scp"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5095,12 +5103,18 @@
           "ticket_request_show_all_targets": {
             "type": "boolean"
           },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
           "show_session_menu": {
             "type": "boolean"
           },
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "record_scp": {
+            "type": "boolean"
           }
         }
       },
@@ -5439,6 +5453,13 @@
             "format": "int16"
           }
         }
+      },
+      "TargetClickAction": {
+        "type": "string",
+        "enum": [
+          "Connect",
+          "ShowInstructions"
+        ]
       },
       "TargetDataRequest": {
         "type": "object",

@@ -15,7 +15,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
-use warpgate_common::{ProtocolName, TargetOptions, WarpgateError};
+use warpgate_common::{ProtocolName, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
