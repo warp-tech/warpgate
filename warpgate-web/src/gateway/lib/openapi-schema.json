@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.4-33-gf91c3fd4-modified"
+    "version": "v0.23.4-58-ga76e4927-modified"
   },
   "servers": [
     {
@@ -1701,6 +1701,7 @@
           "ticket_self_service_enabled",
           "ticket_require_description",
           "ticket_request_show_all_targets",
+          "target_click_action",
           "has_ldap"
         ],
         "properties": {
@@ -1750,6 +1751,9 @@
           },
           "ticket_request_show_all_targets": {
             "type": "boolean"
+          },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
           },
           "max_api_token_duration_seconds": {
             "type": "integer",
@@ -2026,6 +2030,13 @@
             "type": "string"
           }
         }
+      },
+      "TargetClickAction": {
+        "type": "string",
+        "enum": [
+          "Connect",
+          "ShowInstructions"
+        ]
       },
       "TargetKind": {
         "type": "string",

@@ -1,6 +1,17 @@
+use poem_openapi::Enum;
 use sea_orm::Set;
 use sea_orm::entity::prelude::*;
+use serde::Serialize;
 use uuid::Uuid;
+
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum TargetClickAction {
+    #[sea_orm(string_value = "Connect")]
+    Connect,
+    #[sea_orm(string_value = "ShowInstructions")]
+    ShowInstructions,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
@@ -23,6 +34,7 @@ pub struct Model {
     pub ticket_max_uses: Option<i16>,
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
+    pub target_click_action: TargetClickAction,
     pub show_session_menu: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
@@ -54,6 +66,7 @@ impl Entity {
                     ticket_max_uses: Set(None),
                     ticket_require_description: Set(false),
                     ticket_request_show_all_targets: Set(false),
+                    target_click_action: Set(TargetClickAction::Connect),
                     show_session_menu: Set(true),
                     max_api_token_duration_seconds: Set(None),
                     record_scp: Set(true),

@@ -4,7 +4,7 @@ import { compare as naturalCompareFactory } from 'natural-orderby'
 import { faArrowRight, faEllipsisV, faTerminal } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
-import { api, type TargetSnapshot, TargetKind, BootstrapThemeColor } from 'gateway/lib/api'
+import { api, type TargetSnapshot, TargetKind, BootstrapThemeColor, TargetClickAction } from 'gateway/lib/api'
 import Fa from 'svelte-fa'
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
@@ -65,7 +65,12 @@ function selectTarget (target: TargetSnapshot) {
             loadURL(`/?warpgate-target=${target.name}`)
         }
     } else if (target.kind === TargetKind.Ssh) {
-        openWebSsh(target)
+        const targetClickAction = $serverInfo?.targetClickAction
+        if (targetClickAction === TargetClickAction.ShowInstructions) {
+            instructionsTarget = target
+        } else {
+            openWebSsh(target)
+        }
     } else {
         instructionsTarget = target
     }
@@ -133,6 +138,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     return
                 }
                 e.preventDefault()
+                e.stopPropagation()
                 selectTarget(target)
             }}
         >
