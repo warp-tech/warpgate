@@ -20,6 +20,14 @@ impl CookieHostMiddleware {
     }
 }
 
+fn normalize_cookie_domain(base_domain: &str) -> String {
+    if base_domain.starts_with('.') {
+        base_domain.to_string()
+    } else {
+        format!(".{base_domain}")
+    }
+}
+
 pub struct CookieHostMiddlewareEndpoint<E: Endpoint> {
     inner: E,
     base_domain: Option<String>,
@@ -62,11 +70,14 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         //    external_host *and* all its subdomains.
         //  • Any other host → leave the cookie as-is (scoped to that host).
         let target_domain: Option<Option<String>> = match host.as_deref() {
-            None => self.base_domain.as_ref().map(|b| Some(b.clone())),
+            None => self
+                .base_domain
+                .as_ref()
+                .map(|b| Some(normalize_cookie_domain(b))),
             Some(h) if is_localhost_host(h) => Some(None),
             Some(h) => self.base_domain.as_ref().and_then(|base| {
                 if host_is_subdomain_of_or_equal(h, base) {
-                    Some(Some(base.clone()))
+                    Some(Some(normalize_cookie_domain(base)))
                 } else {
                     None
                 }
