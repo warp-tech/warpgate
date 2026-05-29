@@ -207,8 +207,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .validate_credential(&username, &credential)
                                     .await?
                                 {
-                                    state.add_valid_credential(credential);
+                                    state.add_valid_credential(credential.clone());
                                 } else {
+                                    state.emit_authentication_failed_event(
+                                        Some(&credential),
+                                        "invalid credential",
+                                    );
                                     // Postgres CLI will just send the same password in a loop without prompting the user again
                                     return fail(&mut self).await;
                                 }

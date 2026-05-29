@@ -9,7 +9,7 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
-use warpgate_common::WarpgateError;
+use warpgate_common::{SessionId, WarpgateError};
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -19,10 +19,35 @@ use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
 use crate::api::common::logout;
-use crate::common::{SessionExt, authorize_session, get_auth_state_for_request};
+use crate::common::{
+    SessionExt, authorize_session, get_auth_state_for_request, session_id_for_request,
+};
 use crate::session::SessionStore;
 
 pub struct Api;
+
+fn emit_unknown_authentication_failed_event(
+    session_id: SessionId,
+    remote_ip: Option<std::net::IpAddr>,
+    username: &str,
+    credentials: &str,
+    reason: &str,
+) {
+    let client_ip = remote_ip
+        .map(|x| x.to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    info!(
+        target: "audit",
+        _type = "UserAuthenticationFailed1",
+        session = %session_id,
+        client_ip = %client_ip,
+        username = %username,
+        credentials = %credentials,
+        reason = %reason,
+        "Authentication failed",
+    );
+}
 
 #[derive(Enum)]
 pub enum SsoProviderKind {
@@ -257,6 +282,14 @@ impl Api {
             )
             .await?;
         let Some(username) = username else {
+            let session_id = session_id_for_request(req, &ctx).await?;
+            emit_unknown_authentication_failed_event(
+                session_id,
+                req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                &email,
+                &cred.safe_description(),
+                "unknown user",
+            );
             return Ok(Err(format!("No user matching {email}")));
         };
 
@@ -269,6 +302,15 @@ impl Api {
                 Ok(state) => state,
                 Err(e) => {
                     if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
+                        drop(auth_state_store);
+                        let session_id = session_id_for_request(req, &ctx).await?;
+                        emit_unknown_authentication_failed_event(
+                            session_id,
+                            remote_ip,
+                            &username,
+                            &cred.safe_description(),
+                            "IP address not allowed",
+                        );
                         return Ok(Err(
                         "Login denied: your IP address is not in the allowed range for this user"
                             .to_string(),
@@ -279,31 +321,46 @@ impl Api {
             };
 
         let mut state = state_arc.lock().await;
-        let mut cp = services.config_provider.lock().await;
 
         if state.user_info().username != username {
+            let session_id = session_id_for_request(req, &ctx).await?;
+            state.set_session_id(session_id);
+            state.emit_authentication_failed_event(Some(&cred), "incorrect SSO account");
             return Ok(Err(format!(
                 "Incorrect account for SSO authentication ({username})"
             )));
         }
 
+        let mut cp = services.config_provider.lock().await;
+
         if cp.validate_credential(&username, &cred).await? {
-            state.add_valid_credential(cred);
+            state.add_valid_credential(cred.clone());
         } else {
+            drop(cp);
+            let session_id = session_id_for_request(req, &ctx).await?;
+            state.set_session_id(session_id);
+            state.emit_authentication_failed_event(Some(&cred), "invalid credential");
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"
             )));
         }
+        drop(cp);
 
         if let AuthResult::Accepted { user_info } = state.verify() {
-            auth_state_store.complete(state.id()).await;
-            authorize_session(req, &ctx, user_info).await?;
+            let session_id = authorize_session(req, &ctx, user_info).await?;
+            state.set_session_id(session_id);
+            state.emit_authenticated_event_once();
+            let state_id = *state.id();
+            drop(state);
+            auth_state_store.complete(&state_id).await;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token,
                 supports_single_logout: context.supports_single_logout,
             });
         }
+
+        let mut cp = services.config_provider.lock().await;
 
         let mappings = provider_config.provider.role_mappings();
         if let Some(remote_groups) = response.access_roles {

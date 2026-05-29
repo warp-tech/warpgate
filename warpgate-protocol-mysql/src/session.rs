@@ -211,7 +211,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
 
                     let mut cp = self.services.config_provider.lock().await;
                     if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
+                        state.add_valid_credential(credential.clone());
+                    } else {
+                        state.emit_authentication_failed_event(
+                            Some(&credential),
+                            "invalid credential",
+                        );
                     }
 
                     state.verify()

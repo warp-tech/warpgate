@@ -15,7 +15,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
-use warpgate_common::{ProtocolName, WarpgateError};
+use warpgate_common::{ProtocolName, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
@@ -223,17 +223,13 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-pub async fn authorize_session(
+async fn server_handle_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
-    user_info: AuthStateUserInfo,
-) -> Result<(), WarpgateError> {
+) -> Result<Arc<Mutex<warpgate_core::WarpgateServerHandle>>, WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
-    let session = <&Session>::from_request_without_body(req)
-        .await
-        .context("Session not in request")?;
 
     let server_handle = session_middleware
         .lock()
@@ -241,17 +237,40 @@ pub async fn authorize_session(
         .create_handle_for(req, ctx)
         .await
         .context("create_handle_for")?;
-    server_handle
-        .lock()
+
+    Ok(server_handle)
+}
+
+pub async fn session_id_for_request(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+) -> Result<SessionId, WarpgateError> {
+    let server_handle = server_handle_for_request(req, ctx).await?;
+    Ok(server_handle.lock().await.id())
+}
+
+pub async fn authorize_session(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+    user_info: AuthStateUserInfo,
+) -> Result<SessionId, WarpgateError> {
+    let session = <&Session>::from_request_without_body(req)
         .await
-        .set_user_info(user_info.clone())
-        .await?;
+        .context("Session not in request")?;
+
+    let server_handle = server_handle_for_request(req, ctx).await?;
+    let session_id = {
+        let server_handle = server_handle.lock().await;
+        let session_id = server_handle.id();
+        server_handle.set_user_info(user_info.clone()).await?;
+        session_id
+    };
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,
     });
 
-    Ok(())
+    Ok(session_id)
 }
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(

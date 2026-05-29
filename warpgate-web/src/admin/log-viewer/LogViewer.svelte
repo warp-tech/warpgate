@@ -226,6 +226,23 @@ interface UserDeleted1 {
     username: string
 }
 
+interface UserAuthenticated1 {
+    _type: 'UserAuthenticated1'
+    user_id: string
+    username: string
+    credentials: string
+    client_ip?: string
+}
+
+interface UserAuthenticationFailed1 {
+    _type: 'UserAuthenticationFailed1'
+    user_id?: string
+    username: string
+    credentials: string
+    reason: string
+    client_ip?: string
+}
+
 interface CredentialCreated1 {
     _type: 'CredentialCreated1'
     credential_type: string
@@ -276,35 +293,60 @@ interface TicketDeleted1 {
     target: string
 }
 
-type RichLogEntry = AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | TargetSessionStarted1 | TargetSessionEnded1 | CredentialCreated1 | CredentialDeleted1 | TicketCreated1 | TicketDeleted1
+type RichLogEntry = AccessRoleGranted1 | AccessRoleRevoked1 | AdminRoleGranted1 | AdminRoleRevoked1 | UserCreated1 | UserDeleted1 | UserAuthenticated1 | UserAuthenticationFailed1 | TargetSessionStarted1 | TargetSessionEnded1 | CredentialCreated1 | CredentialDeleted1 | TicketCreated1 | TicketDeleted1
+
+function richLogType(entry: LogEntry): string {
+    return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
+}
 
 function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
-    if (entry.values._type === 'AccessRoleGranted1') {
+    const type = richLogType(entry)
+    if (type === 'AccessRoleGranted1') {
         return entry.values as AccessRoleGranted1
-    } else if (entry.values._type === 'AccessRoleRevoked1') {
+    } else if (type === 'AccessRoleRevoked1') {
         return entry.values as AccessRoleRevoked1
-    } else if (entry.values._type === 'AdminRoleGranted1') {
+    } else if (type === 'AdminRoleGranted1') {
         return entry.values as AdminRoleGranted1
-    } else if (entry.values._type === 'AdminRoleRevoked1') {
+    } else if (type === 'AdminRoleRevoked1') {
         return entry.values as AdminRoleRevoked1
-    } else if (entry.values._type === 'UserCreated1') {
+    } else if (type === 'UserCreated1') {
         return entry.values as UserCreated1
-    } else if (entry.values._type === 'UserDeleted1') {
+    } else if (type === 'UserDeleted1') {
         return entry.values as UserDeleted1
-    } else if (entry.values._type === 'TargetSessionStarted1') {
+    } else if (type === 'UserAuthenticated1') {
+        return entry.values as UserAuthenticated1
+    } else if (type === 'UserAuthenticationFailed1') {
+        return entry.values as UserAuthenticationFailed1
+    } else if (type === 'TargetSessionStarted1') {
         return entry.values as TargetSessionStarted1
-    } else if (entry.values._type === 'TargetSessionEnded1') {
+    } else if (type === 'TargetSessionEnded1') {
         return entry.values as TargetSessionEnded1
-    } else if (entry.values._type === 'CredentialCreated1') {
+    } else if (type === 'CredentialCreated1') {
         return entry.values as CredentialCreated1
-    } else if (entry.values._type === 'CredentialDeleted1') {
+    } else if (type === 'CredentialDeleted1') {
         return entry.values as CredentialDeleted1
-    } else if (entry.values._type === 'TicketCreated1') {
+    } else if (type === 'TicketCreated1') {
         return entry.values as TicketCreated1
-    } else if (entry.values._type === 'TicketDeleted1') {
+    } else if (type === 'TicketDeleted1') {
         return entry.values as TicketDeleted1
     }
     return null
+}
+
+function genericValues(entry: LogEntry): [string, unknown][] {
+    const pairs = Object.entries(entry.values ?? {})
+    if (entry.text !== 'Authentication failed') {
+        return pairs.filter(([key]) => key !== '_type')
+    }
+
+    return pairs.filter(([key]) => ![
+        '_type',
+        'client_ip',
+        'credentials',
+        'reason',
+        'user_id',
+        'username',
+    ].includes(key))
 }
 </script>
 
@@ -418,6 +460,35 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                                         Deleted user
                                         <UserBadge id={richEntry.user_id} name={richEntry.username} />
                                     </div>
+                                    {:else if richEntry?._type === 'UserAuthenticated1'}
+                                    <div class="rich-entry">
+                                        Authenticated
+                                        <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        {#if richEntry.credentials}
+                                            <span class="badge bg-secondary">{richEntry.credentials}</span>
+                                        {/if}
+                                        {#if richEntry.client_ip}
+                                            <span class="text-muted">from {richEntry.client_ip}</span>
+                                        {/if}
+                                    </div>
+                                    {:else if richEntry?._type === 'UserAuthenticationFailed1'}
+                                    <div class="rich-entry auth-failed">
+                                        <span class="event-label">Authentication failed</span>
+                                        {#if richEntry.user_id}
+                                            <UserBadge id={richEntry.user_id} name={richEntry.username} />
+                                        {:else}
+                                            <strong>{richEntry.username}</strong>
+                                        {/if}
+                                        {#if richEntry.credentials}
+                                            <span class="badge bg-secondary">{richEntry.credentials}</span>
+                                        {/if}
+                                        {#if richEntry.reason}
+                                            <span class="badge auth-failed-reason">{richEntry.reason}</span>
+                                        {/if}
+                                        {#if richEntry.client_ip}
+                                            <span class="text-muted">from {richEntry.client_ip}</span>
+                                        {/if}
+                                    </div>
                                     {:else if richEntry?._type === 'TargetSessionStarted1'}
                                     <div class="rich-entry">
                                         Target session started for
@@ -474,7 +545,7 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                                         <span class="text">
                                             {item.text}
                                         </span>
-                                        {#each Object.entries(item.values ?? {}) as pair (pair[0])}
+                                        {#each genericValues(item) as pair (pair[0])}
                                         <span class="key-value">
                                             <span class="key">{pair[0]}:</span>
                                             <span class="value">{pair[1]}</span>
@@ -615,6 +686,22 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
             flex-wrap: wrap;
             align-items: center;
             gap: 0.5em;
+
+            .event-label {
+                font-weight: 700;
+            }
+
+            &.auth-failed {
+                .event-label {
+                    color: var(--bs-danger-text-emphasis, #dc3545);
+                }
+
+                .auth-failed-reason {
+                    background: rgba(var(--bs-danger-rgb, 220, 53, 69), 0.16);
+                    border: 1px solid rgba(var(--bs-danger-rgb, 220, 53, 69), 0.34);
+                    color: var(--bs-danger-text-emphasis, #dc3545);
+                }
+            }
         }
     }
 

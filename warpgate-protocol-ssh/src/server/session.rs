@@ -1739,14 +1739,20 @@ impl ServerSession {
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
-                if let Some(credential) = credential
-                    && cp
+                if let Some(credential) = credential {
+                    if cp
                         .lock()
                         .await
                         .validate_credential(username, &credential)
                         .await?
-                {
-                    state.add_valid_credential(credential);
+                    {
+                        state.add_valid_credential(credential.clone());
+                    } else {
+                        state.emit_authentication_failed_event(
+                            Some(&credential),
+                            "invalid credential",
+                        );
+                    }
                 }
 
                 let user_auth_result = state.verify();

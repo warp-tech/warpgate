@@ -11,17 +11,20 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, SessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::{ConfigProvider, Services};
 
 use super::common::logout;
-use crate::common::{SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request};
+use crate::common::{
+    SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request,
+    session_id_for_request,
+};
 use crate::session::SessionStore;
 pub struct Api;
 
@@ -103,6 +106,29 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
     CredentialKind::WebUserApproval,
 ];
 
+fn emit_unknown_authentication_failed_event(
+    session_id: SessionId,
+    remote_ip: Option<std::net::IpAddr>,
+    username: &str,
+    credentials: &str,
+    reason: &str,
+) {
+    let client_ip = remote_ip
+        .map(|x| x.to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    info!(
+        target: "audit",
+        _type = "UserAuthenticationFailed1",
+        session = %session_id,
+        client_ip = %client_ip,
+        username = %username,
+        credentials = %credentials,
+        reason = %reason,
+        "Authentication failed",
+    );
+}
+
 impl From<AuthResult> for ApiAuthState {
     fn from(state: AuthResult) -> Self {
         match state {
@@ -153,11 +179,29 @@ impl Api {
         .await
         {
             Err(WarpgateError::UserNotFound(_)) => {
+                drop(auth_state_store);
+                let session_id = session_id_for_request(req, &ctx).await?;
+                emit_unknown_authentication_failed_event(
+                    session_id,
+                    remote_ip,
+                    &body.username,
+                    "password",
+                    "unknown user",
+                );
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::Failed,
                 })));
             }
             Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                drop(auth_state_store);
+                let session_id = session_id_for_request(req, &ctx).await?;
+                emit_unknown_authentication_failed_event(
+                    session_id,
+                    remote_ip,
+                    &body.username,
+                    "password",
+                    "IP address not allowed",
+                );
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::IpRejected,
                 })));
@@ -169,17 +213,28 @@ impl Api {
         let mut cp = services.config_provider.lock().await;
 
         let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
-        if cp
+        let credential_valid = cp
             .validate_credential(&state.user_info().username, &password_cred)
-            .await?
-        {
-            state.add_valid_credential(password_cred);
+            .await?;
+        if credential_valid {
+            state.add_valid_credential(password_cred.clone());
+        }
+        drop(cp);
+
+        if !credential_valid {
+            let session_id = session_id_for_request(req, &ctx).await?;
+            state.set_session_id(session_id);
+            state.emit_authentication_failed_event(Some(&password_cred), "invalid credential");
         }
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, &ctx, user_info).await?;
+                let session_id = authorize_session(req, &ctx, user_info).await?;
+                state.set_session_id(session_id);
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                auth_state_store.complete(&state_id).await;
                 Ok(LoginResponse::Success)
             }
             x => {
@@ -215,19 +270,30 @@ impl Api {
         let mut cp = services.config_provider.lock().await;
 
         let otp_cred = AuthCredential::Otp(body.otp.clone().into());
-        if cp
+        let credential_valid = cp
             .validate_credential(&state.user_info().username, &otp_cred)
-            .await?
-        {
-            state.add_valid_credential(otp_cred);
+            .await?;
+        if credential_valid {
+            state.add_valid_credential(otp_cred.clone());
         } else {
             warn!("Invalid OTP for user {}", state.user_info().username);
+        }
+        drop(cp);
+
+        if !credential_valid {
+            let session_id = session_id_for_request(req, &ctx).await?;
+            state.set_session_id(session_id);
+            state.emit_authentication_failed_event(Some(&otp_cred), "invalid credential");
         }
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, &ctx, user_info).await?;
+                let session_id = authorize_session(req, &ctx, user_info).await?;
+                state.set_session_id(session_id);
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                auth_state_store.complete(&state_id).await;
                 Ok(LoginResponse::Success)
             }
             x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
@@ -399,7 +465,12 @@ impl Api {
         let Some(state_arc) = get_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
+        {
+            let mut state = state_arc.lock().await;
+            let credential = AuthCredential::WebUserApproval;
+            state.emit_authentication_failed_event(Some(&credential), "rejected by user");
+            state.reject();
+        }
         services.auth_state_store.lock().await.complete(&id).await;
         serialize_auth_state_inner(state_arc, services)
             .await
