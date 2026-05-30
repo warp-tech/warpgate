@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-66-g3e59e43-modified"
+    "version": "v0.23.4-68-g322b2a9-modified"
   },
   "servers": [
     {
@@ -5118,6 +5118,54 @@
           }
         }
       },
+      "RdpTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        }
+      },
+      "RdpTargetAuth_RdpTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RdpTargetPasswordAuth"
+          }
+        ]
+      },
+      "RdpTargetPasswordAuth": {
+        "type": "object",
+        "title": "RdpTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
       "Recording": {
         "type": "object",
         "title": "Recording",
@@ -5645,6 +5693,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         ],
         "discriminator": {
@@ -5655,7 +5706,8 @@
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
-            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions"
+            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         }
       },
@@ -5747,6 +5799,28 @@
           }
         ]
       },
+      "TargetOptions_TargetRdpOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Rdp"
+                ],
+                "example": "Rdp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRdpOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -5827,6 +5901,34 @@
           },
           "default_database_name": {
             "type": "string"
+          }
+        }
+      },
+      "TargetRdpOptions": {
+        "type": "object",
+        "title": "TargetRdpOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/RdpTargetAuth"
           }
         }
       },
@@ -6277,6 +6379,12 @@
             }
           },
           "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

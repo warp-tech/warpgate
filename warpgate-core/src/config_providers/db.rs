@@ -351,6 +351,15 @@ impl ConfigProvider for DatabaseConfigProvider {
                 policy.protocols.insert(
                     "VNC",
                     Box::new(AllCredentialsPolicy {
+                        supported_credential_types: supported_credential_types.clone(),
+                        required_credential_types: p.into_iter().collect(),
+                    }),
+                );
+            }
+            if let Some(p) = req.rdp {
+                policy.protocols.insert(
+                    "RDP",
+                    Box::new(AllCredentialsPolicy {
                         supported_credential_types,
                         required_credential_types: p.into_iter().collect(),
                     }),

@@ -19,6 +19,8 @@ pub enum TargetKind {
     Postgres,
     #[sea_orm(string_value = "vnc")]
     Vnc,
+    #[sea_orm(string_value = "rdp")]
+    Rdp,
 }
 
 impl From<&TargetOptions> for TargetKind {
@@ -30,6 +32,7 @@ impl From<&TargetOptions> for TargetKind {
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
             TargetOptions::Vnc(_) => Self::Vnc,
+            TargetOptions::Rdp(_) => Self::Rdp,
         }
     }
 }

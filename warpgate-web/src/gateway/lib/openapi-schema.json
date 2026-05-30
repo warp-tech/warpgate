@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.4-66-g3e59e43-modified"
+    "version": "v0.23.4-68-g322b2a9-modified"
   },
   "servers": [
     {
@@ -1805,6 +1805,9 @@
           },
           "vnc": {
             "type": "string"
+          },
+          "rdp": {
+            "type": "string"
           }
         }
       },
@@ -2102,6 +2105,10 @@
           "vnc": {
             "type": "integer",
             "format": "uint16"
+          },
+          "rdp": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -2189,7 +2196,8 @@
           "MySql",
           "Ssh",
           "Postgres",
-          "Vnc"
+          "Vnc",
+          "Rdp"
         ]
       },
       "TargetSnapshot": {
@@ -2432,6 +2440,12 @@
             }
           },
           "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
