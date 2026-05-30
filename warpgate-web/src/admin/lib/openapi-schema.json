@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-58-ga76e4927-modified"
+    "version": "v0.23.4-66-g3e59e43-modified"
   },
   "servers": [
     {
@@ -5642,6 +5642,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
           }
         ],
         "discriminator": {
@@ -5651,7 +5654,8 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
-            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions"
           }
         }
       },
@@ -5765,6 +5769,28 @@
           }
         ]
       },
+      "TargetOptions_TargetVncOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Vnc"
+                ],
+                "example": "Vnc"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetVncOptions"
+          }
+        ]
+      },
       "TargetPostgresOptions": {
         "type": "object",
         "title": "TargetPostgresOptions",
@@ -5829,6 +5855,27 @@
           },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
+          }
+        }
+      },
+      "TargetVncOptions": {
+        "type": "object",
+        "title": "TargetVncOptions",
+        "required": [
+          "host",
+          "port",
+          "auth"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/VncTargetAuth"
           }
         }
       },
@@ -6228,6 +6275,12 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          },
+          "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
           }
         }
       },
@@ -6273,6 +6326,84 @@
           "is_active": {
             "type": "boolean",
             "description": "Whether this assignment is currently active (not expired, not revoked)"
+          }
+        }
+      },
+      "VncTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth"
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "None": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth",
+            "Password": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        }
+      },
+      "VncTargetAuth_VncTargetNoneAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ],
+                "example": "None"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetNoneAuth"
+          }
+        ]
+      },
+      "VncTargetAuth_VncTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetPasswordAuth"
+          }
+        ]
+      },
+      "VncTargetNoneAuth": {
+        "type": "object",
+        "title": "VncTargetNoneAuth"
+      },
+      "VncTargetPasswordAuth": {
+        "type": "object",
+        "title": "VncTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       }

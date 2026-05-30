@@ -80,6 +80,14 @@
                         privateKey: '',
                     },
                 },
+                Vnc: {
+                    kind: TargetKind.Vnc,
+                    host: '192.168.0.1',
+                    port: 5900,
+                    auth: {
+                        kind: 'None' as const,
+                    },
+                },
             }[params.kind]
             if (!options) {
                 return

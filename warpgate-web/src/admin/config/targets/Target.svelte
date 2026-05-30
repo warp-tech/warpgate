@@ -13,6 +13,7 @@
     import Loadable from 'common/Loadable.svelte'
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import TargetVncOptions from './vnc/Options.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
@@ -188,6 +189,10 @@
             <Section id="target-options" title="Target options">
                 {#if target.options.kind === 'Ssh'}
                     <TargetSshOptions id={target.id} options={target.options} />
+                {/if}
+
+                {#if target.options.kind === 'Vnc'}
+                    <TargetVncOptions bind:options={target.options} />
                 {/if}
 
                 {#if target.options.kind === 'Http'}
