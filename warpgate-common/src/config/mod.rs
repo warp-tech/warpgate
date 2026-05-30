@@ -10,7 +10,7 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_listen,
     _default_postgres_listen, _default_recordings_path, _default_retention,
     _default_session_max_age, _default_ssh_inactivity_timeout, _default_ssh_keys_path,
-    _default_ssh_listen,
+    _default_ssh_listen, _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
@@ -94,6 +94,8 @@ pub struct UserRequireCredentialsPolicy {
     pub mysql: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub postgres: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vnc: Option<Vec<CredentialKind>>,
 }
 
 impl UserRequireCredentialsPolicy {
@@ -549,6 +551,42 @@ impl PostgresConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct VncConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_vnc_listen")]
+    pub listen: ListenEndpoint,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+}
+
+impl Default for VncConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_vnc_listen(),
+            external_port: None,
+            external_host: None,
+        }
+    }
+}
+
+impl VncConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct RecordingsConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -625,6 +663,9 @@ pub struct WarpgateConfigStore {
     pub postgres: PostgresConfig,
 
     #[serde(default)]
+    pub vnc: VncConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -640,6 +681,7 @@ impl Default for WarpgateConfigStore {
             kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
+            vnc: <_>::default(),
             log: <_>::default(),
         }
     }

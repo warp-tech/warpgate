@@ -8,6 +8,7 @@ use warpgate_tls::TlsMode;
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_ssh_port, _default_true, _default_username,
+    _default_vnc_port,
 };
 use crate::Secret;
 
@@ -240,6 +241,42 @@ impl TargetPostgresOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetVncOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_vnc_port")]
+    pub port: u16,
+
+    #[serde(default)]
+    pub auth: VncTargetAuth,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum VncTargetAuth {
+    #[serde(rename = "none")]
+    None(VncTargetNoneAuth),
+    #[serde(rename = "password")]
+    Password(VncTargetPasswordAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct VncTargetNoneAuth {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct VncTargetPasswordAuth {
+    pub password: Secret<String>,
+}
+
+impl Default for VncTargetAuth {
+    fn default() -> Self {
+        Self::None(VncTargetNoneAuth::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
     pub cluster_url: String,
@@ -308,4 +345,6 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
+    #[serde(rename = "vnc")]
+    Vnc(TargetVncOptions),
 }

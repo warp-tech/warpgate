@@ -19,6 +19,10 @@ pub const fn _default_mysql_port() -> u16 {
     3306
 }
 
+pub const fn _default_vnc_port() -> u16 {
+    5900
+}
+
 #[inline]
 pub fn _default_username() -> String {
     "root".to_owned()
@@ -57,6 +61,11 @@ pub fn _default_postgres_listen() -> ListenEndpoint {
 #[inline]
 pub fn _default_kubernetes_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 8443))
+}
+
+#[inline]
+pub fn _default_vnc_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5900))
 }
 
 #[inline]
