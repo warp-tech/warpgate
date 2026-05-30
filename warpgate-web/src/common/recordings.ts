@@ -33,6 +33,10 @@ export type RecordingMetadata ={
 } | {
     type: 'ssh-forwarded-socket',
     path: string
+} | {
+    type: 'desktop',
+    protocol: string
+    target: string
 }
 
 
@@ -66,6 +70,10 @@ export function recordingMetadataToFieldSet(metadata: RecordingMetadata): [strin
         case 'ssh-forwarded-socket':
             fieldSets.push(['Path', metadata.path])
             break
+        case 'desktop':
+            fieldSets.push(['Protocol', metadata.protocol.toUpperCase()])
+            fieldSets.push(['Target', metadata.target])
+            break
     }
 
     return fieldSets
@@ -92,6 +100,8 @@ export function recordingTypeLabel(recording: Recording): string {
             return 'Remote TCP forwarding'
         case 'ssh-forwarded-socket':
             return 'Remote UNIX socket forwarding'
+        case 'desktop':
+            return 'Desktop'
     }
 
     return 'Unknown type'

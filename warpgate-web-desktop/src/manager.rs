@@ -5,10 +5,11 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
-use tracing::{Instrument, debug, info_span};
+use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetOptions, WarpgateError};
+use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
 
@@ -130,7 +131,35 @@ impl WebDesktopClientManager {
             .await
             .insert(session_id, session.clone());
 
-        spawn_event_loop(session.clone(), event_rx, self.sessions.clone());
+        // Start a desktop recording (no-op if recording is disabled in config).
+        let protocol = match &target.options {
+            TargetOptions::Vnc(_) => "vnc",
+            TargetOptions::Rdp(_) => "rdp",
+            _ => "desktop",
+        };
+        let recorder = match services
+            .recordings
+            .lock()
+            .await
+            .start::<DesktopRecorder, _>(
+                &session_id,
+                None,
+                DesktopRecordingMetadata::Desktop {
+                    protocol: protocol.to_owned(),
+                    target: target_name.to_owned(),
+                },
+            )
+            .await
+        {
+            Ok(recorder) => Some(recorder),
+            Err(warpgate_core::recordings::Error::Disabled) => None,
+            Err(error) => {
+                warn!(%error, "Failed to start desktop recording");
+                None
+            }
+        };
+
+        spawn_event_loop(session.clone(), event_rx, self.sessions.clone(), recorder);
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 
@@ -153,15 +182,21 @@ fn spawn_event_loop(
     session: Arc<WebDesktopSession>,
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<WebDesktopSession>>>>,
+    recorder: Option<DesktopRecorder>,
 ) {
     let session_id = session.id();
     let span = info_span!("web-desktop", session=%session_id);
     tokio::spawn(
         async move {
             while let Some(event) = event_rx.recv().await {
+                if let Some(recorder) = &recorder
+                    && let Err(error) = recorder.write_event(&event).await
+                {
+                    warn!(%error, "Failed to record desktop event");
+                }
                 session.push_event(ServerMessage::from(event)).await;
             }
-            // Backend ended.
+            // Backend ended; dropping `recorder` here finalises the recording.
             session.close();
             sessions.lock().await.remove(&session_id);
         }

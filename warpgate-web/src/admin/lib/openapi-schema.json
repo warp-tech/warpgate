@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-68-g322b2a9-modified"
+    "version": "v0.23.4-70-gdc2f553-modified"
   },
   "servers": [
     {
@@ -5210,7 +5210,8 @@
         "enum": [
           "Terminal",
           "Traffic",
-          "Kubernetes"
+          "Kubernetes",
+          "Desktop"
         ]
       },
       "Role": {

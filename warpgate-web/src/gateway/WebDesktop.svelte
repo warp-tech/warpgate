@@ -5,13 +5,12 @@
     import InfoBox from 'common/InfoBox.svelte'
     import { ReconnectingWebSocket, ConnectionState } from './lib/ReconnectingWebSocket.svelte'
     import { loadTheme } from 'theme'
+    import { applyDesktopFrame, type Rect } from 'common/desktopCanvas'
 
     interface Props {
         params: { sessionId: string }
     }
     let { params }: Props = $props()
-
-    interface Rect { x: number, y: number, width: number, height: number }
 
     type ServerMessage =
         | { type: 'connection_state'; state: string }
@@ -42,54 +41,6 @@
         ws.send(JSON.stringify(msg))
     }
 
-    function base64ToBytes (b64: string): Uint8Array {
-        const binary = atob(b64)
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i)
-        }
-        return bytes
-    }
-
-    function ensureSize (width: number, height: number) {
-        if (canvas && (canvas.width !== width || canvas.height !== height)) {
-            canvas.width = width
-            canvas.height = height
-        }
-    }
-
-    function drawRaw (rect: Rect, bgra: Uint8Array) {
-        if (!ctx) {
-            return
-        }
-        const count = rect.width * rect.height
-        const rgba = new Uint8ClampedArray(count * 4)
-        for (let i = 0; i < count; i++) {
-            const s = i * 4
-            // server sends BGRA, canvas wants RGBA
-            rgba[s] = bgra[s + 2] ?? 0
-            rgba[s + 1] = bgra[s + 1] ?? 0
-            rgba[s + 2] = bgra[s] ?? 0
-            rgba[s + 3] = 255
-        }
-        const image = new ImageData(rgba, rect.width, rect.height)
-        ctx.putImageData(image, rect.x, rect.y)
-    }
-
-    function drawJpeg (rect: Rect, bytes: Uint8Array) {
-        if (!ctx) {
-            return
-        }
-        const blob = new Blob([bytes], { type: 'image/jpeg' })
-        const url = URL.createObjectURL(blob)
-        const img = new Image()
-        img.onload = () => {
-            ctx?.drawImage(img, rect.x, rect.y)
-            URL.revokeObjectURL(url)
-        }
-        img.src = url
-    }
-
     function onMessage (msg: ServerMessage) {
         switch (msg.type) {
             case 'connection_state':
@@ -97,28 +48,6 @@
                     ws.state = ConnectionState.Connected
                 } else if (msg.state === 'disconnected') {
                     ws.state = ConnectionState.Closed
-                }
-                break
-            case 'resize':
-                ensureSize(msg.width, msg.height)
-                break
-            case 'raw_image':
-                ensureSize(
-                    Math.max(canvas?.width ?? 0, msg.rect.x + msg.rect.width),
-                    Math.max(canvas?.height ?? 0, msg.rect.y + msg.rect.height),
-                )
-                drawRaw(msg.rect, base64ToBytes(msg.data))
-                break
-            case 'jpeg_image':
-                drawJpeg(msg.rect, base64ToBytes(msg.data))
-                break
-            case 'copy_rect':
-                if (ctx && canvas) {
-                    ctx.drawImage(
-                        canvas,
-                        msg.src_x, msg.src_y, msg.dst.width, msg.dst.height,
-                        msg.dst.x, msg.dst.y, msg.dst.width, msg.dst.height,
-                    )
                 }
                 break
             case 'clipboard':
@@ -130,6 +59,10 @@
                 ws.state = ConnectionState.Error
                 connectionError = msg.message
                 break
+            default:
+                if (ctx && canvas) {
+                    applyDesktopFrame(canvas, ctx, msg)
+                }
         }
     }
 
