@@ -21,6 +21,7 @@ members = [
     "warpgate-protocol-vnc",
     "warpgate-sso",
     "warpgate-web",
+    "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
 default-members = ["warpgate"]

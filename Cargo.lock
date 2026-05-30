@@ -7487,6 +7487,7 @@ dependencies = [
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
+ "warpgate-web-desktop",
  "warpgate-web-ssh",
 ]
 
@@ -7679,6 +7680,30 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "warpgate-web-desktop"
+version = "0.23.4"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "poem",
+ "poem-openapi",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-db-entities",
+ "warpgate-protocol-vnc",
 ]
 
 [[package]]
