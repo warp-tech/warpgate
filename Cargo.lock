@@ -334,6 +334,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_io_stream"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d7b9decdf35d8908a7e3ef02f64c5e9b1695e230154c0e8de3969142d9b94c"
+dependencies = [
+ "futures",
+ "rustc_version",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6602,6 +6612,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.6.3",
@@ -7096,6 +7107,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vnc-rs"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5607299ce93dc285571540ee93de681a1be7a5765c35dfb2e1f049b493652145"
+dependencies = [
+ "async_io_stream",
+ "flate2",
+ "futures",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "vsimd"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7583,6 +7611,24 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "zeroize",
+]
+
+[[package]]
+name = "warpgate-protocol-vnc"
+version = "0.23.4"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "uuid",
+ "vnc-rs",
+ "warpgate-common",
+ "warpgate-core",
+ "warpgate-db-entities",
 ]
 
 [[package]]

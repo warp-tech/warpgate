@@ -4,8 +4,10 @@ use std::future::Future;
 use anyhow::Result;
 use warpgate_common::ListenEndpoint;
 
+mod desktop;
 mod handle;
 
+pub use desktop::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]
