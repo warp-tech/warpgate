@@ -7586,6 +7586,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-protocol-rdp"
+version = "0.23.4"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-common",
+ "warpgate-core",
+]
+
+[[package]]
 name = "warpgate-protocol-ssh"
 version = "0.23.4"
 dependencies = [
@@ -7708,6 +7724,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-protocol-rdp",
  "warpgate-protocol-vnc",
 ]
 

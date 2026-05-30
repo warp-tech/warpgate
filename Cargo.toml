@@ -17,6 +17,7 @@ members = [
     "warpgate-protocol-kubernetes",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
+    "warpgate-protocol-rdp",
     "warpgate-protocol-ssh",
     "warpgate-protocol-vnc",
     "warpgate-sso",
@@ -24,6 +25,11 @@ members = [
     "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
+# warpgate-rdp-helper is intentionally excluded: IronRDP's NLA/CredSSP stack
+# (sspi/picky) exact-pins RustCrypto pre-release crates that conflict with
+# russh's exact pins, so RDP support is built as a standalone helper binary
+# with its own lockfile and integrated over a subprocess IPC channel.
+exclude = ["warpgate-rdp-helper"]
 default-members = ["warpgate"]
 resolver = "2"
 

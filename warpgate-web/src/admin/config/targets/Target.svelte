@@ -14,6 +14,7 @@
     import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import TargetVncOptions from './vnc/Options.svelte'
+    import TargetRdpOptions from './rdp/Options.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
@@ -193,6 +194,10 @@
 
                 {#if target.options.kind === 'Vnc'}
                     <TargetVncOptions bind:options={target.options} />
+                {/if}
+
+                {#if target.options.kind === 'Rdp'}
+                    <TargetRdpOptions bind:options={target.options} />
                 {/if}
 
                 {#if target.options.kind === 'Http'}

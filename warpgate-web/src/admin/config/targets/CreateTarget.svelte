@@ -88,6 +88,16 @@
                         kind: 'None' as const,
                     },
                 },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'Administrator',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
             }[params.kind]
             if (!options) {
                 return

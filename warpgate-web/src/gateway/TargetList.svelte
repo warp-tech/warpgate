@@ -78,7 +78,7 @@ function selectTarget (target: TargetSnapshot) {
         } else {
             openWebSsh(target)
         }
-    } else if (target.kind === TargetKind.Vnc) {
+    } else if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) {
         openWebDesktop(target)
     } else {
         instructionsTarget = target
@@ -174,6 +174,9 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {/if}
                 {#if target.kind === TargetKind.Vnc}
                     VNC
+                {/if}
+                {#if target.kind === TargetKind.Rdp}
+                    RDP
                 {/if}
             </small>
             {#if target.kind === TargetKind.Ssh}

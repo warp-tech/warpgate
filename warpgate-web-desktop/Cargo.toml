@@ -24,3 +24,4 @@ warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
+warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }

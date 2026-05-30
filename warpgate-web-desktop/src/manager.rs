@@ -54,6 +54,7 @@ impl WebDesktopClientManager {
 
         let protocol_name = match &target.options {
             TargetOptions::Vnc(_) => warpgate_protocol_vnc::PROTOCOL_NAME,
+            TargetOptions::Rdp(_) => warpgate_protocol_rdp::PROTOCOL_NAME,
             _ => return Err(WarpgateError::InvalidTarget),
         };
 
@@ -89,8 +90,17 @@ impl WebDesktopClientManager {
         let session_id = server_handle.lock().await.id();
         let target_kind = TargetKind::from(&target.options);
 
-        let backend = match target.options.clone() {
-            TargetOptions::Vnc(options) => warpgate_protocol_vnc::connect(options),
+        // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape
+        // over the shared DesktopEvent/DesktopInput types.
+        let (event_rx, input_tx, abort_tx) = match target.options.clone() {
+            TargetOptions::Vnc(options) => {
+                let h = warpgate_protocol_vnc::connect(options);
+                (h.event_rx, h.input_tx, h.abort_tx)
+            }
+            TargetOptions::Rdp(options) => {
+                let h = warpgate_protocol_rdp::connect(options);
+                (h.event_rx, h.input_tx, h.abort_tx)
+            }
             _ => return Err(WarpgateError::InvalidTarget),
         };
 
@@ -100,8 +110,8 @@ impl WebDesktopClientManager {
             target_name.to_owned(),
             target_kind,
             server_handle,
-            backend.input_tx,
-            backend.abort_tx,
+            input_tx,
+            abort_tx,
         ));
 
         // Admin-initiated close: stop the backend and mark the session dead.
@@ -120,7 +130,7 @@ impl WebDesktopClientManager {
             .await
             .insert(session_id, session.clone());
 
-        spawn_event_loop(session.clone(), backend.event_rx, self.sessions.clone());
+        spawn_event_loop(session.clone(), event_rx, self.sessions.clone());
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 

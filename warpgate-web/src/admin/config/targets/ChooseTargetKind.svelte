@@ -41,6 +41,12 @@
             description: 'Access a remote desktop in the browser',
             experimental: true,
         },
+        {
+            name: 'RDP',
+            value: TargetKind.Rdp,
+            description: 'Access a Windows remote desktop in the browser',
+            experimental: true,
+        },
     ]
 </script>
 

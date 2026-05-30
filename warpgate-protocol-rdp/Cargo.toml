@@ -1,0 +1,18 @@
+[package]
+edition = "2024"
+license = "Apache-2.0"
+name = "warpgate-protocol-rdp"
+version = "0.23.4"
+publish = false
+
+[dependencies]
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+anyhow.workspace = true
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+bytes.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+tracing.workspace = true
+uuid.workspace = true
