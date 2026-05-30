@@ -97,6 +97,17 @@
       "items": {
         "$ref": "#/$defs/SsoProviderConfig"
       }
+    },
+    "vnc": {
+      "$ref": "#/$defs/VncConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:5900"
+      }
     }
   },
   "$defs": {
@@ -663,6 +674,44 @@
         "external_host",
         "host_header"
       ]
+    },
+    "VncConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:5900"
+        }
+      }
     }
   }
 }

@@ -7188,6 +7188,7 @@ dependencies = [
  "warpgate-protocol-mysql",
  "warpgate-protocol-postgres",
  "warpgate-protocol-ssh",
+ "warpgate-protocol-vnc",
  "warpgate-tls",
 ]
 
@@ -7620,9 +7621,12 @@ version = "0.23.4"
 dependencies = [
  "anyhow",
  "bytes",
+ "des",
  "futures",
+ "rustls 0.23.40",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tokio-stream",
  "tracing",
  "uuid",
@@ -7630,6 +7634,7 @@ dependencies = [
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]

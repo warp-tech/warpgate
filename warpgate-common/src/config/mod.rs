@@ -563,6 +563,12 @@ pub struct VncConfig {
 
     #[serde(default)]
     pub external_host: Option<String>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
 }
 
 impl Default for VncConfig {
@@ -572,6 +578,8 @@ impl Default for VncConfig {
             listen: _default_vnc_listen(),
             external_port: None,
             external_host: None,
+            certificate: "".into(),
+            key: "".into(),
         }
     }
 }
