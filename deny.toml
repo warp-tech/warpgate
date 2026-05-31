@@ -204,6 +204,13 @@ allow = [
     "CDLA-Permissive-2.0",
 ]
 
+# `async_io_stream` (pulled in transitively by `vnc-rs`) is released under the
+# Unlicense, a permissive public-domain dedication. Allow it scoped to that crate
+# rather than globally.
+[[licenses.exceptions]]
+allow = ["Unlicense"]
+crate = "async_io_stream"
+
 [[licenses.clarify]]
 crate = "ring"
 expression = "OpenSSL"

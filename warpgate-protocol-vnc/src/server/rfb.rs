@@ -208,6 +208,13 @@ where
 ///
 /// VNC uses DES with the (max 8 byte) password as the key, with each key byte's
 /// bits reversed, encrypting the 16-byte challenge as two ECB blocks.
+///
+/// NOTE: DES is intentional here and cannot be substituted. It is hard-wired into
+/// the RFB "VNC Authentication" security type (type 2) challenge-response, which
+/// is what password-protected VNC servers expect; it is *not* used to protect any
+/// data in transit (the relayed session is wrapped in TLS via VeNCrypt on the
+/// viewer side). Static analysers (e.g. CodeQL "weak cryptographic algorithm")
+/// will flag this usage — it is a known, accepted, protocol-mandated exception.
 fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     let mut key = [0u8; 8];
     for (i, b) in password.bytes().take(8).enumerate() {
