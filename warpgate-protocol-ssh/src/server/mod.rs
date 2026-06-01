@@ -3,6 +3,7 @@ mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
+mod target_menu;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
