@@ -21,7 +21,7 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
-pgwire = { version = "0.30", default-features = false, features = [
+pgwire = { version = "0.40", default-features = false, features = [
     "server-api-aws-lc-rs",
 ] }
 rsasl = { git = "https://github.com/Eugeny/rsasl.git", rev = "cbf4b0f3e05c73b33ac332718ab6e955eaa58166", default-features = false, features = [
