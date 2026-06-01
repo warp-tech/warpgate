@@ -43,6 +43,7 @@ use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::ERASE_PROGRESS_SPINNER;
+use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
@@ -53,17 +54,20 @@ use crate::{
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
     None,
+    Menu,
     NotFound(String),
     Found(Target, TargetSSHOptions),
 }
 
 #[derive(Debug)]
-enum Event {
+pub enum Event {
     Command(SessionHandleCommand),
     ServerHandler(ServerHandlerEvent),
     ConsoleInput(Bytes),
     ServiceOutput(Bytes),
     Client(RCEvent),
+    MenuRedraw,
+    Menu(MenuEvent),
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -354,21 +358,28 @@ impl ServerSession {
     /// where a PTY channel is required for the host key prompt, but we've connected
     /// faster than the client could open one.
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
-        match self.target.clone() {
+        let connect_params = match &self.target {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
+            TargetSelection::Menu => return Ok(()),
             TargetSelection::NotFound(name) => {
+                let name = name.clone();
                 self.emit_service_message(&format!("Selected target not found: {name}"))?;
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {name}");
             }
             TargetSelection::Found(target, ssh_options) => {
-                if self.rc_state == RCState::NotInitialized {
-                    self.connect_remote(&target, ssh_options)?;
-                }
+                Some((target.clone(), ssh_options.clone()))
             }
+        };
+
+        if let Some((target, ssh_options)) = connect_params
+            && self.rc_state == RCState::NotInitialized
+        {
+            self.connect_remote(&target, ssh_options)?;
         }
+
         Ok(())
     }
 
@@ -378,6 +389,28 @@ impl ServerSession {
             .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.service_output.show_progress();
         self.emit_service_message(&format!("Selected target: {}", target.name))?;
+
+        Ok(())
+    }
+
+    async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
+        match action {
+            MenuEvent::Render(data) => {
+                self.emit_pty_output(&data)?;
+            }
+            MenuEvent::Abort => {
+                self.emit_service_message("Session closed")?;
+                self.request_disconnect();
+                self.disconnect_server().await;
+            }
+            MenuEvent::Selected(target, ssh_options) => {
+                self.target = TargetSelection::Found(target.clone(), ssh_options.clone());
+                let _ = self.server_handle.lock().await.set_target(&target).await;
+                // clear screen ; cursor to 1;1
+                self.emit_pty_output(b"\x1b[2J\x1b[H")?;
+                self.maybe_connect_remote().await?;
+            }
+        }
 
         Ok(())
     }
@@ -417,11 +450,74 @@ impl ServerSession {
                 Event::ServiceOutput(data) => {
                     let _ = self.emit_pty_output(&data);
                 }
+                Event::Menu(action) => {
+                    if let Err(err) = self.handle_menu_event(action).await {
+                        error!(?err, "Menu loop action handler error");
+                    }
+                }
+                Event::MenuRedraw => (),
                 Event::ConsoleInput(_) => (),
             }
             Ok(())
         }
         .boxed()
+    }
+
+    async fn start_target_selection_menu(&mut self) -> Result<()> {
+        let menu_event_subscription = self
+            .hub
+            .subscribe(|e| matches!(e, Event::MenuRedraw | Event::ConsoleInput(_)))
+            .await;
+
+        let username = self
+            .username
+            .as_deref()
+            .ok_or(WarpgateError::InconsistentState("No username".into()))?;
+
+        let ssh_targets = {
+            self.services
+                .config_provider
+                .lock()
+                .await
+                .list_targets()
+                .await?
+                .into_iter()
+                .filter_map(|target| match target.options.clone() {
+                    TargetOptions::Ssh(options) => Some((target, options)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut authorized_targets = Vec::new();
+
+        for (target, mut ssh_options) in ssh_targets {
+            let is_authorized = self
+                .services
+                .config_provider
+                .lock()
+                .await
+                .authorize_target(username, &target.name)
+                .await?;
+
+            if is_authorized {
+                if ssh_options.username.is_empty() {
+                    ssh_options.username = username.to_string();
+                }
+                authorized_targets.push((target, ssh_options));
+            }
+        }
+
+        authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
+
+        spawn_target_menu_loop(
+            self.id,
+            username.to_string(),
+            authorized_targets,
+            menu_event_subscription,
+            self.event_sender.clone(),
+        )?;
+        Ok(())
     }
 
     async fn handle_server_handler_event(&mut self, event: ServerHandlerEvent) -> Result<()> {
@@ -499,7 +595,11 @@ impl ServerSession {
 
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
-                let _ = self.maybe_connect_remote().await;
+                self.maybe_connect_remote().await?;
+
+                if matches!(self.target, TargetSelection::Menu) {
+                    self.start_target_selection_menu().await?;
+                }
 
                 let _ = self.send_command(RCCommand::Channel(
                     channel_id,
@@ -1146,6 +1246,15 @@ impl ServerSession {
             error!(%channel_id, ?error, "Failed to record terminal data");
             self.channel_recorders.remove(&channel_id);
         }
+
+        if matches!(self.target, TargetSelection::Menu) {
+            let _ = self.event_sender.send_once(Event::MenuRedraw).await;
+        }
+
+        if self.rc_state != RCState::Connected {
+            return Ok(());
+        }
+
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::ResizePty(request),
@@ -1174,7 +1283,7 @@ impl ServerSession {
 
         let should_record = if is_scp {
             let db = self.services.db.lock().await;
-            let should_record = Parameters::Entity::get(&*db)
+            let should_record = Parameters::Entity::get(&db)
                 .await
                 .map(|p| p.record_scp)
                 .unwrap_or(true);
@@ -1332,6 +1441,10 @@ impl ServerSession {
                 .event_sender
                 .send_once(Event::ConsoleInput(data.clone()))
                 .await;
+        }
+
+        if self.rc_state != RCState::Connected {
+            return Ok(());
         }
 
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
@@ -1759,20 +1872,22 @@ impl ServerSession {
                             .await
                             .complete(state.id())
                             .await;
-                        let target_auth_result = {
-                            self.services
-                                .config_provider
-                                .lock()
-                                .await
-                                .authorize_target(&user_info.username, target_name)
-                                .await?
-                        };
-                        if !target_auth_result {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, username
-                            );
-                            return Ok(AuthResult::Rejected);
+                        if !target_name.is_empty() {
+                            let target_auth_result = {
+                                self.services
+                                    .config_provider
+                                    .lock()
+                                    .await
+                                    .authorize_target(&user_info.username, target_name)
+                                    .await?
+                            };
+                            if !target_auth_result {
+                                warn!(
+                                    "Target {} not authorized for user {}",
+                                    target_name, username
+                                );
+                                return Ok(AuthResult::Rejected);
+                            }
                         }
                         self._auth_accept(user_info.clone(), target_name).await?;
                         Ok(AuthResult::Accepted { user_info })
@@ -1808,6 +1923,11 @@ impl ServerSession {
             .set_user_info(user_info.clone())
             .await;
 
+        if target_name.is_empty() {
+            self.target = TargetSelection::Menu;
+            return Ok(());
+        }
+
         let target = {
             self.services
                 .config_provider
@@ -1841,6 +1961,11 @@ impl ServerSession {
     }
 
     async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, "Ignoring close after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
@@ -1849,6 +1974,11 @@ impl ServerSession {
     }
 
     fn _channel_eof(&self, server_channel_id: ServerChannelId) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, "Ignoring eof after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
@@ -1860,6 +1990,11 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         signal: Sig,
     ) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, ?signal, "Ignoring signal after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, ?signal, "Signal");
         self.send_command_and_wait(RCCommand::Channel(
