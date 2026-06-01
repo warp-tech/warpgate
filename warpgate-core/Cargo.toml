@@ -2,7 +2,7 @@
 edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-core"
-version = "0.24.0"
+version = "0.24.1"
 publish = false
 
 [dependencies]
