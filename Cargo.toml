@@ -27,6 +27,7 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
+argon2 = { version = "0.5", default-features = false, features = ["password-hash", "alloc"] }
 bytes = { version = "1.4", default-features = false }
 data-encoding = { version = "2.3", default-features = false, features = ["alloc", "std"] }
 ipnet = "2"
