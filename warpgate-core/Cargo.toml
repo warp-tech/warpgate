@@ -12,7 +12,7 @@ warpgate-db-migrations = { path = "../warpgate-db-migrations" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 
 anyhow.workspace = true
-argon2 = "0.5"
+argon2.workspace = true
 async-trait = "0.1"
 bytes.workspace = true
 data-encoding.workspace = true
