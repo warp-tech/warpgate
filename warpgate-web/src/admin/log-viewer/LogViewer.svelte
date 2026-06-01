@@ -15,6 +15,7 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 import Fa from 'svelte-fa'
 import { faDownload, faRotateRight } from '@fortawesome/free-solid-svg-icons'
+import { downloadBlob } from 'common/helpers'
 
 interface Props {
     filters?: {
@@ -167,18 +168,6 @@ function search () {
 
 function stringifyDate (date: Date) {
     return date.toLocaleString()
-}
-
-function downloadBlob(content: string, filename: string) {
-    const blob = new Blob([content], { type: 'application/x-ndjson' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
 }
 
 function filenameTimestamp () {
