@@ -48,6 +48,8 @@ mod m00043_unique_usernames;
 mod m00044_ticket_requests;
 mod m00045_role_default_flag;
 mod m00046_max_api_token_duration;
+mod m00047_record_scp;
+mod m00048_target_click_action;
 
 pub struct Migrator;
 
@@ -101,6 +103,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00044_ticket_requests::Migration),
             Box::new(m00045_role_default_flag::Migration),
             Box::new(m00046_max_api_token_duration::Migration),
+            Box::new(m00047_record_scp::Migration),
+            Box::new(m00048_target_click_action::Migration),
         ]
     }
 }

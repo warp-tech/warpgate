@@ -6,7 +6,7 @@ authors = ["Your Name <you@example.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-pytest = "^8"
+pytest = ">=8,<10"
 psutil = ">=5.9.1,<8.0.0"
 pyotp = "^2.6.0"
 paramiko = ">=2.11,<6.0"
@@ -25,7 +25,7 @@ flake8 = "^7.3.0"
 black = "^26"
 
 [tool.poetry.group.dev.dependencies]
-pytest-asyncio = "^0.26.0"
+pytest-asyncio = ">=0.26,<1.5"
 pytest-timeout = "^2.4.0"
 pyright = "^1.1.408"
 

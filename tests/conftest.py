@@ -463,6 +463,7 @@ class ProcessManager:
         extra_scopes=None,
         users_override=None,
         extra_identity_resources=None,
+        redirect_uris=None,
     ):
         port = alloc_port()
         container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
@@ -488,7 +489,7 @@ class ProcessManager:
                 "AllowedGrantTypes": ["authorization_code"],
                 "AllowedScopes": allowed_scopes,
                 "ClientClaimsPrefix": "",
-                "RedirectUris": [
+                "RedirectUris": redirect_uris or [
                     f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
                 ],
             }
