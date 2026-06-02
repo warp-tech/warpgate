@@ -34,3 +34,4 @@ cdx.xml
 node_modules
 
 .github
+*.md
