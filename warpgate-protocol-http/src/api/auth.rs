@@ -11,16 +11,16 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
-use warpgate_common::{Secret, SessionId, WarpgateError};
+use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::{ConfigProvider, Services};
 
-use super::common::logout;
+use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
     SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request,
     session_id_for_request,
@@ -105,29 +105,6 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
     CredentialKind::Sso,
     CredentialKind::WebUserApproval,
 ];
-
-fn emit_unknown_authentication_failed_event(
-    session_id: SessionId,
-    remote_ip: Option<std::net::IpAddr>,
-    username: &str,
-    credentials: &str,
-    reason: &str,
-) {
-    let client_ip = remote_ip
-        .map(|x| x.to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
-
-    info!(
-        target: "audit",
-        _type = "UserAuthenticationFailed1",
-        session = %session_id,
-        client_ip = %client_ip,
-        username = %username,
-        credentials = %credentials,
-        reason = %reason,
-        "Authentication failed",
-    );
-}
 
 impl From<AuthResult> for ApiAuthState {
     fn from(state: AuthResult) -> Self {

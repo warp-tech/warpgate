@@ -9,7 +9,7 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
-use warpgate_common::{SessionId, WarpgateError};
+use warpgate_common::WarpgateError;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -18,36 +18,13 @@ use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
-use crate::api::common::logout;
+use crate::api::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
     SessionExt, authorize_session, get_auth_state_for_request, session_id_for_request,
 };
 use crate::session::SessionStore;
 
 pub struct Api;
-
-fn emit_unknown_authentication_failed_event(
-    session_id: SessionId,
-    remote_ip: Option<std::net::IpAddr>,
-    username: &str,
-    credentials: &str,
-    reason: &str,
-) {
-    let client_ip = remote_ip
-        .map(|x| x.to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
-
-    info!(
-        target: "audit",
-        _type = "UserAuthenticationFailed1",
-        session = %session_id,
-        client_ip = %client_ip,
-        username = %username,
-        credentials = %credentials,
-        reason = %reason,
-        "Authentication failed",
-    );
-}
 
 #[derive(Enum)]
 pub enum SsoProviderKind {
