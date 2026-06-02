@@ -324,7 +324,8 @@ impl Api {
         drop(cp);
 
         if let AuthResult::Accepted { user_info } = state.verify() {
-            let session_id = authorize_session(req, &ctx, user_info).await?;
+            let session_id = session_id_for_request(req, &ctx).await?;
+            authorize_session(req, &ctx, user_info).await?;
             state.set_session_id(session_id);
             state.emit_authenticated_event_once();
             let state_id = *state.id();

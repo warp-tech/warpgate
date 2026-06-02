@@ -223,10 +223,10 @@ pub async fn get_auth_state_for_request(
     Ok(state)
 }
 
-async fn server_handle_for_request(
+pub async fn session_id_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
-) -> Result<Arc<Mutex<warpgate_core::WarpgateServerHandle>>, WarpgateError> {
+) -> Result<SessionId, WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
@@ -238,14 +238,6 @@ async fn server_handle_for_request(
         .await
         .context("create_handle_for")?;
 
-    Ok(server_handle)
-}
-
-pub async fn session_id_for_request(
-    req: &Request,
-    ctx: &UnauthenticatedRequestContext,
-) -> Result<SessionId, WarpgateError> {
-    let server_handle = server_handle_for_request(req, ctx).await?;
     Ok(server_handle.lock().await.id())
 }
 
@@ -253,24 +245,31 @@ pub async fn authorize_session(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
     user_info: AuthStateUserInfo,
-) -> Result<SessionId, WarpgateError> {
+) -> Result<(), WarpgateError> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await
+        .context("SessionStore not in request")?;
     let session = <&Session>::from_request_without_body(req)
         .await
         .context("Session not in request")?;
 
-    let server_handle = server_handle_for_request(req, ctx).await?;
-    let session_id = {
-        let server_handle = server_handle.lock().await;
-        let session_id = server_handle.id();
-        server_handle.set_user_info(user_info.clone()).await?;
-        session_id
-    };
+    let server_handle = session_middleware
+        .lock()
+        .await
+        .create_handle_for(req, ctx)
+        .await
+        .context("create_handle_for")?;
+    server_handle
+        .lock()
+        .await
+        .set_user_info(user_info.clone())
+        .await?;
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,
     });
 
-    Ok(session_id)
+    Ok(())
 }
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
