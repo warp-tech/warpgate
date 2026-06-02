@@ -257,6 +257,19 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(targets?)
     }
 
+    async fn list_targets_by_name(&mut self, name: &str) -> Result<Vec<Target>, WarpgateError> {
+        let db = self.db.lock().await;
+
+        let targets = entities::Target::Entity::find()
+            .filter(entities::Target::Column::Name.eq(name))
+            .all(&*db)
+            .await?;
+
+        let targets: Result<Vec<Target>, _> = targets.into_iter().map(|t| t.try_into()).collect();
+
+        Ok(targets?)
+    }
+
     async fn get_credential_policy(
         &mut self,
         username: &str,

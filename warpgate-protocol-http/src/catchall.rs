@@ -135,10 +135,9 @@ async fn get_target_for_request(
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .list_targets_by_name(target_name.as_str())
                 .await?
                 .iter()
-                .filter(|t| t.name == target_name)
                 .find_map(|t| match t.options {
                     TargetOptions::Http(ref options) => Some((t, options)),
                     _ => None,
