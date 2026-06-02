@@ -78,16 +78,10 @@ async fn get_target_for_request(
             .config_provider
             .lock()
             .await
-            .list_targets()
+            .list_targets_by_hostname(host.as_str())
             .await?
-            .iter()
-            .filter_map(|t| match t.options {
-                TargetOptions::Http(ref options) => Some((t, options)),
-                _ => None,
-            })
-            .find(|(_, o)| o.external_host.as_deref() == Some(&host))
-            .map(|(t, _)| t.name.clone());
-
+            .first()
+            .map(|t| t.name.clone());
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
