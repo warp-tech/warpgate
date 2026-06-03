@@ -2,6 +2,7 @@
 This test runs against Postgres for a better chance to catch
 DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
+
 import contextlib
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
@@ -686,7 +687,9 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="approve_ticket_request",
         permission="ticket_requests_manage",
-        call=lambda api, r: api.approve_ticket_request_with_http_info(r["ticket_request_id"]),
+        call=lambda api, r: api.approve_ticket_request_with_http_info(
+            r["ticket_request_id"]
+        ),
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
@@ -793,6 +796,36 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="admin_roles_manage",
         call=lambda api, r: api.delete_admin_role_with_http_info(r["admin_role_id"]),
         expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_security_status",
+        permission=None,
+        call=lambda api, r: api.get_security_status_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_blocked_ips",
+        permission=None,
+        call=lambda api, r: api.list_blocked_ips_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unblock_ip",
+        permission=None,
+        call=lambda api, r: api.unblock_ip_with_http_info("127.0.0.1"),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_locked_users",
+        permission=None,
+        call=lambda api, r: api.list_locked_users_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unlock_user",
+        permission=None,
+        call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
+        expected_statuses={200, 404},
     ),
 ]
 
@@ -979,7 +1012,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
         allowed_user = _create_user_with_role(admin_client, allowed_role.id)
         token = _create_user_api_token(url, allowed_user.username, "123")
         with new_admin_client(url, token) as allowed_api:
-            print('Trying positive case')
+            print("Trying positive case")
             try:
                 response = case.call(allowed_api, resources)
                 (status, body) = response.status_code, response.data
@@ -1007,7 +1040,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
             with new_admin_client(
                 f"https://localhost:{pg_wg.http_port}", denied_token
             ) as denied_api:
-                print('Trying negative case')
+                print("Trying negative case")
                 try:
                     response = case.call(denied_api, resources)
                     (status, body) = response.status_code, response.data
