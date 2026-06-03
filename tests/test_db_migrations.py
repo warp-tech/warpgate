@@ -21,6 +21,16 @@ class TestPostgresMigrations:
         _check_info_endpoint(wg, timeout)
 
 
+class TestMariaDBMigrations:
+    def test_mariadb_migrations(self, processes: ProcessManager, timeout):
+        db_port = processes.start_mariadb_server()
+        wait_mysql_port(db_port)
+        wg = processes.start_wg(
+            database_url=f"mysql://root:123@localhost:{db_port}/db",
+        )
+        _check_info_endpoint(wg, timeout)
+
+
 class TestMysqlMigrations:
     def test_mysql_migrations(self, processes: ProcessManager, timeout):
         db_port = processes.start_mysql_server()

@@ -211,10 +211,7 @@ impl<T: Clone> TargetMenu<T> {
         } else {
             draw_state.no_entry_msg.len()
         };
-        let body_height = draw_state
-            .list_items
-            .as_ref()
-            .map_or(1, |v| v.len().max(1));
+        let body_height = draw_state.list_items.as_ref().map_or(1, |v| v.len().max(1));
 
         let width = (header_width.max(body_width) as u16).max(40) + 2;
         let total_height = HEADER_HEIGHT + body_height as u16;
@@ -257,11 +254,8 @@ impl<T: Clone> TargetMenu<T> {
                 header_area.width,
                 1,
             );
-            let filter_cols = Layout::horizontal([
-                Constraint::Length(8),
-                Constraint::Min(0),
-            ])
-            .split(filter_row);
+            let filter_cols =
+                Layout::horizontal([Constraint::Length(8), Constraint::Min(0)]).split(filter_row);
             frame.render_widget(Paragraph::new("Filter: "), filter_cols[0]);
             frame.render_widget(
                 Paragraph::new(draw_state.filter_value.as_str()),

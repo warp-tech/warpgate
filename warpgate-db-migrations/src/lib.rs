@@ -51,6 +51,8 @@ mod m00046_max_api_token_duration;
 mod m00047_record_scp;
 mod m00048_target_click_action;
 
+pub(crate) mod helpers;
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
