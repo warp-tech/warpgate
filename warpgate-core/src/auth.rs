@@ -20,5 +20,5 @@ pub async fn validate_and_add_credential<C: ConfigProvider>(
         state.emit_authentication_failed_event(Some(credential), "invalid credential");
     }
 
-    Ok(false)
+    Ok(credential_valid)
 }
