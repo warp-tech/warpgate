@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 use tracing::{debug, info, warn};
 use warpgate_common::{TargetPostgresOptions, WarpgateError};
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
@@ -124,14 +124,9 @@ impl PostgresClient {
         let effective_password = match &target.effective_auth() {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
-                let token = warpgate_aws::generate_rds_auth_token(
-                    &target.host,
-                    target.port,
-                    &target.username,
-                )
-                .await
-                .map_err(WarpgateError::Aws)?;
-                token
+                warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
+                    .await
+                    .map_err(WarpgateError::Aws)?
             }
         };
 

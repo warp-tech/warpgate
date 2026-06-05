@@ -5,8 +5,8 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
-use governor::clock::Reference;
 use governor::Jitter;
+use governor::clock::Reference;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::rate_limiting::{

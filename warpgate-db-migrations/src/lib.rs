@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
-use sea_orm_migration::prelude::*;
 use sea_orm_migration::MigrationTrait;
+use sea_orm_migration::prelude::*;
 
 mod m00001_create_ticket;
 mod m00002_create_session;
@@ -43,7 +43,17 @@ mod m00038_fix_target_auth_tags;
 mod m00039_show_session_menu;
 mod m00040_allowed_ip_range;
 mod m00041_fix_user_role_assignment_dates;
-mod m00042_password_policy;
+mod m00042_database_target_auth_again;
+mod m00043_unique_usernames;
+mod m00044_ticket_requests;
+mod m00045_role_default_flag;
+mod m00046_max_api_token_duration;
+mod m00047_record_scp;
+mod m00048_target_click_action;
+mod m00049_text_columns;
+mod m00050_password_policy;
+
+pub(crate) mod helpers;
 
 pub struct Migrator;
 
@@ -92,7 +102,15 @@ impl MigratorTrait for Migrator {
             Box::new(m00039_show_session_menu::Migration),
             Box::new(m00040_allowed_ip_range::Migration),
             Box::new(m00041_fix_user_role_assignment_dates::Migration),
-            Box::new(m00042_password_policy::Migration),
+            Box::new(m00042_database_target_auth_again::Migration),
+            Box::new(m00043_unique_usernames::Migration),
+            Box::new(m00044_ticket_requests::Migration),
+            Box::new(m00045_role_default_flag::Migration),
+            Box::new(m00046_max_api_token_duration::Migration),
+            Box::new(m00047_record_scp::Migration),
+            Box::new(m00048_target_click_action::Migration),
+            Box::new(m00049_text_columns::Migration),
+            Box::new(m00050_password_policy::Migration),
         ]
     }
 }

@@ -15,8 +15,9 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use crate::client::{ConnectionOptions, PostgresClient};
@@ -224,12 +225,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .await
                                     .subscribe(auth_state_id);
 
-                                let login_url_result =
-                                    state_arc.lock().await.construct_web_approval_url(
-                                        &*self.services.config.lock().await,
-                                    );
-                                let login_url = match login_url_result {
-                                    Ok(login_url) => login_url,
+                                let ext_url_result = construct_external_url(
+                                    None,
+                                    &*self.services.config.lock().await,
+                                    None,
+                                )
+                                .await;
+
+                                let login_url = match ext_url_result {
+                                    Ok(ext_url) => {
+                                        state_arc.lock().await.construct_web_approval_url(ext_url)
+                                    }
                                     Err(error) => {
                                         error!(?error, "Failed to construct external URL");
                                         return fail(&mut self).await;

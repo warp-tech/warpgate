@@ -14,7 +14,8 @@ import TargetBadge from './TargetBadge.svelte'
 import AsyncButton from 'common/AsyncButton.svelte'
 import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
 import Fa from 'svelte-fa'
-import { faRotateRight } from '@fortawesome/free-solid-svg-icons'
+import { faDownload, faRotateRight } from '@fortawesome/free-solid-svg-icons'
+import { downloadBlob } from 'common/helpers'
 
 interface Props {
     filters?: {
@@ -32,6 +33,7 @@ let { filters }: Props = $props()
 const MAX_LOGS = 500
 const POLL_INTERVAL_MS = 3000
 const PAGE_SIZE = 500
+const EXPORT_PAGE_SIZE = 500
 
 let error: string|null = $state(null)
 let items: LogEntry[]|undefined
@@ -51,6 +53,16 @@ let virtualizerStore = createVirtualizer<HTMLDivElement, HTMLDivElement>({
 })
 
 let virtualItems = $derived($virtualizerStore.getVirtualItems())
+
+async function getLogs(extra: Partial<GetLogsRequest> = {}) {
+    const getLogsRequest: GetLogsRequest = {
+        ...filters ?? {},
+        search: searchQuery,
+        ...extra,
+    }
+
+    return api.getLogs({ getLogsRequest })
+}
 
 function rowMeasure (node: HTMLDivElement) {
     $virtualizerStore.measureElement(node)
@@ -99,14 +111,10 @@ function addItems (newItems: LogEntry[]) {
 async function loadNewer () {
     loading = true
     try {
-        const getLogsRequest: GetLogsRequest = {
-            ...filters ?? {},
+        const newItems = await getLogs({
             after: items?.at(0)?.timestamp,
             limit: PAGE_SIZE,
-            search: searchQuery,
-        }
-
-        const newItems = await api.getLogs({ getLogsRequest })
+        })
         addItems(newItems)
         visibleItems = items
     } finally {
@@ -115,23 +123,27 @@ async function loadNewer () {
 }
 
 async function loadOlder (searchMode = false) {
+    if (endReached && !searchMode) {
+        return
+    }
     loading = true
     try {
-        const getLogsRequest: GetLogsRequest = {
-            ...filters ?? {},
+        const newItems = await getLogs({
             before: searchMode ? undefined : items?.at(-1)?.timestamp,
             limit: PAGE_SIZE,
-            search: searchQuery,
-        }
-
-        const newItems = await api.getLogs({ getLogsRequest })
+        })
         if (searchMode) {
             endReached = false
             items = []
         }
+
+        const lengthBefore = items?.length ?? 0
         addItems(newItems)
+
         visibleItems = items
-        if (!newItems.length) {
+        if (lengthBefore === (items?.length ?? 0)) {
+            // newItems.length is not necessarily 0 here
+            // e.g. when fetching logs with "before" filter
             endReached = true
         }
     } finally {
@@ -156,6 +168,46 @@ function search () {
 
 function stringifyDate (date: Date) {
     return date.toLocaleString()
+}
+
+function filenameTimestamp () {
+    return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+async function downloadLogs () {
+    error = null
+
+    const chunks: string[] = []
+    let before: Date | undefined
+    const baseRequest: Partial<GetLogsRequest> = {
+        ...filters ?? {},
+        search: searchQuery,
+    }
+
+    try {
+        while (true) {
+            const logs = await getLogs({
+                ...baseRequest,
+                before,
+                limit: EXPORT_PAGE_SIZE,
+            })
+            if (!logs.length) {
+                break
+            }
+
+            chunks.push(logs.map(log => JSON.stringify(log)).join('\n'))
+
+            if (logs.length < EXPORT_PAGE_SIZE) {
+                break
+            }
+
+            before = logs.at(-1)?.timestamp
+        }
+
+        downloadBlob(chunks.join('\n') + (chunks.length ? '\n' : ''), `warpgate-logs-${filenameTimestamp()}.ndjson`)
+    } catch (e) {
+        error = await stringifyError(e)
+    }
 }
 
 loadOlder().catch(async e => {
@@ -324,6 +376,18 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
     <Tooltip target="clearAndReloadButton" delay={500}>
         Clear view and reload latest log
     </Tooltip>
+    <AsyncButton
+        id="downloadLogsButton"
+        color="link"
+        click={downloadLogs}
+        size="sm"
+        disabled={loading && !visibleItems}
+    >
+        <Fa icon={faDownload} fw />
+    </AsyncButton>
+    <Tooltip target="downloadLogsButton" delay={500}>
+        Download all matching logs
+    </Tooltip>
 </div>
 
 {#if visibleItems}
@@ -483,7 +547,7 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
                 {#if !loading}
                     <div class="load-older-footer">
                         <IntersectionObserver element={loadOlderButton} on:observe={event => {
-                            if (!loading && !error && event.detail.isIntersecting) {
+                            if (!loading && !error && event.detail.isIntersecting && !endReached) {
                                 loadOlder()
                             }
                         }}>

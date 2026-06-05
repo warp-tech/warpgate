@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use time::{format_description, UtcOffset};
+use time::{UtcOffset, format_description};
 use tracing_log::LogTracer;
 use tracing_subscriber::filter::dynamic_filter_fn;
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -17,11 +17,14 @@ use crate::Cli;
 
 pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
-        match cli.debug {
-            0 => std::env::set_var("RUST_LOG", "audit=info,warpgate=info"),
-            1 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug"),
-            2 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug,russh=debug"),
-            _ => std::env::set_var("RUST_LOG", "debug"),
+        #[allow(unsafe_code)]
+        unsafe {
+            match cli.debug {
+                0 => std::env::set_var("RUST_LOG", "audit=info,warpgate=info"),
+                1 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug"),
+                2 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug,russh=debug"),
+                _ => std::env::set_var("RUST_LOG", "debug"),
+            }
         }
     }
 

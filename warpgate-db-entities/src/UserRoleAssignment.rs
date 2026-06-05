@@ -1,6 +1,6 @@
 use poem_openapi::Object;
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;

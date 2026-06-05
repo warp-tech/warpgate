@@ -1,6 +1,6 @@
 use bytes::{Bytes, BytesMut};
-use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::proto::codec::PacketCodec;
+use mysql_common::proto::codec::error::PacketCodecError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::trace;
 use warpgate_database_protocols::io::Encode;

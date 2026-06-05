@@ -98,3 +98,8 @@ $success-text-emphasis:   tint-color($success, 60%);
 $info-text-emphasis:      tint-color($info, 60%);
 $warning-text-emphasis:   tint-color($warning, 60%);
 $danger-text-emphasis:    tint-color($danger, 60%);
+
+
+$nav-link-color: $body-color;
+$nav-pills-link-active-color: $body-color;
+$nav-pills-link-active-bg: $component-active-bg;

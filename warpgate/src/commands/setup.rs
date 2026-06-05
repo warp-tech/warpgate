@@ -1,6 +1,6 @@
 #![allow(clippy::collapsible_else_if)]
 
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::io::Write;
 use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -301,8 +301,8 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
                     admin_password
                 } else {
                     error!(
-                    "You must supply the admin password either through the --admin-password option"
-                );
+                        "You must supply the admin password either through the --admin-password option"
+                    );
                     error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
                     std::process::exit(1);
                 }
@@ -356,6 +356,8 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     let access_role = Role::ActiveModel {
         id: Set(Uuid::new_v4()),
         name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
+        description: Set("".to_string()),
+        is_default: Set(false),
         ..Default::default()
     }
     .insert(&db)
@@ -395,7 +397,9 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     info!("");
     info!("You can now start Warpgate with:");
     if is_docker() {
-        info!("docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate");
+        info!(
+            "docker run -p 8888:8888 -p 2222:2222 -it -v <your data dir>:/data ghcr.io/warp-tech/warpgate"
+        );
     } else {
         info!(
             "  {} --config {} run",

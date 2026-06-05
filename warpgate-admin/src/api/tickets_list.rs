@@ -25,8 +25,9 @@ pub struct TicketModel {
     pub username: String,
     pub description: String,
     pub target_id: Uuid,
-    pub target: String, // TODO rename to target_name
+    pub target: String,
     pub uses_left: Option<i16>,
+    pub self_service: bool,
     pub expiry: Option<OffsetDateTime>,
     pub created: OffsetDateTime,
 }
@@ -57,6 +58,7 @@ impl TicketModel {
             uses_left: ticket.uses_left,
             expiry: ticket.expiry,
             created: ticket.created,
+            self_service: ticket.self_service,
         })
     }
 }
@@ -174,6 +176,7 @@ impl Api {
             expiry: Set(body.expiry),
             uses_left: Set(body.number_of_uses),
             description: Set(body.description.clone().unwrap_or_default()),
+            self_service: Set(false),
         };
 
         let ticket = values.insert(&*db).await.context("Error saving ticket")?;

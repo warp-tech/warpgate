@@ -178,6 +178,10 @@ impl TargetMySqlOptions {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
                 password,
             }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
         }
     }
 }
@@ -226,6 +230,10 @@ impl TargetPostgresOptions {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
                 password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
             }));
         }
     }
@@ -281,6 +289,10 @@ pub struct Target {
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]

@@ -1,8 +1,8 @@
 use tracing::{debug, info};
 
+use crate::AwsError;
 use crate::error::AwsResourceType;
 use crate::region::parse_eks_region;
-use crate::AwsError;
 
 pub struct EksClusterInfo {
     pub name: String,
@@ -32,18 +32,16 @@ pub async fn find_eks_cluster_by_url(cluster_url: &str) -> Result<EksClusterInfo
     for cluster_name in clusters.clusters() {
         let describe = client.describe_cluster().name(cluster_name).send().await;
 
-        if let Ok(output) = describe {
-            if let Some(cluster) = output.cluster() {
-                if let Some(endpoint) = cluster.endpoint() {
-                    if endpoint.trim_end_matches('/') == normalized_url {
-                        info!(cluster_name, "Matched EKS cluster by endpoint URL");
-                        return Ok(EksClusterInfo {
-                            name: cluster_name.clone(),
-                            region: region_name,
-                        });
-                    }
-                }
-            }
+        if let Ok(output) = describe
+            && let Some(cluster) = output.cluster()
+            && let Some(endpoint) = cluster.endpoint()
+            && endpoint.trim_end_matches('/') == normalized_url
+        {
+            info!(cluster_name, "Matched EKS cluster by endpoint URL");
+            return Ok(EksClusterInfo {
+                name: cluster_name.clone(),
+                region: region_name,
+            });
         }
     }
 
@@ -63,7 +61,7 @@ pub async fn generate_eks_token(cluster_name: &str, region: &str) -> Result<Stri
 
     use aws_credential_types::provider::ProvideCredentials;
     use aws_sigv4::http_request::{
-        sign, SignableBody, SignableRequest, SignatureLocation, SigningSettings,
+        SignableBody, SignableRequest, SignatureLocation, SigningSettings, sign,
     };
     use aws_sigv4::sign::v4;
 

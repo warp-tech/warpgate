@@ -1,8 +1,8 @@
 use futures::{SinkExt, StreamExt};
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::{handler, IntoResponse};
+use poem::web::websocket::{Message, WebSocket};
+use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -11,8 +11,8 @@ use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
 
-use super::pagination::{PaginatedResponse, PaginationParams};
 use super::AnySecurityScheme;
+use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::common::require_admin_permission;
 
 pub struct Api;

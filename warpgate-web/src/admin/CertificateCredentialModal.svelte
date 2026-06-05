@@ -14,6 +14,7 @@
     import CopyButton from 'common/CopyButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Fa from 'svelte-fa'
+    import { downloadBlob } from 'common/helpers'
 
     interface Props {
         isOpen: boolean
@@ -113,17 +114,6 @@
         }
     }
 
-    function downloadBlob(content: string, filename: string) {
-        const blob = new Blob([content], { type: 'text/plain' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-    }
 
     function downloadPrivateKey() {
         if (!privateKeyPem) {

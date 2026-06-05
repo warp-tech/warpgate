@@ -636,6 +636,10 @@
             "type": "string"
           }
         },
+        "return_url_domain": {
+          "$ref": "#/$defs/SsoReturnUrlDomainPreference",
+          "default": "external_host"
+        },
         "return_url_prefix": {
           "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
           "default": "@"
@@ -651,6 +655,13 @@
       "enum": [
         "@",
         "_"
+      ]
+    },
+    "SsoReturnUrlDomainPreference": {
+      "type": "string",
+      "enum": [
+        "external_host",
+        "host_header"
       ]
     }
   }

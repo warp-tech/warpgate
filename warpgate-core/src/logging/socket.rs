@@ -1,10 +1,10 @@
 use bytes::BytesMut;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tokio::net::UnixDatagram;
-use tracing::{error, Subscriber};
-use tracing_subscriber::registry::LookupSpan;
+use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
+use tracing_subscriber::registry::LookupSpan;
 use warpgate_common::WarpgateConfig;
 
 use super::layer::ValuesLogLayer;

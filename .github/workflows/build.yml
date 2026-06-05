@@ -45,16 +45,14 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           submodules: recursive
 
       - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
 
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
-        with:
-          target: ${{ matrix.target }}
-          override: true
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
@@ -158,7 +156,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           submodules: recursive
 

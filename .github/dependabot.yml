@@ -30,10 +30,26 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    labels: ["type/deps"]
     schedule:
       interval: daily
 
   - package-ecosystem: docker
     directory: /docker
+    labels: ["type/deps"]
     schedule:
       interval: daily
+
+  - package-ecosystem: pip
+    directory: /tests
+    labels: ["type/deps"]
+    exclude-paths:
+      - api_sdk
+    schedule:
+      interval: "daily"
+    groups:
+      version-bumps:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor

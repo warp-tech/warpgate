@@ -10,9 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("log"))
-                    .add_column_if_not_exists(
-                        ColumnDef::new(Alias::new("related_users")).string().null(),
-                    )
+                    .add_column(ColumnDef::new(Alias::new("related_users")).string().null())
                     .to_owned(),
             )
             .await?;
@@ -31,7 +29,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("log"))
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Alias::new("related_access_roles"))
                             .string()
                             .null(),
@@ -54,7 +52,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("log"))
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Alias::new("related_admin_roles"))
                             .string()
                             .null(),

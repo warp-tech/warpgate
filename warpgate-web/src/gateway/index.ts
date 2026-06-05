@@ -1,8 +1,8 @@
 import { mount } from 'svelte'
 import '../theme'
-import App from './App.svelte'
+import Root from './Root.svelte'
 
-mount(App, {
+mount(Root, {
     target: document.getElementById('app')!,
 })
 
