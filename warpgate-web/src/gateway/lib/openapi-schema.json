@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.23.4-58-ga76e4927-modified"
+    "version": "chart-v0.0.5-17-g2d78333f-modified"
   },
   "servers": [
     {
@@ -461,6 +461,9 @@
           },
           "404": {
             "description": ""
+          },
+          "400": {
+            "description": "The request originates from a domain that has no cookie domain relationship\nwith `external_host` while `return_url_domain` is `external_host`"
           }
         },
         "operationId": "start_sso"
@@ -519,6 +522,19 @@
           },
           "401": {
             "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PasswordPolicyViolation"
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1492,7 +1508,8 @@
           "certificates",
           "sso",
           "credential_policy",
-          "ldap_linked"
+          "ldap_linked",
+          "password_policy"
         ],
         "properties": {
           "password": {
@@ -1527,6 +1544,9 @@
           },
           "ldap_linked": {
             "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
           }
         }
       },
@@ -1927,6 +1947,48 @@
             "type": "string"
           }
         }
+      },
+      "PasswordPolicy": {
+        "type": "object",
+        "title": "PasswordPolicy",
+        "description": "Rules that a password must satisfy.",
+        "required": [
+          "min_length",
+          "require_uppercase",
+          "require_lowercase",
+          "require_digits",
+          "require_special"
+        ],
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Minimum number of characters (0 = no requirement)."
+          },
+          "require_uppercase": {
+            "type": "boolean"
+          },
+          "require_lowercase": {
+            "type": "boolean"
+          },
+          "require_digits": {
+            "type": "boolean"
+          },
+          "require_special": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordPolicyViolation": {
+        "type": "string",
+        "description": "A single rule that was violated.",
+        "enum": [
+          "TooShort",
+          "MissingUppercase",
+          "MissingLowercase",
+          "MissingDigit",
+          "MissingSpecial"
+        ]
       },
       "PasswordState": {
         "type": "string",
