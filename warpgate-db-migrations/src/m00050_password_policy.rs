@@ -2,13 +2,8 @@ use sea_orm_migration::prelude::*;
 
 use crate::m00010_parameters::parameters;
 
+#[derive(DeriveMigrationName)]
 pub struct Migration;
-
-impl MigrationName for Migration {
-    fn name(&self) -> &str {
-        "m00042_password_policy"
-    }
-}
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
