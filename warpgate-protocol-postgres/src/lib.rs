@@ -92,7 +92,7 @@ impl ProtocolServer for PostgresProtocolServer {
                 .with_interval(Duration::from_secs(10)) // Send probes every 10s
                 .with_retries(3); // 3 retries before considering dead
             socket.set_tcp_keepalive(&keepalive)?;
-            socket.set_nodelay(true)?;
+            socket.set_tcp_nodelay(true)?;
             let stream = tokio::net::TcpStream::from_std(socket.into())?;
 
             let tls_config = tls_config.clone();
