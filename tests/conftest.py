@@ -169,6 +169,13 @@ class ProcessManager:
         )
         return port
 
+    def start_mariadb_server(self):
+        port = alloc_port()
+        self.start(
+            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mariadb-server"]
+        )
+        return port
+
     def start_mysql_server(self):
         port = alloc_port()
         self.start(
