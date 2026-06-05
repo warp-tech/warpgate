@@ -14,6 +14,7 @@ use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
+use warpgate_protocol_vnc::VncProtocolServer;
 
 use crate::config::{load_config, watch_config};
 
@@ -102,6 +103,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             KubernetesProtocolServer::new(&services)
                 .run(config.store.kubernetes.listen.clone())
                 .boxed(),
+        );
+    }
+
+    if config.store.vnc.enable {
+        protocol_futures.push(
+            run_protocol_server(
+                VncProtocolServer::new(&services),
+                config.store.vnc.listen.clone(),
+            )
+            .boxed(),
         );
     }
 

@@ -32,10 +32,14 @@ jobs:
           ref: main
           path: main-branch
 
+      # oasdiff-severity.txt downgrades additive response union/enum changes
+      # (new oneOf members / new enum values) to informational: they are
+      # backward-compatible for Warpgate, whose typed client is regenerated in
+      # lockstep and discriminates on `kind`.
       - name: Check admin API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
 
       - name: Check gateway API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json

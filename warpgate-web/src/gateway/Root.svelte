@@ -6,6 +6,9 @@
         '/web-ssh/:sessionId': wrap({
             asyncComponent: () => import('./WebSsh.svelte') as any,
         }),
+        '/web-desktop/:sessionId': wrap({
+            asyncComponent: () => import('./WebDesktop.svelte') as any,
+        }),
         '/': wrap({
             asyncComponent: () => import('./App.svelte') as any,
         }),
