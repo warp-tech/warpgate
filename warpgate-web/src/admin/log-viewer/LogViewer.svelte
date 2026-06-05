@@ -379,9 +379,6 @@ function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
 
 function genericValues(entry: LogEntry): [string, unknown][] {
     const pairs = Object.entries(entry.values ?? {})
-    if (entry.text !== 'Authentication failed') {
-        return pairs.filter(([key]) => key !== '_type')
-    }
 
     return pairs.filter(([key]) => ![
         '_type',

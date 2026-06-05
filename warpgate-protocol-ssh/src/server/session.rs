@@ -27,6 +27,7 @@ use warpgate_common::{
     WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -1861,25 +1862,16 @@ impl ServerSession {
                 username,
                 target_name,
             } => {
-                let cp = self.services.config_provider.clone();
-
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
-                    if cp
-                        .lock()
-                        .await
-                        .validate_credential(username, &credential)
-                        .await?
-                    {
-                        state.add_valid_credential(credential.clone());
-                    } else {
-                        state.emit_authentication_failed_event(
-                            Some(&credential),
-                            "invalid credential",
-                        );
-                    }
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
                 }
 
                 let user_auth_result = state.verify();

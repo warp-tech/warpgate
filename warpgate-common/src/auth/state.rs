@@ -10,6 +10,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
+use crate::helpers::logging::format_related_ids;
 use crate::{SessionId, User};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,11 +138,7 @@ impl AuthState {
             .join(", ")
     }
 
-    fn related_users(&self) -> String {
-        format!("${}$", self.user_info.id)
-    }
-
-    fn client_ip(&self) -> String {
+    fn client_ip_for_logging(&self) -> String {
         self.remote_ip
             .map(|x| x.to_string())
             .unwrap_or_else(|| "<unknown>".to_string())
@@ -164,11 +161,11 @@ impl AuthState {
             target: "audit",
             _type = "UserAuthenticated1",
             session = %session_id,
-            client_ip = %self.client_ip(),
+            client_ip = %self.client_ip_for_logging(),
             user_id = %self.user_info.id,
             username = %self.user_info.username,
             credentials = %self.valid_credentials_description(),
-            related_users = %self.related_users(),
+            related_users = %format_related_ids(&[self.user_info.id]),
             "Authenticated",
         );
 
@@ -192,12 +189,12 @@ impl AuthState {
             target: "audit",
             _type = "UserAuthenticationFailed1",
             session = %session_id,
-            client_ip = %self.client_ip(),
+            client_ip = %self.client_ip_for_logging(),
             user_id = %self.user_info.id,
             username = %self.user_info.username,
             credentials = %credentials,
             reason = %reason,
-            related_users = %self.related_users(),
+            related_users = %format_related_ids(&[self.user_info.id]),
             "Authentication failed",
         );
     }

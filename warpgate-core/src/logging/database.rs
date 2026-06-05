@@ -8,6 +8,7 @@ use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 use uuid::Uuid;
+pub use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_db_entities::LogEntry;
 
 use super::layer::ValuesLogLayer;
@@ -49,16 +50,6 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
             }
         }
     });
-}
-
-pub fn format_related_ids(ids: &[Uuid]) -> String {
-    let mut result = String::new();
-    for id in ids {
-        result.push('$');
-        result.push_str(&id.to_string());
-    }
-    result.push('$');
-    result
 }
 
 fn values_to_log_entry_data(
