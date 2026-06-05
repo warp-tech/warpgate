@@ -382,7 +382,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             .join(&config.store.http.certificate);
         let key_path = params.paths_relative_to().join(&config.store.http.key);
         std::fs::write(&certificate_path, cert.cert.pem())?;
-        std::fs::write(&key_path, cert.key_pair.serialize_pem())?;
+        std::fs::write(&key_path, cert.signing_key.serialize_pem())?;
         if params.should_secure_files() {
             secure_file(&certificate_path)?;
             secure_file(&key_path)?;
