@@ -5,7 +5,9 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
-use ratatui::widgets::{HighlightSpacing, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph,
+};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
@@ -14,11 +16,12 @@ use warpgate_common::{SessionId, Target, TargetSSHOptions, WarpgateError};
 
 use crate::server::session::Event;
 
+const HEADER_HEIGHT: u16 = 6;
+
 type MenuTerminal = Terminal<CrosstermBackend<Cursor<Vec<u8>>>>;
 
 struct DrawState {
     list_state: ListState,
-    header_lines: Vec<Line<'static>>,
     username_display: String,
     filter_value: String,
     filter_cursor: usize,
@@ -42,6 +45,8 @@ pub struct TargetMenu<T: Clone> {
     username: String,
     terminal: MenuTerminal,
     last_area: Rect,
+    terminal_width: u16,
+    terminal_height: u16,
 }
 
 pub struct MenuEntry<T: Clone> {
@@ -56,7 +61,12 @@ pub enum MenuInputResult<T: Clone> {
 }
 
 impl<T: Clone> TargetMenu<T> {
-    pub fn new(mut entries: Vec<MenuEntry<T>>, username: String) -> Result<Self, WarpgateError> {
+    pub fn new(
+        mut entries: Vec<MenuEntry<T>>,
+        username: String,
+        terminal_width: u16,
+        terminal_height: u16,
+    ) -> Result<Self, WarpgateError> {
         entries.sort_by(|a, b| a.label.cmp(&b.label));
         let terminal = Terminal::with_options(
             CrosstermBackend::new(Cursor::new(Vec::new())),
@@ -74,6 +84,8 @@ impl<T: Clone> TargetMenu<T> {
             username,
             terminal,
             last_area: Rect::default(),
+            terminal_width,
+            terminal_height,
         })
     }
 
@@ -98,6 +110,14 @@ impl<T: Clone> TargetMenu<T> {
                 }
                 (KeyCode::DownArrow | KeyCode::ApplicationDownArrow, _) => {
                     self.move_down();
+                    redraw = true;
+                }
+                (KeyCode::PageUp, _) => {
+                    self.move_page_up();
+                    redraw = true;
+                }
+                (KeyCode::PageDown, _) => {
+                    self.move_page_down();
                     redraw = true;
                 }
                 (KeyCode::Enter, _) => {
@@ -151,15 +171,6 @@ impl<T: Clone> TargetMenu<T> {
 
     fn build_draw_state(&mut self, visible_indices: &[usize]) -> DrawState {
         let username_display = format!(" {} ", self.username);
-        let instructions =
-            Line::from("↑/↓ / Enter to connect. Type to filter. Ctrl-C to exit.").gray();
-        let header_lines: Vec<Line<'static>> = vec![
-            Line::from(""),
-            Line::from(""),
-            instructions,
-            Line::from(""),
-            Line::from(""),
-        ];
 
         let no_entry_msg: &'static str = if self.entries.is_empty() {
             "No authorized SSH targets are available for this account."
@@ -180,7 +191,6 @@ impl<T: Clone> TargetMenu<T> {
 
         DrawState {
             list_state: std::mem::take(&mut self.list_state),
-            header_lines,
             username_display,
             filter_value: self.filter_input.value().to_string(),
             filter_cursor: self.filter_input.visual_cursor(),
@@ -190,32 +200,9 @@ impl<T: Clone> TargetMenu<T> {
     }
 
     fn render_frame(&mut self, visible_indices: &[usize]) -> Result<String, WarpgateError> {
-        const HEADER_HEIGHT: u16 = 5;
-
         let mut draw_state = self.build_draw_state(visible_indices);
 
-        let header_width = draw_state
-            .header_lines
-            .iter()
-            .map(|l| l.to_string().chars().count())
-            .max()
-            .unwrap_or(0)
-            .max(draw_state.username_display.chars().count())
-            .max(9 + draw_state.filter_value.chars().count());
-        let body_width = if draw_state.list_items.is_some() {
-            visible_indices
-                .iter()
-                .map(|&i| self.entries[i].label.chars().count() + 2)
-                .max()
-                .unwrap_or(0)
-        } else {
-            draw_state.no_entry_msg.len()
-        };
-        let body_height = draw_state.list_items.as_ref().map_or(1, |v| v.len().max(1));
-
-        let width = (header_width.max(body_width) as u16).max(40) + 2;
-        let total_height = HEADER_HEIGHT + body_height as u16;
-        let area = Rect::new(0, 0, width, total_height);
+        let area = Rect::new(0, 0, self.terminal_width, self.terminal_height);
 
         {
             let w = self.terminal.backend_mut().writer_mut();
@@ -234,28 +221,36 @@ impl<T: Clone> TargetMenu<T> {
             let header_area = areas[0];
             let body_area = areas[1];
 
-            frame.render_widget(Paragraph::new(draw_state.header_lines.clone()), header_area);
+            let header_block = Block::default()
+                .border_style(Style::default().fg(Color::DarkGray))
+                .border_type(BorderType::Plain)
+                .borders(Borders::BOTTOM);
+            let header_block_area = header_block.inner(header_area);
+            let header_block_areas =
+                Layout::vertical([Constraint::Length(1); 5].as_slice()).split(header_block_area);
+            frame.render_widget(header_block, header_area);
 
-            let title_row = Rect::new(header_area.x, header_area.y, header_area.width, 1);
+            frame.render_widget(
+                Paragraph::new(
+                    Line::from("↑ / ↓ / Enter to connect. Type to filter. Ctrl-C to exit.").gray(),
+                ),
+                header_block_areas[2],
+            );
+
+            // let title_row = Rect::new(header_area.x, header_area.y, header_area.width, 1);
             let title_cols = Layout::horizontal([
                 Constraint::Min(0),
                 Constraint::Length(draw_state.username_display.chars().count() as u16),
             ])
-            .split(title_row);
+            .split(header_block_areas[0]);
             frame.render_widget(Paragraph::new("Welcome to Warpgate"), title_cols[0]);
             frame.render_widget(
                 Paragraph::new(Line::from(draw_state.username_display.clone().gray())),
                 title_cols[1],
             );
 
-            let filter_row = Rect::new(
-                header_area.x,
-                header_area.y + HEADER_HEIGHT - 1,
-                header_area.width,
-                1,
-            );
-            let filter_cols =
-                Layout::horizontal([Constraint::Length(8), Constraint::Min(0)]).split(filter_row);
+            let filter_cols = Layout::horizontal([Constraint::Length(8), Constraint::Min(0)])
+                .split(header_block_areas[4]);
             frame.render_widget(Paragraph::new("Filter: "), filter_cols[0]);
             frame.render_widget(
                 Paragraph::new(draw_state.filter_value.as_str()),
@@ -272,8 +267,8 @@ impl<T: Clone> TargetMenu<T> {
                     .highlight_spacing(HighlightSpacing::Always)
                     .highlight_style(
                         Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::LightCyan)
+                            .fg(Color::White)
+                            .bg(Color::Blue)
                             .add_modifier(Modifier::BOLD),
                     );
                 frame.render_stateful_widget(list, body_area, &mut draw_state.list_state);
@@ -286,6 +281,10 @@ impl<T: Clone> TargetMenu<T> {
 
         let bytes = self.terminal.backend().writer().get_ref().clone();
         String::from_utf8(bytes).map_err(WarpgateError::other)
+    }
+
+    fn page_size(&self) -> usize {
+        self.terminal_height.saturating_sub(HEADER_HEIGHT).max(1) as usize
     }
 
     fn move_up(&mut self) {
@@ -308,6 +307,26 @@ impl<T: Clone> TargetMenu<T> {
         }
         let current = self.list_state.selected().unwrap_or(0);
         self.list_state.select(Some((current + 1) % visible_len));
+    }
+
+    fn move_page_up(&mut self) {
+        let visible_len = self.visible_indices().len();
+        if visible_len == 0 {
+            return;
+        }
+        let current = self.list_state.selected().unwrap_or(0);
+        self.list_state
+            .select(Some(current.saturating_sub(self.page_size())));
+    }
+
+    fn move_page_down(&mut self) {
+        let visible_len = self.visible_indices().len();
+        if visible_len == 0 {
+            return;
+        }
+        let current = self.list_state.selected().unwrap_or(0);
+        self.list_state
+            .select(Some((current + self.page_size()).min(visible_len - 1)));
     }
 
     fn visible_indices(&self) -> Vec<usize> {
@@ -348,6 +367,8 @@ pub fn spawn_target_menu_loop(
     entries: Vec<(Target, TargetSSHOptions)>,
     mut subscription: EventSubscription<Event>,
     sender: EventSender<Event>,
+    terminal_width: u16,
+    terminal_height: u16,
 ) -> anyhow::Result<()> {
     let name = format!("SSH {id} target menu loop");
     tokio::task::Builder::new().name(&name).spawn(async move {
@@ -360,6 +381,8 @@ pub fn spawn_target_menu_loop(
                 })
                 .collect(),
             username,
+            terminal_width,
+            terminal_height,
         )?;
 
         if sender
@@ -372,7 +395,9 @@ pub fn spawn_target_menu_loop(
 
         while let Some(event) = subscription.recv().await {
             match event {
-                Event::MenuRedraw => {
+                Event::MenuRedraw(new_width, new_height) => {
+                    menu.terminal_width = new_width;
+                    menu.terminal_height = new_height;
                     if sender
                         .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.render()?))))
                         .await
