@@ -16,6 +16,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
@@ -199,16 +200,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let credential = AuthCredential::Password(password);
 
-                                if self
-                                    .services
-                                    .config_provider
-                                    .lock()
-                                    .await
-                                    .validate_credential(&username, &credential)
-                                    .await?
+                                if !validate_and_add_credential(
+                                    &mut state,
+                                    &credential,
+                                    &mut *self.services.config_provider.lock().await,
+                                )
+                                .await?
                                 {
-                                    state.add_valid_credential(credential);
-                                } else {
                                     // Postgres CLI will just send the same password in a loop without prompting the user again
                                     return fail(&mut self).await;
                                 }

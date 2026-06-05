@@ -358,7 +358,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
         description: Set("".to_string()),
         is_default: Set(false),
-        ..Default::default()
     }
     .insert(&db)
     .await?;

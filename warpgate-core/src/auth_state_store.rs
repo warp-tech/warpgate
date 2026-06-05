@@ -170,6 +170,7 @@ impl AuthStateStore {
         let state = AuthState::new(
             id,
             session_id.copied(),
+            remote_ip,
             (&user).into(),
             protocol.to_string(),
             policy,

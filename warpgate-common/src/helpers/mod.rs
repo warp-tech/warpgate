@@ -2,6 +2,7 @@ pub mod fs;
 pub mod hash;
 pub mod ipnet;
 pub mod locks;
+pub mod logging;
 pub mod net;
 pub mod otp;
 pub mod rng;

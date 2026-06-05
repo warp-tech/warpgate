@@ -14,6 +14,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
@@ -209,10 +210,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 let user_auth_result = {
                     let credential = AuthCredential::Password(password);
 
-                    let mut cp = self.services.config_provider.lock().await;
-                    if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
-                    }
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
 
                     state.verify()
                 };

@@ -8,6 +8,7 @@ use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 use uuid::Uuid;
+pub use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_db_entities::LogEntry;
 
 use super::layer::ValuesLogLayer;
@@ -51,16 +52,6 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
     });
 }
 
-pub fn format_related_ids(ids: &[Uuid]) -> String {
-    let mut result = String::new();
-    for id in ids {
-        result.push('$');
-        result.push_str(&id.to_string());
-    }
-    result.push('$');
-    result
-}
-
 fn values_to_log_entry_data(
     mut values: SerializedRecordValues,
     target: String,
@@ -68,7 +59,9 @@ fn values_to_log_entry_data(
     use sea_orm::ActiveValue::Set;
 
     let session_id = (*values).remove("session");
-    let username = (*values).remove("session_username");
+    let username = (*values)
+        .remove("session_username")
+        .or_else(|| (*values).get("username").cloned());
     let related_users = (*values).remove("related_users");
     let related_access_roles = (*values).remove("related_access_roles");
     let related_admin_roles = (*values).remove("related_admin_roles");
