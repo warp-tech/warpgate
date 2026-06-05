@@ -216,8 +216,6 @@ impl Api {
     ) -> poem::Result<LoginResponse> {
         let services = ctx.services();
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
-
         let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 state: ApiAuthState::NotStarted,
@@ -239,7 +237,12 @@ impl Api {
                 state.emit_authenticated_event_once();
                 let state_id = *state.id();
                 drop(state);
-                auth_state_store.complete(&state_id).await;
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
                 Ok(LoginResponse::Success)
             }
             x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
