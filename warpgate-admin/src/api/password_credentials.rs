@@ -5,8 +5,8 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{
-    validate_password, AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential,
-    WarpgateError,
+    AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential, WarpgateError,
+    validate_password,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};

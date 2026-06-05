@@ -8,8 +8,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{
-    validate_password, PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
-    UserRequireCredentialsPolicy, WarpgateError,
+    PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
+    UserRequireCredentialsPolicy, WarpgateError, validate_password,
 };
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
