@@ -167,6 +167,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tieb62"><img src="https://avatars.githubusercontent.com/u/39233377?v=4?s=100" width="100px;" alt="Tina"/><br /><sub><b>Tina</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=tieb62" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://immanuwell.github.io"><img src="https://avatars.githubusercontent.com/u/122638311?v=4?s=100" width="100px;" alt="Immanuel Tikhonov"/><br /><sub><b>Immanuel Tikhonov</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=immanuwell" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/xTamasu"><img src="https://avatars.githubusercontent.com/u/20605096?v=4?s=100" width="100px;" alt="Lukas Klepper"/><br /><sub><b>Lukas Klepper</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=xTamasu" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kamilkrzeminski"><img src="https://avatars.githubusercontent.com/u/6916757?v=4?s=100" width="100px;" alt="kamilkrzeminski"/><br /><sub><b>kamilkrzeminski</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=kamilkrzeminski" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
