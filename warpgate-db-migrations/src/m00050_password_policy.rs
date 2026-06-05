@@ -18,24 +18,56 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(0),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("password_policy_require_uppercase"))
                             .boolean()
                             .not_null()
                             .default(false),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("password_policy_require_lowercase"))
                             .boolean()
                             .not_null()
                             .default(false),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("password_policy_require_digits"))
                             .boolean()
                             .not_null()
                             .default(false),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(parameters::Entity)
                     .add_column(
                         ColumnDef::new(Alias::new("password_policy_require_special"))
                             .boolean()
