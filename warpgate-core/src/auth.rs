@@ -9,7 +9,7 @@ pub async fn validate_and_add_credential<C: ConfigProvider>(
     cp: &mut C,
 ) -> Result<bool, WarpgateError> {
     let credential_valid = cp
-        .validate_credential(&state.user_info().username, &credential)
+        .validate_credential(&state.user_info().username, credential)
         .await?;
 
     if credential_valid {
@@ -17,7 +17,7 @@ pub async fn validate_and_add_credential<C: ConfigProvider>(
     }
 
     if !credential_valid {
-        state.emit_authentication_failed_event(Some(&credential), "invalid credential");
+        state.emit_authentication_failed_event(Some(credential), "invalid credential");
     }
 
     Ok(false)

@@ -215,7 +215,7 @@ pub async fn get_or_create_auth_state_for_request(
         .await?;
 
     {
-        let session_id = session_id_for_request(req, &ctx).await?;
+        let session_id = session_id_for_request(req, ctx).await?;
         let mut state = state.lock().await;
         if state.session_id() != Some(&session_id) {
             state.set_session_id(session_id);
@@ -248,7 +248,7 @@ pub async fn get_auth_state_for_request(
         return Ok(Some(state));
     }
 
-    return Ok(None);
+    Ok(None)
 }
 
 pub async fn session_id_for_request(

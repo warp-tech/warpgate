@@ -72,6 +72,7 @@ pub struct WebSshSession {
 }
 
 impl WebSshSession {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         user_id: Uuid,
