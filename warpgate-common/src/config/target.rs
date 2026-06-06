@@ -26,17 +26,6 @@ impl Default for KubernetesTargetCertificateAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct SSHJumpHostOptions {
-    pub host: String,
-    #[serde(default = "_default_ssh_port")]
-    pub port: u16,
-    #[serde(default = "_default_username")]
-    pub username: String,
-    #[serde(default)]
-    pub auth: SSHTargetAuth,
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
@@ -49,7 +38,7 @@ pub struct TargetSSHOptions {
     #[serde(default)]
     pub auth: SSHTargetAuth,
     #[serde(default)]
-    pub jump_host: Option<SSHJumpHostOptions>,
+    pub jump_host: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]

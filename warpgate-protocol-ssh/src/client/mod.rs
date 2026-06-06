@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -13,7 +14,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
-use futures::pin_mut;
+use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
@@ -27,8 +28,8 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
-use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
-use warpgate_core::Services;
+use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions};
+use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -68,6 +69,9 @@ pub enum ConnectionError {
 
     #[error("Authentication failed")]
     Authentication,
+
+    #[error("Jump host target not found")]
+    JumpHostTargetNotFound,
 }
 
 #[derive(Debug)]
@@ -431,22 +435,7 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
-        let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
-        let address = match address_str
-            .to_socket_addrs()
-            .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-        {
-            Ok(address) => address,
-            Err(error) => {
-                error!(?error, address=%address_str, "Cannot resolve target address");
-                self.set_disconnected().await;
-                return Err(error);
-            }
-        };
-
-        info!(?address, username = &ssh_options.username[..], "Connecting");
+    async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
         let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
             Preferred {
                 kex: Cow::Borrowed(&[
@@ -457,9 +446,9 @@ impl RemoteClient {
                     kex::ECDH_SHA2_NISTP384,
                     kex::ECDH_SHA2_NISTP521,
                     kex::DH_G16_SHA512,
-                    kex::DH_G14_SHA256, // non-default
+                    kex::DH_G14_SHA256,
                     kex::DH_GEX_SHA256,
-                    kex::DH_G1_SHA1, // non-default
+                    kex::DH_G1_SHA1,
                     kex::EXTENSION_SUPPORT_AS_CLIENT,
                     kex::EXTENSION_SUPPORT_AS_SERVER,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
@@ -514,103 +503,126 @@ impl RemoteClient {
         {
             config.gex = gex;
         }
+        Arc::new(config)
+    }
 
-        let config = Arc::new(config);
+    async fn resolve_jump_target(
+        &self,
+        jump_host_id: Uuid,
+    ) -> Result<TargetSSHOptions, ConnectionError> {
+        let targets: Vec<_> = self
+            .services
+            .config_provider
+            .lock()
+            .await
+            .list_targets()
+            .await
+            .map_err(|_| ConnectionError::JumpHostTargetNotFound)?;
+        let target = targets
+            .into_iter()
+            .find(|t| t.id == jump_host_id)
+            .ok_or(ConnectionError::JumpHostTargetNotFound)?;
+        match target.options {
+            TargetOptions::Ssh(opts) => Ok(opts),
+            _ => Err(ConnectionError::JumpHostTargetNotFound),
+        }
+    }
 
-        let (session, mut event_rx) = if let Some(jump_host) = &ssh_options.jump_host {
-            let jump_address_str = format!("{}:{}", jump_host.host, jump_host.port);
-            let jump_address = match jump_address_str
-                .to_socket_addrs()
-                .map_err(ConnectionError::Io)
-                .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-            {
-                Ok(address) => address,
-                Err(error) => {
-                    error!(?error, address=%jump_address_str, "Cannot resolve jump host address");
-                    self.set_disconnected();
-                    return Err(error);
-                }
-            };
+    /// Connect to target, recursively opening jump channels if needed
+    fn open_session<'a>(
+        &'a mut self,
+        ssh_options: TargetSSHOptions,
+        config: Arc<russh::client::Config>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        (Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>),
+                        ConnectionError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        async move {
+            if let Some(jump_host_id) = ssh_options.jump_host {
+                let jump_ssh_options = self.resolve_jump_target(jump_host_id).await?;
+                let jump_config = self.build_ssh_config(&jump_ssh_options).await;
 
-            info!(
-                ?jump_address,
-                username = &jump_host.username[..],
-                "Connecting to Jump Host"
-            );
+                info!(
+                    host = %jump_ssh_options.host,
+                    port = jump_ssh_options.port,
+                    username = %jump_ssh_options.username,
+                    "Connecting to jump host"
+                );
+                let (jump_session, _) = self.open_session(jump_ssh_options, jump_config).await?;
 
-            let jump_ssh_options = TargetSSHOptions {
-                host: jump_host.host.clone(),
-                port: jump_host.port,
-                username: jump_host.username.clone(),
-                auth: jump_host.auth.clone(),
-                allow_insecure_algos: ssh_options.allow_insecure_algos,
-                jump_host: None,
-            };
+                info!(
+                    host = %ssh_options.host,
+                    port = ssh_options.port,
+                    "Opening direct-tcpip channel through jump host"
+                );
+                let channel = jump_session
+                    .channel_open_direct_tcpip(
+                        ssh_options.host.clone(),
+                        ssh_options.port as u32,
+                        "localhost".to_string(),
+                        0,
+                    )
+                    .await
+                    .map_err(ConnectionError::Ssh)?;
 
-            let (jump_event_tx, jump_event_rx) = unbounded_channel();
-            let jump_handler = ClientHandler {
-                ssh_options: jump_ssh_options.clone(),
-                event_tx: jump_event_tx,
-                services: self.services.clone(),
-                session_id: self.id,
-            };
+                let stream = channel.into_stream();
+                let (event_tx, event_rx) = unbounded_channel();
+                let handler = ClientHandler {
+                    ssh_options: ssh_options.clone(),
+                    event_tx,
+                    services: self.services.clone(),
+                    session_id: self.id,
+                };
+                let fut_connect = russh::client::connect_stream(config, stream, handler);
+                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
+                    .await
+            } else {
+                let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
+                let address = address_str
+                    .to_socket_addrs()
+                    .map_err(ConnectionError::Io)
+                    .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
+                    .inspect_err(|e| {
+                        error!(?e, address=%address_str, "Cannot resolve address");
+                    })?;
 
-            let fut_connect = russh::client::connect(config.clone(), jump_address, jump_handler);
-            let (jump_session, _jump_event_rx) = self
-                .wait_for_connection(&jump_ssh_options, fut_connect, jump_event_rx, true)
-                .await?;
+                info!(?address, username = %ssh_options.username, "Connecting to target");
+                let (event_tx, event_rx) = unbounded_channel();
+                let handler = ClientHandler {
+                    ssh_options: ssh_options.clone(),
+                    event_tx,
+                    services: self.services.clone(),
+                    session_id: self.id,
+                };
 
-            info!("Connected to Jump Host, opening direct-tcpip channel to target");
-            let channel = jump_session
-                .channel_open_direct_tcpip(
-                    ssh_options.host.clone(),
-                    ssh_options.port as u32,
-                    "localhost".to_string(),
-                    0,
-                )
-                .await
-                .map_err(ConnectionError::Ssh)?;
+                let fut_connect = russh::client::connect(config, address, handler);
+                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
+                    .await
+            }
+        }
+        .boxed()
+    }
 
-            let stream = channel.into_stream();
-
-            let (event_tx, event_rx) = unbounded_channel();
-            let handler = ClientHandler {
-                ssh_options: ssh_options.clone(),
-                event_tx,
-                services: self.services.clone(),
-                session_id: self.id,
-            };
-
-            info!(
-                ?address,
-                username = &ssh_options.username[..],
-                "Connecting to target via Jump Host"
-            );
-            let fut_connect = russh::client::connect_stream(config, stream, handler);
-            self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
-                .await?
-        } else {
-            let (event_tx, event_rx) = unbounded_channel();
-            let handler = ClientHandler {
-                ssh_options: ssh_options.clone(),
-                event_tx,
-                services: self.services.clone(),
-                session_id: self.id,
-            };
-
-            info!(
-                ?address,
-                username = &ssh_options.username[..],
-                "Connecting directly to target"
-            );
-            let fut_connect = russh::client::connect(config, address, handler);
-            self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
-                .await?
-        };
+    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
+        info!(
+            host = %ssh_options.host,
+            port = ssh_options.port,
+            username = %ssh_options.username,
+            "Connecting"
+        );
+        let config = self.build_ssh_config(&ssh_options).await;
+        let (session, mut event_rx) = self.open_session(ssh_options, config).await?;
 
         self.session = Some(Arc::new(Mutex::new(session)));
 
-        info!(?address, "Connected");
+        info!("Connected");
 
         tokio::spawn(
             {
@@ -634,10 +646,10 @@ impl RemoteClient {
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
-        is_jump_host: bool,
+        _is_jump_host: bool,
     ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
     where
-        Fut: std::future::Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
+        Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
     {
         pin_mut!(fut_connect);
 
@@ -646,7 +658,7 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;

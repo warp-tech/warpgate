@@ -21,7 +21,7 @@ struct CheckSshHostKeyRequest {
     username: Option<String>,
     allow_insecure_algos: Option<bool>,
     auth: Option<SSHTargetAuth>,
-    jump_host: Option<warpgate_common::SSHJumpHostOptions>,
+    jump_host: Option<Uuid>,
 }
 
 #[derive(Object)]

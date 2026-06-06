@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "unknown"
+    "version": "chart-v0.0.5-23-g1094e944-modified"
   },
   "servers": [
     {
@@ -4190,8 +4190,9 @@
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
           },
-          "jumpHost": {
-            "$ref": "#/components/schemas/SSHJumpHostOptions"
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5282,31 +5283,6 @@
           }
         }
       },
-      "SSHJumpHostOptions": {
-        "type": "object",
-        "title": "SSHJumpHostOptions",
-        "required": [
-          "host",
-          "port",
-          "username",
-          "auth"
-        ],
-        "properties": {
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "uint16"
-          },
-          "username": {
-            "type": "string"
-          },
-          "auth": {
-            "$ref": "#/components/schemas/SSHTargetAuth"
-          }
-        }
-      },
       "SSHKey": {
         "type": "object",
         "title": "SSHKey",
@@ -5929,8 +5905,9 @@
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
           },
-          "jumpHost": {
-            "$ref": "#/components/schemas/SSHJumpHostOptions"
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
