@@ -97,6 +97,7 @@ pub enum RCEvent {
         ext: u32,
     },
     ConnectionError(ConnectionError),
+    HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
     HostKeyReceived(PublicKey),
@@ -555,7 +556,10 @@ impl RemoteClient {
                     username = %jump_ssh_options.username,
                     "Connecting to jump host"
                 );
+                println!("hop connecting");
                 let (jump_session, _) = self.open_session(jump_ssh_options, jump_config).await?;
+                let _ = self.tx.send(RCEvent::HopConnected).await;
+                println!("hop connected");
 
                 info!(
                     host = %ssh_options.host,
@@ -602,6 +606,7 @@ impl RemoteClient {
                     session_id: self.id,
                 };
 
+                println!("direct connecting");
                 let fut_connect = russh::client::connect(config, address, handler);
                 self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
                     .await

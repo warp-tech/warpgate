@@ -39,11 +39,11 @@ use warpgate_db_entities::Parameters;
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::{ServiceOutput, ansi_paint};
+use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::ERASE_PROGRESS_SPINNER;
+use crate::server::service_output::{ConnectionChainHost, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
@@ -323,20 +323,6 @@ impl ServerSession {
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
-    pub fn emit_service_message(&self, msg: &str) -> Result<()> {
-        debug!("Service message: {}", msg);
-
-        let output = format!(
-            "{}{} {}\r\n",
-            ERASE_PROGRESS_SPINNER,
-            ansi_paint(Color::Black, Color::White, " Warpgate "),
-            msg.replace('\n', "\r\n"),
-        );
-        self.emit_pty_output(output.as_bytes())?;
-
-        Ok(())
-    }
-
     pub fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
         let channels = self.pty_channels.clone();
         for channel in channels {
@@ -346,6 +332,30 @@ impl ServerSession {
             }
         }
         Ok(())
+    }
+
+    pub fn emit_service_message(&self, msg: &str) -> Result<()> {
+        debug!("Service message: {}", msg);
+
+        let _ = self.emit_pty_output(&self.service_output.erase_display().as_bytes());
+        self.emit_pty_output(
+            format!(
+                "{} {}\r\n",
+                paint_fg(Color::Blue, false, "● Warpgate:"),
+                msg.replace('\n', "\r\n")
+            )
+            .as_bytes(),
+        )
+    }
+
+    pub fn emit_pty_error(&self, msg: &str) -> Result<()> {
+        if self.service_output.progress_visible() {
+            self.service_output.stop_progress();
+            let _ = self.emit_pty_output(&self.service_output.erase_display().as_bytes());
+        }
+        self.emit_pty_output(
+            format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:")).as_bytes(),
+        )
     }
 
     /// Start connecting to the target if we aren't already.
@@ -378,20 +388,70 @@ impl ServerSession {
         if let Some((target, ssh_options)) = connect_params
             && self.rc_state == RCState::NotInitialized
         {
-            self.connect_remote(&target, ssh_options)?;
+            self.connect_remote(&target, ssh_options).await?;
         }
 
         Ok(())
     }
 
-    fn connect_remote(&mut self, target: &Target, ssh_options: TargetSSHOptions) -> Result<()> {
+    async fn connect_remote(
+        &mut self,
+        target: &Target,
+        ssh_options: TargetSSHOptions,
+    ) -> Result<()> {
+        let hosts = self.resolve_chain_hosts(&target.name, &ssh_options).await?;
         self.rc_state = RCState::Connecting;
         self.send_command(RCCommand::Connect(ssh_options))
             .map_err(|_| anyhow::anyhow!("cannot send command"))?;
-        self.service_output.show_progress();
-        self.emit_service_message(&format!("Selected target: {}", target.name))?;
-
+        self.emit_pty_output(b"\r\n")?;
+        self.service_output.start_progress(hosts).await;
         Ok(())
+    }
+
+    async fn resolve_chain_hosts(
+        &self,
+        target_name: &str,
+        ssh_options: &TargetSSHOptions,
+    ) -> Result<Vec<ConnectionChainHost>, WarpgateError> {
+        let mut jumps: Vec<_> = Vec::new();
+        let mut current_jump_id = ssh_options.jump_host;
+
+        while let Some(id) = current_jump_id {
+            let result = self
+                .services
+                .config_provider
+                .lock()
+                .await
+                .list_targets()
+                .await;
+            let Ok(targets) = result else { break };
+            let Some(t) = targets.into_iter().find(|t| t.id == id) else {
+                break;
+            };
+            jumps.push(ConnectionChainHost::Text(t.name.clone()));
+            if let TargetOptions::Ssh(opts) = t.options {
+                current_jump_id = opts.jump_host;
+            } else {
+                break;
+            }
+        }
+
+        // `jumps` follows the jump_host links from the final target outward.
+        // Reverse so the list runs in physical connection order (innermost first).
+        jumps.reverse();
+
+        let mut chain = vec![
+            ConnectionChainHost::Text("You".into()),
+            ConnectionChainHost::Link {
+                text: "Warpgate".into(),
+                url: construct_external_url(None, &*self.services.config.lock().await, None)
+                    .await?
+                    .to_string(),
+            },
+        ];
+        chain.extend(jumps);
+        chain.push(ConnectionChainHost::Text(target_name.into()));
+        Ok(chain)
     }
 
     async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
@@ -750,16 +810,17 @@ impl ServerSession {
 
     pub async fn handle_remote_event(&mut self, event: RCEvent) -> Result<()> {
         match event {
+            RCEvent::HopConnected => {
+                self.service_output.notify_hop_connected().await;
+            }
             RCEvent::State(state) => {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.service_output.stop_progress();
-                        let msg = format!(
-                            "{}{}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(Color::Black, Color::Green, " ✓ Warpgate connected ")
-                        );
+                        let msg = self
+                            .service_output
+                            .render_final_success_static_frame()
+                            .await;
                         let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     RCState::Disconnected => {
@@ -779,12 +840,9 @@ impl ServerSession {
                         known_key_type,
                         known_key_base64,
                     } => {
+                        let _ = self.emit_pty_error("Host key doesn't match the stored one.");
                         let msg = format!(
-                            concat!(
-                                "Host key doesn't match the stored one.\n",
-                                "Stored key   ({}): {}\n",
-                                "Received key ({}): {}",
-                            ),
+                            concat!("Stored key   ({}): {}\n", "Received key ({}): {}",),
                             known_key_type,
                             known_key_base64,
                             received_key_type,
@@ -800,31 +858,18 @@ impl ServerSession {
                         ?;
                     }
                     ConnectionError::Authentication => {
-                        let msg = format!(
-                            "{}{}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(
-                                Color::Black,
-                                Color::Red,
-                                " ✗ SSH target rejected Warpgate authentication request "
-                            )
+                        let _ = self.emit_pty_error(
+                            "SSH target rejected Warpgate's authentication request",
                         );
-                        let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     error => {
-                        let msg = format!(
-                            "{}{} {}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(Color::Black, Color::Red, " ✗ Connection failed "),
-                            error
-                        );
-                        let _ = self.emit_pty_output(msg.as_bytes());
+                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_service_message(&format!("Error: {e}"));
+                let _ = self.emit_pty_error(&format!("Error: {e}"));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -949,13 +994,7 @@ impl ServerSession {
                         .write_extended(session, server_channel_id.0, ext, data);
                 }
             }
-            RCEvent::HostKeyReceived(key) => {
-                self.emit_service_message(&format!(
-                    "Host key ({}): {}",
-                    key.algorithm(),
-                    key.public_key_base64()
-                ))?;
-            }
+            RCEvent::HostKeyReceived(_) => {}
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
@@ -1094,6 +1133,11 @@ impl ServerSession {
             anyhow::bail!("No PTY channel to show an interactive prompt on")
         }
 
+        self.emit_service_message(&format!(
+            "Host key ({}): {}",
+            key.algorithm(),
+            key.public_key_base64()
+        ))?;
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
             key.algorithm()
