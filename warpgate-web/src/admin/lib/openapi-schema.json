@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.5-17-g2d78333f-modified"
+    "version": "chart-v0.0.5-23-g1094e944-modified"
   },
   "servers": [
     {
@@ -4180,6 +4180,19 @@
           "port": {
             "type": "integer",
             "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "allow_insecure_algos": {
+            "type": "boolean"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SSHTargetAuth"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5891,6 +5904,10 @@
           },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
