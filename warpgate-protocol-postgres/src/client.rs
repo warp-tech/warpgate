@@ -253,7 +253,7 @@ impl PostgresClient {
             state.is_running()
         } {
             let Some(payload) = stream
-                .recv::<PgWireGenericBackendMessage>(&decode_context)
+                .recv::<PgWireGenericBackendMessage>(decode_context)
                 .await?
             else {
                 return Err(PostgresError::Eof);
