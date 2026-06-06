@@ -1,18 +1,20 @@
 [package]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-protocol-postgres"
-version = "0.23.2"
+version = "0.24.0"
 publish = false
 
 [dependencies]
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 anyhow.workspace = true
 async-trait = { version = "0.1", default-features = false }
 tokio.workspace = true
+rand.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 bytes.workspace = true
@@ -20,7 +22,7 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 thiserror.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
-pgwire = { version = "0.30", default-features = false, features = [
+pgwire = { version = "0.40", default-features = false, features = [
     "server-api-aws-lc-rs",
 ] }
 rsasl = { git = "https://github.com/Eugeny/rsasl.git", rev = "cbf4b0f3e05c73b33ac332718ab6e955eaa58166", default-features = false, features = [
@@ -32,4 +34,4 @@ rsasl = { git = "https://github.com/Eugeny/rsasl.git", rev = "cbf4b0f3e05c73b33a
 ] }
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }

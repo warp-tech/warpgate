@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use ipnet::IpNet;
 use poem_openapi::Object;
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
@@ -19,6 +19,7 @@ use crate::{
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
     #[sea_orm(column_type = "Text")]

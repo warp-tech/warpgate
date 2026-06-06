@@ -5,13 +5,13 @@ use tokio::net::TcpStream;
 use tracing::{debug, info, trace, warn};
 use warpgate_common::{TargetMySqlOptions, WarpgateError};
 use warpgate_database_protocols::io::Decode;
+use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
     Handshake, HandshakeResponse, SslRequest,
 };
 use warpgate_database_protocols::mysql::protocol::response::ErrPacket;
-use warpgate_database_protocols::mysql::protocol::Capabilities;
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 
 use crate::common::compute_auth_challenge_response;
 use crate::error::MySqlError;

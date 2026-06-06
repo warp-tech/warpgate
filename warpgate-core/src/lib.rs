@@ -1,3 +1,4 @@
+pub mod auth;
 mod auth_state_store;
 mod config_providers;
 pub mod consts;
@@ -9,6 +10,7 @@ pub mod rate_limiting;
 pub mod recordings;
 mod services;
 mod state;
+pub mod ticket_requests;
 pub use auth_state_store::*;
 pub use config_providers::*;
 pub use data::*;

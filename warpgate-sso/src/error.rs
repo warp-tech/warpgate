@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use openidconnect::{
-    reqwest, ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError,
+    ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError, reqwest,
 };
 
 #[derive(thiserror::Error, Debug)]

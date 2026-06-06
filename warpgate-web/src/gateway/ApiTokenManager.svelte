@@ -1,6 +1,7 @@
 <script lang="ts">
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
+    import { stringifyError } from 'common/errors'
     import { faKey } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
@@ -9,11 +10,26 @@
     import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
+    import { querystring } from 'svelte-spa-router'
+    import { get } from 'svelte/store'
+    import { parseHumantimeDuration } from 'common/duration'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
     let lastCreatedSecret: string | undefined = $state()
+    let error: string | undefined = $state()
     const now = Date.now()
+
+    const urlParams = new URLSearchParams(get(querystring) ?? '')
+    const autoCreate = urlParams.get('create') === 'true'
+    const paramLabel = urlParams.get('label') ?? ''
+    const paramExpiry = urlParams.get('expiry')
+
+    const initialExpiryMs = paramExpiry ? parseHumantimeDuration(paramExpiry) : undefined
+
+    if (autoCreate) {
+        creatingToken = true
+    }
 
     async function deleteToken (token: ExistingApiToken) {
         tokens = tokens.filter(c => c.id !== token.id)
@@ -22,9 +38,14 @@
     }
 
     async function createToken (label: string, expiry: Date) {
-        const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
-        lastCreatedSecret = secret
-        tokens = [...tokens, token]
+        try {
+            error = undefined
+            const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
+            lastCreatedSecret = secret
+            tokens = [...tokens, token]
+        } catch (err: any) {
+            error = await stringifyError(err)
+        }
     }
 </script>
 
@@ -35,6 +56,10 @@
         e.preventDefault()
     }}>Create token</Button>
 </div>
+
+{#if error}
+<Alert color="danger">{error}</Alert>
+{/if}
 
 {#if lastCreatedSecret}
 <Alert color="info">
@@ -84,5 +109,7 @@
 <CreateApiTokenModal
     bind:isOpen={creatingToken}
     create={createToken}
+    initialLabel={paramLabel}
+    {initialExpiryMs}
 />
 {/if}

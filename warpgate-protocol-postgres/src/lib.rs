@@ -11,14 +11,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
 use rustls::ServerConfig;
+use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
-use tracing::{error, info, warn, Instrument};
-use warpgate_common::helpers::net::detect_port_knock;
+use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{
     ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
@@ -92,7 +92,7 @@ impl ProtocolServer for PostgresProtocolServer {
                 .with_interval(Duration::from_secs(10)) // Send probes every 10s
                 .with_retries(3); // 3 retries before considering dead
             socket.set_tcp_keepalive(&keepalive)?;
-            socket.set_nodelay(true)?;
+            socket.set_tcp_nodelay(true)?;
             let stream = tokio::net::TcpStream::from_std(socket.into())?;
 
             let tls_config = tls_config.clone();
@@ -110,7 +110,10 @@ impl ProtocolServer for PostgresProtocolServer {
                 )
                 .await?;
 
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
+                let wrapped_stream = {
+                    let guard = server_handle.lock().await;
+                    guard.wrap_stream(stream).await?
+                };
 
                 let session = PostgresSession::new(
                     server_handle,

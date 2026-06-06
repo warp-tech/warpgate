@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::helpers::locks::{Mutex, MutexGuard};
 
@@ -20,7 +20,7 @@ impl<E> Clone for EventSender<E> {
 impl<E> EventSender<E> {
     async fn cleanup_subscriptions(&self) -> MutexGuard<'_, SubscriptionStoreInner<E>> {
         let mut subscriptions = self.subscriptions.lock().await;
-        subscriptions.retain(|(_, ref s)| !s.is_closed());
+        subscriptions.retain(|(_, s)| !s.is_closed());
         subscriptions
     }
 }
@@ -29,7 +29,7 @@ impl<'h, E: Clone + 'h> EventSender<E> {
     pub async fn send_all(&'h self, event: E) -> Result<(), SendError<E>> {
         let mut subscriptions = self.cleanup_subscriptions().await;
 
-        for (ref f, ref mut s) in subscriptions.iter_mut().rev() {
+        for (f, s) in subscriptions.iter_mut().rev() {
             if f(&event) {
                 let _ = s.send(event.clone());
             }
@@ -46,7 +46,7 @@ impl<'h, E: 'h> EventSender<E> {
     pub async fn send_once(&'h self, event: E) -> Result<(), SendError<E>> {
         let mut subscriptions = self.cleanup_subscriptions().await;
 
-        for (ref f, ref mut s) in subscriptions.iter_mut().rev() {
+        for (f, s) in subscriptions.iter_mut().rev() {
             if f(&event) {
                 return s.send(event);
             }

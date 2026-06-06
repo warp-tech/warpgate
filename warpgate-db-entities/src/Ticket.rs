@@ -1,9 +1,8 @@
 use sea_orm::entity::prelude::*;
-use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "tickets")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -14,6 +13,7 @@ pub struct Model {
     pub description: String,
     pub target_id: Uuid,
     pub uses_left: Option<i16>,
+    pub self_service: bool,
     pub expiry: Option<OffsetDateTime>,
     pub created: OffsetDateTime,
 }

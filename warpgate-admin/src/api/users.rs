@@ -5,7 +5,6 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
@@ -14,11 +13,11 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::logging::{format_related_ids, AuditEvent};
+use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{case_insensitive_search, require_admin_permission};
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -67,8 +66,7 @@ impl ListApi {
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
         if let Some(ref search) = *search {
-            let search = format!("%{search}%");
-            users = users.filter(User::Column::Username.like(search));
+            users = users.filter(case_insensitive_search(search, [User::Column::Username]));
         }
 
         let users = users.all(&*db).await.map_err(WarpgateError::from)?;
@@ -111,6 +109,7 @@ impl ListApi {
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let default_roles = Role::Entity::grant_default_roles(&db, user.id).await?;
 
         AuditEvent::UserCreated {
             user_id: user.id,
@@ -118,6 +117,18 @@ impl ListApi {
             actor_user_id: ctx.auth.user_id(),
         }
         .emit();
+
+        for role in default_roles {
+            AuditEvent::AccessRoleGranted {
+                grantee_id: user.id,
+                grantee_username: user.username.clone(),
+                role_id: role.id,
+                role_name: role.name,
+                actor_user_id: ctx.auth.user_id(),
+                related_access_roles: format_related_ids(&[role.id]),
+            }
+            .emit();
+        }
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
@@ -221,13 +232,8 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
-            Some(ranges) => serde_json::to_value(
-                ranges
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(WarpgateError::from)?,
+            Some(ranges) => serde_json::to_value(ranges.into_iter().collect::<Vec<_>>())
+                .map_err(WarpgateError::from)?,
             None => serde_json::Value::Null,
         });
         let user = model.update(&*db).await?;
@@ -390,7 +396,7 @@ impl DetailApi {
 // ========== User Role Assignment DTOs ==========
 
 /// Response containing user role assignment with expiry info.
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct UserRoleAssignmentResponse {
     /// Role ID
     id: Uuid,
@@ -409,14 +415,14 @@ struct UserRoleAssignmentResponse {
 }
 
 /// Request to add a user role with optional expiry
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct AddUserRoleRequest {
     #[oai(default)]
     expires_at: Option<OffsetDateTime>,
 }
 
 /// Request to update user role expiry
-#[derive(Object, Serialize, Deserialize, Clone, Debug)]
+#[derive(Object, Clone, Debug)]
 struct UpdateUserRoleRequest {
     /// The new expiry timestamp, or null to remove expiry (make permanent)
     expires_at: Option<OffsetDateTime>,

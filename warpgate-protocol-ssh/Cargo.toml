@@ -1,8 +1,8 @@
 [package]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "warpgate-protocol-ssh"
-version = "0.23.2"
+version = "0.24.0"
 publish = false
 
 [dependencies]
@@ -15,6 +15,9 @@ dialoguer.workspace = true
 curve25519-dalek = { version = "4.0.0", default-features = false } # pin due to build fail on x86
 ed25519-dalek = { version = "2.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
+ratatui = { version = "0.29", default-features = false, features = ["crossterm", "unstable-backend-writer"] }
+termwiz = { version = "0.22", default-features = false }
+tui-input = "0.14"
 russh.workspace = true
 serde.workspace = true
 sea-orm.workspace = true
@@ -23,8 +26,10 @@ time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+url.workspace = true
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 zeroize = { version = "^1.5", default-features = false }

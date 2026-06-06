@@ -162,6 +162,42 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "tieb62",
+      "name": "Tina",
+      "avatar_url": "https://avatars.githubusercontent.com/u/39233377?v=4",
+      "profile": "https://github.com/tieb62",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "immanuwell",
+      "name": "Immanuel Tikhonov",
+      "avatar_url": "https://avatars.githubusercontent.com/u/122638311?v=4",
+      "profile": "https://immanuwell.github.io",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "xTamasu",
+      "name": "Lukas Klepper",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20605096?v=4",
+      "profile": "https://github.com/xTamasu",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "kamilkrzeminski",
+      "name": "kamilkrzeminski",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6916757?v=4",
+      "profile": "https://github.com/kamilkrzeminski",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

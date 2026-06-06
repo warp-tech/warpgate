@@ -1,6 +1,18 @@
-use sea_orm::entity::prelude::*;
+use poem_openapi::Enum;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
+use serde::Serialize;
 use uuid::Uuid;
+use warpgate_common::PasswordPolicy;
+
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum TargetClickAction {
+    #[sea_orm(string_value = "Connect")]
+    Connect,
+    #[sea_orm(string_value = "ShowInstructions")]
+    ShowInstructions,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
@@ -17,13 +29,39 @@ pub struct Model {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub minimize_password_login: bool,
+    pub ticket_self_service_enabled: bool,
+    pub ticket_auto_approve_existing_access: bool,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_max_uses: Option<i16>,
+    pub ticket_require_description: bool,
+    pub ticket_request_show_all_targets: bool,
+    pub target_click_action: TargetClickAction,
     pub show_session_menu: bool,
+    pub password_policy_min_length: i32,
+    pub password_policy_require_uppercase: bool,
+    pub password_policy_require_lowercase: bool,
+    pub password_policy_require_digits: bool,
+    pub password_policy_require_special: bool,
+    pub max_api_token_duration_seconds: Option<i64>,
+    pub record_scp: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
+
+impl Model {
+    pub fn password_policy(&self) -> PasswordPolicy {
+        PasswordPolicy {
+            min_length: self.password_policy_min_length.max(0) as u32,
+            require_uppercase: self.password_policy_require_uppercase,
+            require_lowercase: self.password_policy_require_lowercase,
+            require_digits: self.password_policy_require_digits,
+            require_special: self.password_policy_require_special,
+        }
+    }
+}
 
 impl Entity {
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
@@ -40,7 +78,21 @@ impl Entity {
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
                     minimize_password_login: Set(false),
+                    ticket_self_service_enabled: Set(false),
+                    ticket_auto_approve_existing_access: Set(true),
+                    ticket_max_duration_seconds: Set(Some(28800)),
+                    ticket_max_uses: Set(None),
+                    ticket_require_description: Set(false),
+                    ticket_request_show_all_targets: Set(false),
+                    target_click_action: Set(TargetClickAction::Connect),
                     show_session_menu: Set(true),
+                    password_policy_min_length: Set(0),
+                    password_policy_require_uppercase: Set(false),
+                    password_policy_require_lowercase: Set(false),
+                    password_policy_require_digits: Set(false),
+                    password_policy_require_special: Set(false),
+                    max_api_token_duration_seconds: Set(None),
+                    record_scp: Set(true),
                 }
                 .insert(db)
                 .await

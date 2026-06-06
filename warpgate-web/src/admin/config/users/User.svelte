@@ -19,6 +19,10 @@
     import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
     import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
+    import PageSummaryBar from 'common/PageSummaryBar.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import Section from 'admin/lib/Section.svelte'
 
     interface Props {
         params: { id: string };
@@ -266,191 +270,205 @@
 
 </script>
 
-<div class="container-max-md">
+<div class="container-max-md user-page-wrapper">
     <Loadable promise={initPromise}>
         {#if user}
-        <div class="page-summary-bar">
-            <div>
-                <h1>{user.username}</h1>
-                <div class="text-muted">User</div>
-            </div>
-        </div>
-
-        <div class="d-flex align-items-center gap-3">
-            <FormGroup floating label="Username" class="flex-grow-1">
-                <Input bind:value={user.username} disabled={!user.ldapServerId} />
-            </FormGroup>
-
-            {#if $serverInfo?.hasLdap}
-            <Dropdown class="mb-3">
-                <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
-                    {#if user.ldapServerId}
-                        <Fa icon={faLink} fw />
-                    {/if}
-                    LDAP
-                    <Fa icon={faCaretDown} />
-                </DropdownToggle>
-                <DropdownMenu right={true}>
-                    {#if user.ldapServerId}
-                    <DropdownItem on:click={unlinkFromLdap}>
-                        <Fa icon={faUnlink} fw />
-                        Unlink from LDAP
-                    </DropdownItem>
-                    {:else}
-                    <DropdownItem on:click={autoLinkToLdap}>
-                        <Fa icon={faLink} fw />
-                        Auto-link to LDAP
-                    </DropdownItem>
-                    {/if}
-                </DropdownMenu>
-            </Dropdown>
-            {/if}
-        </div>
-
-        <FormGroup floating label="Description">
-            <Input bind:value={user.description} />
-        </FormGroup>
-
-        {#if $adminPermissions.usersEdit}
-        <CredentialEditor
-            userId={user.id}
-            username={user.username}
-            bind:credentialPolicy={user.credentialPolicy!}
-            ldapLinked={!!user.ldapServerId}
-        />
+        {#if error}
+            <Alert color="danger" dismissible on:dismiss={() => error = null}>{error}</Alert>
         {/if}
 
-        <h4 class="mt-4">User roles</h4>
-        <div class="list-group list-group-flush mb-3">
-            {#each allRoles as role (role.id)}
-                {@const activeAssignment = userRoles.find(ur => ur.id === role.id && ur.isActive)}
-                {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
-                {@const isActive = !!activeAssignment}
-                {@const isExpired = !!expiredAssignment && !isActive}
-                {@const assignment = activeAssignment ?? expiredAssignment}
-                {@const status = assignment ? getExpiryStatus(assignment) : null}
-                <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
-                    <div class="d-flex align-items-center gap-3">
-                        <Input
-                            id="role-{role.id}"
-                            class="mb-0"
-                            type="switch"
-                            on:change={() => toggleRole(role)}
-                            checked={isActive} />
-                        <div>
-                            <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
-                            {#if isActive && activeAssignment}
-                                <div class="d-flex gap-2 align-items-center flex-wrap">
-                                    <small class={status?.class ?? ''}>
-                                        {status?.text ?? ''}
-                                    </small>
-                                    {#if activeAssignment.grantedAt}
-                                        <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
-                                            &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
-                                        </small>
-                                    {/if}
-                                </div>
-                            {:else if isExpired && expiredAssignment}
-                                <div class="d-flex gap-2 align-items-center flex-wrap">
-                                    <small class="text-danger">
-                                        <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
-                                    </small>
-                                    {#if expiredAssignment.expiresAt}
-                                        <small class="text-muted">
-                                            <RelativeDate date={expiredAssignment.expiresAt} />
-                                        </small>
-                                    {/if}
-                                </div>
-                            {:else if role.description}
-                                <small class="text-muted">{role.description}</small>
+        <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
+
+        <SectionedForm class="user-form">
+            <Section id="info" title="General">
+                <div class="d-flex align-items-center gap-3">
+                    <FormGroup floating label="Username" class="flex-grow-1">
+                        <Input bind:value={user.username} disabled={!user.ldapServerId} />
+                    </FormGroup>
+
+                    {#if $serverInfo?.hasLdap}
+                    <Dropdown class="mb-3">
+                        <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
+                            {#if user.ldapServerId}
+                                <Fa icon={faLink} fw />
                             {/if}
-                        </div>
-                    </div>
-                    <div class="d-flex gap-2">
-                        {#if isActive && activeAssignment}
-                            <Button
-                                id="options-button-{role.id}"
-                                color="link"
-                                on:click={() => openExpiryModal(activeAssignment)}
-                            >
-                                <Fa icon={faWrench}/>
-                            </Button>
-                            <Tooltip target="options-button-{role.id}" delay="500">
-                                Options
-                            </Tooltip>
-                        {/if}
-                    </div>
+                            LDAP
+                            <Fa icon={faCaretDown} />
+                        </DropdownToggle>
+                        <DropdownMenu right={true}>
+                            {#if user.ldapServerId}
+                            <DropdownItem on:click={unlinkFromLdap}>
+                                <Fa icon={faUnlink} fw />
+                                Unlink from LDAP
+                            </DropdownItem>
+                            {:else}
+                            <DropdownItem on:click={autoLinkToLdap}>
+                                <Fa icon={faLink} fw />
+                                Auto-link to LDAP
+                            </DropdownItem>
+                            {/if}
+                        </DropdownMenu>
+                    </Dropdown>
+                    {/if}
                 </div>
-            {/each}
-        </div>
 
-        <h4 class="mt-4">Admin roles</h4>
-        <div class="list-group list-group-flush mb-3">
-            {#each allAdminRoles as role (role.id)}
-                <label
-                    for="admin-role-{role.id}"
-                    class="list-group-item list-group-item-action d-flex align-items-center"
-                >
-                    <Input
-                        id="admin-role-{role.id}"
-                        class="mb-0 me-2"
-                        type="switch"
-                        on:change={() => toggleAdminRole(role)}
-                        disabled={!$adminPermissions.adminRolesManage}
-                        checked={adminRoleIsAllowed[role.id]} />
-                    <div>
-                        <div>{role.name}</div>
-                        {#if role.description}
-                            <small class="text-muted">{role.description}</small>
-                        {/if}
-                    </div   >
-                    <span class="ms-auto">
-                        <AdminRolePermissionsBadge {role} />
-                    </span>
-                </label>
-            {/each}
-        </div>
+                <FormGroup floating label="Description">
+                    <Input bind:value={user.description} />
+                </FormGroup>
+            </Section>
 
-        <h4 class="mt-4">Traffic</h4>
-        <FormGroup class="mb-3">
-            <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
-            <RateLimitInput
-                id="rateLimitBytesPerSecond"
-                bind:value={user.rateLimitBytesPerSecond}
-            />
-        </FormGroup>
+            {#if $adminPermissions.usersEdit}
+            <Section id="credentials" title="Credentials" hideHeading>
+                <CredentialEditor
+                    userId={user.id}
+                    username={user.username}
+                    bind:credentialPolicy={user.credentialPolicy!}
+                    ldapLinked={!!user.ldapServerId}
+                />
+            </Section>
+            {/if}
 
-        <h4 class="mt-4">Access restrictions</h4>
-        <div class="mb-5">
-            <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
-        </div>
+            <Section id="roles" title="Access roles">
+                <div class="list-group list-group-flush">
+                    {#each allRoles as role (role.id)}
+                        {@const activeAssignment = userRoles.find(ur => ur.id === role.id && ur.isActive)}
+                        {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
+                        {@const isActive = !!activeAssignment}
+                        {@const isExpired = !!expiredAssignment && !isActive}
+                        {@const assignment = activeAssignment ?? expiredAssignment}
+                        {@const status = assignment ? getExpiryStatus(assignment) : null}
+                        <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
+                            <div class="d-flex align-items-center gap-3">
+                                <Input
+                                    id="role-{role.id}"
+                                    class="mb-0"
+                                    type="switch"
+                                    on:change={() => toggleRole(role)}
+                                    checked={isActive} />
+                                <div>
+                                    <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
+                                    {#if isActive && activeAssignment}
+                                        <div class="d-flex gap-2 align-items-center flex-wrap">
+                                            <small class={status?.class ?? ''}>
+                                                {status?.text ?? ''}
+                                            </small>
+                                            {#if activeAssignment.grantedAt}
+                                                <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
+                                                    &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
+                                                </small>
+                                            {/if}
+                                        </div>
+                                    {:else if isExpired && expiredAssignment}
+                                        <div class="d-flex gap-2 align-items-center flex-wrap">
+                                            <small class="text-danger">
+                                                <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
+                                            </small>
+                                            {#if expiredAssignment.expiresAt}
+                                                <small class="text-muted">
+                                                    <RelativeDate date={expiredAssignment.expiresAt} />
+                                                </small>
+                                            {/if}
+                                        </div>
+                                    {:else if role.description}
+                                        <small class="text-muted">{role.description}</small>
+                                    {/if}
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2">
+                                {#if isActive && activeAssignment}
+                                    <Button
+                                        id="options-button-{role.id}"
+                                        color="link"
+                                        on:click={() => openExpiryModal(activeAssignment)}
+                                    >
+                                        <Fa icon={faWrench}/>
+                                    </Button>
+                                    <Tooltip target="options-button-{role.id}" delay="500">
+                                        Options
+                                    </Tooltip>
+                                {/if}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            </Section>
+
+            <Section id="admin-roles" title="Admin roles">
+                <div class="list-group list-group-flush">
+                    {#each allAdminRoles as role (role.id)}
+                        <label
+                            for="admin-role-{role.id}"
+                            class="list-group-item list-group-item-action d-flex align-items-center"
+                        >
+                            <Input
+                                id="admin-role-{role.id}"
+                                class="mb-0 me-2"
+                                type="switch"
+                                on:change={() => toggleAdminRole(role)}
+                                disabled={!$adminPermissions.adminRolesManage}
+                                checked={adminRoleIsAllowed[role.id]} />
+                            <div>
+                                <div>{role.name}</div>
+                                {#if role.description}
+                                    <small class="text-muted">{role.description}</small>
+                                {/if}
+                            </div   >
+                            <span class="ms-auto">
+                                <AdminRolePermissionsBadge {role} />
+                            </span>
+                        </label>
+                    {/each}
+                </div>
+            </Section>
+
+            <Section id="traffic" title="Network">
+                <FormGroup class="mb-3">
+                    <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+                    <RateLimitInput
+                        id="rateLimitBytesPerSecond"
+                        bind:value={user.rateLimitBytesPerSecond}
+                    />
+                </FormGroup>
+
+                <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
+            </Section>
+        </SectionedForm>
+
+        <StickyActionBar>
+            {#snippet start()}
+                <a href="/log/user/{params.id}" use:link class="btn btn-secondary">
+                    Audit log
+                </a>
+            {/snippet}
+
+            <AsyncButton
+                color="primary"
+                click={update}
+                disabled={!$adminPermissions.usersEdit}
+            >Update</AsyncButton>
+
+            <AsyncButton
+                color="danger"
+                click={remove}
+                disabled={!$adminPermissions.usersDelete}
+            >Remove</AsyncButton>
+        </StickyActionBar>
         {/if}
     </Loadable>
-
-    {#if error}
-        <Alert color="danger">{error}</Alert>
-    {/if}
-
-    <div class="d-flex">
-        <a href="/log/user/{params.id}" use:link class="btn btn-secondary">
-            Audit log
-        </a>
-
-        <AsyncButton
-            color="primary"
-            class="ms-auto"
-            click={update}
-            disabled={!$adminPermissions.usersEdit}
-        >Update</AsyncButton>
-
-        <AsyncButton
-            class="ms-2"
-            color="danger"
-            click={remove}
-            disabled={!$adminPermissions.usersDelete}
-        >Remove</AsyncButton>
-    </div>
 </div>
+
+<style>
+    .user-page-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .user-form {
+        flex: 1;
+        min-height: 0;
+    }
+</style>
 
 <!-- Expiry Modal -->
 <Modal isOpen={showExpiryModal} toggle={() => showExpiryModal = false}>

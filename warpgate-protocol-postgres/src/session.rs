@@ -1,9 +1,14 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use pgwire::error::ErrorInfo;
-use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
+use pgwire::messages::startup::SecretKey;
+use pgwire::messages::{
+    DecodeContext, PgWireBackendMessage, PgWireFrontendMessage, ProtocolVersion,
+};
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
@@ -15,13 +20,18 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 
 use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;
-use crate::stream::{PgWireGenericFrontendMessage, PgWireStartupOrSslRequest, PostgresStream};
+use crate::stream::{
+    PgWireGenericBackendMessage, PgWireGenericFrontendMessage, PgWireStartupOrSslRequest,
+    PostgresStream,
+};
 
 pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     stream: PostgresStream<S, TlsStream<S>>,
@@ -32,6 +42,13 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     id: Uuid,
     services: Services,
     remote_address: SocketAddr,
+    decode_context: DecodeContext,
+    /// Used to remap cancel keys when the target uses protocol 3.2
+    /// but the client only supports 3.0
+    cancel_key_downgrade_map: HashMap<SecretKey, SecretKey>,
+    /// Used to remap cancel keys when the target uses protocol 3.0
+    /// but the client already supports 3.2
+    cancel_key_upgrade_map: HashMap<SecretKey, SecretKey>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
@@ -53,6 +70,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             server_handle,
             id,
             remote_address,
+            decode_context: DecodeContext::new(pgwire::messages::ProtocolVersion::PROTOCOL3_2),
+            cancel_key_downgrade_map: HashMap::new(),
+            cancel_key_upgrade_map: HashMap::new(),
         }
     }
 
@@ -66,7 +86,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 
     pub async fn run(mut self) -> Result<(), PostgresError> {
-        let Some(mut initial_message) = self.stream.recv::<PgWireStartupOrSslRequest>().await?
+        let Some(mut initial_message) = self
+            .stream
+            .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
+            .await?
         else {
             return Err(PostgresError::Eof);
         };
@@ -79,18 +102,47 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
             debug!("TLS setup complete");
 
-            let Some(next_message) = self.stream.recv::<PgWireStartupOrSslRequest>().await? else {
+            let Some(next_message) = self
+                .stream
+                .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
+                .await?
+            else {
                 return Err(PostgresError::Eof);
             };
 
             initial_message = next_message;
         }
 
+        self.decode_context.awaiting_frontend_ssl = false;
+
         let PgWireStartupOrSslRequest::Startup(startup) = initial_message else {
             return Err(PostgresError::ProtocolError("expected Startup".into()));
         };
 
+        self.decode_context.awaiting_frontend_startup = false;
+
+        let Some(protocol_version) = ProtocolVersion::from_version_number(
+            startup.protocol_number_major,
+            startup.protocol_number_minor,
+        ) else {
+            error!(
+                major = startup.protocol_number_major,
+                minor = startup.protocol_number_minor,
+                "Client requested unsupported protocol version"
+            );
+            self.send_error_response(
+                "0W002".into(),
+                format!(
+                    "Unsupported protocol version: {}.{}",
+                    startup.protocol_number_major, startup.protocol_number_minor
+                ),
+            )
+            .await?;
+            return Ok(());
+        };
+
         let username = startup.parameters.get("user").cloned();
+        self.decode_context.protocol_version = protocol_version;
         self.username = username.clone();
         self.database = startup.parameters.get("database").cloned();
 
@@ -182,7 +234,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let Some(PgWireGenericFrontendMessage(
                                     PgWireFrontendMessage::PasswordMessageFamily(message),
-                                )) = self.stream.recv::<PgWireGenericFrontendMessage>().await?
+                                )) = self
+                                    .stream
+                                    .recv::<PgWireGenericFrontendMessage>(&self.decode_context)
+                                    .await?
                                 else {
                                     return Err(PostgresError::Eof);
                                 };
@@ -198,16 +253,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let credential = AuthCredential::Password(password);
 
-                                if self
-                                    .services
-                                    .config_provider
-                                    .lock()
-                                    .await
-                                    .validate_credential(&username, &credential)
-                                    .await?
+                                if !validate_and_add_credential(
+                                    &mut state,
+                                    &credential,
+                                    &mut *self.services.config_provider.lock().await,
+                                )
+                                .await?
                                 {
-                                    state.add_valid_credential(credential);
-                                } else {
                                     // Postgres CLI will just send the same password in a loop without prompting the user again
                                     return fail(&mut self).await;
                                 }
@@ -224,12 +276,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .await
                                     .subscribe(auth_state_id);
 
-                                let login_url_result =
-                                    state_arc.lock().await.construct_web_approval_url(
-                                        &*self.services.config.lock().await,
-                                    );
-                                let login_url = match login_url_result {
-                                    Ok(login_url) => login_url,
+                                let ext_url_result = construct_external_url(
+                                    None,
+                                    &*self.services.config.lock().await,
+                                    None,
+                                )
+                                .await;
+
+                                let login_url = match ext_url_result {
+                                    Ok(ext_url) => {
+                                        state_arc.lock().await.construct_web_approval_url(ext_url)
+                                    }
                                     Err(error) => {
                                         error!(?error, "Failed to construct external URL");
                                         return fail(&mut self).await;
@@ -356,8 +413,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let mut client = match PostgresClient::connect(
             &options,
             ConnectionOptions {
-                protocol_number_major: startup.protocol_number_major,
-                protocol_number_minor: startup.protocol_number_minor,
+                protocol_version: ProtocolVersion::PROTOCOL3_2,
                 parameters: startup.parameters,
             },
         )
@@ -431,11 +487,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             let select_timeout = remaining_timeout.min(check_interval);
 
             tokio::select! {
-                c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>()) => {
+                c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>(&self.decode_context)) => {
                     match c_to_s {
-                        Ok(Ok(Some(msg))) => {
+                        Ok(Ok(Some(mut msg))) => {
                             last_activity = std::time::Instant::now(); // Update activity on client message
                             Self::maybe_log_client_msg(&msg.0);
+                            msg = self.maybe_transform_client_msg(msg, &client);
                             client.send(msg).await?;
                         }
                         Ok(Ok(None)) => {
@@ -452,9 +509,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 },
                 s_to_c = client.recv() => {
                     match s_to_c {
-                        Ok(Some(msg)) => {
+                        Ok(Some(mut msg)) => {
                             last_activity = std::time::Instant::now(); // Update activity on server message
                             Self::maybe_log_server_msg(&msg.0);
+                            msg = self.maybe_transform_server_msg(msg);
                             self.stream.push(msg)?;
                             self.stream.flush().await?;
                         }
@@ -471,6 +529,64 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         }
 
         Ok(())
+    }
+
+    /// Needed to downgrade cancel key handling from 3.2 to 3.0 protocol
+    fn maybe_transform_client_msg(
+        &mut self,
+        mut msg: PgWireGenericFrontendMessage,
+        client: &PostgresClient,
+    ) -> PgWireGenericFrontendMessage {
+        if let PgWireFrontendMessage::CancelRequest(cancel_request) = &mut msg.0 {
+            // Transform cancel keys back to 3.2 format if needed
+            if let SecretKey::I32(_) = cancel_request.secret_key
+                && let Some(upgraded_key) = self
+                    .cancel_key_downgrade_map
+                    .remove(&cancel_request.secret_key)
+                {
+                    cancel_request.secret_key = upgraded_key;
+                }
+            if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
+                // Transform cancel keys to 3.0 format if needed
+                if let SecretKey::Bytes(_) = cancel_request.secret_key
+                    && let Some(downgraded_key) = self
+                        .cancel_key_upgrade_map
+                        .remove(&cancel_request.secret_key)
+                    {
+                        cancel_request.secret_key = downgraded_key;
+                    }
+            }
+        }
+        msg
+    }
+
+    fn maybe_transform_server_msg(
+        &mut self,
+        mut msg: PgWireGenericBackendMessage,
+    ) -> PgWireGenericBackendMessage {
+        if let PgWireBackendMessage::BackendKeyData(key_data) = &mut msg.0 {
+            // Locally issue a 3.0 protocol key in older format and store mapping
+            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_0 {
+                // Locally issue a random key in older format and store mapping
+                if let SecretKey::Bytes(bytes) = &key_data.secret_key {
+                    let downgraded_key = SecretKey::I32(rand::random::<i32>());
+                    self.cancel_key_downgrade_map
+                        .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
+                    key_data.secret_key = downgraded_key
+                }
+            }
+            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
+                // Locally issue a 3.2 protocol key in newer format and store mapping
+                if let SecretKey::I32(_) = key_data.secret_key {
+                    let value = rand::random::<[u8; 32]>();
+                    let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
+                    self.cancel_key_upgrade_map
+                        .insert(upgraded_key.clone(), key_data.secret_key.clone());
+                    key_data.secret_key = upgraded_key
+                }
+            }
+        }
+        msg
     }
 
     fn maybe_log_client_msg(msg: &PgWireFrontendMessage) {

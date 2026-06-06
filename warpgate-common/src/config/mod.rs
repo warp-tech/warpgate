@@ -12,14 +12,11 @@ use defaults::{
     _default_session_max_age, _default_ssh_inactivity_timeout, _default_ssh_keys_path,
     _default_ssh_listen,
 };
-use poem::http::uri;
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use tracing::warn;
-use uri::Scheme;
-use url::Url;
 use uuid::Uuid;
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
@@ -28,25 +25,19 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret, WarpgateError};
+use crate::{ListenEndpoint, Secret};
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum UserAuthCredential {
-    #[serde(rename = "password")]
     Password(UserPasswordCredential),
-    #[serde(rename = "publickey")]
     PublicKey(UserPublicKeyCredential),
-    #[serde(rename = "certificate")]
     Certificate(UserCertificateCredential),
-    #[serde(rename = "otp")]
     Totp(UserTotpCredential),
-    #[serde(rename = "sso")]
     Sso(UserSsoCredential),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPasswordCredential {
     pub hash: Secret<String>,
 }
@@ -59,22 +50,21 @@ impl UserPasswordCredential {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserCertificateCredential {
     pub certificate_pem: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserTotpCredential {
-    #[serde(with = "crate::helpers::serde_base64_secret")]
     pub key: OtpSecretKey,
 }
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserSsoCredential {
     pub provider: Option<String>,
     pub email: String,
@@ -173,17 +163,16 @@ impl Deref for UserDetails {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    pub is_default: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct AdminRole {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
@@ -212,6 +201,8 @@ pub struct AdminRole {
     pub config_edit: bool,
 
     pub admin_roles_manage: bool,
+
+    pub ticket_requests_manage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
@@ -234,6 +225,7 @@ pub enum AdminPermission {
     TicketsDelete,
     ConfigEdit,
     AdminRolesManage,
+    TicketRequestsManage,
 }
 
 impl AdminRole {
@@ -256,6 +248,7 @@ impl AdminRole {
             AdminPermission::TicketsDelete => self.tickets_delete,
             AdminPermission::ConfigEdit => self.config_edit,
             AdminPermission::AdminRolesManage => self.admin_roles_manage,
+            AdminPermission::TicketRequestsManage => self.ticket_requests_manage,
         }
     }
 }
@@ -658,99 +651,16 @@ pub struct WarpgateConfig {
 }
 
 impl WarpgateConfig {
-    pub fn external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
-        self.store.external_host.as_ref().map(|external_host| {
-            #[allow(clippy::unwrap_used)]
-            let external_host = external_host.split(':').next().unwrap();
-
-            (
-                Scheme::HTTPS,
-                external_host.to_owned(),
-                self.store
-                    .http
-                    .external_port
-                    .or_else(|| Some(self.store.http.listen.port())),
-            )
-        })
-    }
-
-    /// Extract external host:port from request headers
-    pub fn external_host_from_request(
-        &self,
-        request: &poem::Request,
-    ) -> Option<(Scheme, String, Option<u16>)> {
-        let (mut scheme, mut host, mut port) = (Scheme::HTTPS, None, None);
-        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
-
-        // Try the Host header first
-        scheme = request.uri().scheme().cloned().unwrap_or(scheme);
-
-        let original_url = request.original_uri();
-        if let Some(original_host) = original_url.host() {
-            host = Some(original_host.to_string());
-            port = original_url.port().map(|x| x.as_u16());
-        }
-
-        // But prefer X-Forwarded-* headers if enabled
-        if trust_forwarded_headers {
-            scheme = request
-                .header("x-forwarded-proto")
-                .and_then(|x| Scheme::try_from(x).ok())
-                .unwrap_or(scheme);
-
-            if let Some(xfh) = request.header("x-forwarded-host") {
-                // XFH can contain both host and port
-                let parts = xfh.split(':').collect::<Vec<_>>();
-                host = parts.first().map(ToString::to_string).or(host);
-                port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
-            }
-
-            port = request
-                .header("x-forwarded-port")
-                .and_then(|x| x.parse::<u16>().ok())
-                .or(port);
-        }
-
-        host.map(|host| (scheme, host, port))
-    }
-
-    pub fn construct_external_url(
-        &self,
-        for_request: Option<&poem::Request>,
-        domain_whitelist: Option<&[String]>,
-    ) -> Result<Url, WarpgateError> {
-        let Some((scheme, host, port)) = for_request
-            .and_then(|r| self.external_host_from_request(r))
-            .or_else(|| self.external_host_from_config())
-        else {
-            return Err(WarpgateError::ExternalHostUnknown);
-        };
-
-        if let Some(list) = domain_whitelist {
-            if !list.contains(&host) {
-                return Err(WarpgateError::ExternalHostNotWhitelisted(
-                    host,
-                    list.to_vec(),
-                ));
-            }
-        }
-
-        let mut url = format!("{scheme}://{host}");
-        if let Some(port) = port {
-            // can't `match` `Scheme`
-            if scheme == Scheme::HTTP && port != 80 || scheme == Scheme::HTTPS && port != 443 {
-                url = format!("{url}:{port}");
-            }
-        }
-        Url::parse(&url).map_err(WarpgateError::UrlParse)
-    }
-
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host {
-            if ext.contains(':') {
-                warn!("Looks like your `external_host` config option contains a port - it will be ignored.");
-                warn!("Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.");
-            }
+        if let Some(ref ext) = self.store.external_host
+            && ext.contains(':')
+        {
+            warn!(
+                "Looks like your `external_host` config option contains a port - it will be ignored."
+            );
+            warn!(
+                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
+            );
         }
     }
 }

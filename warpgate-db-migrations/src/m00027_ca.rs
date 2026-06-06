@@ -4,6 +4,8 @@ use sea_orm_migration::prelude::*;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::helpers::string_default_value;
+
 pub mod parameters {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
@@ -34,6 +36,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let backend = manager.get_database_backend();
         manager
             .alter_table(
                 Table::alter()
@@ -42,7 +45,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Alias::new("ca_certificate_pem"))
                             .text()
                             .not_null()
-                            .default(""),
+                            .default(string_default_value(backend, "")),
                     )
                     .to_owned(),
             )
@@ -55,7 +58,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Alias::new("ca_private_key_pem"))
                             .text()
                             .not_null()
-                            .default(""),
+                            .default(string_default_value(backend, "")),
                     )
                     .to_owned(),
             )

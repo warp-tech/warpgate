@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use bytes::BytesMut;
 use pgwire::error::{PgWireError, PgWireResult};
-use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
+use pgwire::messages::{DecodeContext, PgWireBackendMessage, PgWireFrontendMessage};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::trace;
 use warpgate_tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
@@ -22,7 +22,7 @@ pub trait PostgresEncode {
 }
 
 pub trait PostgresDecode {
-    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>>
+    fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>>
     where
         Self: Sized;
 }
@@ -34,11 +34,11 @@ pub enum PgWireStartupOrSslRequest {
 }
 
 impl PostgresDecode for PgWireStartupOrSslRequest {
-    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
-        if let Ok(Some(result)) = pgwire::messages::startup::SslRequest::decode(buf) {
+    fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
+        if let Ok(Some(result)) = pgwire::messages::startup::SslRequest::decode(buf, ctx) {
             return Ok(Some(Self::SslRequest(result)));
         }
-        pgwire::messages::startup::Startup::decode(buf).map(|x| x.map(Self::Startup))
+        pgwire::messages::startup::Startup::decode(buf, ctx).map(|x| x.map(Self::Startup))
     }
 }
 
@@ -49,20 +49,21 @@ pub struct PgWireGenericFrontendMessage(pub PgWireFrontendMessage);
 pub struct PgWireGenericBackendMessage(pub PgWireBackendMessage);
 
 impl PostgresDecode for PgWireGenericFrontendMessage {
-    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
-        PgWireFrontendMessage::decode(buf).map(|x| x.map(PgWireGenericFrontendMessage))
+    fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
+        pgwire::messages::PgWireFrontendMessage::decode(buf, ctx)
+            .map(|x| x.map(PgWireGenericFrontendMessage))
     }
 }
 
 impl PostgresDecode for PgWireGenericBackendMessage {
-    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
-        PgWireBackendMessage::decode(buf).map(|x| x.map(PgWireGenericBackendMessage))
+    fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
+        PgWireBackendMessage::decode(buf, ctx).map(|x| x.map(PgWireGenericBackendMessage))
     }
 }
 
 impl<T: pgwire::messages::Message> PostgresDecode for T {
-    fn decode(buf: &mut BytesMut) -> PgWireResult<Option<Self>> {
-        T::decode(buf)
+    fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
+        T::decode(buf, ctx)
     }
 }
 
@@ -128,9 +129,10 @@ where
 
     pub(crate) async fn recv<T: PostgresDecode + Debug>(
         &mut self,
+        ctx: &DecodeContext,
     ) -> Result<Option<T>, PostgresStreamError> {
         loop {
-            if let Some(message) = T::decode(&mut self.inbound_buffer)? {
+            if let Some(message) = T::decode(&mut self.inbound_buffer, ctx)? {
                 trace!(?message, "received");
                 return Ok(Some(message));
             }

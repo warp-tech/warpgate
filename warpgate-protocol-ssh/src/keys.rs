@@ -1,8 +1,8 @@
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use russh::keys::{encode_pkcs8_pem, load_secret_key, HashAlg, PrivateKey};
+use russh::keys::{HashAlg, PrivateKey, encode_pkcs8_pem, load_secret_key};
 use tracing::*;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::rng::get_crypto_rng;

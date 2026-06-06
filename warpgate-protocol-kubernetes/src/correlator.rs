@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
-use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::WarpgateError;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 
