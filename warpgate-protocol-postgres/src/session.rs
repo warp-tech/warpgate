@@ -537,30 +537,25 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         mut msg: PgWireGenericFrontendMessage,
         client: &PostgresClient,
     ) -> PgWireGenericFrontendMessage {
-        match &mut msg.0 {
-            PgWireFrontendMessage::CancelRequest(cancel_request) => {
-                // Transform cancel keys back to 3.2 format if needed
-                if let SecretKey::I32(_) = cancel_request.secret_key {
-                    if let Some(upgraded_key) = self
-                        .cancel_key_downgrade_map
+        if let PgWireFrontendMessage::CancelRequest(cancel_request) = &mut msg.0 {
+            // Transform cancel keys back to 3.2 format if needed
+            if let SecretKey::I32(_) = cancel_request.secret_key
+                && let Some(upgraded_key) = self
+                    .cancel_key_downgrade_map
+                    .remove(&cancel_request.secret_key)
+                {
+                    cancel_request.secret_key = upgraded_key;
+                }
+            if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
+                // Transform cancel keys to 3.0 format if needed
+                if let SecretKey::Bytes(_) = cancel_request.secret_key
+                    && let Some(downgraded_key) = self
+                        .cancel_key_upgrade_map
                         .remove(&cancel_request.secret_key)
                     {
-                        cancel_request.secret_key = upgraded_key;
+                        cancel_request.secret_key = downgraded_key;
                     }
-                }
-                if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
-                    // Transform cancel keys to 3.0 format if needed
-                    if let SecretKey::Bytes(_) = cancel_request.secret_key {
-                        if let Some(downgraded_key) = self
-                            .cancel_key_upgrade_map
-                            .remove(&cancel_request.secret_key)
-                        {
-                            cancel_request.secret_key = downgraded_key;
-                        }
-                    }
-                }
             }
-            _ => (),
         }
         msg
     }
@@ -569,30 +564,27 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         &mut self,
         mut msg: PgWireGenericBackendMessage,
     ) -> PgWireGenericBackendMessage {
-        match &mut msg.0 {
-            PgWireBackendMessage::BackendKeyData(key_data) => {
-                // Locally issue a 3.0 protocol key in older format and store mapping
-                if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_0 {
-                    // Locally issue a random key in older format and store mapping
-                    if let SecretKey::Bytes(bytes) = &key_data.secret_key {
-                        let downgraded_key = SecretKey::I32(rand::random::<i32>());
-                        self.cancel_key_downgrade_map
-                            .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
-                        key_data.secret_key = downgraded_key
-                    }
-                }
-                if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
-                    // Locally issue a 3.2 protocol key in newer format and store mapping
-                    if let SecretKey::I32(_) = key_data.secret_key {
-                        let value = rand::random::<[u8; 32]>();
-                        let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
-                        self.cancel_key_upgrade_map
-                            .insert(upgraded_key.clone(), key_data.secret_key.clone());
-                        key_data.secret_key = upgraded_key
-                    }
+        if let PgWireBackendMessage::BackendKeyData(key_data) = &mut msg.0 {
+            // Locally issue a 3.0 protocol key in older format and store mapping
+            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_0 {
+                // Locally issue a random key in older format and store mapping
+                if let SecretKey::Bytes(bytes) = &key_data.secret_key {
+                    let downgraded_key = SecretKey::I32(rand::random::<i32>());
+                    self.cancel_key_downgrade_map
+                        .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
+                    key_data.secret_key = downgraded_key
                 }
             }
-            _ => (),
+            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
+                // Locally issue a 3.2 protocol key in newer format and store mapping
+                if let SecretKey::I32(_) = key_data.secret_key {
+                    let value = rand::random::<[u8; 32]>();
+                    let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
+                    self.cancel_key_upgrade_map
+                        .insert(upgraded_key.clone(), key_data.secret_key.clone());
+                    key_data.secret_key = upgraded_key
+                }
+            }
         }
         msg
     }
