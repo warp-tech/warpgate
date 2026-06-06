@@ -6,7 +6,11 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     labels: ["type/deps"]
-    #open-pull-requests-limit: 25
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     schedule:
       interval: "daily"
     groups:
@@ -18,7 +22,11 @@ updates:
   - package-ecosystem: "npm"
     directory: "/warpgate-web"
     labels: ["type/deps"]
-    #open-pull-requests-limit: 25
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       version-bumps:
         applies-to: version-updates
@@ -45,6 +53,11 @@ updates:
     labels: ["type/deps"]
     exclude-paths:
       - api_sdk
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     schedule:
       interval: "daily"
     groups:
