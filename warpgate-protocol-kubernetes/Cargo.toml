@@ -13,7 +13,7 @@ bytes.workspace = true
 dashmap = { version = "6.0", default-features = false }
 futures.workspace = true
 http = { version = "1.0", default-features = false }
-md5 = { version = "0.7", default-features = false }
+md5 = { version = "0.8", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 regex.workspace = true

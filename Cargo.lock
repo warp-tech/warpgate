@@ -7915,7 +7915,7 @@ dependencies = [
  "dashmap",
  "futures",
  "http 1.4.0",
- "md5 0.7.0",
+ "md5 0.8.0",
  "poem",
  "poem-openapi",
  "regex",
