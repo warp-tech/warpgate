@@ -363,15 +363,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(&target_name)
                 .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::Postgres(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::Postgres(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, postgres_options)) = target else {
@@ -543,18 +540,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 && let Some(upgraded_key) = self
                     .cancel_key_downgrade_map
                     .remove(&cancel_request.secret_key)
-                {
-                    cancel_request.secret_key = upgraded_key;
-                }
+            {
+                cancel_request.secret_key = upgraded_key;
+            }
             if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
                 // Transform cancel keys to 3.0 format if needed
                 if let SecretKey::Bytes(_) = cancel_request.secret_key
                     && let Some(downgraded_key) = self
                         .cancel_key_upgrade_map
                         .remove(&cancel_request.secret_key)
-                    {
-                        cancel_request.secret_key = downgraded_key;
-                    }
+                {
+                    cancel_request.secret_key = downgraded_key;
+                }
             }
         }
         msg

@@ -1945,15 +1945,12 @@ impl ServerSession {
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(target_name)
                 .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::Ssh(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::Ssh(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, mut ssh_options)) = target else {
