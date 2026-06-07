@@ -346,7 +346,7 @@ impl Api {
     #[oai(
         path = "/auth/state/:id",
         method = "get",
-        operation_id = "get_foreign_auth_state",
+        operation_id = "get_auth_state",
         transform = "endpoint_auth"
     )]
     async fn api_auth_state(

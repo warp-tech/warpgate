@@ -44,6 +44,7 @@ pub struct Model {
     pub password_policy_require_special: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    pub tutorial_dismissed: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -93,6 +94,7 @@ impl Entity {
                     password_policy_require_special: Set(false),
                     max_api_token_duration_seconds: Set(None),
                     record_scp: Set(true),
+                    tutorial_dismissed: Set(false),
                 }
                 .insert(db)
                 .await

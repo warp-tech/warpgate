@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.24.0-23-g5c4ac819-modified"
+    "version": "v0.24.0-30-gcc876528-modified"
   },
   "servers": [
     {
@@ -180,7 +180,7 @@
             "description": ""
           }
         },
-        "operationId": "get_foreign_auth_state"
+        "operationId": "get_auth_state"
       }
     },
     "/auth/state/{id}/approve": {
@@ -280,6 +280,19 @@
           }
         },
         "operationId": "get_info"
+      }
+    },
+    "/dismiss-tutorial": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "operationId": "dismiss_tutorial"
       }
     },
     "/targets": {
@@ -2029,13 +2042,17 @@
         "title": "SetupState",
         "required": [
           "has_targets",
-          "has_users"
+          "has_users",
+          "tutorial_dismissed"
         ],
         "properties": {
           "has_targets": {
             "type": "boolean"
           },
           "has_users": {
+            "type": "boolean"
+          },
+          "tutorial_dismissed": {
             "type": "boolean"
           }
         }
