@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use data_encoding::BASE64;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -255,6 +256,45 @@ impl ConfigProvider for DatabaseConfigProvider {
         let targets: Result<Vec<Target>, _> = targets.into_iter().map(TryInto::try_into).collect();
 
         Ok(targets?)
+    }
+
+    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError> {
+        let db = self.db.lock().await;
+
+        let target = entities::Target::Entity::find()
+            .filter(entities::Target::Column::Name.eq(name))
+            .one(&*db)
+            .await?;
+
+        target
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn get_target_by_hostname(
+        &mut self,
+        hostname: &str,
+    ) -> Result<Option<Target>, WarpgateError> {
+        let db: tokio::sync::MutexGuard<'_, DatabaseConnection> = self.db.lock().await;
+
+        let hostname_query = match db.get_database_backend() {
+            DatabaseBackend::MySql => Expr::cust("options->>'$.http.external_host'"),
+            DatabaseBackend::Postgres => Expr::cust(r#"options->'http'->>'external_host'"#),
+            DatabaseBackend::Sqlite => {
+                Expr::cust(r#"json_extract(options, '$.http.external_host')"#)
+            }
+        };
+
+        let target = entities::Target::Entity::find()
+            .filter(hostname_query.eq(hostname))
+            .one(&*db)
+            .await?;
+
+        target
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
     }
 
     async fn get_credential_policy(
