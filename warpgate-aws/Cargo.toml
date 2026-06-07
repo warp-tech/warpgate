@@ -30,7 +30,7 @@ aws-sdk-sts = { version = "1", default-features = false, features = [
 aws-sigv4 = { version = "1", default-features = false }
 aws-credential-types = { version = "1", default-features = false }
 aws-smithy-runtime-api = { version = "1", default-features = false }
-dashmap = { version = "6.0", default-features = false }
+dashmap = { version = "6.2", default-features = false }
 http = "1"
 reqwest.workspace = true
 tokio.workspace = true
