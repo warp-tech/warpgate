@@ -111,6 +111,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             };
 
             initial_message = next_message;
+        } else {
+            self.send_error_response(
+                "08P01".into(),
+                "SSL connection required - please enable SSL in your client (e.g., add `sslmode=require` to your connection string)".into(),
+            )
+            .await?;
+            return Ok(());
         }
 
         self.decode_context.awaiting_frontend_ssl = false;
