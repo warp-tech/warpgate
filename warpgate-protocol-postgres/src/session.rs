@@ -576,7 +576,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     let downgraded_key = SecretKey::I32(rand::random::<i32>());
                     self.cancel_key_downgrade_map
                         .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
-                    key_data.secret_key = downgraded_key
+                    key_data.secret_key = downgraded_key;
                 }
             }
             if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
@@ -586,7 +586,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
                     self.cancel_key_upgrade_map
                         .insert(upgraded_key.clone(), key_data.secret_key.clone());
-                    key_data.secret_key = upgraded_key
+                    key_data.secret_key = upgraded_key;
                 }
             }
         }

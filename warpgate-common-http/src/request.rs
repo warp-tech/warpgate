@@ -3,14 +3,14 @@ use poem::http::header::HOST;
 use poem::http::uri::Scheme;
 use warpgate_common::http_headers::{X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO};
 
-pub(crate) fn first_forwarded_header_value(value: &str) -> Option<&str> {
+pub fn first_forwarded_header_value(value: &str) -> Option<&str> {
     value
         .split(',')
         .map(str::trim)
         .find(|value| !value.is_empty())
 }
 
-pub(crate) fn trusted_host_header(should_trust_x_forwarded: bool, req: &Request) -> Option<String> {
+pub fn trusted_host_header(should_trust_x_forwarded: bool, req: &Request) -> Option<String> {
     if should_trust_x_forwarded
         && let Some(host) = req
             .header(&X_FORWARDED_HOST)
@@ -25,7 +25,7 @@ pub(crate) fn trusted_host_header(should_trust_x_forwarded: bool, req: &Request)
     })
 }
 
-pub(crate) fn trusted_proto(should_trust_x_forwarded: bool, req: &Request) -> Scheme {
+pub fn trusted_proto(should_trust_x_forwarded: bool, req: &Request) -> Scheme {
     if should_trust_x_forwarded
         && let Some(proto) = req
             .header(&X_FORWARDED_PROTO)
@@ -41,7 +41,7 @@ pub(crate) fn trusted_proto(should_trust_x_forwarded: bool, req: &Request) -> Sc
     }
 }
 
-pub(crate) fn trusted_client_ip(
+pub fn trusted_client_ip(
     req: &Request,
     remote_ip: Option<String>,
     trust_x_forwarded: bool,

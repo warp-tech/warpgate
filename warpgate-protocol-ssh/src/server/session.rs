@@ -490,15 +490,14 @@ impl ServerSession {
                         error!(?err, "Menu loop action handler error");
                     }
                 }
-                Event::MenuRedraw(_, _) => (),
-                Event::ConsoleInput(_) => (),
+                Event::MenuRedraw(_, _) | Event::ConsoleInput(_) => (),
             }
             Ok(())
         }
         .boxed()
     }
 
-    async fn start_target_selection_menu(&mut self, channel_id: Uuid) -> Result<()> {
+    async fn start_target_selection_menu(&self, channel_id: Uuid) -> Result<()> {
         let menu_event_subscription = self
             .hub
             .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
@@ -548,8 +547,7 @@ impl ServerSession {
         let (terminal_width, terminal_height) = self
             .channel_pty_size_map
             .get(&channel_id)
-            .map(|r| (r.col_width as u16, r.row_height as u16))
-            .unwrap_or((220, 24));
+            .map_or((220, 24), |r| (r.col_width as u16, r.row_height as u16));
 
         spawn_target_menu_loop(
             self.id,
@@ -952,7 +950,6 @@ impl ServerSession {
                 })
                 .await?;
             }
-            RCEvent::Done => {}
             RCEvent::ExtendedData { channel, data, ext } => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel)
                     && let Err(error) = recorder
@@ -968,7 +965,7 @@ impl ServerSession {
                         .write_extended(session, server_channel_id.0, ext, data);
                 }
             }
-            RCEvent::HostKeyReceived(_) => {}
+            RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
@@ -1746,6 +1743,7 @@ impl ServerSession {
                     ));
                     auth_prompts.push(("Press Enter when done: ".into(), true));
 
+                    #[allow(clippy::items_after_statements)]
                     const MAX_RETRIES: u8 = 3;
                     if let Some(retries) = pending_web_auth_retries {
                         if retries >= MAX_RETRIES {
@@ -1760,20 +1758,20 @@ impl ServerSession {
                         next_pending.web_approval_retry_count = Some(retries + 1);
                     } else {
                         next_pending.web_approval_retry_count = Some(0);
-                    };
+                    }
                 }
 
-                if !auth_prompts.is_empty() {
+                if auth_prompts.is_empty() {
+                    russh::server::Auth::Reject {
+                        proceed_with_methods: None,
+                        partial_success: false,
+                    }
+                } else {
                     self.keyboard_interactive_state = Some(next_pending);
                     russh::server::Auth::Partial {
                         name: auth_name.into(),
                         instructions: auth_instructions.into(),
                         prompts: auth_prompts.into(),
-                    }
-                } else {
-                    russh::server::Auth::Reject {
-                        proceed_with_methods: None,
-                        partial_success: false,
                     }
                 }
             }

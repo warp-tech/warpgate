@@ -284,7 +284,7 @@ impl Api {
             .all(&*db)
             .await?;
 
-        let parameters = Parameters::Entity::get(&*db).await?;
+        let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
@@ -321,7 +321,7 @@ impl Api {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
-        let parameters = Parameters::Entity::get(&*db).await?;
+        let parameters = Parameters::Entity::get(&db).await?;
         let policy = parameters.password_policy();
         let violations = validate_password(&body.password, &policy);
         if !violations.is_empty() {

@@ -92,7 +92,7 @@ impl ListApi {
 
         let db = ctx.services().db.lock().await;
 
-        let parameters = Parameters::Entity::get(&*db).await?;
+        let parameters = Parameters::Entity::get(&db).await?;
         let policy = parameters.password_policy();
         let violations = validate_password(body.password.expose_secret(), &policy);
         if !violations.is_empty() {

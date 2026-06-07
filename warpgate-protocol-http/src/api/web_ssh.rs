@@ -110,7 +110,7 @@ impl Api {
                 user_id,
                 username,
                 &target.name,
-                remote_addr.0.as_socket_addr().cloned(),
+                remote_addr.0.as_socket_addr().copied(),
             )
             .await;
 

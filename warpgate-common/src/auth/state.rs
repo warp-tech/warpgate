@@ -97,7 +97,7 @@ impl AuthState {
         self.session_id.as_ref()
     }
 
-    pub fn set_session_id(&mut self, session_id: SessionId) {
+    pub const fn set_session_id(&mut self, session_id: SessionId) {
         self.session_id = Some(session_id);
     }
 
@@ -140,8 +140,7 @@ impl AuthState {
 
     fn client_ip_for_logging(&self) -> String {
         self.remote_ip
-            .map(|x| x.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
+            .map_or_else(|| "<unknown>".to_string(), |x| x.to_string())
     }
 
     pub fn emit_authenticated_event_once(&mut self) {
@@ -181,9 +180,8 @@ impl AuthState {
             return;
         };
 
-        let credentials = credential
-            .map(AuthCredential::safe_description)
-            .unwrap_or_else(|| "<unknown>".to_string());
+        let credentials =
+            credential.map_or_else(|| "<unknown>".to_string(), AuthCredential::safe_description);
 
         info!(
             target: "audit",

@@ -55,7 +55,7 @@ pub async fn ws_handler(
 
         loop {
             tokio::select! {
-                _ = session.wait_buffer() => {
+                () = session.wait_buffer() => {
                     let msgs = session.drain_buffer().await;
                     for msg in msgs {
                         if let Ok(json) = serde_json::to_string(&msg)
@@ -71,13 +71,13 @@ pub async fn ws_handler(
                 maybe_msg = stream.next() => {
                     match maybe_msg {
                         Some(Ok(Message::Text(text))) => {
+                            #[allow(clippy::collapsible_if)]
                             if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
                                 && let Some(reply) = handle_client_message(&session, &db, client_msg).await
                                 && let Ok(json) = serde_json::to_string(&reply) {
                                 if sink.send(Message::Text(json)).await.is_err() {
                                     break;
                                 }
-
                             }
                         }
                         Some(Ok(Message::Close(_))) | None => break,
@@ -115,7 +115,7 @@ async fn handle_client_message(
             Some(ServerMessage::ChannelOpened { channel_id })
         }
         ClientMessage::Input { channel_id, data } => {
-            session.send_input(channel_id, data.0).await;
+            session.send_input(channel_id, data.0);
             None
         }
         ClientMessage::Resize {
@@ -127,7 +127,7 @@ async fn handle_client_message(
             None
         }
         ClientMessage::CloseChannel { channel_id } => {
-            session.close_channel(channel_id).await;
+            session.close_channel(channel_id);
             None
         }
         ClientMessage::AcceptHostKey => {

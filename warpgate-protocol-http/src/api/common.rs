@@ -7,16 +7,14 @@ use warpgate_db_entities as entities;
 
 use crate::session::SessionStore;
 
-pub(crate) fn emit_unknown_authentication_failed_event(
+pub fn emit_unknown_authentication_failed_event(
     session_id: SessionId,
     remote_ip: Option<std::net::IpAddr>,
     username: &str,
     credentials: &str,
     reason: &str,
 ) {
-    let client_ip = remote_ip
-        .map(|x| x.to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
+    let client_ip = remote_ip.map_or_else(|| "<unknown>".to_string(), |x| x.to_string());
 
     info!(
         target: "audit",

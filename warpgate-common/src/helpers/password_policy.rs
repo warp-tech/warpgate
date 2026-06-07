@@ -13,7 +13,7 @@ pub struct PasswordPolicy {
 }
 
 impl PasswordPolicy {
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.min_length == 0
             && !self.require_uppercase
             && !self.require_lowercase

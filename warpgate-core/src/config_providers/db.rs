@@ -280,10 +280,8 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let hostname_query = match db.get_database_backend() {
             DatabaseBackend::MySql => Expr::cust("options->>'$.http.external_host'"),
-            DatabaseBackend::Postgres => Expr::cust(r#"options->'http'->>'external_host'"#),
-            DatabaseBackend::Sqlite => {
-                Expr::cust(r#"json_extract(options, '$.http.external_host')"#)
-            }
+            DatabaseBackend::Postgres => Expr::cust(r"options->'http'->>'external_host'"),
+            DatabaseBackend::Sqlite => Expr::cust(r"json_extract(options, '$.http.external_host')"),
         };
 
         let target = entities::Target::Entity::find()

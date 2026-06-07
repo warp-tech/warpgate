@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::ops::Deref;
 
 use bytes::Bytes;
 use ratatui::backend::CrosstermBackend;
@@ -104,11 +105,13 @@ impl<T: Clone> TargetMenu<T> {
                 continue;
             };
             match (key_event.key, key_event.modifiers) {
-                (KeyCode::UpArrow | KeyCode::ApplicationUpArrow, _) => {
+                (KeyCode::Char('k' | 'K'), Modifiers::NONE)
+                | (KeyCode::UpArrow | KeyCode::ApplicationUpArrow, _) => {
                     self.move_up();
                     redraw = true;
                 }
-                (KeyCode::DownArrow | KeyCode::ApplicationDownArrow, _) => {
+                (KeyCode::Char('j' | 'J'), Modifiers::NONE)
+                | (KeyCode::DownArrow | KeyCode::ApplicationDownArrow, _) => {
                     self.move_down();
                     redraw = true;
                 }
@@ -124,8 +127,8 @@ impl<T: Clone> TargetMenu<T> {
                     let visible_indices = self.visible_indices();
                     let sel = self.list_state.selected().unwrap_or(0);
                     if let Some(&entry_idx) = visible_indices.get(sel) {
-                        let selected = self.entries[entry_idx].value.clone();
-                        return Some(MenuInputResult::Selected(selected));
+                        let selected = self.entries.get(entry_idx).map(|e| e.value.clone());
+                        return selected.map(MenuInputResult::Selected);
                     }
                 }
                 (KeyCode::Backspace, _) => {
@@ -144,14 +147,6 @@ impl<T: Clone> TargetMenu<T> {
                 }
                 (KeyCode::Char('c'), modifiers) if modifiers.contains(Modifiers::CTRL) => {
                     return Some(MenuInputResult::Abort);
-                }
-                (KeyCode::Char('k' | 'K'), Modifiers::NONE) => {
-                    self.move_up();
-                    redraw = true;
-                }
-                (KeyCode::Char('j' | 'J'), Modifiers::NONE) => {
-                    self.move_down();
-                    redraw = true;
                 }
                 (KeyCode::Char(ch), Modifiers::NONE) if ch.is_ascii_graphic() || ch == ' ' => {
                     self.filter_input.handle(InputRequest::InsertChar(ch));
@@ -184,7 +179,8 @@ impl<T: Clone> TargetMenu<T> {
             Some(
                 visible_indices
                     .iter()
-                    .map(|&i| ListItem::new(self.entries[i].label.clone()))
+                    .filter_map(|&i| self.entries.get(i))
+                    .map(|e| ListItem::new(e.label.clone()))
                     .collect(),
             )
         };
@@ -216,49 +212,75 @@ impl<T: Clone> TargetMenu<T> {
         }
 
         self.terminal.draw(|frame| {
-            let areas = Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(1)])
-                .split(frame.area());
-            let header_area = areas[0];
-            let body_area = areas[1];
+            let [header_area, body_area]: [Rect; 2] = {
+                let areas =
+                    Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(1)])
+                        .split(frame.area());
+                #[allow(clippy::unwrap_used, reason = "hardcoded size")]
+                areas.deref().try_into().unwrap()
+            };
 
             let header_block = Block::default()
                 .border_style(Style::default().fg(Color::DarkGray))
                 .border_type(BorderType::Plain)
                 .borders(Borders::BOTTOM);
             let header_block_area = header_block.inner(header_area);
-            let header_block_areas =
-                Layout::vertical([Constraint::Length(1); 5].as_slice()).split(header_block_area);
+
+            let [
+                header_block_area_subdiv_0,
+                _,
+                header_block_area_subdiv_2,
+                _,
+                header_block_area_subdiv_4,
+            ]: [Rect; 5] = {
+                let header_block_area_subdivs =
+                    Layout::vertical([Constraint::Length(1); 5].as_slice())
+                        .split(header_block_area);
+                #[allow(clippy::unwrap_used, reason = "hardcoded size")]
+                header_block_area_subdivs.deref().try_into().unwrap()
+            };
             frame.render_widget(header_block, header_area);
 
             frame.render_widget(
                 Paragraph::new(
                     Line::from("↑ / ↓ / Enter to connect. Type to filter. Ctrl-C to exit.").gray(),
                 ),
-                header_block_areas[2],
+                header_block_area_subdiv_2,
             );
 
-            // let title_row = Rect::new(header_area.x, header_area.y, header_area.width, 1);
-            let title_cols = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(draw_state.username_display.chars().count() as u16),
-            ])
-            .split(header_block_areas[0]);
-            frame.render_widget(Paragraph::new("Welcome to Warpgate"), title_cols[0]);
+            let [title_col_0, title_col_1]: [Rect; 2] = {
+                let title_cols = Layout::horizontal([
+                    Constraint::Min(0),
+                    Constraint::Length(draw_state.username_display.chars().count() as u16),
+                ])
+                .split(header_block_area_subdiv_0);
+
+                #[allow(clippy::unwrap_used, reason = "hardcoded size")]
+                title_cols.deref().try_into().unwrap()
+            };
+
+            frame.render_widget(Paragraph::new("Welcome to Warpgate"), title_col_0);
             frame.render_widget(
                 Paragraph::new(Line::from(draw_state.username_display.clone().gray())),
-                title_cols[1],
+                title_col_1,
             );
 
-            let filter_cols = Layout::horizontal([Constraint::Length(8), Constraint::Min(0)])
-                .split(header_block_areas[4]);
-            frame.render_widget(Paragraph::new("Filter: "), filter_cols[0]);
+            let [filter_col_0, filter_col_1]: [Rect; 2] = {
+                let filter_cols = Layout::horizontal([Constraint::Length(8), Constraint::Min(0)])
+                    .split(header_block_area_subdiv_4);
+
+                #[allow(clippy::unwrap_used, reason = "hardcoded size")]
+                filter_cols.deref().try_into().unwrap()
+            };
+
+            frame.render_widget(Paragraph::new("Filter: "), filter_col_0);
             frame.render_widget(
                 Paragraph::new(draw_state.filter_value.as_str()),
-                filter_cols[1],
+                filter_col_1,
             );
             frame.set_cursor_position((
-                filter_cols[1].x + draw_state.filter_cursor as u16,
-                filter_cols[1].y,
+                filter_col_1.x + draw_state.filter_cursor as u16,
+                filter_col_1.y,
             ));
 
             if let Some(items) = draw_state.list_items.take() {
@@ -418,10 +440,8 @@ pub fn spawn_target_menu_loop(
                         }
                     };
 
-                    let terminal = matches!(
-                        action,
-                        Some(MenuEvent::Selected(..)) | Some(MenuEvent::Abort)
-                    );
+                    let terminal =
+                        matches!(action, Some(MenuEvent::Selected(..) | MenuEvent::Abort));
 
                     if terminal {
                         // restore terminal state

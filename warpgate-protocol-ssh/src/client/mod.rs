@@ -13,7 +13,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
-use futures::pin_mut;
+use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
@@ -580,6 +580,7 @@ impl RemoteClient {
         let fut = russh::client::connect(config, address, handler);
         let (mut session, mut active_rx) = self
             .wait_for_connection(&first, fut, event_rx, false)
+            .boxed()
             .await?;
 
         for ssh_options in iter {
@@ -592,7 +593,7 @@ impl RemoteClient {
             let channel = session
                 .channel_open_direct_tcpip(
                     ssh_options.host.clone(),
-                    ssh_options.port as u32,
+                    u32::from(ssh_options.port),
                     "localhost".to_string(),
                     0,
                 )
@@ -610,6 +611,7 @@ impl RemoteClient {
             let fut = russh::client::connect_stream(config, stream, handler);
             let (new_session, new_rx) = self
                 .wait_for_connection(&ssh_options, fut, event_rx, false)
+                .boxed()
                 .await?;
             session = new_session;
             active_rx = new_rx;
@@ -619,7 +621,7 @@ impl RemoteClient {
     }
 
     async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
-        let (session, mut event_rx) = self.connect_chain(chain).await?;
+        let (session, mut event_rx) = self.connect_chain(chain).boxed().await?;
 
         self.session = Some(Arc::new(Mutex::new(session)));
 

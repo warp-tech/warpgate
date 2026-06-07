@@ -39,7 +39,9 @@ enum GetUsersResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<UserConfig>>),
 }
+
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum CreateUserResponse {
     #[oai(status = 201)]
     Created(Json<UserConfig>),
@@ -162,6 +164,7 @@ enum DeleteUserResponse {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum UnlinkUserFromLdapResponse {
     #[oai(status = 200)]
     Ok(Json<UserConfig>),
@@ -174,6 +177,7 @@ enum UnlinkUserFromLdapResponse {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum AutoLinkUserToLdapResponse {
     #[oai(status = 200)]
     Ok(Json<UserConfig>),

@@ -198,17 +198,13 @@ fn spawn_event_loop(
                         RCEvent::Eof(channel_id) => {
                             session.push_event(ServerMessage::Eof { channel_id }).await;
                         }
-                        RCEvent::Close(channel_id) => {
-                            session.stop_recording(channel_id).await;
-                            session
-                                .push_event(ServerMessage::ChannelClosed { channel_id })
-                                .await;
-                        }
+
                         RCEvent::ExitStatus(channel_id, code) => {
                             session
                                 .push_event(ServerMessage::ExitStatus { channel_id, code })
                                 .await;
                         }
+                        RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
                             session.stop_recording(channel_id).await;
                             session

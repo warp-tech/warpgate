@@ -35,10 +35,10 @@ pub enum VisualConnectionChainItem {
 }
 
 impl VisualConnectionChainItem {
-    pub fn ansi<'a>(&'a self) -> Cow<'a, str> {
+    pub fn ansi(&self) -> Cow<'_, str> {
         match self {
-            VisualConnectionChainItem::Text(s) => Cow::Borrowed(s),
-            VisualConnectionChainItem::Link { text, url } => {
+            Self::Text(s) => Cow::Borrowed(s),
+            Self::Link { text, url } => {
                 Cow::Owned(format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"))
             }
         }
@@ -97,6 +97,7 @@ pub fn render_connection_chain(chain: &VisualConnectionChainState, tick: usize) 
     let mut out = String::new();
 
     for (seg_index, host) in chain.items.iter().enumerate() {
+        #[allow(clippy::comparison_chain)]
         let state = if seg_index < chain.connected_hops + 1 {
             SegmentState::Connected
         } else if seg_index == chain.connected_hops + 1 {
@@ -126,9 +127,8 @@ pub fn render_connection_chain(chain: &VisualConnectionChainState, tick: usize) 
         out.push(' ');
         out.push_str(&paint_fg(
             match state {
-                SegmentState::Connected => Color::White,
                 SegmentState::Connecting => Color::Blue,
-                SegmentState::Pending => Color::White,
+                SegmentState::Connected | SegmentState::Pending => Color::White,
             },
             state == SegmentState::Pending,
             host.ansi(),

@@ -15,6 +15,7 @@ pub fn hash_password(password: &str) -> String {
     {
         Argon2::default()
     } else {
+        #[allow(clippy::unwrap_used, reason = "tests")]
         Argon2::new(
             argon2::Algorithm::Argon2id,
             argon2::Version::V0x13,

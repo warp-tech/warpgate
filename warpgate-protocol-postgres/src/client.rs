@@ -52,7 +52,7 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
-    pub fn protocol_version(&self) -> ProtocolVersion {
+    pub const fn protocol_version(&self) -> ProtocolVersion {
         self.decode_context.protocol_version
     }
 
