@@ -169,6 +169,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/xTamasu"><img src="https://avatars.githubusercontent.com/u/20605096?v=4?s=100" width="100px;" alt="Lukas Klepper"/><br /><sub><b>Lukas Klepper</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=xTamasu" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/kamilkrzeminski"><img src="https://avatars.githubusercontent.com/u/6916757?v=4?s=100" width="100px;" alt="kamilkrzeminski"/><br /><sub><b>kamilkrzeminski</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=kamilkrzeminski" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/rjourdan04"><img src="https://avatars.githubusercontent.com/u/181946490?v=4?s=100" width="100px;" alt="rjourdan04"/><br /><sub><b>rjourdan04</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=rjourdan04" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
