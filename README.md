@@ -84,7 +84,7 @@ Please use GitHub's [vulnerability reporting system](https://github.com/warp-tec
 
 ## Project Status
 
-The project is ready for production.
+Warpgate is being actively used in enterprise settings.
 
 ## How it works
 
@@ -99,6 +99,14 @@ When connecting through HTTPS, Warpgate presents a selection of available target
 You manage the target and user lists and assign them to each other through the admin UI, and the session history is stored in an SQLite database (default: in `/var/lib/warpgate`).
 
 You can also use the admin web interface to view the live session list, review session recordings, logs and more.
+
+## AI transparency disclosure
+
+In late 2025, this project had started accepting AI-assisted contributions. Contributors are required to disclose AI use. I believe that by applying the same high quality standard to all PRs, whether AI-assisted or not, no sacrifice in quality or security needs to be made.
+
+Since AI is a spectrum between braindead vibe bros and autocomplete users, I believe that being transparent about its use helps establish and limit the place of AI in this project.
+
+Architectural and security decisions on this project are 100% human.
 
 ## Contributing / building from source
 
@@ -118,7 +126,7 @@ The binary is in `target/{debug|release}`.
   * Database: SQLite via `sea-orm` + `sqlx`
   * SSH: `russh`
 * Typescript
-  * Svelte
+  * Svelte 5
   * Bootstrap
 
 ### Backend API
@@ -159,6 +167,10 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tieb62"><img src="https://avatars.githubusercontent.com/u/39233377?v=4?s=100" width="100px;" alt="Tina"/><br /><sub><b>Tina</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=tieb62" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://immanuwell.github.io"><img src="https://avatars.githubusercontent.com/u/122638311?v=4?s=100" width="100px;" alt="Immanuel Tikhonov"/><br /><sub><b>Immanuel Tikhonov</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=immanuwell" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/xTamasu"><img src="https://avatars.githubusercontent.com/u/20605096?v=4?s=100" width="100px;" alt="Lukas Klepper"/><br /><sub><b>Lukas Klepper</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=xTamasu" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kamilkrzeminski"><img src="https://avatars.githubusercontent.com/u/6916757?v=4?s=100" width="100px;" alt="kamilkrzeminski"/><br /><sub><b>kamilkrzeminski</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=kamilkrzeminski" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/rjourdan04"><img src="https://avatars.githubusercontent.com/u/181946490?v=4?s=100" width="100px;" alt="rjourdan04"/><br /><sub><b>rjourdan04</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=rjourdan04" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

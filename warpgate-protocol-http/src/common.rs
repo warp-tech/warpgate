@@ -1,5 +1,4 @@
 use core::str;
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -15,13 +14,13 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
-use warpgate_common::{ProtocolName, WarpgateError};
+use warpgate_common::{ProtocolName, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::{AuthStateStore, ConfigProvider};
+use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{User, UserAdminRoleAssignment};
 use warpgate_sso::WarpgateIdToken;
 
@@ -183,29 +182,24 @@ pub fn gateway_redirect(req: &Request) -> Response {
     Redirect::temporary(path).into_response()
 }
 
-pub async fn get_auth_state_for_request(
+pub async fn get_or_create_auth_state_for_request(
+    req: &Request,
     username: &str,
-    session: &Session,
-    store: &mut AuthStateStore,
-    remote_ip: Option<IpAddr>,
+    ctx: &UnauthenticatedRequestContext,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    if let Some(id) = session.get_auth_state_id()
-        && !store.contains_key(&id.0)
-    {
-        session.remove(AUTH_STATE_ID_SESSION_KEY);
-    }
+    let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
+    let session = <&Session>::from_request_without_body(req)
+        .await
+        .context("Session not in request")?;
 
-    if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
-            "unknown auth state id".into(),
-        ))?;
-
+    if let Some(state) = get_auth_state_for_request(req, ctx).await? {
         let existing_matched = state.lock().await.user_info().username == username;
         if existing_matched {
             return Ok(state);
         }
     }
 
+    let mut store = ctx.services().auth_state_store.lock().await;
     let (id, state) = store
         .create(
             None,
@@ -219,8 +213,60 @@ pub async fn get_auth_state_for_request(
             remote_ip,
         )
         .await?;
+
+    {
+        let session_id = session_id_for_request(req, ctx).await?;
+        let mut state = state.lock().await;
+        if state.session_id() != Some(&session_id) {
+            state.set_session_id(session_id);
+        }
+    }
+
     session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)
+}
+
+pub async fn get_auth_state_for_request(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+) -> Result<Option<Arc<Mutex<AuthState>>>, WarpgateError> {
+    let store = ctx.services().auth_state_store.lock().await;
+    let session = <&Session>::from_request_without_body(req)
+        .await
+        .context("Session not in request")?;
+
+    if let Some(id) = session.get_auth_state_id()
+        && !store.contains_key(&id.0)
+    {
+        session.clear_auth_state();
+    }
+
+    if let Some(id) = session.get_auth_state_id() {
+        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
+            "unknown auth state id".into(),
+        ))?;
+        return Ok(Some(state));
+    }
+
+    Ok(None)
+}
+
+pub async fn session_id_for_request(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+) -> Result<SessionId, WarpgateError> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await
+        .context("SessionStore not in request")?;
+
+    let server_handle = session_middleware
+        .lock()
+        .await
+        .create_handle_for(req, ctx)
+        .await
+        .context("creating session handle")?;
+
+    Ok(server_handle.lock().await.id())
 }
 
 pub async fn authorize_session(

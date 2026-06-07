@@ -27,6 +27,7 @@ use warpgate_common::{
     WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -66,7 +67,7 @@ pub enum Event {
     ConsoleInput(Bytes),
     ServiceOutput(Bytes),
     Client(RCEvent),
-    MenuRedraw,
+    MenuRedraw(u16, u16),
     Menu(MenuEvent),
 }
 
@@ -455,7 +456,7 @@ impl ServerSession {
                         error!(?err, "Menu loop action handler error");
                     }
                 }
-                Event::MenuRedraw => (),
+                Event::MenuRedraw(_, _) => (),
                 Event::ConsoleInput(_) => (),
             }
             Ok(())
@@ -463,10 +464,10 @@ impl ServerSession {
         .boxed()
     }
 
-    async fn start_target_selection_menu(&mut self) -> Result<()> {
+    async fn start_target_selection_menu(&mut self, channel_id: Uuid) -> Result<()> {
         let menu_event_subscription = self
             .hub
-            .subscribe(|e| matches!(e, Event::MenuRedraw | Event::ConsoleInput(_)))
+            .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
             .await;
 
         let username = self
@@ -510,12 +511,20 @@ impl ServerSession {
 
         authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
 
+        let (terminal_width, terminal_height) = self
+            .channel_pty_size_map
+            .get(&channel_id)
+            .map(|r| (r.col_width as u16, r.row_height as u16))
+            .unwrap_or((220, 24));
+
         spawn_target_menu_loop(
             self.id,
             username.to_string(),
             authorized_targets,
             menu_event_subscription,
             self.event_sender.clone(),
+            terminal_width,
+            terminal_height,
         )?;
         Ok(())
     }
@@ -598,7 +607,7 @@ impl ServerSession {
                 self.maybe_connect_remote().await?;
 
                 if matches!(self.target, TargetSelection::Menu) {
-                    self.start_target_selection_menu().await?;
+                    self.start_target_selection_menu(channel_id).await?;
                 }
 
                 let _ = self.send_command(RCCommand::Channel(
@@ -1248,7 +1257,13 @@ impl ServerSession {
         }
 
         if matches!(self.target, TargetSelection::Menu) {
-            let _ = self.event_sender.send_once(Event::MenuRedraw).await;
+            let _ = self
+                .event_sender
+                .send_once(Event::MenuRedraw(
+                    request.col_width as u16,
+                    request.row_height as u16,
+                ))
+                .await;
         }
 
         if self.rc_state != RCState::Connected {
@@ -1847,19 +1862,16 @@ impl ServerSession {
                 username,
                 target_name,
             } => {
-                let cp = self.services.config_provider.clone();
-
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
-                if let Some(credential) = credential
-                    && cp
-                        .lock()
-                        .await
-                        .validate_credential(username, &credential)
-                        .await?
-                {
-                    state.add_valid_credential(credential);
+                if let Some(credential) = credential {
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
                 }
 
                 let user_auth_result = state.verify();

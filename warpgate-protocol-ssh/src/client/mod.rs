@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -13,7 +14,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
-use futures::pin_mut;
+use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
@@ -27,8 +28,8 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
-use warpgate_common::{SSHTargetAuth, SessionId, TargetSSHOptions};
-use warpgate_core::Services;
+use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions};
+use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -68,6 +69,9 @@ pub enum ConnectionError {
 
     #[error("Authentication failed")]
     Authentication,
+
+    #[error("Jump host target not found")]
+    JumpHostTargetNotFound,
 }
 
 #[derive(Debug)]
@@ -431,22 +435,7 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
-        let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
-        let address = match address_str
-            .to_socket_addrs()
-            .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-        {
-            Ok(address) => address,
-            Err(error) => {
-                error!(?error, address=%address_str, "Cannot resolve target address");
-                self.set_disconnected().await;
-                return Err(error);
-            }
-        };
-
-        info!(?address, username = &ssh_options.username[..], "Connecting");
+    async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
         let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
             Preferred {
                 kex: Cow::Borrowed(&[
@@ -457,9 +446,9 @@ impl RemoteClient {
                     kex::ECDH_SHA2_NISTP384,
                     kex::ECDH_SHA2_NISTP521,
                     kex::DH_G16_SHA512,
-                    kex::DH_G14_SHA256, // non-default
+                    kex::DH_G14_SHA256,
                     kex::DH_GEX_SHA256,
-                    kex::DH_G1_SHA1, // non-default
+                    kex::DH_G1_SHA1,
                     kex::EXTENSION_SUPPORT_AS_CLIENT,
                     kex::EXTENSION_SUPPORT_AS_SERVER,
                     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
@@ -514,18 +503,154 @@ impl RemoteClient {
         {
             config.gex = gex;
         }
+        Arc::new(config)
+    }
 
-        let config = Arc::new(config);
+    async fn resolve_jump_target(
+        &self,
+        jump_host_id: Uuid,
+    ) -> Result<TargetSSHOptions, ConnectionError> {
+        let targets: Vec<_> = self
+            .services
+            .config_provider
+            .lock()
+            .await
+            .list_targets()
+            .await
+            .map_err(|_| ConnectionError::JumpHostTargetNotFound)?;
+        let target = targets
+            .into_iter()
+            .find(|t| t.id == jump_host_id)
+            .ok_or(ConnectionError::JumpHostTargetNotFound)?;
+        match target.options {
+            TargetOptions::Ssh(opts) => Ok(opts),
+            _ => Err(ConnectionError::JumpHostTargetNotFound),
+        }
+    }
 
-        let (event_tx, mut event_rx) = unbounded_channel();
-        let handler = ClientHandler {
-            ssh_options: ssh_options.clone(),
-            event_tx,
-            services: self.services.clone(),
-            session_id: self.id,
-        };
+    /// Connect to target, recursively opening jump channels if needed
+    fn open_session<'a>(
+        &'a mut self,
+        ssh_options: TargetSSHOptions,
+        config: Arc<russh::client::Config>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        (Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>),
+                        ConnectionError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        async move {
+            if let Some(jump_host_id) = ssh_options.jump_host {
+                let jump_ssh_options = self.resolve_jump_target(jump_host_id).await?;
+                let jump_config = self.build_ssh_config(&jump_ssh_options).await;
 
-        let fut_connect = russh::client::connect(config, address, handler);
+                info!(
+                    host = %jump_ssh_options.host,
+                    port = jump_ssh_options.port,
+                    username = %jump_ssh_options.username,
+                    "Connecting to jump host"
+                );
+                let (jump_session, _) = self.open_session(jump_ssh_options, jump_config).await?;
+
+                info!(
+                    host = %ssh_options.host,
+                    port = ssh_options.port,
+                    "Opening direct-tcpip channel through jump host"
+                );
+                let channel = jump_session
+                    .channel_open_direct_tcpip(
+                        ssh_options.host.clone(),
+                        ssh_options.port as u32,
+                        "localhost".to_string(),
+                        0,
+                    )
+                    .await
+                    .map_err(ConnectionError::Ssh)?;
+
+                let stream = channel.into_stream();
+                let (event_tx, event_rx) = unbounded_channel();
+                let handler = ClientHandler {
+                    ssh_options: ssh_options.clone(),
+                    event_tx,
+                    services: self.services.clone(),
+                    session_id: self.id,
+                };
+                let fut_connect = russh::client::connect_stream(config, stream, handler);
+                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
+                    .await
+            } else {
+                let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
+                let address = address_str
+                    .to_socket_addrs()
+                    .map_err(ConnectionError::Io)
+                    .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
+                    .inspect_err(|e| {
+                        error!(?e, address=%address_str, "Cannot resolve address");
+                    })?;
+
+                info!(?address, username = %ssh_options.username, "Connecting to target");
+                let (event_tx, event_rx) = unbounded_channel();
+                let handler = ClientHandler {
+                    ssh_options: ssh_options.clone(),
+                    event_tx,
+                    services: self.services.clone(),
+                    session_id: self.id,
+                };
+
+                let fut_connect = russh::client::connect(config, address, handler);
+                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
+                    .await
+            }
+        }
+        .boxed()
+    }
+
+    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
+        info!(
+            host = %ssh_options.host,
+            port = ssh_options.port,
+            username = %ssh_options.username,
+            "Connecting"
+        );
+        let config = self.build_ssh_config(&ssh_options).await;
+        let (session, mut event_rx) = self.open_session(ssh_options, config).await?;
+
+        self.session = Some(Arc::new(Mutex::new(session)));
+
+        info!("Connected");
+
+        tokio::spawn(
+            {
+                let inner_event_tx = self.inner_event_tx.clone();
+                async move {
+                    while let Some(e) = event_rx.recv().await {
+                        info!("{:?}", e);
+                        inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+            }
+            .instrument(Span::current()),
+        );
+
+        return Ok(());
+    }
+
+    async fn wait_for_connection<Fut>(
+        &mut self,
+        ssh_options: &TargetSSHOptions,
+        fut_connect: Fut,
+        mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
+        _is_jump_host: bool,
+    ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
+    where
+        Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
+    {
         pin_mut!(fut_connect);
 
         loop {
@@ -560,157 +685,164 @@ impl RemoteClient {
                         }
                     };
 
-                    let mut auth_result = false;
-                    let mut auth_error_msg: Option<String> = None;
-                    match ssh_options.auth {
-                        SSHTargetAuth::Password(auth) => {
-                            let response = session
-                                    .authenticate_password(
-                                        ssh_options.username.clone(),
-                                        auth.password.expose_secret()
-                                    )
-                                    .await?;
-                            auth_result = self._handle_auth_result(
-                                &mut session,
-                                ssh_options.username.clone(),
-                                response
-                            ).await.unwrap_or(false);
-                            if auth_result {
-                                debug!(username=&ssh_options.username[..], "Authenticated with password");
-                            } else {
-                                auth_error_msg = Some("Password authentication was rejected by the SSH target".to_string());
-                            }
-                        }
-                        SSHTargetAuth::PublicKey(_) => {
-                            let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                            #[allow(clippy::explicit_auto_deref)]
-                            let keys = load_keys(
-                                &*self.services.config.lock().await,
-                                &self.services.global_params,
-                                "client"
-                            )?;
-                            let allow_insecure_algos = ssh_options.allow_insecure_algos.unwrap_or(false);
-                            for key in keys {
-                                let key = Arc::new(key);
-                                if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
-                                    info!("Skipping ssh-rsa (SHA1) key authentication since insecure SSH algos are not allowed for this target");
-                                    continue;
-                                }
-                                let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
-                                let mut response  = session
-                                    .authenticate_publickey(
-                                        ssh_options.username.clone(),
-                                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                                    )
-                                    .await?;
+                    self.authenticate_session(
+                        &mut session,
+                        &ssh_options.host,
+                        &ssh_options.username,
+                        &ssh_options.auth,
+                        ssh_options.allow_insecure_algos.unwrap_or(false)
+                    ).await?;
 
-                                auth_result = self._handle_auth_result(
-                                    &mut session,
-                                    ssh_options.username.clone(),
-                                    response
-                                ).await.unwrap_or(false);
-
-                                if !auth_result && key.key_data().is_rsa() && best_hash.is_some() && allow_insecure_algos {
-                                    // Corner case: OpenSSH advertising rsa2-sha-* through server-sig-algs, but it being
-                                    // disabled via PubkeyAcceptedAlgorithms. So far the only case is our own test suite.
-                                    // In this case we retry with ssh-rsa (SHA1)
-                                    response = session
-                                        .authenticate_publickey(
-                                            ssh_options.username.clone(),
-                                            PrivateKeyWithHashAlg::new(key.clone(), None),
-                                        ).await?;
-
-                                    auth_result = self._handle_auth_result(
-                                        &mut session,
-                                        ssh_options.username.clone(),
-                                        response
-                                    ).await.unwrap_or(false);
-                                }
-
-                                if auth_result {
-                                    debug!(username=&ssh_options.username[..], key=%key_str, "Authenticated with key");
-                                    break;
-                                }
-                                auth_error_msg = Some("Public key authentication was rejected by the SSH target".into());
-                            }
-                        }
-                        SSHTargetAuth::IamRole(_) => {
-                            let instance_info = warpgate_aws::find_instance_by_ip(&ssh_options.host).await?;
-
-                            let key = load_preferred_key(
-                                &*self.services.config.lock().await,
-                                &self.services.global_params,
-                                "client"
-                            )?;
-
-                            let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
-
-                            // Push the public key via EC2 Instance Connect
-                            warpgate_aws::send_ssh_public_key(
-                                &instance_info.instance_id,
-                                &instance_info.availability_zone,
-                                &instance_info.region,
-                                &ssh_options.username,
-                                &pub_key_str,
-                            ).await?;
-
-                            // Now authenticate with this key (key is valid for 60 seconds)
-                            let key = Arc::new(key.clone());
-                            let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                            let response = session
-                                .authenticate_publickey(
-                                    ssh_options.username.clone(),
-                                    PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                                )
-                                .await?;
-
-                            auth_result = self._handle_auth_result(
-                                &mut session,
-                                ssh_options.username.clone(),
-                                response
-                            ).await.unwrap_or(false);
-
-                            if auth_result {
-                                debug!(username=&ssh_options.username[..], "Authenticated via EC2 Instance Connect");
-                            }
-
-                            if !auth_result {
-                                auth_error_msg = Some("EC2 Instance Connect authentication was rejected by the SSH target".into());
-                            }
-                        }
-                    }
-
-                    if !auth_result {
-                        let reason = auth_error_msg.unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
-                        error!(%reason, "Warpgate could not authenticate with SSH target");
-                        let _ = session
-                            .disconnect(russh::Disconnect::ByApplication, "", "")
-                            .await;
-                        return Err(ConnectionError::Authentication);
-                    }
-
-                    self.session = Some(Arc::new(Mutex::new(session)));
-
-                    info!(?address, "Connected");
-
-                    tokio::spawn({
-                        let inner_event_tx = self.inner_event_tx.clone();
-                        async move {
-                            while let Some(e) = event_rx.recv().await {
-                                info!("{:?}", e);
-                                inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?;
-                            }
-                            Ok::<(), anyhow::Error>(())
-                        }
-                    }.instrument(Span::current()));
-
-                    return Ok(())
+                    return Ok((session, event_rx));
                 }
             }
         }
     }
 
-    /// Handles an AuthResult from a password or public key authentication attempt.
+    async fn authenticate_session(
+        &self,
+        session: &mut Handle<ClientHandler>,
+        host: &str,
+        username: &str,
+        auth: &SSHTargetAuth,
+        allow_insecure_algos: bool,
+    ) -> Result<(), ConnectionError> {
+        let mut auth_result = false;
+        let mut auth_error_msg: Option<String> = None;
+        match auth {
+            SSHTargetAuth::Password(auth) => {
+                let response = session
+                    .authenticate_password(username.to_string(), auth.password.expose_secret())
+                    .await?;
+                auth_result = self
+                    ._handle_auth_result(session, username.to_string(), response)
+                    .await
+                    .unwrap_or(false);
+                if auth_result {
+                    debug!(username = username, "Authenticated with password");
+                } else {
+                    auth_error_msg =
+                        Some("Password authentication was rejected by the SSH target".to_string());
+                }
+            }
+            SSHTargetAuth::PublicKey(_) => {
+                let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                #[allow(clippy::explicit_auto_deref)]
+                let keys = load_keys(
+                    &*self.services.config.lock().await,
+                    &self.services.global_params,
+                    "client",
+                )?;
+                for key in keys {
+                    let key = Arc::new(key);
+                    if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
+                        info!(
+                            "Skipping ssh-rsa (SHA1) key authentication since insecure SSH algos are not allowed for this target"
+                        );
+                        continue;
+                    }
+                    let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+                    let mut response = session
+                        .authenticate_publickey(
+                            username.to_string(),
+                            PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                        )
+                        .await?;
+
+                    auth_result = self
+                        ._handle_auth_result(session, username.to_string(), response)
+                        .await
+                        .unwrap_or(false);
+
+                    if !auth_result
+                        && key.key_data().is_rsa()
+                        && best_hash.is_some()
+                        && allow_insecure_algos
+                    {
+                        response = session
+                            .authenticate_publickey(
+                                username.to_string(),
+                                PrivateKeyWithHashAlg::new(key.clone(), None),
+                            )
+                            .await?;
+
+                        auth_result = self
+                            ._handle_auth_result(session, username.to_string(), response)
+                            .await
+                            .unwrap_or(false);
+                    }
+
+                    if auth_result {
+                        debug!(username=username, key=%key_str, "Authenticated with key");
+                        break;
+                    }
+                    auth_error_msg =
+                        Some("Public key authentication was rejected by the SSH target".into());
+                }
+            }
+            SSHTargetAuth::IamRole(_) => {
+                let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
+
+                let key = load_preferred_key(
+                    &*self.services.config.lock().await,
+                    &self.services.global_params,
+                    "client",
+                )?;
+
+                let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+
+                // Push the public key via EC2 Instance Connect
+                warpgate_aws::send_ssh_public_key(
+                    &instance_info.instance_id,
+                    &instance_info.availability_zone,
+                    &instance_info.region,
+                    username,
+                    &pub_key_str,
+                )
+                .await?;
+
+                // Now authenticate with this key (key is valid for 60 seconds)
+                let key = Arc::new(key.clone());
+                let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                let response = session
+                    .authenticate_publickey(
+                        username.to_string(),
+                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                    )
+                    .await?;
+
+                auth_result = self
+                    ._handle_auth_result(session, username.to_string(), response)
+                    .await
+                    .unwrap_or(false);
+
+                if auth_result {
+                    debug!(
+                        username = username,
+                        "Authenticated via EC2 Instance Connect"
+                    );
+                }
+
+                if !auth_result {
+                    auth_error_msg = Some(
+                        "EC2 Instance Connect authentication was rejected by the SSH target".into(),
+                    );
+                }
+            }
+        }
+
+        if !auth_result {
+            let reason = auth_error_msg
+                .unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
+            error!(%reason, "Warpgate could not authenticate with SSH target");
+            let _ = session
+                .disconnect(russh::Disconnect::ByApplication, "", "")
+                .await;
+            return Err(ConnectionError::Authentication);
+        }
+
+        Ok(())
+    }
     /// If presented with an additional keyboard-interactive challenge it will respond with empty
     /// strings. This ensures optional 2fa is respected, where this extra challenge always happens.
     ///
