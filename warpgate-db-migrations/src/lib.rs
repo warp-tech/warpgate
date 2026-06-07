@@ -52,6 +52,7 @@ mod m00047_record_scp;
 mod m00048_target_click_action;
 mod m00049_text_columns;
 mod m00050_password_policy;
+mod m00051_tutorial_dismissed;
 
 pub(crate) mod helpers;
 
@@ -111,6 +112,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00048_target_click_action::Migration),
             Box::new(m00049_text_columns::Migration),
             Box::new(m00050_password_policy::Migration),
+            Box::new(m00051_tutorial_dismissed::Migration),
         ]
     }
 }

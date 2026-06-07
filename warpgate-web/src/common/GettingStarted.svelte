@@ -2,14 +2,23 @@
     import { faCircle } from '@fortawesome/free-regular-svg-icons'
     import { faCircleCheck, faExternalLink } from '@fortawesome/free-solid-svg-icons'
     import { ListGroup } from '@sveltestrap/sveltestrap'
-    import type { SetupState } from 'gateway/lib/api'
+    import { api, type SetupState } from 'gateway/lib/api'
+    import { reloadServerInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
 
     export let setupState: SetupState
+
+    async function dismiss () {
+        await api.dismissTutorial()
+        await reloadServerInfo()
+    }
 </script>
 
 <div class="getting-started-help border-secondary">
-    <h2>getting started</h2>
+    <div class="d-flex align-items-center mb-3">
+        <h2 class="mb-0">getting started</h2>
+        <button class="btn btn-link ms-auto p-0 text-muted" onclick={dismiss}>Dismiss</button>
+    </div>
 
     <ListGroup flush>
         <!-- eslint-disable-next-line svelte/no-target-blank -->
@@ -50,7 +59,6 @@
         h2 {
             font-family: 'Poppins';
             font-weight: 700;
-            margin-bottom: 1rem;
         }
 
         .item-text {
