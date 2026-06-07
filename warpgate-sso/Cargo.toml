@@ -19,7 +19,7 @@ reqwest_12.workspace = true
 reqwest_12.features = ["json"]
 serde.workspace = true
 serde_json.workspace = true
-jsonwebtoken = { version = "10", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 data-encoding.workspace = true
 futures.workspace = true
 schemars.workspace = true
