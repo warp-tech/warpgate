@@ -1,4 +1,4 @@
-import { SvelteActionReturnType } from 'svelte'
+import type { ActionReturn } from 'svelte/action'
 
 /**
  * Format seconds into a string compatible with the humantime crate
@@ -64,7 +64,7 @@ export function parseHumantimeDuration (str: string): number | undefined {
 export function humantimeDuration (
     node: HTMLInputElement,
     params: { seconds: number | undefined; onChange: (seconds: number | undefined) => void },
-): SvelteActionReturnType {
+): ActionReturn {
     node.value = params.seconds != null ? formatDurationAsHumantime(params.seconds) : ''
 
     function handleChange () {
