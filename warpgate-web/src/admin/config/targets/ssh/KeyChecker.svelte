@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type CheckSshHostKeyResponseBody, type SSHKnownHost, type TargetOptionsTargetSSHOptions } from '../../../lib/api'
+    import { api, type CheckSshHostKeyResponseBody, type SSHKnownHost, type TargetOptionsTargetSSHOptions } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import KeyCheckerResult, { Key, type CheckResult } from './KeyCheckerResult.svelte'
@@ -87,13 +87,10 @@
     }
 
     async function checkRemoteHostKey () {
-        if (!options.host || !options.port) {
-            return
-        }
         _state = { state: 'checking', previousResult: _state.state === 'ready' ? _state.result : null }
         try {
             remoteHostKey = await api.checkSshHostKey({
-                checkSshHostKeyRequest: options,
+                checkSshHostKeyRequest: { targetId: id },
             })
         } catch (err) {
             _state = { state: 'error', error: await stringifyError(err) }

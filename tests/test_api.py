@@ -705,7 +705,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="check_ssh_host_key",
         permission="targets_edit",
         call=lambda api, r: api.check_ssh_host_key_with_http_info(
-            sdk.CheckSshHostKeyRequest(host="127.0.0.1", port=22),
+            sdk.CheckSshHostKeyRequest(target_id=r["target_id"]),
         ),
         expected_statuses={200},
     ),
@@ -877,27 +877,34 @@ def admin_client(pg_wg: WarpgateProcess):
         yield api
 
 
-def test_all_openapi_admin_operations_permission_enforcement(
-    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
-):
+@pytest.fixture(scope="session")
+def _session_admin_client(pg_wg: WarpgateProcess):
+    url = f"https://localhost:{pg_wg.http_port}"
+    with new_admin_client(url) as api:
+        yield api
+
+
+@pytest.fixture(scope="session")
+def api_test_resources(
+    pg_wg: WarpgateProcess, _session_admin_client: sdk.DefaultApi
+) -> Dict[str, object]:
     _verify_all_openapi_ops_are_covered()
 
-    url = f"https://localhost:{pg_wg.http_port}"
-
+    ac = _session_admin_client
     resources: Dict[str, object] = {}
-    resources["role_id"] = admin_client.create_role(
+    resources["role_id"] = ac.create_role(
         sdk.RoleDataRequest(name=f"role-{uuid4()}")
     ).id
     resources["admin_role_id"] = _create_admin_role(
-        admin_client,
+        ac,
         make_limited_admin_role_payload(name=f"admin-role-{uuid4()}"),
     ).id
-    resources["target_group_id"] = admin_client.create_target_group(
+    resources["target_group_id"] = ac.create_target_group(
         sdk.TargetGroupDataRequest(
             name=f"group-{uuid4()}", description="", color=sdk.BootstrapThemeColor.INFO
         )
     ).id
-    user = admin_client.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    user = ac.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
     resources["user_id"] = user.id
     resources["username"] = user.username
 
@@ -907,7 +914,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
     resources["ssh_known_host_id"] = str(uuid4())
     resources["ticket_request_id"] = str(uuid4())
 
-    target = admin_client.create_target(
+    target = ac.create_target(
         sdk.TargetDataRequest(
             name=f"target-{uuid4()}",
             options=sdk.TargetOptions(
@@ -926,23 +933,23 @@ def test_all_openapi_admin_operations_permission_enforcement(
     resources["target_id"] = target.id
     resources["target_name"] = target.name
 
-    ticket = admin_client.create_ticket(
+    ticket = ac.create_ticket(
         sdk.CreateTicketRequest(
             username=resources["username"], target_name=resources["target_name"]
         )
     )
     resources["ticket_id"] = ticket.ticket.id
 
-    pw = admin_client.create_password_credential(
+    pw = ac.create_password_credential(
         resources["user_id"], sdk.NewPasswordCredential(password="123")
     )
     resources["password_id"] = pw.id
-    sso = admin_client.create_sso_credential(
+    sso = ac.create_sso_credential(
         resources["user_id"],
         sdk.NewSsoCredential(email="test@example.com", provider="test"),
     )
     resources["sso_id"] = sso.id
-    public_key = admin_client.create_public_key_credential(
+    public_key = ac.create_public_key_credential(
         resources["user_id"],
         sdk.NewPublicKeyCredential(
             label="key",
@@ -950,11 +957,11 @@ def test_all_openapi_admin_operations_permission_enforcement(
         ),
     )
     resources["public_key_id"] = public_key.id
-    otp = admin_client.create_otp_credential(
+    otp = ac.create_otp_credential(
         resources["user_id"], sdk.NewOtpCredential(name="otp-1", secret_key=[1, 2, 3])
     )
     resources["otp_id"] = otp.id
-    cert = admin_client.issue_certificate_credential(
+    cert = ac.issue_certificate_credential(
         resources["user_id"],
         sdk.IssueCertificateCredentialRequest(
             label="test",
@@ -962,7 +969,7 @@ def test_all_openapi_admin_operations_permission_enforcement(
         ),
     )
     resources["certificate_id"] = cert.credential.id
-    ldap = admin_client.create_ldap_server(
+    ldap = ac.create_ldap_server(
         sdk.CreateLdapServerRequest(
             name=f"ldap-{uuid4()}",
             host="127.0.0.1",
@@ -972,50 +979,57 @@ def test_all_openapi_admin_operations_permission_enforcement(
     )
     resources["ldap_server_id"] = ldap.id
 
-    for case in ADMIN_API_TEST_CASES:
-        print(f"Testing {case.id} with permission {case.permission}")
-        # Positive case: role has required permission (or any admin if None).
-        allow_payload = make_limited_admin_role_payload(
-            **({case.permission: True} if case.permission else {})
+    return resources
+
+
+@pytest.mark.parametrize(
+    "case",
+    ADMIN_API_TEST_CASES,
+    ids=[c.id for c in ADMIN_API_TEST_CASES],
+)
+def test_admin_api_permission_enforcement(
+    pg_wg: WarpgateProcess,
+    admin_client: sdk.DefaultApi,
+    api_test_resources: Dict[str, object],
+    case: AdminApiTestCase,
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+
+    allow_payload = make_limited_admin_role_payload(
+        **({case.permission: True} if case.permission else {})
+    )
+    allowed_role = _create_admin_role(admin_client, allow_payload)
+    allowed_user = _create_user_with_role(admin_client, allowed_role.id)
+    token = _create_user_api_token(url, allowed_user.username, "123")
+    with new_admin_client(url, token) as allowed_api:
+        try:
+            response = case.call(allowed_api, api_test_resources)
+            (status, body) = response.status_code, response.data
+        except sdk.ApiException as e:
+            (status, body) = e.status, e.body
+        assert status in case.expected_statuses, (
+            f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
         )
-        allowed_role = _create_admin_role(admin_client, allow_payload)
-        allowed_user = _create_user_with_role(admin_client, allowed_role.id)
-        token = _create_user_api_token(url, allowed_user.username, "123")
-        with new_admin_client(url, token) as allowed_api:
-            print("Trying positive case")
-            try:
-                response = case.call(allowed_api, resources)
-                (status, body) = response.status_code, response.data
-            except sdk.ApiException as e:
-                (status, body) = e.status, e.body
-            assert status in case.expected_statuses, (
-                f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
-            )
 
-            # Negative case: permission missing should be rejected.
-            if case.permission:
-                denied_role = _create_admin_role(
-                    admin_client,
-                    {
-                        k: not v if isinstance(v, bool) else v
-                        for k, v in allow_payload.items()
-                    },
-                )
-                denied_user = _create_user_with_role(admin_client, denied_role.id)
-            else:
-                denied_user = _create_user_with_role(admin_client, None)
+    if case.permission:
+        denied_role = _create_admin_role(
+            admin_client,
+            {
+                k: not v if isinstance(v, bool) else v
+                for k, v in allow_payload.items()
+            },
+        )
+        denied_user = _create_user_with_role(admin_client, denied_role.id)
+    else:
+        denied_user = _create_user_with_role(admin_client, None)
 
-            denied_token = _create_user_api_token(url, denied_user.username, "123")
-
-            with new_admin_client(
-                f"https://localhost:{pg_wg.http_port}", denied_token
-            ) as denied_api:
-                print("Trying negative case")
-                try:
-                    response = case.call(denied_api, resources)
-                    (status, body) = response.status_code, response.data
-                except sdk.ApiException as e:
-                    (status, body) = e.status, e.body
-                assert status in {401, 403}, (
-                    f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
-                )
+    denied_token = _create_user_api_token(url, denied_user.username, "123")
+    with new_admin_client(url, denied_token) as denied_api:
+        try:
+            response = case.call(denied_api, api_test_resources)
+            (status, body) = response.status_code, response.data
+        except sdk.ApiException as e:
+            (status, body) = e.status, e.body
+        assert status in {401, 403}, (
+            f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
+        )
