@@ -12,7 +12,7 @@ cookie = "0.18"
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
-http = { version = "1.0", default-features = false }
+http = { version = "1.4", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
 reqwest.workspace = true
