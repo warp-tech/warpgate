@@ -138,9 +138,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         use std::time::Duration;
         tokio::spawn(async {
             if let Err(error) = async {
-                sd_notify::notify(false, &[NotifyState::Ready])?;
+                sd_notify::notify(&[NotifyState::Ready])?;
                 loop {
-                    sd_notify::notify(false, &[NotifyState::Watchdog])?;
+                    sd_notify::notify(&[NotifyState::Watchdog])?;
                     tokio::time::sleep(Duration::from_secs(15)).await;
                 }
                 #[allow(unreachable_code)]
