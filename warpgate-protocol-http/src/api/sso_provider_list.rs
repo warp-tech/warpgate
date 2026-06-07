@@ -222,6 +222,13 @@ impl Api {
             })?;
 
         if !response.email_verified.unwrap_or(true) {
+            error!(
+                "SSO login attempt with an unverified email: {:?}",
+                response.email
+            );
+            error!(
+                "The SSO provider did provide an email_verified claim, and it is false. Since the provider provides this claim, Warpgate requires the email to be verified."
+            );
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));
         }
 
