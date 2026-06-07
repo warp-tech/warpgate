@@ -19,6 +19,7 @@ async function singleLogout () {
 </script>
 
 {#if $serverInfo?.username}
+<div class="d-flex align-items-center">
     <a href="/@warpgate/#/profile">
         {$serverInfo.username}
     </a>
@@ -28,7 +29,7 @@ async function singleLogout () {
 
     {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
         <Dropdown>
-            <DropdownToggle color="link" title="Log out options">
+            <DropdownToggle color="link" title="Log out options" size="sm">
                 <Fa icon={faSignOut} fw />
             </DropdownToggle>
             <DropdownMenu right={true}>
@@ -43,8 +44,9 @@ async function singleLogout () {
             </DropdownMenu>
         </Dropdown>
     {:else}
-        <Button color="link" on:click={logout} title="Log out" class="p-0 ms-2">
+        <Button color="link" on:click={logout} title="Log out" size="sm" class="p-0 ms-2">
             <Fa icon={faSignOut} fw />
         </Button>
     {/if}
+</div>
 {/if}
