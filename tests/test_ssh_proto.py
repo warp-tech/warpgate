@@ -122,8 +122,7 @@ class Test:
         )
 
         output = ssh_client.communicate(timeout=timeout)[0]
-        assert b"Warpgate" in output
-        assert b"Selected target:" in output
+        assert ssh_target.name.encode() in output
         assert b"hello\r\n" in output
 
     def test_signals(

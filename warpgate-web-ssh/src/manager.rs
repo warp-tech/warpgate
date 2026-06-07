@@ -16,7 +16,7 @@ use warpgate_core::recordings::TerminalRecordingStreamId;
 use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient};
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
 
 use crate::protocol::ServerMessage;
 use crate::session::{WebSshSession, WebSshSessionHandle};
@@ -124,9 +124,14 @@ impl WebSshClientManager {
             .await
             .insert(session_id, session.clone());
 
+        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username.to_string()))
+            .await?
+            .into_iter()
+            .map(|x| x.ssh_options)
+            .collect::<Vec<_>>();
         rc_handles
             .command_tx
-            .send((RCCommand::Connect(ssh_options.clone()), None))
+            .send((RCCommand::Connect(ssh_chain), None))
             .ok();
 
         spawn_event_loop(

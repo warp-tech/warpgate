@@ -6,7 +6,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,7 +13,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
-use futures::{FutureExt, pin_mut};
+use futures::pin_mut;
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
@@ -28,7 +27,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
-use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions};
+use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError};
 use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
@@ -74,6 +73,51 @@ pub enum ConnectionError {
     JumpHostTargetNotFound,
 }
 
+pub struct ResolvedSshChainHost {
+    pub name: String,
+    pub ssh_options: TargetSSHOptions,
+}
+
+/// Resolve the full ordered SSH jump chain for a target
+/// `logged_in_username` is used to substitute empty dynamic usernames
+/// in targets' configs
+pub async fn resolve_ssh_chain(
+    services: &Services,
+    target_id: Uuid,
+    logged_in_username: Option<&String>,
+) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    let mut jumps = vec![];
+    let mut current_jump_id = Some(target_id);
+    let targets = services.config_provider.lock().await.list_targets().await?;
+    while let Some(id) = current_jump_id {
+        let Some(t) = targets.iter().find(|t| t.id == id) else {
+            break;
+        };
+        let name = t.name.clone();
+        match &t.options {
+            TargetOptions::Ssh(opts) => {
+                let mut opts = opts.clone();
+                current_jump_id = opts.jump_host;
+
+                // Forward username from the authenticated user to the target, if target has no username
+                if let Some(logged_in_username) = logged_in_username
+                    && opts.username.is_empty()
+                {
+                    opts.username = logged_in_username.clone();
+                }
+
+                jumps.push(ResolvedSshChainHost {
+                    name,
+                    ssh_options: opts.clone(),
+                });
+            }
+            _ => break,
+        }
+    }
+    jumps.reverse();
+    Ok(jumps)
+}
+
 #[derive(Debug)]
 pub enum RCEvent {
     State(RCState),
@@ -97,6 +141,7 @@ pub enum RCEvent {
         ext: u32,
     },
     ConnectionError(ConnectionError),
+    HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
     HostKeyReceived(PublicKey),
@@ -111,7 +156,7 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(TargetSSHOptions),
+    Connect(Vec<TargetSSHOptions>),
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -506,119 +551,75 @@ impl RemoteClient {
         Arc::new(config)
     }
 
-    async fn resolve_jump_target(
-        &self,
-        jump_host_id: Uuid,
-    ) -> Result<TargetSSHOptions, ConnectionError> {
-        let targets: Vec<_> = self
-            .services
-            .config_provider
-            .lock()
-            .await
-            .list_targets()
-            .await
-            .map_err(|_| ConnectionError::JumpHostTargetNotFound)?;
-        let target = targets
-            .into_iter()
-            .find(|t| t.id == jump_host_id)
-            .ok_or(ConnectionError::JumpHostTargetNotFound)?;
-        match target.options {
-            TargetOptions::Ssh(opts) => Ok(opts),
-            _ => Err(ConnectionError::JumpHostTargetNotFound),
+    /// Connect through a pre-resolved chain of SSH hops, each tunnelled through the previous.
+    /// `chain` must be non-empty; the first entry is connected directly, subsequent ones via
+    /// `channel_open_direct_tcpip` through the previous session.
+    async fn connect_chain(
+        &mut self,
+        chain: Vec<TargetSSHOptions>,
+    ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
+    {
+        let mut iter = chain.into_iter();
+        let first = iter.next().ok_or(ConnectionError::Resolve)?;
+
+        let config = self.build_ssh_config(&first).await;
+        let address_str = format!("{}:{}", first.host, first.port);
+        let address = address_str
+            .to_socket_addrs()
+            .map_err(ConnectionError::Io)
+            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
+            .inspect_err(|e| error!(?e, address=%address_str, "Cannot resolve address"))?;
+        info!(?address, username = %first.username, "Connecting");
+        let (event_tx, event_rx) = unbounded_channel();
+        let handler = ClientHandler {
+            ssh_options: first.clone(),
+            event_tx,
+            services: self.services.clone(),
+            session_id: self.id,
+        };
+        let fut = russh::client::connect(config, address, handler);
+        let (mut session, mut active_rx) = self
+            .wait_for_connection(&first, fut, event_rx, false)
+            .await?;
+
+        for ssh_options in iter {
+            let _ = self.tx.send(RCEvent::HopConnected).await;
+            info!(
+                host = %ssh_options.host,
+                port = ssh_options.port,
+                "Opening direct-tcpip channel through jump host"
+            );
+            let channel = session
+                .channel_open_direct_tcpip(
+                    ssh_options.host.clone(),
+                    ssh_options.port as u32,
+                    "localhost".to_string(),
+                    0,
+                )
+                .await
+                .map_err(ConnectionError::Ssh)?;
+            let stream = channel.into_stream();
+            let config = self.build_ssh_config(&ssh_options).await;
+            let (event_tx, event_rx) = unbounded_channel();
+            let handler = ClientHandler {
+                ssh_options: ssh_options.clone(),
+                event_tx,
+                services: self.services.clone(),
+                session_id: self.id,
+            };
+            let fut = russh::client::connect_stream(config, stream, handler);
+            let (new_session, new_rx) = self
+                .wait_for_connection(&ssh_options, fut, event_rx, false)
+                .await?;
+            session = new_session;
+            active_rx = new_rx;
         }
+
+        Ok((session, active_rx))
     }
 
-    /// Connect to target, recursively opening jump channels if needed
-    fn open_session<'a>(
-        &'a mut self,
-        ssh_options: TargetSSHOptions,
-        config: Arc<russh::client::Config>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        (Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>),
-                        ConnectionError,
-                    >,
-                > + Send
-                + 'a,
-        >,
-    > {
-        async move {
-            if let Some(jump_host_id) = ssh_options.jump_host {
-                let jump_ssh_options = self.resolve_jump_target(jump_host_id).await?;
-                let jump_config = self.build_ssh_config(&jump_ssh_options).await;
-
-                info!(
-                    host = %jump_ssh_options.host,
-                    port = jump_ssh_options.port,
-                    username = %jump_ssh_options.username,
-                    "Connecting to jump host"
-                );
-                let (jump_session, _) = self.open_session(jump_ssh_options, jump_config).await?;
-
-                info!(
-                    host = %ssh_options.host,
-                    port = ssh_options.port,
-                    "Opening direct-tcpip channel through jump host"
-                );
-                let channel = jump_session
-                    .channel_open_direct_tcpip(
-                        ssh_options.host.clone(),
-                        ssh_options.port as u32,
-                        "localhost".to_string(),
-                        0,
-                    )
-                    .await
-                    .map_err(ConnectionError::Ssh)?;
-
-                let stream = channel.into_stream();
-                let (event_tx, event_rx) = unbounded_channel();
-                let handler = ClientHandler {
-                    ssh_options: ssh_options.clone(),
-                    event_tx,
-                    services: self.services.clone(),
-                    session_id: self.id,
-                };
-                let fut_connect = russh::client::connect_stream(config, stream, handler);
-                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
-                    .await
-            } else {
-                let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
-                let address = address_str
-                    .to_socket_addrs()
-                    .map_err(ConnectionError::Io)
-                    .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-                    .inspect_err(|e| {
-                        error!(?e, address=%address_str, "Cannot resolve address");
-                    })?;
-
-                info!(?address, username = %ssh_options.username, "Connecting to target");
-                let (event_tx, event_rx) = unbounded_channel();
-                let handler = ClientHandler {
-                    ssh_options: ssh_options.clone(),
-                    event_tx,
-                    services: self.services.clone(),
-                    session_id: self.id,
-                };
-
-                let fut_connect = russh::client::connect(config, address, handler);
-                self.wait_for_connection(&ssh_options, fut_connect, event_rx, false)
-                    .await
-            }
-        }
-        .boxed()
-    }
-
-    async fn connect(&mut self, ssh_options: TargetSSHOptions) -> Result<(), ConnectionError> {
-        info!(
-            host = %ssh_options.host,
-            port = ssh_options.port,
-            username = %ssh_options.username,
-            "Connecting"
-        );
-        let config = self.build_ssh_config(&ssh_options).await;
-        let (session, mut event_rx) = self.open_session(ssh_options, config).await?;
+    async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
+        let (session, mut event_rx) = self.connect_chain(chain).await?;
 
         self.session = Some(Arc::new(Mutex::new(session)));
 
@@ -638,7 +639,7 @@ impl RemoteClient {
             .instrument(Span::current()),
         );
 
-        return Ok(());
+        Ok(())
     }
 
     async fn wait_for_connection<Fut>(
