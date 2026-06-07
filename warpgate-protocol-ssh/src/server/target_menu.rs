@@ -33,7 +33,7 @@ struct DrawState {
 #[allow(clippy::large_enum_variant)]
 pub enum MenuEvent {
     Render(Bytes),
-    Selected(Target, TargetSSHOptions),
+    Selected(Target),
     Abort,
 }
 
@@ -413,8 +413,8 @@ pub fn spawn_target_menu_loop(
                             Some(MenuEvent::Render(Bytes::from(menu.render()?)))
                         }
                         Some(MenuInputResult::Abort) => Some(MenuEvent::Abort),
-                        Some(MenuInputResult::Selected((target, options))) => {
-                            Some(MenuEvent::Selected(target, options))
+                        Some(MenuInputResult::Selected((target, _options))) => {
+                            Some(MenuEvent::Selected(target))
                         }
                     };
 

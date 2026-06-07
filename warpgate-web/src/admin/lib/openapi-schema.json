@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "chart-v0.0.5-23-g1094e944-modified"
+    "version": "chart-v0.0.5-22-gd5a06153-modified"
   },
   "servers": [
     {
@@ -4170,27 +4170,10 @@
         "type": "object",
         "title": "CheckSshHostKeyRequest",
         "required": [
-          "host",
-          "port"
+          "target_id"
         ],
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "uint16"
-          },
-          "username": {
-            "type": "string"
-          },
-          "allow_insecure_algos": {
-            "type": "boolean"
-          },
-          "auth": {
-            "$ref": "#/components/schemas/SSHTargetAuth"
-          },
-          "jump_host": {
+          "target_id": {
             "type": "string",
             "format": "uuid"
           }

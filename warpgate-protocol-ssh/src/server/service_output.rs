@@ -29,16 +29,16 @@ pub(super) fn paint_fg<S: Display>(fg: Color, dimmed: bool, text: S) -> String {
 }
 
 #[derive(Clone)]
-pub enum ConnectionChainHost {
+pub enum VisualConnectionChainItem {
     Text(String),
     Link { text: String, url: String },
 }
 
-impl ConnectionChainHost {
-    pub fn ansi<'a>(&'a self) -> Cow<'a, String> {
+impl VisualConnectionChainItem {
+    pub fn ansi<'a>(&'a self) -> Cow<'a, str> {
         match self {
-            ConnectionChainHost::Text(s) => Cow::Borrowed(s),
-            ConnectionChainHost::Link { text, url } => {
+            VisualConnectionChainItem::Text(s) => Cow::Borrowed(s),
+            VisualConnectionChainItem::Link { text, url } => {
                 Cow::Owned(format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"))
             }
         }
@@ -46,9 +46,9 @@ impl ConnectionChainHost {
 }
 
 /// Describes the connection chain hosts and how many hops are fully connected.
-pub struct ConnectionChain {
+pub struct VisualConnectionChainState {
     /// Host display names
-    pub hosts: Vec<ConnectionChainHost>,
+    pub items: Vec<VisualConnectionChainItem>,
     /// Number of segments (between adjacent hosts) that are fully connected (green).
     /// Starts at 1 because the you → warpgate link is always established.
     pub connected_hops: usize,
@@ -67,7 +67,7 @@ fn render_segment_line(state: SegmentState, tick: usize) -> String {
         SegmentState::Connected => paint_fg(
             Color::Green,
             false,
-            &CH_SEGMENT_CONNECTED.to_string().repeat(SEG_LEN),
+            CH_SEGMENT_CONNECTED.to_string().repeat(SEG_LEN),
         ),
         SegmentState::Connecting => {
             let active_seg = tick % (SEG_LEN * 2);
@@ -78,8 +78,7 @@ fn render_segment_line(state: SegmentState, tick: usize) -> String {
                     paint_fg(
                         Color::Blue,
                         (active_seg > j) || (active_seg + 10 < j + 10 - 2),
-                        // (j + ANIM_PERIOD - tick % ANIM_PERIOD) % ANIM_PERIOD != ANIM_PERIOD - 1,
-                        &seg_ch,
+                        seg_ch,
                     )
                 })
                 .collect()
@@ -87,17 +86,17 @@ fn render_segment_line(state: SegmentState, tick: usize) -> String {
         SegmentState::Pending => paint_fg(
             Color::White,
             true,
-            &CH_SEGMENT_NOT_CONNECTED.to_string().repeat(SEG_LEN),
+            CH_SEGMENT_NOT_CONNECTED.to_string().repeat(SEG_LEN),
         ),
     }
 }
 
 /// Render the full connection chain graph for a given animation tick
 #[must_use]
-pub fn render_connection_graph(chain: &ConnectionChain, tick: usize) -> String {
+pub fn render_connection_chain(chain: &VisualConnectionChainState, tick: usize) -> String {
     let mut out = String::new();
 
-    for (seg_index, host) in chain.hosts.iter().enumerate() {
+    for (seg_index, host) in chain.items.iter().enumerate() {
         let state = if seg_index < chain.connected_hops + 1 {
             SegmentState::Connected
         } else if seg_index == chain.connected_hops + 1 {
@@ -132,7 +131,7 @@ pub fn render_connection_graph(chain: &ConnectionChain, tick: usize) -> String {
                 SegmentState::Pending => Color::White,
             },
             state == SegmentState::Pending,
-            &host.ansi(),
+            host.ansi(),
         ));
     }
 
@@ -149,7 +148,7 @@ fn erase_for_width(w: usize) -> String {
 pub struct ServiceOutput {
     progress_visible: Arc<AtomicBool>,
     last_progress_width: Arc<AtomicUsize>,
-    chain: Arc<Mutex<Option<ConnectionChain>>>,
+    chain: Arc<Mutex<Option<VisualConnectionChainState>>>,
     abort_tx: mpsc::Sender<()>,
     output_tx: broadcast::Sender<Bytes>,
 }
@@ -158,7 +157,7 @@ impl ServiceOutput {
     pub fn new() -> Self {
         let progress_visible = Arc::new(AtomicBool::new(false));
         let last_progress_width = Arc::new(AtomicUsize::new(0));
-        let chain: Arc<Mutex<Option<ConnectionChain>>> = Arc::new(Mutex::new(None));
+        let chain: Arc<Mutex<Option<VisualConnectionChainState>>> = Arc::new(Mutex::new(None));
         let (abort_tx, mut abort_rx) = mpsc::channel(1);
         let output_tx = broadcast::channel(32).0;
 
@@ -177,7 +176,7 @@ impl ServiceOutput {
                                 tick += 1;
                                 let guard = chain.lock().await;
                                 if let Some(c) = &*guard {
-                                    let frame = format!("{CURSOR_UP}\r{}", render_connection_graph(c, tick));
+                                    let frame = format!("{CURSOR_UP}\r{}", render_connection_chain(c, tick));
                                     last_progress_width.store(frame.len(), Ordering::Relaxed);
                                     let _ = output_tx.send(Bytes::from(frame.into_bytes()));
                                 }
@@ -197,9 +196,9 @@ impl ServiceOutput {
         }
     }
 
-    pub async fn start_progress(&self, hosts: Vec<ConnectionChainHost>) {
-        *self.chain.lock().await = Some(ConnectionChain {
-            hosts,
+    pub async fn start_progress(&self, hosts: Vec<VisualConnectionChainItem>) {
+        *self.chain.lock().await = Some(VisualConnectionChainState {
+            items: hosts,
             connected_hops: 1,
         });
         self.progress_visible.store(true, Ordering::Relaxed);
@@ -230,12 +229,12 @@ impl ServiceOutput {
         self.progress_visible.store(false, Ordering::Relaxed);
         let chain = self.chain.lock().await;
         let graph = if let Some(c) = &*chain {
-            let n = c.hosts.len();
-            let all_green = ConnectionChain {
-                hosts: c.hosts.clone(),
+            let n = c.items.len();
+            let all_green = VisualConnectionChainState {
+                items: c.items.clone(),
                 connected_hops: n,
             };
-            render_connection_graph(&all_green, 0)
+            render_connection_chain(&all_green, 0)
         } else {
             "".into()
         };
@@ -243,7 +242,7 @@ impl ServiceOutput {
         format!("{}{}\r\n", self.erase_display(), graph)
     }
 
-    /// String that erases the last graph line
+    /// String that erases the last line
     #[must_use]
     pub fn erase_display(&self) -> String {
         erase_for_width(self.last_progress_width.load(Ordering::Relaxed))

@@ -23,8 +23,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::{
-    Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
-    WarpgateError,
+    Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
@@ -43,12 +42,12 @@ use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::{ConnectionChainHost, paint_fg};
+use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
-    X11Request,
+    RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
+    SshRecordingMetadata, X11Request, resolve_ssh_chain,
 };
 
 #[derive(Clone)]
@@ -57,7 +56,7 @@ enum TargetSelection {
     None,
     Menu,
     NotFound(String),
-    Found(Target, TargetSSHOptions),
+    Found(Target),
 }
 
 #[derive(Debug)]
@@ -337,7 +336,7 @@ impl ServerSession {
     pub fn emit_service_message(&self, msg: &str) -> Result<()> {
         debug!("Service message: {}", msg);
 
-        let _ = self.emit_pty_output(&self.service_output.erase_display().as_bytes());
+        let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         self.emit_pty_output(
             format!(
                 "{} {}\r\n",
@@ -351,7 +350,7 @@ impl ServerSession {
     pub fn emit_pty_error(&self, msg: &str) -> Result<()> {
         if self.service_output.progress_visible() {
             self.service_output.stop_progress();
-            let _ = self.emit_pty_output(&self.service_output.erase_display().as_bytes());
+            let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         }
         self.emit_pty_output(
             format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:")).as_bytes(),
@@ -369,7 +368,7 @@ impl ServerSession {
     /// where a PTY channel is required for the host key prompt, but we've connected
     /// faster than the client could open one.
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
-        let connect_params = match &self.target {
+        let target = match &self.target {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
@@ -380,78 +379,53 @@ impl ServerSession {
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {name}");
             }
-            TargetSelection::Found(target, ssh_options) => {
-                Some((target.clone(), ssh_options.clone()))
-            }
+            TargetSelection::Found(target) => Some(target.clone()),
         };
 
-        if let Some((target, ssh_options)) = connect_params
+        if let Some(target) = target
             && self.rc_state == RCState::NotInitialized
         {
-            self.connect_remote(&target, ssh_options).await?;
+            self.connect_remote(&target).await?;
         }
 
         Ok(())
     }
 
-    async fn connect_remote(
-        &mut self,
-        target: &Target,
-        ssh_options: TargetSSHOptions,
-    ) -> Result<()> {
-        let hosts = self.resolve_chain_hosts(&target.name, &ssh_options).await?;
+    async fn connect_remote(&mut self, target: &Target) -> Result<()> {
+        let ssh_chain =
+            resolve_ssh_chain(&self.services, target.id, self.username.as_ref()).await?;
+
+        let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(ssh_options))
-            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.send_command(RCCommand::Connect(
+            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
+        ))
+        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n")?;
-        self.service_output.start_progress(hosts).await;
+        self.service_output.start_progress(visual_chain).await;
         Ok(())
     }
 
-    async fn resolve_chain_hosts(
+    async fn make_visual_connection_chain(
         &self,
-        target_name: &str,
-        ssh_options: &TargetSSHOptions,
-    ) -> Result<Vec<ConnectionChainHost>, WarpgateError> {
-        let mut jumps: Vec<_> = Vec::new();
-        let mut current_jump_id = ssh_options.jump_host;
-
-        while let Some(id) = current_jump_id {
-            let result = self
-                .services
-                .config_provider
-                .lock()
-                .await
-                .list_targets()
-                .await;
-            let Ok(targets) = result else { break };
-            let Some(t) = targets.into_iter().find(|t| t.id == id) else {
-                break;
-            };
-            jumps.push(ConnectionChainHost::Text(t.name.clone()));
-            if let TargetOptions::Ssh(opts) = t.options {
-                current_jump_id = opts.jump_host;
-            } else {
-                break;
-            }
-        }
-
-        // `jumps` follows the jump_host links from the final target outward.
-        // Reverse so the list runs in physical connection order (innermost first).
-        jumps.reverse();
-
-        let mut chain = vec![
-            ConnectionChainHost::Text("You".into()),
-            ConnectionChainHost::Link {
+        ssh_chain: &[ResolvedSshChainHost],
+    ) -> Result<Vec<VisualConnectionChainItem>, WarpgateError> {
+        let mut display = vec![
+            VisualConnectionChainItem::Text("You".into()),
+            VisualConnectionChainItem::Link {
                 text: "Warpgate".into(),
                 url: construct_external_url(None, &*self.services.config.lock().await, None)
                     .await?
                     .to_string(),
             },
         ];
-        chain.extend(jumps);
-        chain.push(ConnectionChainHost::Text(target_name.into()));
-        Ok(chain)
+        display.extend(
+            ssh_chain
+                .iter()
+                .map(|host| VisualConnectionChainItem::Text(host.name.clone())),
+        );
+
+        Ok(display)
     }
 
     async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
@@ -464,8 +438,8 @@ impl ServerSession {
                 self.request_disconnect();
                 self.disconnect_server().await;
             }
-            MenuEvent::Selected(target, ssh_options) => {
-                self.target = TargetSelection::Found(target.clone(), ssh_options.clone());
+            MenuEvent::Selected(target) => {
+                self.target = TargetSelection::Found(target.clone());
                 let _ = self.server_handle.lock().await.set_target(&target).await;
                 // clear screen ; cursor to 1;1
                 self.emit_pty_output(b"\x1b[2J\x1b[H")?;
@@ -2000,19 +1974,14 @@ impl ServerSession {
                 .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
-        let Some((target, mut ssh_options)) = target else {
+        let Some((target, _)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
             warn!("Selected target not found");
             return Ok(());
         };
 
-        // Forward username from the authenticated user to the target, if target has no username
-        if ssh_options.username.is_empty() {
-            ssh_options.username = user_info.username.clone();
-        }
-
         let _ = self.server_handle.lock().await.set_target(&target).await;
-        self.target = TargetSelection::Found(target, ssh_options);
+        self.target = TargetSelection::Found(target);
         Ok(())
     }
 

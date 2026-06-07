@@ -3,11 +3,9 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{
-    AdminPermission, SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError,
-};
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient};
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -16,12 +14,7 @@ pub struct Api;
 
 #[derive(Object)]
 struct CheckSshHostKeyRequest {
-    host: String,
-    port: u16,
-    username: Option<String>,
-    allow_insecure_algos: Option<bool>,
-    auth: Option<SSHTargetAuth>,
-    jump_host: Option<Uuid>,
+    target_id: Uuid,
 }
 
 #[derive(Object)]
@@ -53,23 +46,16 @@ impl Api {
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
+        let ssh_chain = resolve_ssh_chain(ctx.services(), body.target_id, ctx.auth.username())
+            .await?
+            .into_iter()
+            .map(|x| x.ssh_options)
+            .collect::<Vec<_>>();
 
-        let _ = handles.command_tx.send((
-            RCCommand::Connect(TargetSSHOptions {
-                host: body.host.clone(),
-                port: body.port,
-                username: body.username.clone().unwrap_or_default(),
-                allow_insecure_algos: body.allow_insecure_algos,
-                auth: body.auth.clone().unwrap_or_else(|| {
-                    SSHTargetAuth::Password(SshTargetPasswordAuth {
-                        password: String::new().into(),
-                    })
-                }),
-                jump_host: body.jump_host.clone(),
-            }),
-            None,
-        ));
+        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
+        let _ = handles
+            .command_tx
+            .send((RCCommand::Connect(ssh_chain), None));
 
         let fut = async move {
             let key = loop {
