@@ -1703,7 +1703,7 @@ impl ServerSession {
                 let mut auth_instructions = String::new();
                 let mut auth_prompts = vec![];
 
-                let Some(auth_state) = self.auth_state.as_ref() else {
+                let Some(auth_state) = self.auth_state.as_ref().cloned() else {
                     return Ok(russh::server::Auth::Reject {
                         proceed_with_methods: None,
                         partial_success: false,
@@ -1722,6 +1722,37 @@ impl ServerSession {
                 }
 
                 if kinds.contains(&CredentialKind::WebUserApproval) {
+                    let username = auth_state.lock().await.user_info().username.clone();
+                    let has_web_session = self
+                        .services
+                        .active_web_sessions
+                        .lock()
+                        .await
+                        .has_fresh(&username, self.remote_address.ip());
+
+                    if has_web_session {
+                        let auth_id = {
+                            let mut state = auth_state.lock().await;
+                            state.add_valid_credential(AuthCredential::WebUserApproval);
+                            *state.id()
+                        };
+                        info!(
+                            user = %username,
+                            "Auto-approving SSH WebUserApproval via active browser session"
+                        );
+                        if let AuthResult::Accepted { .. } =
+                            self.try_auth_lazy(&selector, None).await?
+                        {
+                            self.services
+                                .auth_state_store
+                                .lock()
+                                .await
+                                .complete(&auth_id)
+                                .await;
+                            return Ok(russh::server::Auth::Accept);
+                        }
+                    }
+
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
 

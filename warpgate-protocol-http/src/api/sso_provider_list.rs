@@ -13,6 +13,7 @@ use warpgate_common::WarpgateError;
 use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::SessionAuthorization;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
@@ -315,7 +316,22 @@ impl Api {
         }
 
         if let AuthResult::Accepted { user_info } = state.verify() {
+            let username_for_ttl = user_info.username.clone();
             authorize_session(req, &ctx, user_info).await?;
+            if let (Some(secs), Some(ip)) = (
+                provider_config.active_web_session_ttl_seconds,
+                remote_ip,
+            ) {
+                ctx.services()
+                    .active_web_sessions
+                    .lock()
+                    .await
+                    .touch(
+                        &username_for_ttl,
+                        std::time::Duration::from_secs(secs),
+                        ip,
+                    );
+            }
             state.emit_authenticated_event_once();
             let state_id = *state.id();
             drop(state);
@@ -455,6 +471,13 @@ impl Api {
         let client = SsoClient::new(provider_config.provider.clone())?;
         let logout_url = client.logout(state.token, return_url).await?;
 
+        if let Some(SessionAuthorization::User { username, .. }) = session.get_auth() {
+            ctx.services()
+                .active_web_sessions
+                .lock()
+                .await
+                .forget(&username);
+        }
         logout(session, &mut *session_middleware.lock().await);
 
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
