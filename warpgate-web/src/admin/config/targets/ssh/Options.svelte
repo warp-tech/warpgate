@@ -8,6 +8,7 @@
     import { adminPermissions } from 'admin/lib/store'
     import { serverInfo } from 'gateway/lib/store'
     import { TargetKind } from 'gateway/lib/api'
+    import { untrack } from 'svelte'
 
     interface Props {
         id: string,
@@ -28,6 +29,19 @@
     api.getTargets().then(targets => {
         sshTargets = targets.filter(t => t.options.kind === TargetKind.Ssh && t.id !== id)
     })
+
+    let jumpHostSelectValue = $state('')
+
+    $effect(() => {
+        const val = jumpHostSelectValue
+        untrack(() => { options.jumpHost = val || undefined })
+    })
+
+    // Re-sync from options when the prop is reassigned (e.g. after save)
+    $effect(() => {
+        const jumpHost = options.jumpHost
+        untrack(() => { jumpHostSelectValue = jumpHost ?? '' })
+    })
 </script>
 
 <h4 class="mt-4">Connection</h4>
@@ -36,7 +50,7 @@
     {#if sshTargets.length}
         <div class="col">
             <FormGroup floating label="Jump host">
-                <select class="form-control" bind:value={options.jumpHost}>
+                <select class="form-control" bind:value={jumpHostSelectValue}>
                     <option value="">Direct connection</option>
                     {#each sshTargets as target (target.id)}
                         <option value={target.id}>{target.name}</option>
