@@ -15,7 +15,7 @@ mysql_common = { version = "0.34", default-features = false }
 password-hash.workspace = true
 rand.workspace = true
 rustls.workspace = true
-sha1 = { version = "0.10", default-features = false }
+sha1 = { version = "0.11", default-features = false }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
