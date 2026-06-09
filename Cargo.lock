@@ -5718,7 +5718,6 @@ checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
 dependencies = [
  "dyn-clone",
  "ref-cast",
- "schemars_derive",
  "serde",
  "serde_json",
 ]
@@ -5731,15 +5730,16 @@ checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "schemars_derive"
-version = "0.9.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5016d94c77c6d32f0b8e08b781f7dc8a90c2007d4e77472cc2807bc10a8438fe"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7607,7 +7607,7 @@ dependencies = [
  "rcgen",
  "reqwest 0.13.4",
  "rustls 0.23.40",
- "schemars 0.9.0",
+ "schemars 1.2.1",
  "sd-notify",
  "sea-orm",
  "serde_json",
@@ -7741,7 +7741,7 @@ dependencies = [
  "rustls 0.23.40",
  "rustls-native-certs",
  "rustls-pki-types",
- "schemars 0.9.0",
+ "schemars 1.2.1",
  "sea-orm",
  "serde",
  "serde_json",
@@ -8067,7 +8067,7 @@ dependencies = [
  "jsonwebtoken",
  "openidconnect",
  "reqwest 0.12.28",
- "schemars 0.9.0",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "subtle",
