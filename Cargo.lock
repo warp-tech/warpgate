@@ -3473,7 +3473,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "url",
- "x509-parser 0.18.1",
+ "x509-parser",
 ]
 
 [[package]]
@@ -5087,7 +5087,7 @@ dependencies = [
  "pem",
  "rustls-pki-types",
  "time",
- "x509-parser 0.18.1",
+ "x509-parser",
  "yasna",
  "zeroize",
 ]
@@ -7711,7 +7711,7 @@ dependencies = [
  "tracing",
  "uuid",
  "x509-cert",
- "x509-parser 0.17.0",
+ "x509-parser",
 ]
 
 [[package]]
@@ -7764,7 +7764,7 @@ dependencies = [
  "warpgate-sso",
  "warpgate-tls",
  "webpki",
- "x509-parser 0.17.0",
+ "x509-parser",
 ]
 
 [[package]]
@@ -8096,7 +8096,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tracing",
  "webpki",
- "x509-parser 0.17.0",
+ "x509-parser",
 ]
 
 [[package]]
@@ -8936,23 +8936,6 @@ dependencies = [
  "spki 0.7.3",
  "thiserror 2.0.18",
  "zeroize",
-]
-
-[[package]]
-name = "x509-parser"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4569f339c0c402346d4a75a9e39cf8dad310e287eef1ff56d4c68e5067f53460"
-dependencies = [
- "asn1-rs",
- "data-encoding",
- "der-parser",
- "lazy_static",
- "nom",
- "oid-registry",
- "rusticata-macros",
- "thiserror 2.0.18",
- "time",
 ]
 
 [[package]]
