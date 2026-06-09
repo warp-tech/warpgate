@@ -1,28 +1,25 @@
 [package]
-edition = "2024"
-license = "Apache-2.0"
 name = "warpgate-core"
 version = "0.25.2"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
-warpgate-common = { path = "../warpgate-common" }
-warpgate-db-entities = { path = "../warpgate-db-entities" }
-warpgate-db-migrations = { path = "../warpgate-db-migrations" }
-warpgate-ldap = { path = "../warpgate-ldap" }
 
 anyhow.workspace = true
 argon2.workspace = true
-async-trait = "0.1"
+async-trait.workspace = true
 bytes.workspace = true
 data-encoding.workspace = true
 dialoguer.workspace = true
 enum_dispatch.workspace = true
-humantime-serde = "1.1"
 futures.workspace = true
+governor.workspace = true
+humantime-serde = { version = "1.1", default-features = false }
 ipnet.workspace = true
 ldap3.workspace = true
-packet = "0.1"
+packet = { version = "0.1", default-features = false }
 password-hash.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
@@ -30,11 +27,12 @@ rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
 russh.workspace = true
+rustls.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-time.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
@@ -42,10 +40,12 @@ tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-db-migrations = { path = "../warpgate-db-migrations" }
+warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
-rustls.workspace = true
 webpki = { version = "0.22", default-features = false }
-governor.workspace = true
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

@@ -1,24 +1,27 @@
 [package]
-edition = "2024"
-license = "Apache-2.0"
 name = "warpgate-ca"
 version = "0.25.2"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
+aws-lc-rs = { version = "1", default-features = false }
 bytes.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
+const-oid = { version = "0.9", default-features = false }
 data-encoding.workspace = true
-tracing.workspace = true
-rcgen.workspace = true
-x509-parser.workspace = true
-x509-cert = { version = "0.2", features = ["builder", "signature"] }
-aws-lc-rs = "1"
-der = "0.7"
-pem = "3.0"
-spki = "0.7"
-const-oid = "0.9"
-uuid.workspace = true
+der = { version = "0.7", default-features = false }
 
 hex.workspace = true
+pem = { version = "3.0", default-features = false }
+rcgen.workspace = true
+spki = { version = "0.7", default-features = false }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+x509-cert = { version = "0.2", features = [
+    "builder",
+    "signature",
+], default-features = false }
+x509-parser.workspace = true

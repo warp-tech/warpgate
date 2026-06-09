@@ -1,30 +1,30 @@
 [package]
-edition = "2024"
-license = "Apache-2.0"
 name = "warpgate-protocol-mysql"
 version = "0.25.2"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
-warpgate-aws = { path = "../warpgate-aws", default-features = false }
-warpgate-common = { path = "../warpgate-common", default-features = false }
-warpgate-tls = { path = "../warpgate-tls", default-features = false }
-warpgate-core = { path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
-warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }
 anyhow.workspace = true
-async-trait = { version = "0.1", default-features = false }
+async-trait.workspace = true
+bytes.workspace = true
+flate2 = { version = "1", features = ["zlib"], default-features = false }
 futures.workspace = true
+mysql_common = { version = "0.34", default-features = false }
+password-hash.workspace = true
+rand.workspace = true
+rustls.workspace = true
+sha1 = { version = "0.10", default-features = false }
+thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-bytes.workspace = true
-mysql_common = { version = "0.34", default-features = false }
-flate2 = { version = "1", features = ["zlib"], default-features = false }
-rand.workspace = true
-sha1 = { version = "0.10", default-features = false }
-password-hash.workspace = true
-rustls.workspace = true
-tokio-rustls.workspace = true
-thiserror.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
 webpki = { version = "0.22", default-features = false }
