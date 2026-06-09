@@ -4,7 +4,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set};
+use sea_orm::{EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -43,7 +43,7 @@ pub struct SetupState {
 }
 
 impl SetupState {
-    pub fn completed(&self) -> bool {
+    pub const fn completed(&self) -> bool {
         self.tutorial_dismissed || (self.has_targets && self.has_users)
     }
 }
@@ -153,7 +153,7 @@ impl Api {
             };
             if user_is_admin {
                 let state = SetupState {
-                    has_targets: targets.len() > 0,
+                    has_targets: !targets.is_empty(),
                     has_users: users.len() > 1,
                     tutorial_dismissed: parameters.tutorial_dismissed,
                 };
@@ -215,7 +215,7 @@ impl Api {
                 let perms = {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
-                        .filter(User::Column::Username.eq(username))
+                        .filter(User::Entity::username_eq_ci(username))
                         .one(&*db)
                         .await
                         .context("loading user")?
@@ -345,7 +345,7 @@ impl Api {
         }
 
         let db = ctx.services().db.lock().await;
-        let mut parameters = Parameters::Entity::get(&*db)
+        let mut parameters = Parameters::Entity::get(&db)
             .await
             .context("loading parameters")?
             .into_active_model();

@@ -139,7 +139,7 @@ impl AuthStateStore {
             .list_users()
             .await?
             .iter()
-            .find(|u| u.username == username)
+            .find(|u| u.username.to_lowercase() == username.to_lowercase())
             .cloned()
         else {
             return Err(WarpgateError::UserNotFound(username.into()));

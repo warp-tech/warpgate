@@ -168,7 +168,7 @@ impl DatabaseConfigProvider {
         }
 
         let existing_user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(&preferred_username))
+            .filter(entities::User::Entity::username_eq_ci(&preferred_username))
             .one(db)
             .await?;
 
@@ -305,7 +305,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -460,7 +460,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -571,7 +571,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -624,7 +624,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
@@ -685,7 +685,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;

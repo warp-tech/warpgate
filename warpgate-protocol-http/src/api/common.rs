@@ -1,5 +1,5 @@
 use poem::session::Session;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::info;
 use warpgate_common::{SessionId, WarpgateError};
 use warpgate_common_http::RequestAuthorization;
@@ -43,7 +43,7 @@ pub async fn get_user(
     };
 
     let Some(user_model) = entities::User::Entity::find()
-        .filter(entities::User::Column::Username.eq(username))
+        .filter(entities::User::Entity::username_eq_ci(username))
         .one(db)
         .await?
     else {
