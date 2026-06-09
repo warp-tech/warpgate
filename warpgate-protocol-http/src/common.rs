@@ -122,7 +122,7 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
     let db = services.db.lock().await;
 
     let Some(user_model) = User::Entity::find()
-        .filter(User::Column::Username.eq(username))
+        .filter(User::Entity::username_eq_ci(username))
         .one(&*db)
         .await
         .map_err(InternalServerError)?

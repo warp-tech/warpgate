@@ -4,6 +4,7 @@ use ipnet::IpNet;
 use poem_openapi::Object;
 use sea_orm::Set;
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
@@ -136,6 +137,12 @@ impl RelationTrait for Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Entity {
+    pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
+    }
+}
 
 impl TryFrom<Model> for User {
     type Error = WarpgateError;

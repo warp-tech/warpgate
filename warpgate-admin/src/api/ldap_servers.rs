@@ -63,7 +63,9 @@ impl ImportApi {
         for dn in &body.dns {
             if let Some(user) = all_users.iter().find(|u| &u.dn == dn) {
                 let existing = warpgate_db_entities::User::Entity::find()
-                    .filter(warpgate_db_entities::User::Column::Username.eq(&user.username))
+                    .filter(warpgate_db_entities::User::Entity::username_eq_ci(
+                        &user.username,
+                    ))
                     .one(&*db)
                     .await?;
                 if existing.is_none() {

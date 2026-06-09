@@ -37,7 +37,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
     let user = match username {
         Some(username) => users
             .iter_mut()
-            .find(|x| &x.username == username)
+            .find(|x| x.username.to_lowercase() == username.to_lowercase())
             .ok_or_else(|| anyhow::anyhow!("User not found"))?,
         None =>
         {

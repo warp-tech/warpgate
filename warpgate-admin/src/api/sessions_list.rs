@@ -6,6 +6,8 @@ use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
+use sea_orm::prelude::Expr;
+use sea_orm::sea_query::Func;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -58,7 +60,10 @@ impl Api {
             q = q.filter(Session::Column::Username.is_not_null());
         }
         if let Some(username_filter) = username.as_ref() {
-            q = q.filter(Session::Column::Username.eq(username_filter.as_str()));
+            q = q.filter(
+                Expr::expr(Func::lower(Expr::col(Session::Column::Username)))
+                    .eq(username_filter.to_lowercase()),
+            );
         }
 
         Ok(GetSessionsResponse::Ok(Json(
