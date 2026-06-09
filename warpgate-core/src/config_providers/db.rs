@@ -279,7 +279,9 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db: tokio::sync::MutexGuard<'_, DatabaseConnection> = self.db.lock().await;
 
         let hostname_query = match db.get_database_backend() {
-            DatabaseBackend::MySql => Expr::cust("options->>'$.http.external_host'"),
+            DatabaseBackend::MySql => {
+                Expr::cust("JSON_UNQUOTE(JSON_EXTRACT(options, '$.http.external_host'))")
+            }
             DatabaseBackend::Postgres => Expr::cust(r"options->'http'->>'external_host'"),
             DatabaseBackend::Sqlite => Expr::cust(r"json_extract(options, '$.http.external_host')"),
         };
