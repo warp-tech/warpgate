@@ -5359,8 +5359,9 @@ dependencies = [
 
 [[package]]
 name = "rsasl"
-version = "2.2.1"
-source = "git+https://github.com/Eugeny/rsasl.git?rev=cbf4b0f3e05c73b33ac332718ab6e955eaa58166#cbf4b0f3e05c73b33ac332718ab6e955eaa58166"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed828a88913fd477c73bc3768b05d4b335ee775e29f2397bb59b9a4dd69ffb83"
 dependencies = [
  "base64 0.22.1",
  "digest 0.10.7",
