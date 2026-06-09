@@ -561,6 +561,14 @@ impl ServerSession {
         Ok(())
     }
 
+    async fn maybe_start_target_selection_menu(&self, channel_id: Uuid) -> Result<()> {
+        if matches!(self.target, TargetSelection::Menu) && self.pty_channels.contains(&channel_id) {
+            self.start_target_selection_menu(channel_id).await?;
+        }
+
+        Ok(())
+    }
+
     async fn handle_server_handler_event(&mut self, event: ServerHandlerEvent) -> Result<()> {
         match event {
             ServerHandlerEvent::Authenticated(handle) => {
@@ -637,10 +645,7 @@ impl ServerSession {
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
                 self.maybe_connect_remote().await?;
-
-                if matches!(self.target, TargetSelection::Menu) {
-                    self.start_target_selection_menu(channel_id).await?;
-                }
+                self.maybe_start_target_selection_menu(channel_id).await?;
 
                 let _ = self.send_command(RCCommand::Channel(
                     channel_id,
@@ -1306,6 +1311,7 @@ impl ServerSession {
 
         let is_scp = command == "scp" || command.starts_with("scp ");
         let _ = self.maybe_connect_remote().await;
+        self.maybe_start_target_selection_menu(channel_id).await?;
         let _ = self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestExec(command.to_string()),
