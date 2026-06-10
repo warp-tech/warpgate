@@ -30,7 +30,7 @@
         sshTargets = targets.filter(t => t.options.kind === TargetKind.Ssh && t.id !== id)
     })
 
-    let jumpHostSelectValue = $state('')
+    let jumpHostSelectValue = $state(options.jumpHost ?? '')
 
     $effect(() => {
         const val = jumpHostSelectValue
