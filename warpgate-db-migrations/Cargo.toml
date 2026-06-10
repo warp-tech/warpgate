@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-db-migrations"
-version = "0.25.2"
+version = "0.25.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
