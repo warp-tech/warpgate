@@ -22,7 +22,7 @@ russh.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 termcolor = { version = "1", default-features = false }
-termwiz = { version = "0.22", default-features = false }
+termwiz = { version = "0.23", default-features = false }
 thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
