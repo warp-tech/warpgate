@@ -30,6 +30,7 @@
         sshTargets = targets.filter(t => t.options.kind === TargetKind.Ssh && t.id !== id)
     })
 
+    // svelte-ignore state_referenced_locally
     let jumpHostSelectValue = $state(options.jumpHost ?? '')
 
     $effect(() => {
