@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-tls"
-version = "0.25.3"
+version = "0.25.4"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
