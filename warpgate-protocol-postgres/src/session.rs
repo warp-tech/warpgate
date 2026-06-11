@@ -417,7 +417,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let mut client = match PostgresClient::connect(
             &options,
             ConnectionOptions {
-                protocol_version: ProtocolVersion::PROTOCOL3_2,
+                protocol_version: self.decode_context.protocol_version,
                 parameters: startup.parameters,
             },
         )
