@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.24.0-30-gcc876528-modified"
+    "version": "v0.25.3-modified"
   },
   "servers": [
     {
@@ -5176,6 +5176,13 @@
           "MissingSpecial"
         ]
       },
+      "PostgresProtocolVersion": {
+        "type": "string",
+        "enum": [
+          "3.0",
+          "3.2"
+        ]
+      },
       "Recording": {
         "type": "object",
         "title": "Recording",
@@ -5859,6 +5866,9 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "protocol_version": {
+            "$ref": "#/components/schemas/PostgresProtocolVersion"
           }
         }
       },

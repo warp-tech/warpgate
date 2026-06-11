@@ -19,7 +19,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
-use warpgate_common::{Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::{
@@ -414,10 +414,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         startup: pgwire::messages::startup::Startup,
         options: TargetPostgresOptions,
     ) -> Result<(), PostgresError> {
+        let target_protocol_version = match options.protocol_version.unwrap_or_default() {
+            PostgresProtocolVersion::V3_0 => ProtocolVersion::PROTOCOL3_0,
+            PostgresProtocolVersion::V3_2 => ProtocolVersion::PROTOCOL3_2,
+        };
+
         let mut client = match PostgresClient::connect(
             &options,
             ConnectionOptions {
-                protocol_version: ProtocolVersion::PROTOCOL3_2,
+                protocol_version: target_protocol_version,
                 parameters: startup.parameters,
             },
         )
