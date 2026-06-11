@@ -11,7 +11,7 @@ async-trait.workspace = true
 bytes.workspace = true
 flate2 = { version = "1", features = ["zlib"], default-features = false }
 futures.workspace = true
-mysql_common = { version = "0.34", default-features = false }
+mysql_common = { version = "0.37", default-features = false }
 password-hash.workspace = true
 rand.workspace = true
 rustls.workspace = true
