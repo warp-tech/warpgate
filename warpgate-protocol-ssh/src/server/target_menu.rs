@@ -1,9 +1,10 @@
-use std::io::Cursor;
+use std::io::{self, Cursor};
 use std::ops::Deref;
 
 use bytes::Bytes;
-use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
+use ratatui::buffer::Cell;
+use ratatui::layout::{Constraint, Layout, Position, Rect, Size};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{
@@ -19,7 +20,99 @@ use crate::server::session::Event;
 
 const HEADER_HEIGHT: u16 = 6;
 
-type MenuTerminal = Terminal<CrosstermBackend<Cursor<Vec<u8>>>>;
+type MenuTerminal = Terminal<VirtualTerminalBackend>;
+
+/// A virtual backend that renders to a buffer and fakes a terminal size
+/// need this because `CrosstermBackend` checks PTY size by querying the actual local PTY
+struct VirtualTerminalBackend {
+    inner: CrosstermBackend<Cursor<Vec<u8>>>,
+    size: Size,
+    cursor_position: Position,
+}
+
+impl VirtualTerminalBackend {
+    const fn new(size: Size) -> Self {
+        Self {
+            inner: CrosstermBackend::new(Cursor::new(Vec::new())),
+            size,
+            cursor_position: Position::ORIGIN,
+        }
+    }
+
+    const fn set_size(&mut self, size: Size) {
+        self.size = size;
+    }
+
+    /// Returns all output produced since the last call and resets the buffer.
+    fn take_output(&mut self) -> Vec<u8> {
+        let writer = self.inner.writer_mut();
+        writer.set_position(0);
+        std::mem::take(writer.get_mut())
+    }
+}
+
+impl Backend for VirtualTerminalBackend {
+    type Error = io::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        let mut last_cell: Option<(u16, u16)> = None;
+        self.inner
+            .draw(content.inspect(|(x, y, _)| last_cell = Some((*x, *y))))?;
+
+        // Cursor is now behind the last drawn cell
+        if let Some((x, y)) = last_cell {
+            self.cursor_position = Position {
+                x: x.saturating_add(1).min(self.size.width.saturating_sub(1)),
+                y,
+            };
+        }
+        Ok(())
+    }
+
+    fn hide_cursor(&mut self) -> io::Result<()> {
+        self.inner.hide_cursor()
+    }
+
+    fn show_cursor(&mut self) -> io::Result<()> {
+        self.inner.show_cursor()
+    }
+
+    fn get_cursor_position(&mut self) -> io::Result<Position> {
+        Ok(self.cursor_position)
+    }
+
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+        let position = position.into();
+        self.cursor_position = position;
+        self.inner.set_cursor_position(position)
+    }
+
+    fn clear(&mut self) -> io::Result<()> {
+        self.inner.clear()
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
+        self.inner.clear_region(clear_type)
+    }
+
+    fn size(&self) -> io::Result<Size> {
+        Ok(self.size)
+    }
+
+    fn window_size(&mut self) -> io::Result<WindowSize> {
+        Ok(WindowSize {
+            columns_rows: self.size,
+            pixels: Size::new(0, 0),
+        })
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 struct DrawState {
     list_state: ListState,
@@ -70,7 +163,7 @@ impl<T: Clone> TargetMenu<T> {
     ) -> Result<Self, WarpgateError> {
         entries.sort_by(|a, b| a.label.cmp(&b.label));
         let terminal = Terminal::with_options(
-            CrosstermBackend::new(Cursor::new(Vec::new())),
+            VirtualTerminalBackend::new(Size::new(terminal_width, terminal_height)),
             TerminalOptions {
                 viewport: Viewport::Fixed(Rect::default()),
             },
@@ -200,13 +293,8 @@ impl<T: Clone> TargetMenu<T> {
 
         let area = Rect::new(0, 0, self.terminal_width, self.terminal_height);
 
-        {
-            let w = self.terminal.backend_mut().writer_mut();
-            w.get_mut().clear();
-            w.set_position(0);
-        }
-
         if area != self.last_area {
+            self.terminal.backend_mut().set_size(area.as_size());
             self.terminal.resize(area)?;
             self.last_area = area;
         }
@@ -301,7 +389,7 @@ impl<T: Clone> TargetMenu<T> {
 
         self.list_state = draw_state.list_state;
 
-        let bytes = self.terminal.backend().writer().get_ref().clone();
+        let bytes = self.terminal.backend_mut().take_output();
         String::from_utf8(bytes).map_err(WarpgateError::other)
     }
 
@@ -372,13 +460,9 @@ impl<T: Clone> TargetMenu<T> {
 
     /// restore terminal state
     pub fn cleanup(&mut self) -> Result<String, WarpgateError> {
-        {
-            let w = self.terminal.backend_mut().writer_mut();
-            w.get_mut().clear();
-            w.set_position(0);
-        }
+        let _ = self.terminal.backend_mut().take_output();
         self.terminal.show_cursor()?;
-        let bytes = self.terminal.backend().writer().get_ref().clone();
+        let bytes = self.terminal.backend_mut().take_output();
         String::from_utf8(bytes).map_err(WarpgateError::other)
     }
 }
@@ -394,86 +478,171 @@ pub fn spawn_target_menu_loop(
 ) -> anyhow::Result<()> {
     let name = format!("SSH {id} target menu loop");
     tokio::task::Builder::new().name(&name).spawn(async move {
-        let mut menu = TargetMenu::new(
-            entries
-                .into_iter()
-                .map(|(target, options)| MenuEntry {
-                    label: target.name.clone(),
-                    value: (target, options),
-                })
-                .collect(),
+        if let Err(error) = run_target_menu_loop(
+            entries,
             username,
+            &mut subscription,
+            &sender,
             terminal_width,
             terminal_height,
-        )?;
-
-        if sender
-            .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.render()?))))
-            .await
-            .is_err()
+        )
+        .await
         {
-            return Ok::<(), WarpgateError>(());
+            tracing::error!(?error, "Target menu error");
+            let _ = sender.send_once(Event::Menu(MenuEvent::Abort)).await;
         }
+    })?;
 
-        while let Some(event) = subscription.recv().await {
-            match event {
-                Event::MenuRedraw(new_width, new_height) => {
-                    menu.terminal_width = new_width;
-                    menu.terminal_height = new_height;
+    Ok(())
+}
+
+async fn run_target_menu_loop(
+    entries: Vec<(Target, TargetSSHOptions)>,
+    username: String,
+    subscription: &mut EventSubscription<Event>,
+    sender: &EventSender<Event>,
+    terminal_width: u16,
+    terminal_height: u16,
+) -> Result<(), WarpgateError> {
+    let mut menu = TargetMenu::new(
+        entries
+            .into_iter()
+            .map(|(target, options)| MenuEntry {
+                label: target.name.clone(),
+                value: (target, options),
+            })
+            .collect(),
+        username,
+        terminal_width,
+        terminal_height,
+    )?;
+
+    if sender
+        .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.render()?))))
+        .await
+        .is_err()
+    {
+        return Ok(());
+    }
+
+    while let Some(event) = subscription.recv().await {
+        match event {
+            Event::MenuRedraw(new_width, new_height) => {
+                menu.terminal_width = new_width;
+                menu.terminal_height = new_height;
+                if sender
+                    .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.render()?))))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Event::ConsoleInput(data) => {
+                let action = match menu.handle_input(&data) {
+                    None => None,
+                    Some(MenuInputResult::Redraw) => {
+                        Some(MenuEvent::Render(Bytes::from(menu.render()?)))
+                    }
+                    Some(MenuInputResult::Abort) => Some(MenuEvent::Abort),
+                    Some(MenuInputResult::Selected((target, _options))) => {
+                        Some(MenuEvent::Selected(target))
+                    }
+                };
+
+                let terminal = matches!(action, Some(MenuEvent::Selected(..) | MenuEvent::Abort));
+
+                if terminal {
+                    // restore terminal state
                     if sender
-                        .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.render()?))))
+                        .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.cleanup()?))))
                         .await
                         .is_err()
                     {
                         break;
                     }
                 }
-                Event::ConsoleInput(data) => {
-                    let action = match menu.handle_input(&data) {
-                        None => None,
-                        Some(MenuInputResult::Redraw) => {
-                            Some(MenuEvent::Render(Bytes::from(menu.render()?)))
-                        }
-                        Some(MenuInputResult::Abort) => Some(MenuEvent::Abort),
-                        Some(MenuInputResult::Selected((target, _options))) => {
-                            Some(MenuEvent::Selected(target))
-                        }
-                    };
 
-                    let terminal =
-                        matches!(action, Some(MenuEvent::Selected(..) | MenuEvent::Abort));
-
-                    if terminal {
-                        // restore terminal state
-                        if sender
-                            .send_once(Event::Menu(MenuEvent::Render(Bytes::from(menu.cleanup()?))))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-
-                    if let Some(action) = action
-                        && sender.send_once(Event::Menu(action)).await.is_err()
-                    {
-                        break;
-                    }
-
-                    if terminal {
-                        break;
-                    }
+                if let Some(action) = action
+                    && sender.send_once(Event::Menu(action)).await.is_err()
+                {
+                    break;
                 }
-                Event::Command(_)
-                | Event::ServerHandler(_)
-                | Event::ServiceOutput(_)
-                | Event::Client(_)
-                | Event::Menu(_) => {}
-            }
-        }
 
-        Ok(())
-    })?;
+                if terminal {
+                    break;
+                }
+            }
+            Event::Command(_)
+            | Event::ServerHandler(_)
+            | Event::ServiceOutput(_)
+            | Event::Client(_)
+            | Event::Menu(_) => {}
+        }
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_menu() -> TargetMenu<u32> {
+        // Must work without a local TTY (Warpgate normally runs without one) -
+        // this is what regressed in #2050.
+        TargetMenu::new(
+            vec![
+                MenuEntry {
+                    label: "alpha".into(),
+                    value: 1,
+                },
+                MenuEntry {
+                    label: "bravo".into(),
+                    value: 2,
+                },
+            ],
+            "user".into(),
+            120,
+            40,
+        )
+        .expect("menu creation should not require a local TTY")
+    }
+
+    #[test]
+    fn renders_without_a_local_tty() {
+        let mut menu = make_menu();
+        let out = menu
+            .render()
+            .expect("rendering should not require a local TTY");
+        assert!(out.contains("alpha"));
+        assert!(out.contains("bravo"));
+        assert!(out.contains("Warpgate"));
+    }
+
+    #[test]
+    fn handles_input_and_selection() {
+        let mut menu = make_menu();
+        menu.render().expect("initial render failed");
+
+        // Down arrow
+        let result = menu.handle_input(b"\x1b[B");
+        assert!(matches!(result, Some(MenuInputResult::Redraw)));
+        menu.render().expect("redraw failed");
+
+        // Enter selects the second entry
+        let result = menu.handle_input(b"\r");
+        assert!(matches!(result, Some(MenuInputResult::Selected(2))));
+    }
+
+    #[test]
+    fn resize_renders_full_frame() {
+        let mut menu = make_menu();
+        menu.render().expect("initial render failed");
+
+        menu.terminal_width = 80;
+        menu.terminal_height = 24;
+        let out = menu.render().expect("render after resize failed");
+        assert!(out.contains("alpha"));
+    }
 }

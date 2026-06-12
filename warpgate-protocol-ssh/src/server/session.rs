@@ -410,15 +410,17 @@ impl ServerSession {
         &self,
         ssh_chain: &[ResolvedSshChainHost],
     ) -> Result<Vec<VisualConnectionChainItem>, WarpgateError> {
-        let mut display = vec![
-            VisualConnectionChainItem::Text("You".into()),
-            VisualConnectionChainItem::Link {
+        let maybe_ext_url =
+            construct_external_url(None, &*self.services.config.lock().await, None).await;
+        let warpgate_item = match maybe_ext_url {
+            Ok(url) => VisualConnectionChainItem::Link {
                 text: "Warpgate".into(),
-                url: construct_external_url(None, &*self.services.config.lock().await, None)
-                    .await?
-                    .to_string(),
+                url: url.to_string(),
             },
-        ];
+            Err(_) => VisualConnectionChainItem::Text("Warpgate".into()),
+        };
+
+        let mut display = vec![VisualConnectionChainItem::Text("You".into()), warpgate_item];
         display.extend(
             ssh_chain
                 .iter()
