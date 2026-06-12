@@ -95,6 +95,8 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         let default_data_path = "/var/lib/warpgate".to_string();
         #[cfg(target_os = "macos")]
         let default_data_path = "/usr/local/var/lib/warpgate".to_string();
+        #[cfg(target_os = "freebsd")]
+        let default_data_path = "/usr/local/var/warpgate".to_string();
 
         if is_docker() {
             "/data".to_owned()
