@@ -52,6 +52,7 @@
     "mysql": {
       "$ref": "#/$defs/MySqlConfig",
       "default": {
+        "advertised_version": "8.0.3-Warpgate",
         "certificate": "",
         "enable": false,
         "external_host": null,
@@ -251,6 +252,11 @@
     "MySqlConfig": {
       "type": "object",
       "properties": {
+        "advertised_version": {
+          "description": "The server version advertised to clients during the handshake.\nIt can't match the target's version since the target is only known\nafter the handshake, but clients use it to pick a protocol dialect.",
+          "type": "string",
+          "default": "8.0.3-Warpgate"
+        },
         "certificate": {
           "type": "string",
           "default": ""

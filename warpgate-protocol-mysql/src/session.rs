@@ -94,9 +94,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         let challenge_2 = challenge_1.split_off(8);
         let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
 
+        let advertised_version = {
+            let config = self.services.config.lock().await;
+            config.store.mysql.advertised_version.clone()
+        };
+
         let handshake = Handshake {
             protocol_version: 10,
-            server_version: "8.0.0-Warpgate".to_owned(),
+            server_version: advertised_version,
             connection_id: 1,
             auth_plugin_data: challenge_chain,
             server_capabilities: self.capabilities,
