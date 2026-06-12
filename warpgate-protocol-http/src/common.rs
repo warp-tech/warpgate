@@ -169,6 +169,15 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
 }
 
 pub fn gateway_redirect(req: &Request) -> Response {
+    // Only do a login redirect for document requests
+    if let Some(mode) = req.headers().get(HeaderName::from_static("sec-fetch-mode"))
+        && mode != "navigate"
+    {
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .finish();
+    }
+
     let path = req
         .original_uri()
         .path_and_query()
@@ -388,7 +397,38 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use super::host_is_subdomain_of_or_equal;
+    use super::{StatusCode, gateway_redirect, host_is_subdomain_of_or_equal};
+
+    #[test]
+    fn gateway_redirect_navigation_redirects_to_login() {
+        for mode in [None, Some("navigate")] {
+            let mut req = poem::Request::builder().uri_str("/api/data");
+            if let Some(mode) = mode {
+                req = req.header("sec-fetch-mode", mode);
+            }
+            let resp = gateway_redirect(&req.finish());
+            assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+            let location = resp
+                .headers()
+                .get(http::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            assert!(location.starts_with("/@warpgate#/login"));
+        }
+    }
+
+    #[test]
+    fn gateway_redirect_fetch_gets_401() {
+        // https://github.com/warp-tech/warpgate/issues/1989
+        for mode in ["cors", "same-origin", "no-cors"] {
+            let req = poem::Request::builder()
+                .uri_str("/api/data")
+                .header("sec-fetch-mode", mode)
+                .finish();
+            let resp = gateway_redirect(&req);
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
 
     #[test]
     fn test_host_is_subdomain_of_or_equal() {
