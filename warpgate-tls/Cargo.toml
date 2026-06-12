@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+bytes.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 rustls.workspace = true
