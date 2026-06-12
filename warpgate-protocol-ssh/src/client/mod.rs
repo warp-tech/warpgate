@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -539,7 +540,8 @@ impl RemoteClient {
         let mut config = russh::client::Config {
             preferred: algos,
             nodelay: true,
-            inactivity_timeout: Some(ssh_config.inactivity_timeout),
+            // Extra time for the "closing due to inactivity" message to be sent
+            inactivity_timeout: Some(ssh_config.inactivity_timeout + Duration::from_secs(10)),
             keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };

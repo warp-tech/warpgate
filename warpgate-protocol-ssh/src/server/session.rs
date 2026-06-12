@@ -246,9 +246,22 @@ impl ServerSession {
             }
         })?;
 
+        let inactivity_timeout = services.config.lock().await.store.ssh.inactivity_timeout;
+
         Ok(async move {
-            while let Some(event) = this.get_next_event().await {
-                this.handle_event(event).await?;
+            loop {
+                let next_event_fut = this.get_next_event();
+                match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
+                    Ok(Some(event)) => this.handle_event(event).await?,
+                    Ok(None) => break,
+                    Err(_) => {
+                        info!("Closing the session due to inactivity");
+                        let _ = this.emit_service_message("Closing the session due to inactivity");
+                        this.request_disconnect();
+                        this.disconnect_server().await;
+                        break;
+                    }
+                }
             }
             debug!("No more events");
             Ok::<_, anyhow::Error>(())
