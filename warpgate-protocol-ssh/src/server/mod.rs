@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
+use futures::StreamExt;
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -41,7 +41,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.try_next().await.context("accepting connection")? {
+    while let Some(stream) = listener.next().await {
         let russh_config_init = russh_config_init.clone();
         let services = services.clone();
 

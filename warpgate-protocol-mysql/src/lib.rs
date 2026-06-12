@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
+use futures::StreamExt;
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
@@ -69,12 +69,15 @@ impl ProtocolServer for MySQLProtocolServer {
         let mut listener = address.tcp_accept_stream().await?;
 
         loop {
-            let Some(stream) = listener.try_next().await.context("accepting connection")? else {
+            let Some(stream) = listener.next().await else {
                 return Ok(());
             };
-            let remote_address = stream.peer_addr().context("getting peer address")?;
+            let Ok(remote_address) = stream.peer_addr() else {
+                // already disconnected
+                continue;
+            };
 
-            stream.set_nodelay(true)?;
+            let _ = stream.set_nodelay(true);
             if detect_port_knock(&stream).await {
                 continue;
             }
