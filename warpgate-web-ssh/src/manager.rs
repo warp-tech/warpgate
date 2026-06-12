@@ -110,10 +110,14 @@ impl WebSshClientManager {
             services.recordings.clone(),
         ));
 
+        // weak ref to avoid the ref cycle
+        // https://github.com/warp-tech/warpgate/issues/2049
         tokio::spawn({
-            let session = session.clone();
+            let session = Arc::downgrade(&session);
             async move {
-                if abort_rx.recv().await.is_some() {
+                if abort_rx.recv().await.is_some()
+                    && let Some(session) = session.upgrade()
+                {
                     session.close();
                 }
             }
@@ -281,13 +285,15 @@ fn spawn_event_loop(
                             }
                         }
                         RCEvent::Done => {
-                            session.close();
-                            sessions.lock().await.remove(&session.id());
                             break;
                         }
                         _ => {}
                     }
                 }
+
+                // remote client is gone now
+                session.close();
+                sessions.lock().await.remove(&session.id());
                 anyhow::Ok(())
             }
             .instrument(span),
