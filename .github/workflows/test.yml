@@ -13,6 +13,14 @@ jobs:
         with:
           submodules: recursive
 
+      # Github runner ocasionally runs out of space causing flakiness
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          large-packages: false
+          docker-images: false
+
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 24
