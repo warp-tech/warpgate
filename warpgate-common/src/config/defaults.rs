@@ -50,6 +50,13 @@ pub fn _default_mysql_listen() -> ListenEndpoint {
 }
 
 #[inline]
+pub fn _default_mysql_advertised_version() -> String {
+    // Has to be >= 8.0.3 to stop Connector/J from probing
+    // query cache variables that no longer exist (#947)
+    "8.0.3-Warpgate".into()
+}
+
+#[inline]
 pub fn _default_postgres_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 55432))
 }
