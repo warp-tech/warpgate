@@ -89,6 +89,19 @@ fn make_redirect_url(err: &str) -> String {
     format!("/@warpgate?login_error={err}")
 }
 
+/// Only relative paths and absolute `http(s)` URLs are accepted as post-login
+/// redirect targets. This rejects schemes such as `javascript:` or `data:` and
+/// protocol-relative `//host` URLs.
+fn is_safe_redirect_target(next: &str) -> bool {
+    if let Some(rest) = next.strip_prefix('/') {
+        // Relative path, but not protocol-relative ("//host")
+        return !rest.starts_with('/');
+    }
+    url::Url::parse(next)
+        .as_ref()
+        .is_ok_and(|v| matches!(v.scheme(), "http" | "https"))
+}
+
 #[OpenApi]
 impl Api {
     #[oai(
@@ -167,6 +180,8 @@ impl Api {
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
         let serialized_url = serde_json::to_string(&url)?;
+        let attr_url = html_escape::encode_double_quoted_attribute(&url);
+        let text_url = html_escape::encode_text(&url);
         Ok(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
                 "<!doctype html>\n
@@ -175,7 +190,7 @@ impl Api {
                         location.href = {serialized_url};
                     </script>
                     <body>
-                        Redirecting to <a href='{url}'>{url}</a>...
+                        Redirecting to <a href=\"{attr_url}\">{text_url}</a>...
                     </body>
                 </html>
             "
@@ -410,6 +425,7 @@ impl Api {
         let mut next_url = context
             .next_url
             .as_deref()
+            .filter(|next| is_safe_redirect_target(next))
             .unwrap_or("/@warpgate#/login")
             .to_owned();
 
@@ -460,5 +476,30 @@ impl Api {
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_redirect_target;
+
+    #[test]
+    fn accepts_relative_paths() {
+        assert!(is_safe_redirect_target("/@warpgate#/login"));
+        assert!(is_safe_redirect_target("/foo/bar?x=1"));
+    }
+
+    #[test]
+    fn accepts_http_and_https_urls() {
+        assert!(is_safe_redirect_target("https://example.com/path"));
+        assert!(is_safe_redirect_target("http://example.com"));
+    }
+
+    #[test]
+    fn rejects_dangerous_schemes_and_protocol_relative() {
+        assert!(!is_safe_redirect_target("javascript:alert(1)"));
+        assert!(!is_safe_redirect_target("data:text/html,<script>"));
+        assert!(!is_safe_redirect_target("//evil.com"));
+        assert!(!is_safe_redirect_target("ftp://example.com"));
     }
 }

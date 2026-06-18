@@ -12,6 +12,7 @@ cookie = { version = "0.18", default-features = false }
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
+html-escape.workspace = true
 http.workspace = true
 percent-encoding = { version = "2.1", default-features = false }
 poem.workspace = true
