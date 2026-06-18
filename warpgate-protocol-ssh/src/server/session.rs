@@ -1495,7 +1495,14 @@ impl ServerSession {
                 .await;
         }
 
-        if self.rc_state != RCState::Connected {
+        // While the target selection menu is open, keystrokes drive the menu
+        // (handled above) and there's no target to forward them to.
+        // Otherwise forward the data even before the target connection is
+        // established: the remote client buffers channel operations and
+        // replays them in order once connected, so early stdin (e.g. rsync,
+        // scp or Ansible pipelining payloads sent right after the exec
+        // request) must not be dropped (#2065).
+        if matches!(self.target, TargetSelection::Menu) {
             return Ok(());
         }
 
