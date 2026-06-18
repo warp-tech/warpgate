@@ -193,6 +193,11 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
         warn!(
             "All SSH authentication methods are disabled in parameters. Enabling all methods as fallback."
         );
+        methods_vec = vec![
+            MethodKind::PublicKey,
+            MethodKind::Password,
+            MethodKind::KeyboardInteractive,
+        ];
     }
 
     Ok(MethodSet::from(&methods_vec[..]))

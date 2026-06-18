@@ -259,6 +259,25 @@ impl ServerSession {
         self.main_event_subscription.recv().await
     }
 
+    /// Based on the global params (#1957)
+    fn supported_credential_kinds(&self) -> Vec<CredentialKind> {
+        let mut kinds = vec![];
+        if self.allowed_auth_methods.contains(&MethodKind::Password) {
+            kinds.push(CredentialKind::Password);
+        }
+        if self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
+            kinds.push(CredentialKind::PublicKey);
+        }
+        if self
+            .allowed_auth_methods
+            .contains(&MethodKind::KeyboardInteractive)
+        {
+            kinds.push(CredentialKind::Totp);
+            kinds.push(CredentialKind::WebUserApproval);
+        }
+        kinds
+    }
+
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
@@ -281,12 +300,7 @@ impl ServerSession {
                     Some(&self.id),
                     username,
                     crate::PROTOCOL_NAME,
-                    &[
-                        CredentialKind::Password,
-                        CredentialKind::PublicKey,
-                        CredentialKind::Totp,
-                        CredentialKind::WebUserApproval,
-                    ],
+                    &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
                 )
                 .await?
