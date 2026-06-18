@@ -1,4 +1,5 @@
 import html
+import json
 import re
 import socket
 import requests
@@ -41,6 +42,7 @@ def _make_sso_provider_config(
     admin_role_mappings=None,
     extra_scopes=None,
     return_url_domain=None,
+    groups_claim=None,
 ):
     """Build an ``sso_providers`` entry for warpgate config."""
     scopes = list(DEFAULT_OIDC_SCOPES)
@@ -57,6 +59,8 @@ def _make_sso_provider_config(
         provider["role_mappings"] = role_mappings
     if admin_role_mappings is not None:
         provider["admin_role_mappings"] = admin_role_mappings
+    if groups_claim is not None:
+        provider["groups_claim"] = groups_claim
     sso_entry = {
         "name": "test-oidc",
         "label": "OIDC Test",
@@ -974,3 +978,214 @@ class TestHTTPUserAuthOIDC:
             active_role_names = {r.name for r in user_roles if r.is_active}
             assert "role-keep" in active_role_names
             assert "role-remove" not in active_role_names
+
+
+# ---------------------------------------------------------------------------
+# `groups_claim`: source group memberships from a configurable OIDC claim
+# (e.g. the standard-ish `groups` claim) and map them to roles via
+# role_mappings / admin_role_mappings. Group names are generic placeholders.
+# ---------------------------------------------------------------------------
+
+def _user_with_group_claims(entries):
+    """Build a single OIDC mock user whose `groups` claim is built from
+    *entries* (a list of ``{"Value":..., "ValueType":...}`` dicts)."""
+    claims = [
+        {"Type": "name", "Value": "Sam Tailor", "ValueType": "string"},
+        {"Type": "email", "Value": "sam.tailor@gmail.com", "ValueType": "string"},
+        {"Type": "preferred_username", "Value": "sam_tailor", "ValueType": "string"},
+    ]
+    for e in entries:
+        claims.append({"Type": "groups", **e})
+    return [
+        {"SubjectId": "1", "Username": "User1", "Password": "pwd", "Claims": claims}
+    ]
+
+
+def _str_groups(*names):
+    """Emit each group name as a repeated string-valued `groups` claim
+    (the OIDC mock's representation of an array of strings)."""
+    return [{"Value": n, "ValueType": "string"} for n in names]
+
+
+def _json_groups(value):
+    """Emit a single JSON-valued `groups` claim (array of strings/objects)."""
+    return [{"Value": json.dumps(value), "ValueType": "json"}]
+
+
+def _run_groups_claim_test(
+    processes,
+    group_entries,
+    *,
+    role_mappings=None,
+    admin_role_mappings=None,
+    pre_create_roles=(),
+):
+    """Drive a full OIDC login with a configurable `groups` claim and return
+    ``(access_role_names, admin_role_names)`` for the auto-created user."""
+    wg_http_port = alloc_port()
+    oidc_port = processes.start_oidc_server(
+        wg_http_port,
+        extra_scopes=["groups"],
+        users_override=_user_with_group_claims(group_entries),
+        extra_identity_resources=[{"Name": "groups", "ClaimTypes": ["groups"]}],
+    )
+    wg = _start_wg_with_oidc(
+        processes,
+        wg_http_port,
+        oidc_port,
+        auto_create_users=True,
+        groups_claim="groups",
+        role_mappings=role_mappings,
+        admin_role_mappings=admin_role_mappings,
+        extra_scopes=["groups"],
+    )
+    wg_url = f"https://127.0.0.1:{wg.http_port}"
+
+    with admin_client(wg_url) as api:
+        for rn in pre_create_roles:
+            api.create_role(sdk.RoleDataRequest(name=rn))
+
+    _, resp = _do_oidc_login(wg_url, oidc_port)
+    assert resp.status_code in (302, 307), (
+        f"Expected redirect after login, got {resp.status_code}: {resp.text[:300]}"
+    )
+
+    with admin_client(wg_url) as api:
+        user = next(u for u in api.get_users() if u.username == "sam_tailor")
+        access = sorted(r.name for r in api.get_user_roles(user.id))
+        admin = sorted(r.name for r in api.get_user_admin_roles(user.id))
+    return access, admin
+
+
+class TestHTTPUserAuthOIDCGroupsClaim:
+    """Group memberships sourced from a configurable `groups` claim and mapped
+    to access/admin roles via role_mappings / admin_role_mappings."""
+
+    def test_access_role_mapping(self, echo_server_port, processes: ProcessManager):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert admin == []
+
+    def test_admin_role_mapping(self, echo_server_port, processes: ProcessManager):
+        # "warpgate:admin" is warpgate's built-in admin role (always present).
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("grp-admin"),
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+        )
+        assert access == []
+        assert "warpgate:admin" in admin
+
+    def test_combined_access_and_admin(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("grp-admin", "grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_group_name_with_spaces(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("remote ssh users"),
+            role_mappings={"remote ssh users": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+
+    def test_duplicate_group_names_dedup(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("grp-ssh", "grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        # role assigned exactly once despite the duplicate group
+        assert access == ["ssh-access-role"]
+
+    def test_multiple_groups_some_unmapped(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _str_groups("grp-ssh", "grp-admin", "grp-extra", "grp-noise"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_mapping_by_group_id_object(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        # SCIM-style object array; map on the stable `value` (id), not the name.
+        access, admin = _run_groups_claim_test(
+            processes,
+            _json_groups([{"value": "id-ssh", "display": "grp-ssh"}]),
+            role_mappings={"id-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+
+    def test_mapping_by_id_and_name_mixed(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_groups_claim_test(
+            processes,
+            _json_groups(
+                [
+                    {"value": "id-ssh", "display": "grp-ssh"},
+                    {"value": "id-admin", "display": "grp-admin"},
+                ]
+            ),
+            role_mappings={"id-ssh": "ssh-access-role"},  # by id
+            admin_role_mappings={"grp-admin": "warpgate:admin"},  # by name
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_complex_objects_cross_dedup_and_spaces(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        # value/display collisions across entries, a value with a space, and a
+        # string entry equal to another entry's display. Flattened set is:
+        #   bla, bla2, dis1, dis2, val 3, val1, val2
+        access, admin = _run_groups_claim_test(
+            processes,
+            _json_groups(
+                [
+                    "bla",
+                    {"value": "val1", "display": "dis1"},
+                    {"value": "val2", "display": "dis1"},
+                    {"value": "val1", "display": "dis2"},
+                    "bla2",
+                    {"value": "val 3", "display": "bla2"},
+                ]
+            ),
+            # map several flattened keys; "dis1" (shared display) and "bla2"
+            # (string + display) must each yield their role exactly once.
+            role_mappings={
+                "dis1": "ssh-access-role",
+                "val 3": "spaced-role",
+            },
+            admin_role_mappings={"bla2": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role", "spaced-role"],
+        )
+        assert access == ["spaced-role", "ssh-access-role"]
+        assert "warpgate:admin" in admin

@@ -574,6 +574,13 @@
             "client_secret": {
               "type": "string"
             },
+            "groups_claim": {
+              "description": "OIDC claim to read group memberships from (e.g. \"groups\").\nIts values are mapped to roles via role_mappings / admin_role_mappings.\nWhen unset, the warpgate_roles / warpgate_admin_roles claims are used.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issuer_url": {
               "type": "string"
             },
