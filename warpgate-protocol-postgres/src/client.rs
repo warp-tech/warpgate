@@ -7,16 +7,15 @@ use pgwire::messages::{DecodeContext, PgWireBackendMessage, ProtocolVersion};
 use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 use tracing::{debug, info, warn};
 use warpgate_common::{TargetPostgresOptions, WarpgateError};
-use warpgate_tls::{TlsMode, configure_tls_connector};
+use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
 
 pub struct PostgresClient {
-    pub stream: PostgresStream<TcpStream, TlsStream<TcpStream>>,
+    pub stream: PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
     decode_context: DecodeContext,
 }
 
@@ -203,7 +202,7 @@ impl PostgresClient {
     }
 
     async fn run_sasl_auth(
-        stream: &mut PostgresStream<TcpStream, TlsStream<TcpStream>>,
+        stream: &mut PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
         mechanisms: Vec<String>,
         username: &str,
         password: &str,

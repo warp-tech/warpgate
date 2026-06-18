@@ -26,13 +26,14 @@ use warpgate_database_protocols::mysql::protocol::connect::{
 };
 use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use warpgate_database_protocols::mysql::protocol::text::Query;
+use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
-    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
+    stream: MySqlStream<S, ServerTlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,

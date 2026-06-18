@@ -13,7 +13,6 @@ use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time;
-use tokio_rustls::server::TlsStream;
 use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
@@ -25,6 +24,7 @@ use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
+use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;
@@ -34,7 +34,7 @@ use crate::stream::{
 };
 
 pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
-    stream: PostgresStream<S, TlsStream<S>>,
+    stream: PostgresStream<S, ServerTlsStream<S>>,
     tls_config: Arc<ServerConfig>,
     username: Option<String>,
     database: Option<String>,
