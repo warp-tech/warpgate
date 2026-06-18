@@ -253,7 +253,7 @@
       "type": "object",
       "properties": {
         "advertised_version": {
-          "description": "The server version advertised to clients during the handshake.\nIt can't match the target's version since the target is only known\nafter the handshake, but clients use it to pick a protocol dialect.",
+          "description": "The server version advertised to clients during the handshake.\nWe can't auto-match the target's version since the target is only known\nafter the handshake, but clients use it to pick a protocol dialect.",
           "type": "string",
           "default": "8.0.3-Warpgate"
         },
