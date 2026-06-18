@@ -28,8 +28,12 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Only log warpgate events (same filter as ValuesLogLayer)
-        if !event.metadata().target().starts_with("warpgate") {
+        // Log warpgate events plus audit events (`audit` target). The env
+        // filter (e.g. `audit=info,warpgate=info`) already gates what reaches
+        // this layer and the text console layer prints audit events on that
+        // basis; mirror it here so the JSON console is not missing them.
+        let target = event.metadata().target();
+        if !target.starts_with("warpgate") && target != "audit" {
             return;
         }
 
@@ -51,8 +55,12 @@ where
         // Record event fields
         event.record(&mut RecordVisitor::new(&mut values));
 
-        // Hide _type from console output (rich JSON field marker, not user-facing)
-        values.remove("_type");
+        // `_type` is a rich-JSON marker normally hidden from console output,
+        // but for audit events it is the event-type discriminator (e.g.
+        // "TargetSessionStarted1"), so keep it there.
+        if target != "audit" {
+            values.remove("_type");
+        }
 
         // Extract message before moving values
         let message = values.remove("message").unwrap_or_default();
