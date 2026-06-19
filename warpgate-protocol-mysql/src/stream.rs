@@ -84,7 +84,12 @@ where
         mut self,
         config: <S as UpgradableStream<TS>>::UpgradeConfig,
     ) -> Result<Self, MaybeTlsStreamError> {
-        self.stream = self.stream.upgrade(config).await?;
+        // Any data already read off the socket past the last decoded packet
+        // is the beginning of the TLS handshake (e.g. clients are allowed
+        // to send their ClientHello right behind the SSLRequest packet) and
+        // has to be replayed into the TLS layer (#1421).
+        let leftover = std::mem::take(&mut self.inbound_buffer).freeze();
+        self.stream = self.stream.upgrade(config, leftover).await?;
         Ok(self)
     }
 

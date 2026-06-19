@@ -182,6 +182,9 @@ fn rewrite_response(
             try_block!({
                 let mut cookie = Cookie::parse(value.to_str()?)?;
                 cookie.set_expires(cookie::Expiration::Session);
+                // the domain set by the target isn't going to match the actual host anyway
+                // https://github.com/warp-tech/warpgate/issues/2048
+                cookie.unset_domain();
                 *value = cookie.to_string().parse()?;
             } catch (error: anyhow::Error) {
                 warn!(?error, header=?value, "Failed to parse response cookie");
@@ -522,4 +525,49 @@ async fn proxy_ws_inner(
     copy_client_response(&client_response, &mut response);
     rewrite_response(&mut response, options, &uri)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_options(url: &str) -> TargetHTTPOptions {
+        TargetHTTPOptions {
+            url: url.to_string(),
+            tls: Default::default(),
+            headers: None,
+            external_host: None,
+        }
+    }
+
+    #[test]
+    fn rewrite_response_strips_cookie_domain() {
+        let mut resp = poem::Response::builder()
+            .header(
+                http::header::SET_COOKIE,
+                "lsws_uid=abc; HttpOnly; Secure; Path=/; Domain=100.0.0.1",
+            )
+            .body(());
+
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/login.php").unwrap();
+
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+
+        let cookie_headers: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(cookie_headers.len(), 1);
+        let cookie = Cookie::parse(cookie_headers[0].as_str()).unwrap();
+        assert_eq!(cookie.name(), "lsws_uid");
+        assert_eq!(cookie.value(), "abc");
+        assert_eq!(cookie.domain(), None);
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(true));
+    }
 }

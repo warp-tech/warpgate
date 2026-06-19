@@ -16,7 +16,7 @@ use warpgate_core::recordings::TerminalRecordingStreamId;
 use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient};
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
 
 use crate::protocol::ServerMessage;
 use crate::session::{WebSshSession, WebSshSessionHandle};
@@ -51,10 +51,8 @@ impl WebSshClientManager {
 
         let target: Target = {
             let mut cp = services.config_provider.lock().await;
-            cp.list_targets()
+            cp.get_target_by_name(target_name)
                 .await?
-                .into_iter()
-                .find(|t| t.name == target_name)
                 .ok_or_else(|| anyhow!("SSH target {target_name:?} not found"))?
         };
 
@@ -112,10 +110,14 @@ impl WebSshClientManager {
             services.recordings.clone(),
         ));
 
+        // weak ref to avoid the ref cycle
+        // https://github.com/warp-tech/warpgate/issues/2049
         tokio::spawn({
-            let session = session.clone();
+            let session = Arc::downgrade(&session);
             async move {
-                if abort_rx.recv().await.is_some() {
+                if abort_rx.recv().await.is_some()
+                    && let Some(session) = session.upgrade()
+                {
                     session.close();
                 }
             }
@@ -126,9 +128,14 @@ impl WebSshClientManager {
             .await
             .insert(session_id, session.clone());
 
+        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username.to_string()))
+            .await?
+            .into_iter()
+            .map(|x| x.ssh_options)
+            .collect::<Vec<_>>();
         rc_handles
             .command_tx
-            .send((RCCommand::Connect(ssh_options.clone()), None))
+            .send((RCCommand::Connect(ssh_chain), None))
             .ok();
 
         spawn_event_loop(
@@ -195,17 +202,13 @@ fn spawn_event_loop(
                         RCEvent::Eof(channel_id) => {
                             session.push_event(ServerMessage::Eof { channel_id }).await;
                         }
-                        RCEvent::Close(channel_id) => {
-                            session.stop_recording(channel_id).await;
-                            session
-                                .push_event(ServerMessage::ChannelClosed { channel_id })
-                                .await;
-                        }
+
                         RCEvent::ExitStatus(channel_id, code) => {
                             session
                                 .push_event(ServerMessage::ExitStatus { channel_id, code })
                                 .await;
                         }
+                        RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
                             session.stop_recording(channel_id).await;
                             session
@@ -282,13 +285,15 @@ fn spawn_event_loop(
                             }
                         }
                         RCEvent::Done => {
-                            session.close();
-                            sessions.lock().await.remove(&session.id());
                             break;
                         }
                         _ => {}
                     }
                 }
+
+                // remote client is gone now
+                session.close();
+                sessions.lock().await.remove(&session.id());
                 anyhow::Ok(())
             }
             .instrument(span),

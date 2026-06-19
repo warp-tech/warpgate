@@ -1,5 +1,5 @@
 [bumpver]
-current_version = "0.23.4"
+current_version = "0.25.5"
 version_pattern = "MAJOR.MINOR.PATCH[-TAG[.INC0]]"
 commit = true
 tag = false

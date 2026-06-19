@@ -1,19 +1,18 @@
 [package]
 name = "warpgate-database-protocols"
-version = "0.23.4"
+version = "0.25.5"
 description = "Core of SQLx, the rust SQL toolkit. Just the database protocol parts."
-license = "MIT OR Apache-2.0"
-edition = "2024"
 authors = [
     "Ryan Leckey <leckey.ryan@gmail.com>",
     "Austin Bonander <austin.bonander@gmail.com>",
     "Chloe Ross <orangesnowfox@gmail.com>",
     "Daniel Akhterov <akhterovd@gmail.com>",
 ]
+edition = "2024"
+license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-tokio.workspace = true
 bitflags = { version = "2", default-features = false }
 bytes.workspace = true
 futures-core = { version = "0.3", default-features = false }
@@ -21,5 +20,6 @@ futures-util = { version = "0.3", default-features = false, features = [
     "alloc",
     "sink",
 ] }
-memchr = { version = "2.5", default-features = false }
+memchr = { version = "2.8", default-features = false }
 thiserror.workspace = true
+tokio.workspace = true

@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
@@ -29,6 +29,7 @@ struct ParameterValues {
     pub ticket_request_show_all_targets: bool,
     pub target_click_action: Parameters::TargetClickAction,
     pub show_session_menu: bool,
+    pub password_policy: PasswordPolicy,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
 }
@@ -49,6 +50,7 @@ struct ParameterUpdate {
     pub ticket_request_show_all_targets: Option<bool>,
     pub target_click_action: Option<Parameters::TargetClickAction>,
     pub show_session_menu: Option<bool>,
+    pub password_policy: Option<PasswordPolicy>,
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
 }
@@ -93,6 +95,7 @@ impl Api {
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             target_click_action: parameters.target_click_action,
             show_session_menu: parameters.show_session_menu,
+            password_policy: parameters.password_policy(),
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
         })))
@@ -139,6 +142,15 @@ impl Api {
         parameters.max_api_token_duration_seconds =
             body.max_api_token_duration_seconds.map_or(NotSet, Set);
         parameters.record_scp = body.record_scp.map_or(NotSet, Set);
+
+        #[allow(clippy::cast_possible_wrap)]
+        if let Some(ref policy) = body.password_policy {
+            parameters.password_policy_min_length = Set(policy.min_length as i32);
+            parameters.password_policy_require_uppercase = Set(policy.require_uppercase);
+            parameters.password_policy_require_lowercase = Set(policy.require_lowercase);
+            parameters.password_policy_require_digits = Set(policy.require_digits);
+            parameters.password_policy_require_special = Set(policy.require_special);
+        }
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

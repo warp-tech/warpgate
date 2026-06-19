@@ -35,7 +35,7 @@ pub struct WebSshSessionHandle {
 }
 
 impl WebSshSessionHandle {
-    pub fn new(abort_tx: UnboundedSender<()>) -> Self {
+    pub const fn new(abort_tx: UnboundedSender<()>) -> Self {
         Self { abort_tx }
     }
 }
@@ -72,6 +72,7 @@ pub struct WebSshSession {
 }
 
 impl WebSshSession {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         user_id: Uuid,
@@ -122,11 +123,11 @@ impl WebSshSession {
         let _ = self.abort_tx.send(());
     }
 
-    pub fn id(&self) -> Uuid {
+    pub const fn id(&self) -> Uuid {
         self.id
     }
 
-    pub fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> Uuid {
         self.user_id
     }
 
@@ -134,7 +135,7 @@ impl WebSshSession {
         &self.target_name
     }
 
-    pub fn target_kind(&self) -> &TargetKind {
+    pub const fn target_kind(&self) -> &TargetKind {
         &self.target_kind
     }
 
@@ -212,10 +213,7 @@ impl WebSshSession {
         self.output_notify.notify_waiters();
     }
 
-    async fn command(
-        &self,
-        cmd: RCCommand,
-    ) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
+    fn command(&self, cmd: RCCommand) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
         let (tx, rx) = oneshot::channel();
 
         if self.command_tx.send((cmd, Some(tx))).is_err() {
@@ -238,32 +236,27 @@ impl WebSshSession {
         })
         .await;
 
-        self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell))
-            .await;
+        self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell));
         self.command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestPty(make_pty_request(cols, rows)),
-        ))
-        .await;
+        ));
         self.command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestShell,
-        ))
-        .await;
+        ));
         channel_id
     }
 
-    pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
-        self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)))
-            .await;
+    pub fn send_input(&self, channel_id: Uuid, data: Bytes) {
+        self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
     pub async fn resize_channel(&self, channel_id: Uuid, cols: u32, rows: u32) {
         self.command(RCCommand::Channel(
             channel_id,
             ChannelOperation::ResizePty(make_pty_request(cols, rows)),
-        ))
-        .await;
+        ));
         self.with_recorder(channel_id, async move |r| {
             if let Err(e) = r.write_pty_resize(cols, rows).await {
                 error!(%channel_id, ?e, "Failed to record PTY resize");
@@ -272,9 +265,8 @@ impl WebSshSession {
         .await;
     }
 
-    pub async fn close_channel(&self, channel_id: Uuid) {
-        self.command(RCCommand::Channel(channel_id, ChannelOperation::Close))
-            .await;
+    pub fn close_channel(&self, channel_id: Uuid) {
+        self.command(RCCommand::Channel(channel_id, ChannelOperation::Close));
     }
 }
 

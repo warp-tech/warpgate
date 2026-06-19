@@ -71,17 +71,13 @@ impl Api {
         if matches!(
             provider_config.return_url_domain,
             SsoReturnUrlDomainPreference::ExternalHost
-        ) {
-            if let (Some(request_host), Some(external_host)) = (
-                ctx.trusted_hostname(req),
-                config.store.external_host.as_deref(),
-            ) {
-                if !is_localhost_host(&request_host)
-                    && !host_is_subdomain_of_or_equal(&request_host, external_host)
-                {
-                    return Ok(StartSsoResponse::IncompatibleSsoDomain);
-                }
-            }
+        ) && let (Some(request_host), Some(external_host)) = (
+            ctx.trusted_hostname(req),
+            config.store.external_host.as_deref(),
+        ) && !is_localhost_host(&request_host)
+            && !host_is_subdomain_of_or_equal(&request_host, external_host)
+        {
+            return Ok(StartSsoResponse::IncompatibleSsoDomain);
         }
 
         let mut return_url = construct_external_url(

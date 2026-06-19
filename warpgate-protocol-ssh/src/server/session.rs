@@ -23,10 +23,10 @@ use warpgate_common::auth::{
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::{
-    Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions,
-    WarpgateError,
+    Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -38,32 +38,36 @@ use warpgate_db_entities::Parameters;
 
 use super::channel_writer::ChannelWriter;
 use super::russh_handler::ServerHandlerEvent;
-use super::service_output::{ServiceOutput, ansi_paint};
+use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::ERASE_PROGRESS_SPINNER;
+use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
+use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ServerChannelId, SshClientError, SshRecordingMetadata,
-    X11Request,
+    RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
+    SshRecordingMetadata, X11Request, resolve_ssh_chain,
 };
 
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
     None,
+    Menu,
     NotFound(String),
-    Found(Target, TargetSSHOptions),
+    Found(Target),
 }
 
 #[derive(Debug)]
-enum Event {
+pub enum Event {
     Command(SessionHandleCommand),
     ServerHandler(ServerHandlerEvent),
     ConsoleInput(Bytes),
     ServiceOutput(Bytes),
     Client(RCEvent),
+    MenuRedraw(u16, u16),
+    Menu(MenuEvent),
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -242,9 +246,22 @@ impl ServerSession {
             }
         })?;
 
+        let inactivity_timeout = services.config.lock().await.store.ssh.inactivity_timeout;
+
         Ok(async move {
-            while let Some(event) = this.get_next_event().await {
-                this.handle_event(event).await?;
+            loop {
+                let next_event_fut = this.get_next_event();
+                match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
+                    Ok(Some(event)) => this.handle_event(event).await?,
+                    Ok(None) => break,
+                    Err(_) => {
+                        info!("Closing the session due to inactivity");
+                        let _ = this.emit_service_message("Closing the session due to inactivity");
+                        this.request_disconnect();
+                        this.disconnect_server().await;
+                        break;
+                    }
+                }
             }
             debug!("No more events");
             Ok::<_, anyhow::Error>(())
@@ -253,6 +270,25 @@ impl ServerSession {
 
     async fn get_next_event(&mut self) -> Option<Event> {
         self.main_event_subscription.recv().await
+    }
+
+    /// Based on the global params (#1957)
+    fn supported_credential_kinds(&self) -> Vec<CredentialKind> {
+        let mut kinds = vec![];
+        if self.allowed_auth_methods.contains(&MethodKind::Password) {
+            kinds.push(CredentialKind::Password);
+        }
+        if self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
+            kinds.push(CredentialKind::PublicKey);
+        }
+        if self
+            .allowed_auth_methods
+            .contains(&MethodKind::KeyboardInteractive)
+        {
+            kinds.push(CredentialKind::Totp);
+            kinds.push(CredentialKind::WebUserApproval);
+        }
+        kinds
     }
 
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
@@ -277,12 +313,7 @@ impl ServerSession {
                     Some(&self.id),
                     username,
                     crate::PROTOCOL_NAME,
-                    &[
-                        CredentialKind::Password,
-                        CredentialKind::PublicKey,
-                        CredentialKind::Totp,
-                        CredentialKind::WebUserApproval,
-                    ],
+                    &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
                 )
                 .await?
@@ -318,20 +349,6 @@ impl ServerSession {
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
-    pub fn emit_service_message(&self, msg: &str) -> Result<()> {
-        debug!("Service message: {}", msg);
-
-        let output = format!(
-            "{}{} {}\r\n",
-            ERASE_PROGRESS_SPINNER,
-            ansi_paint(Color::Black, Color::White, " Warpgate "),
-            msg.replace('\n', "\r\n"),
-        );
-        self.emit_pty_output(output.as_bytes())?;
-
-        Ok(())
-    }
-
     pub fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
         let channels = self.pty_channels.clone();
         for channel in channels {
@@ -341,6 +358,30 @@ impl ServerSession {
             }
         }
         Ok(())
+    }
+
+    pub fn emit_service_message(&self, msg: &str) -> Result<()> {
+        debug!("Service message: {}", msg);
+
+        let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
+        self.emit_pty_output(
+            format!(
+                "{} {}\r\n",
+                paint_fg(Color::Blue, false, "● Warpgate:"),
+                msg.replace('\n', "\r\n")
+            )
+            .as_bytes(),
+        )
+    }
+
+    pub fn emit_pty_error(&self, msg: &str) -> Result<()> {
+        if self.service_output.progress_visible() {
+            self.service_output.stop_progress();
+            let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
+        }
+        self.emit_pty_output(
+            format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:")).as_bytes(),
+        )
     }
 
     /// Start connecting to the target if we aren't already.
@@ -354,30 +395,86 @@ impl ServerSession {
     /// where a PTY channel is required for the host key prompt, but we've connected
     /// faster than the client could open one.
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
-        match self.target.clone() {
+        let target = match &self.target {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
+            TargetSelection::Menu => return Ok(()),
             TargetSelection::NotFound(name) => {
+                let name = name.clone();
                 self.emit_service_message(&format!("Selected target not found: {name}"))?;
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {name}");
             }
-            TargetSelection::Found(target, ssh_options) => {
-                if self.rc_state == RCState::NotInitialized {
-                    self.connect_remote(&target, ssh_options)?;
-                }
-            }
+            TargetSelection::Found(target) => Some(target.clone()),
+        };
+
+        if let Some(target) = target
+            && self.rc_state == RCState::NotInitialized
+        {
+            self.connect_remote(&target).await?;
         }
+
         Ok(())
     }
 
-    fn connect_remote(&mut self, target: &Target, ssh_options: TargetSSHOptions) -> Result<()> {
+    async fn connect_remote(&mut self, target: &Target) -> Result<()> {
+        let ssh_chain =
+            resolve_ssh_chain(&self.services, target.id, self.username.as_ref()).await?;
+
+        let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(ssh_options))
-            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
-        self.service_output.show_progress();
-        self.emit_service_message(&format!("Selected target: {}", target.name))?;
+        self.send_command(RCCommand::Connect(
+            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
+        ))
+        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.emit_pty_output(b"\r\n")?;
+        self.service_output.start_progress(visual_chain).await;
+        Ok(())
+    }
+
+    async fn make_visual_connection_chain(
+        &self,
+        ssh_chain: &[ResolvedSshChainHost],
+    ) -> Result<Vec<VisualConnectionChainItem>, WarpgateError> {
+        let maybe_ext_url =
+            construct_external_url(None, &*self.services.config.lock().await, None).await;
+        let warpgate_item = match maybe_ext_url {
+            Ok(url) => VisualConnectionChainItem::Link {
+                text: "Warpgate".into(),
+                url: url.to_string(),
+            },
+            Err(_) => VisualConnectionChainItem::Text("Warpgate".into()),
+        };
+
+        let mut display = vec![VisualConnectionChainItem::Text("You".into()), warpgate_item];
+        display.extend(
+            ssh_chain
+                .iter()
+                .map(|host| VisualConnectionChainItem::Text(host.name.clone())),
+        );
+
+        Ok(display)
+    }
+
+    async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
+        match action {
+            MenuEvent::Render(data) => {
+                self.emit_pty_output(&data)?;
+            }
+            MenuEvent::Abort => {
+                self.emit_service_message("Session closed")?;
+                self.request_disconnect();
+                self.disconnect_server().await;
+            }
+            MenuEvent::Selected(target) => {
+                self.target = TargetSelection::Found(target.clone());
+                let _ = self.server_handle.lock().await.set_target(&target).await;
+                // clear screen ; cursor to 1;1
+                self.emit_pty_output(b"\x1b[2J\x1b[H")?;
+                self.maybe_connect_remote().await?;
+            }
+        }
 
         Ok(())
     }
@@ -417,11 +514,88 @@ impl ServerSession {
                 Event::ServiceOutput(data) => {
                     let _ = self.emit_pty_output(&data);
                 }
-                Event::ConsoleInput(_) => (),
+                Event::Menu(action) => {
+                    if let Err(err) = self.handle_menu_event(action).await {
+                        error!(?err, "Menu loop action handler error");
+                    }
+                }
+                Event::MenuRedraw(_, _) | Event::ConsoleInput(_) => (),
             }
             Ok(())
         }
         .boxed()
+    }
+
+    async fn start_target_selection_menu(&self, channel_id: Uuid) -> Result<()> {
+        let menu_event_subscription = self
+            .hub
+            .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
+            .await;
+
+        let username = self
+            .username
+            .as_deref()
+            .ok_or(WarpgateError::InconsistentState("No username".into()))?;
+
+        let ssh_targets = {
+            self.services
+                .config_provider
+                .lock()
+                .await
+                .list_targets()
+                .await?
+                .into_iter()
+                .filter_map(|target| match target.options.clone() {
+                    TargetOptions::Ssh(options) => Some((target, options)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut authorized_targets = Vec::new();
+
+        for (target, mut ssh_options) in ssh_targets {
+            let is_authorized = self
+                .services
+                .config_provider
+                .lock()
+                .await
+                .authorize_target(username, &target.name)
+                .await?;
+
+            if is_authorized {
+                if ssh_options.username.is_empty() {
+                    ssh_options.username = username.to_string();
+                }
+                authorized_targets.push((target, ssh_options));
+            }
+        }
+
+        authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
+
+        let (terminal_width, terminal_height) = self
+            .channel_pty_size_map
+            .get(&channel_id)
+            .map_or((220, 24), |r| (r.col_width as u16, r.row_height as u16));
+
+        spawn_target_menu_loop(
+            self.id,
+            username.to_string(),
+            authorized_targets,
+            menu_event_subscription,
+            self.event_sender.clone(),
+            terminal_width,
+            terminal_height,
+        )?;
+        Ok(())
+    }
+
+    async fn maybe_start_target_selection_menu(&self, channel_id: Uuid) -> Result<()> {
+        if matches!(self.target, TargetSelection::Menu) && self.pty_channels.contains(&channel_id) {
+            self.start_target_selection_menu(channel_id).await?;
+        }
+
+        Ok(())
     }
 
     async fn handle_server_handler_event(&mut self, event: ServerHandlerEvent) -> Result<()> {
@@ -499,7 +673,8 @@ impl ServerSession {
 
             ServerHandlerEvent::ShellRequest(server_channel_id, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
-                let _ = self.maybe_connect_remote().await;
+                self.maybe_connect_remote().await?;
+                self.maybe_start_target_selection_menu(channel_id).await?;
 
                 let _ = self.send_command(RCCommand::Channel(
                     channel_id,
@@ -641,16 +816,17 @@ impl ServerSession {
 
     pub async fn handle_remote_event(&mut self, event: RCEvent) -> Result<()> {
         match event {
+            RCEvent::HopConnected => {
+                self.service_output.notify_hop_connected().await;
+            }
             RCEvent::State(state) => {
                 self.rc_state = state;
                 match &self.rc_state {
                     RCState::Connected => {
-                        self.service_output.stop_progress();
-                        let msg = format!(
-                            "{}{}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(Color::Black, Color::Green, " ✓ Warpgate connected ")
-                        );
+                        let msg = self
+                            .service_output
+                            .render_final_success_static_frame()
+                            .await;
                         let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     RCState::Disconnected => {
@@ -670,12 +846,9 @@ impl ServerSession {
                         known_key_type,
                         known_key_base64,
                     } => {
+                        let _ = self.emit_pty_error("Host key doesn't match the stored one.");
                         let msg = format!(
-                            concat!(
-                                "Host key doesn't match the stored one.\n",
-                                "Stored key   ({}): {}\n",
-                                "Received key ({}): {}",
-                            ),
+                            concat!("Stored key   ({}): {}\n", "Received key ({}): {}",),
                             known_key_type,
                             known_key_base64,
                             received_key_type,
@@ -691,31 +864,18 @@ impl ServerSession {
                         ?;
                     }
                     ConnectionError::Authentication => {
-                        let msg = format!(
-                            "{}{}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(
-                                Color::Black,
-                                Color::Red,
-                                " ✗ SSH target rejected Warpgate authentication request "
-                            )
+                        let _ = self.emit_pty_error(
+                            "SSH target rejected Warpgate's authentication request",
                         );
-                        let _ = self.emit_pty_output(msg.as_bytes());
                     }
                     error => {
-                        let msg = format!(
-                            "{}{} {}\r\n",
-                            ERASE_PROGRESS_SPINNER,
-                            ansi_paint(Color::Black, Color::Red, " ✗ Connection failed "),
-                            error
-                        );
-                        let _ = self.emit_pty_output(msg.as_bytes());
+                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_service_message(&format!("Error: {e}"));
+                let _ = self.emit_pty_error(&format!("Error: {e}"));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -824,7 +984,6 @@ impl ServerSession {
                 })
                 .await?;
             }
-            RCEvent::Done => {}
             RCEvent::ExtendedData { channel, data, ext } => {
                 if let Some(recorder) = self.channel_recorders.get_mut(&channel)
                     && let Err(error) = recorder
@@ -840,13 +999,7 @@ impl ServerSession {
                         .write_extended(session, server_channel_id.0, ext, data);
                 }
             }
-            RCEvent::HostKeyReceived(key) => {
-                self.emit_service_message(&format!(
-                    "Host key ({}): {}",
-                    key.algorithm(),
-                    key.public_key_base64()
-                ))?;
-            }
+            RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
             RCEvent::HostKeyUnknown(key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
@@ -985,6 +1138,11 @@ impl ServerSession {
             anyhow::bail!("No PTY channel to show an interactive prompt on")
         }
 
+        self.emit_service_message(&format!(
+            "Host key ({}): {}",
+            key.algorithm(),
+            key.public_key_base64()
+        ))?;
         self.emit_service_message(&format!(
             "There is no trusted {} key for this host.",
             key.algorithm()
@@ -1146,6 +1304,21 @@ impl ServerSession {
             error!(%channel_id, ?error, "Failed to record terminal data");
             self.channel_recorders.remove(&channel_id);
         }
+
+        if matches!(self.target, TargetSelection::Menu) {
+            let _ = self
+                .event_sender
+                .send_once(Event::MenuRedraw(
+                    request.col_width as u16,
+                    request.row_height as u16,
+                ))
+                .await;
+        }
+
+        if self.rc_state != RCState::Connected {
+            return Ok(());
+        }
+
         self.send_command_and_wait(RCCommand::Channel(
             channel_id,
             ChannelOperation::ResizePty(request),
@@ -1167,6 +1340,7 @@ impl ServerSession {
 
         let is_scp = command == "scp" || command.starts_with("scp ");
         let _ = self.maybe_connect_remote().await;
+        self.maybe_start_target_selection_menu(channel_id).await?;
         let _ = self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestExec(command.to_string()),
@@ -1174,7 +1348,7 @@ impl ServerSession {
 
         let should_record = if is_scp {
             let db = self.services.db.lock().await;
-            let should_record = Parameters::Entity::get(&*db)
+            let should_record = Parameters::Entity::get(&db)
                 .await
                 .map(|p| p.record_scp)
                 .unwrap_or(true);
@@ -1332,6 +1506,17 @@ impl ServerSession {
                 .event_sender
                 .send_once(Event::ConsoleInput(data.clone()))
                 .await;
+        }
+
+        // While the target selection menu is open, keystrokes drive the menu
+        // (handled above) and there's no target to forward them to.
+        // Otherwise forward the data even before the target connection is
+        // established: the remote client buffers channel operations and
+        // replays them in order once connected, so early stdin (e.g. rsync,
+        // scp or Ansible pipelining payloads sent right after the exec
+        // request) must not be dropped (#2065).
+        if matches!(self.target, TargetSelection::Menu) {
+            return Ok(());
         }
 
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
@@ -1600,6 +1785,7 @@ impl ServerSession {
                     ));
                     auth_prompts.push(("Press Enter when done: ".into(), true));
 
+                    #[allow(clippy::items_after_statements)]
                     const MAX_RETRIES: u8 = 3;
                     if let Some(retries) = pending_web_auth_retries {
                         if retries >= MAX_RETRIES {
@@ -1614,20 +1800,20 @@ impl ServerSession {
                         next_pending.web_approval_retry_count = Some(retries + 1);
                     } else {
                         next_pending.web_approval_retry_count = Some(0);
-                    };
+                    }
                 }
 
-                if !auth_prompts.is_empty() {
+                if auth_prompts.is_empty() {
+                    russh::server::Auth::Reject {
+                        proceed_with_methods: None,
+                        partial_success: false,
+                    }
+                } else {
                     self.keyboard_interactive_state = Some(next_pending);
                     russh::server::Auth::Partial {
                         name: auth_name.into(),
                         instructions: auth_instructions.into(),
                         prompts: auth_prompts.into(),
-                    }
-                } else {
-                    russh::server::Auth::Reject {
-                        proceed_with_methods: None,
-                        partial_success: false,
                     }
                 }
             }
@@ -1734,19 +1920,16 @@ impl ServerSession {
                 username,
                 target_name,
             } => {
-                let cp = self.services.config_provider.clone();
-
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
-                if let Some(credential) = credential
-                    && cp
-                        .lock()
-                        .await
-                        .validate_credential(username, &credential)
-                        .await?
-                {
-                    state.add_valid_credential(credential);
+                if let Some(credential) = credential {
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
                 }
 
                 let user_auth_result = state.verify();
@@ -1759,20 +1942,22 @@ impl ServerSession {
                             .await
                             .complete(state.id())
                             .await;
-                        let target_auth_result = {
-                            self.services
-                                .config_provider
-                                .lock()
-                                .await
-                                .authorize_target(&user_info.username, target_name)
-                                .await?
-                        };
-                        if !target_auth_result {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, username
-                            );
-                            return Ok(AuthResult::Rejected);
+                        if !target_name.is_empty() {
+                            let target_auth_result = {
+                                self.services
+                                    .config_provider
+                                    .lock()
+                                    .await
+                                    .authorize_target(&user_info.username, target_name)
+                                    .await?
+                            };
+                            if !target_auth_result {
+                                warn!(
+                                    "Target {} not authorized for user {}",
+                                    target_name, username
+                                );
+                                return Ok(AuthResult::Rejected);
+                            }
                         }
                         self._auth_accept(user_info.clone(), target_name).await?;
                         Ok(AuthResult::Accepted { user_info })
@@ -1808,39 +1993,41 @@ impl ServerSession {
             .set_user_info(user_info.clone())
             .await;
 
+        if target_name.is_empty() {
+            self.target = TargetSelection::Menu;
+            return Ok(());
+        }
+
         let target = {
             self.services
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(target_name)
                 .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::Ssh(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::Ssh(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
-        let Some((target, mut ssh_options)) = target else {
+        let Some((target, _)) = target else {
             self.target = TargetSelection::NotFound(target_name.to_string());
             warn!("Selected target not found");
             return Ok(());
         };
 
-        // Forward username from the authenticated user to the target, if target has no username
-        if ssh_options.username.is_empty() {
-            ssh_options.username = user_info.username.clone();
-        }
-
         let _ = self.server_handle.lock().await.set_target(&target).await;
-        self.target = TargetSelection::Found(target, ssh_options);
+        self.target = TargetSelection::Found(target);
         Ok(())
     }
 
     async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, "Ignoring close after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
@@ -1849,6 +2036,11 @@ impl ServerSession {
     }
 
     fn _channel_eof(&self, server_channel_id: ServerChannelId) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, "Ignoring eof after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "EOF");
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Eof));
@@ -1860,6 +2052,11 @@ impl ServerSession {
         server_channel_id: ServerChannelId,
         signal: Sig,
     ) -> Result<()> {
+        if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
+            debug!(channel=%server_channel_id.0, ?signal, "Ignoring signal after backend shutdown");
+            return Ok(());
+        }
+
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, ?signal, "Signal");
         self.send_command_and_wait(RCCommand::Channel(

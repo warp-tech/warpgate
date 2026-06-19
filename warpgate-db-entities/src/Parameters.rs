@@ -3,6 +3,7 @@ use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
+use warpgate_common::PasswordPolicy;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -36,14 +37,32 @@ pub struct Model {
     pub ticket_request_show_all_targets: bool,
     pub target_click_action: TargetClickAction,
     pub show_session_menu: bool,
+    pub password_policy_min_length: i32,
+    pub password_policy_require_uppercase: bool,
+    pub password_policy_require_lowercase: bool,
+    pub password_policy_require_digits: bool,
+    pub password_policy_require_special: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    pub tutorial_dismissed: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
+
+impl Model {
+    pub fn password_policy(&self) -> PasswordPolicy {
+        PasswordPolicy {
+            min_length: self.password_policy_min_length.max(0) as u32,
+            require_uppercase: self.password_policy_require_uppercase,
+            require_lowercase: self.password_policy_require_lowercase,
+            require_digits: self.password_policy_require_digits,
+            require_special: self.password_policy_require_special,
+        }
+    }
+}
 
 impl Entity {
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
@@ -68,8 +87,14 @@ impl Entity {
                     ticket_request_show_all_targets: Set(false),
                     target_click_action: Set(TargetClickAction::Connect),
                     show_session_menu: Set(true),
+                    password_policy_min_length: Set(0),
+                    password_policy_require_uppercase: Set(false),
+                    password_policy_require_lowercase: Set(false),
+                    password_policy_require_digits: Set(false),
+                    password_policy_require_special: Set(false),
                     max_api_token_duration_seconds: Set(None),
                     record_scp: Set(true),
+                    tutorial_dismissed: Set(false),
                 }
                 .insert(db)
                 .await

@@ -30,7 +30,7 @@ pub async fn has_admin_permission(
     let db = ctx.services().db.lock().await;
 
     let Some(user_model) = User::Entity::find()
-        .filter(User::Column::Username.eq(username))
+        .filter(User::Entity::username_eq_ci(username))
         .one(&*db)
         .await?
     else {

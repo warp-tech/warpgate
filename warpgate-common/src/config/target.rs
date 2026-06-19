@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use poem_openapi::{Object, Union};
+use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_tls::TlsMode;
@@ -38,6 +38,8 @@ pub struct TargetSSHOptions {
     pub allow_insecure_algos: Option<bool>,
     #[serde(default)]
     pub auth: SSHTargetAuth,
+    #[serde(default)]
+    pub jump_host: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -187,6 +189,17 @@ impl TargetMySqlOptions {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+pub enum PostgresProtocolVersion {
+    #[serde(rename = "3.0")]
+    #[oai(rename = "3.0")]
+    V3_0,
+    #[default]
+    #[serde(rename = "3.2")]
+    #[oai(rename = "3.2")]
+    V3_2,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetPostgresOptions {
     #[serde(default = "_default_empty_string")]
@@ -214,6 +227,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+
+    #[serde(default)]
+    pub protocol_version: Option<PostgresProtocolVersion>,
 }
 
 impl TargetPostgresOptions {

@@ -56,6 +56,82 @@
                     </label>
                 </Section>
 
+                <Section id="password-policy" title="Password policy">
+                    <FormGroup floating label="Minimum length (0 = no requirement)">
+                        <input
+                            type="number"
+                            min="0"
+                            class="form-control"
+                            value={parameters.passwordPolicy.minLength}
+                            onchange={e => {
+                                const v = parseInt(e.currentTarget.value)
+                                parameters!.passwordPolicy.minLength = isNaN(v) ? 0 : Math.max(0, v)
+                                update()
+                            }}
+                        />
+                    </FormGroup>
+                    <label
+                        for="requireUppercase"
+                        class="d-flex align-items-center mb-2"
+                    >
+                        <Input
+                            id="requireUppercase"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                parameters!.passwordPolicy.requireUppercase = !parameters!.passwordPolicy.requireUppercase
+                                update()
+                            }}
+                            checked={parameters.passwordPolicy.requireUppercase} />
+                        <div>Require uppercase letter</div>
+                    </label>
+                    <label
+                        for="requireLowercase"
+                        class="d-flex align-items-center mb-2"
+                    >
+                        <Input
+                            id="requireLowercase"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                parameters!.passwordPolicy.requireLowercase = !parameters!.passwordPolicy.requireLowercase
+                                update()
+                            }}
+                            checked={parameters.passwordPolicy.requireLowercase} />
+                        <div>Require lowercase letter</div>
+                    </label>
+                    <label
+                        for="requireDigits"
+                        class="d-flex align-items-center mb-2"
+                    >
+                        <Input
+                            id="requireDigits"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                parameters!.passwordPolicy.requireDigits = !parameters!.passwordPolicy.requireDigits
+                                update()
+                            }}
+                            checked={parameters.passwordPolicy.requireDigits} />
+                        <div>Require digit</div>
+                    </label>
+                    <label
+                        for="requireSpecial"
+                        class="d-flex align-items-center"
+                    >
+                        <Input
+                            id="requireSpecial"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                parameters!.passwordPolicy.requireSpecial = !parameters!.passwordPolicy.requireSpecial
+                                update()
+                            }}
+                            checked={parameters.passwordPolicy.requireSpecial} />
+                        <div>Require special character</div>
+                    </label>
+                </Section>
+
                 <Section id="traffic" title="Traffic">
                     <FormGroup>
                         <label class="mb-2" for="rateLimitBytesPerSecond">Global bandwidth limit</label>

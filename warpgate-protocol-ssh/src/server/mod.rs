@@ -3,12 +3,13 @@ mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
+mod target_menu;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
+use futures::StreamExt;
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -40,7 +41,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.try_next().await.context("accepting connection")? {
+    while let Some(stream) = listener.next().await {
         let russh_config_init = russh_config_init.clone();
         let services = services.clone();
 
@@ -113,7 +114,8 @@ async fn _handle_connection(
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout),
+            // Extra time for the "closing due to inactivity" message to be sent
+            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),
@@ -192,6 +194,11 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
         warn!(
             "All SSH authentication methods are disabled in parameters. Enabling all methods as fallback."
         );
+        methods_vec = vec![
+            MethodKind::PublicKey,
+            MethodKind::Password,
+            MethodKind::KeyboardInteractive,
+        ];
     }
 
     Ok(MethodSet::from(&methods_vec[..]))

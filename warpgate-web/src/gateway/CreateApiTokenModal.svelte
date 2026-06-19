@@ -73,7 +73,7 @@
                     type="datetime-local"
                     max={maxExpiry}
                     bind:value={expiry}  />
-                {#if maxDurationMs !== Number.POSITIVE_INFINITY}
+                {#if maxDurationMs !== null}
                     <small class="text-muted">
                         Maximum: {Math.floor(maxDurationMs / 86400 / 1000)} days
                     </small>

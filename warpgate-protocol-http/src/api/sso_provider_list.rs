@@ -14,12 +14,15 @@ use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
-use crate::api::common::logout;
-use crate::common::{SessionExt, authorize_session, get_auth_state_for_request};
+use crate::api::common::{emit_unknown_authentication_failed_event, logout};
+use crate::common::{
+    SessionExt, authorize_session, get_or_create_auth_state_for_request, session_id_for_request,
+};
 use crate::session::SessionStore;
 
 pub struct Api;
@@ -84,6 +87,19 @@ enum StartSloResponse {
 fn make_redirect_url(err: &str) -> String {
     error!("SSO error: {err}");
     format!("/@warpgate?login_error={err}")
+}
+
+/// Only relative paths and absolute `http(s)` URLs are accepted as post-login
+/// redirect targets. This rejects schemes such as `javascript:` or `data:` and
+/// protocol-relative `//host` URLs.
+fn is_safe_redirect_target(next: &str) -> bool {
+    if let Some(rest) = next.strip_prefix('/') {
+        // Relative path, but not protocol-relative ("//host")
+        return !rest.starts_with('/');
+    }
+    url::Url::parse(next)
+        .as_ref()
+        .is_ok_and(|v| matches!(v.scheme(), "http" | "https"))
 }
 
 #[OpenApi]
@@ -164,6 +180,8 @@ impl Api {
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
         let serialized_url = serde_json::to_string(&url)?;
+        let attr_url = html_escape::encode_double_quoted_attribute(&url);
+        let text_url = html_escape::encode_text(&url);
         Ok(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
                 "<!doctype html>\n
@@ -172,7 +190,7 @@ impl Api {
                         location.href = {serialized_url};
                     </script>
                     <body>
-                        Redirecting to <a href='{url}'>{url}</a>...
+                        Redirecting to <a href=\"{attr_url}\">{text_url}</a>...
                     </body>
                 </html>
             "
@@ -219,6 +237,13 @@ impl Api {
             })?;
 
         if !response.email_verified.unwrap_or(true) {
+            error!(
+                "SSO login attempt with an unverified email: {:?}",
+                response.email
+            );
+            error!(
+                "The SSO provider did provide an email_verified claim, and it is false. Since the provider provides this claim, Warpgate requires the email to be verified."
+            );
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));
         }
 
@@ -257,53 +282,72 @@ impl Api {
             )
             .await?;
         let Some(username) = username else {
+            let session_id = session_id_for_request(req, &ctx).await?;
+            emit_unknown_authentication_failed_event(
+                session_id,
+                req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                &email,
+                &cred.safe_description(),
+                "unknown user",
+            );
             return Ok(Err(format!("No user matching {email}")));
         };
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
         let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-        let state_arc =
-            match get_auth_state_for_request(&username, session, &mut auth_state_store, remote_ip)
-                .await
-            {
-                Ok(state) => state,
-                Err(e) => {
-                    if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
-                        return Ok(Err(
+        let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx).await {
+            Ok(state) => state,
+            Err(e) => {
+                if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {
+                    let session_id = session_id_for_request(req, &ctx).await?;
+                    emit_unknown_authentication_failed_event(
+                        session_id,
+                        remote_ip,
+                        &username,
+                        &cred.safe_description(),
+                        "IP address not allowed",
+                    );
+                    return Ok(Err(
                         "Login denied: your IP address is not in the allowed range for this user"
                             .to_string(),
                     ));
-                    }
-                    return Err(e);
                 }
-            };
+                return Err(e);
+            }
+        };
 
         let mut state = state_arc.lock().await;
-        let mut cp = services.config_provider.lock().await;
 
-        if state.user_info().username != username {
-            return Ok(Err(format!(
-                "Incorrect account for SSO authentication ({username})"
-            )));
-        }
-
-        if cp.validate_credential(&username, &cred).await? {
-            state.add_valid_credential(cred);
-        } else {
+        if !validate_and_add_credential(
+            &mut state,
+            &cred,
+            &mut *ctx.services().config_provider.lock().await,
+        )
+        .await?
+        {
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"
             )));
         }
 
         if let AuthResult::Accepted { user_info } = state.verify() {
-            auth_state_store.complete(state.id()).await;
             authorize_session(req, &ctx, user_info).await?;
+            state.emit_authenticated_event_once();
+            let state_id = *state.id();
+            drop(state);
+            ctx.services()
+                .auth_state_store
+                .lock()
+                .await
+                .complete(&state_id)
+                .await;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token,
                 supports_single_logout: context.supports_single_logout,
             });
         }
+
+        let mut cp = services.config_provider.lock().await;
 
         let mappings = provider_config.provider.role_mappings();
         if let Some(remote_groups) = response.access_roles {
@@ -381,6 +425,7 @@ impl Api {
         let mut next_url = context
             .next_url
             .as_deref()
+            .filter(|next| is_safe_redirect_target(next))
             .unwrap_or("/@warpgate#/login")
             .to_owned();
 
@@ -431,5 +476,30 @@ impl Api {
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_redirect_target;
+
+    #[test]
+    fn accepts_relative_paths() {
+        assert!(is_safe_redirect_target("/@warpgate#/login"));
+        assert!(is_safe_redirect_target("/foo/bar?x=1"));
+    }
+
+    #[test]
+    fn accepts_http_and_https_urls() {
+        assert!(is_safe_redirect_target("https://example.com/path"));
+        assert!(is_safe_redirect_target("http://example.com"));
+    }
+
+    #[test]
+    fn rejects_dangerous_schemes_and_protocol_relative() {
+        assert!(!is_safe_redirect_target("javascript:alert(1)"));
+        assert!(!is_safe_redirect_target("data:text/html,<script>"));
+        assert!(!is_safe_redirect_target("//evil.com"));
+        assert!(!is_safe_redirect_target("ftp://example.com"));
     }
 }

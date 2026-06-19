@@ -78,16 +78,9 @@ async fn get_target_for_request(
             .config_provider
             .lock()
             .await
-            .list_targets()
+            .get_target_by_hostname(host.as_str())
             .await?
-            .iter()
-            .filter_map(|t| match t.options {
-                TargetOptions::Http(ref options) => Some((t, options)),
-                _ => None,
-            })
-            .find(|(_, o)| o.external_host.as_deref() == Some(&host))
-            .map(|(t, _)| t.name.clone());
-
+            .map(|t| t.name);
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
@@ -135,15 +128,12 @@ async fn get_target_for_request(
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(target_name.as_str())
                 .await?
-                .iter()
-                .filter(|t| t.name == target_name)
-                .find_map(|t| match t.options {
-                    TargetOptions::Http(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::Http(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .map(|(t, o)| (t.clone(), o.clone()))
         };
 
         if let Some(target) = target {

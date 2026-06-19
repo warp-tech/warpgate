@@ -71,8 +71,10 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
                     .with_timer(OffsetTime::new(
                         offset,
                         #[allow(clippy::unwrap_used)]
-                        format_description::parse("[day].[month].[year] [hour]:[minute]:[second]")
-                            .unwrap(),
+                        format_description::parse_borrowed::<1>(
+                            "[day].[month].[year] [hour]:[minute]:[second]",
+                        )
+                        .unwrap(),
                     ))
                     .with_filter(dynamic_filter_fn(move |m, c| {
                         env_filter.enabled(m, c.clone())
@@ -89,7 +91,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
                 .with_timer(OffsetTime::new(
                     offset,
                     #[allow(clippy::unwrap_used)]
-                    format_description::parse("[hour]:[minute]:[second]").unwrap(),
+                    format_description::parse_borrowed::<1>("[hour]:[minute]:[second]").unwrap(),
                 ))
                 .with_filter(dynamic_filter_fn(move |m, c| {
                     env_filter.enabled(m, c.clone())

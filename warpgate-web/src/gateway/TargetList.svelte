@@ -188,8 +188,16 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                         <Fa icon={faEllipsisV} fw />
                     </DropdownToggle>
                     <DropdownMenu end>
-                        <DropdownItem onclick={() => openWebSsh(target)}>Web terminal</DropdownItem>
-                        <DropdownItem onclick={() => showInstructions(target)}>Connection instructions</DropdownItem>
+                        <DropdownItem onclick={e => {
+                            openWebSsh(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web terminal</DropdownItem>
+                        <DropdownItem onclick={e => {
+                            showInstructions(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Connection instructions</DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
             {:else if target.kind === TargetKind.Http}

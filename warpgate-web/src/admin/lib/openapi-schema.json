@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-70-gdc2f553-modified"
+    "version": "v0.23.4-72-g5b9d2d0c-modified"
   },
   "servers": [
     {
@@ -2639,6 +2639,19 @@
           },
           "404": {
             "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PasswordPolicyViolation"
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -4157,16 +4170,12 @@
         "type": "object",
         "title": "CheckSshHostKeyRequest",
         "required": [
-          "host",
-          "port"
+          "target_id"
         ],
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "uint16"
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5037,6 +5046,9 @@
           "show_session_menu": {
             "type": "boolean"
           },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
@@ -5061,6 +5073,7 @@
           "ticket_request_show_all_targets",
           "target_click_action",
           "show_session_menu",
+          "password_policy",
           "record_scp"
         ],
         "properties": {
@@ -5109,6 +5122,9 @@
           "show_session_menu": {
             "type": "boolean"
           },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
@@ -5117,6 +5133,55 @@
             "type": "boolean"
           }
         }
+      },
+      "PasswordPolicy": {
+        "type": "object",
+        "title": "PasswordPolicy",
+        "description": "Rules that a password must satisfy.",
+        "required": [
+          "min_length",
+          "require_uppercase",
+          "require_lowercase",
+          "require_digits",
+          "require_special"
+        ],
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Minimum number of characters (0 = no requirement)."
+          },
+          "require_uppercase": {
+            "type": "boolean"
+          },
+          "require_lowercase": {
+            "type": "boolean"
+          },
+          "require_digits": {
+            "type": "boolean"
+          },
+          "require_special": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordPolicyViolation": {
+        "type": "string",
+        "description": "A single rule that was violated.",
+        "enum": [
+          "TooShort",
+          "MissingUppercase",
+          "MissingLowercase",
+          "MissingDigit",
+          "MissingSpecial"
+        ]
+      },
+      "PostgresProtocolVersion": {
+        "type": "string",
+        "enum": [
+          "3.0",
+          "3.2"
+        ]
       },
       "RdpTargetAuth": {
         "type": "object",
@@ -5902,6 +5967,9 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "protocol_version": {
+            "$ref": "#/components/schemas/PostgresProtocolVersion"
           }
         }
       },
@@ -5958,6 +6026,10 @@
           },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },

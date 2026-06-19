@@ -40,6 +40,9 @@
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
+        if (target.options.kind === 'Postgres') {
+            target.options.protocolVersion ??= '3.2'
+        }
     }
 
     async function loadRoles () {
@@ -364,6 +367,16 @@
             {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
                 <Section id="advanced" title="Advanced">
                     {#if target.options.kind === 'Postgres'}
+                        <FormGroup floating label="Protocol version">
+                            <select class="form-control" bind:value={target.options.protocolVersion}>
+                                <option value="3.2">3.2</option>
+                                <option value="3.0">3.0</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                Postgres protocol version for the target connection. You might have to choose 3.0 here for some non-compliant Postgres proxies that do not implement automatic version negotiation.
+                            </small>
+                        </FormGroup>
+
                         <FormGroup floating label="Idle timeout">
                             <input
                                 class="form-control"

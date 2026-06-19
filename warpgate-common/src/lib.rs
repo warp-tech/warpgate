@@ -13,5 +13,6 @@ pub mod version;
 
 pub use config::*;
 pub use error::WarpgateError;
+pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
 pub use state::GlobalParams;
 pub use types::*;

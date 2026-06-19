@@ -140,7 +140,7 @@ impl Api {
             User::Entity::find_by_id(user_id).one(&*db).await?
         } else if let Some(username) = &body.username {
             User::Entity::find()
-                .filter(User::Column::Username.eq(username.clone()))
+                .filter(User::Entity::username_eq_ci(username))
                 .one(&*db)
                 .await?
         } else {

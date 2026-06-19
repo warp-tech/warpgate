@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
-    _default_http_listen, _default_kubernetes_listen, _default_mysql_listen,
-    _default_postgres_listen, _default_recordings_path, _default_retention,
-    _default_rdp_listen, _default_session_max_age, _default_ssh_inactivity_timeout,
+    _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
+    _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
+    _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
     _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
@@ -434,6 +434,12 @@ pub struct MySqlConfig {
 
     #[serde(default)]
     pub key: String,
+
+    /// The server version advertised to clients during the handshake.
+    /// We can't auto-match the target's version since the target is only known
+    /// after the handshake, but clients use it to pick a protocol dialect.
+    #[serde(default = "_default_mysql_advertised_version")]
+    pub advertised_version: String,
 }
 
 impl Default for MySqlConfig {
@@ -445,6 +451,7 @@ impl Default for MySqlConfig {
             external_host: None,
             certificate: "".into(),
             key: "".into(),
+            advertised_version: _default_mysql_advertised_version(),
         }
     }
 }

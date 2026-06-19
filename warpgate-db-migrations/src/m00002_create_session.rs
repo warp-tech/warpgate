@@ -13,6 +13,7 @@ pub mod session {
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
+        #[sea_orm(column_type = "Text")]
         pub target_snapshot: Option<String>,
         pub username: Option<String>,
         pub remote_address: String,

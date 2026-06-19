@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use data_encoding::BASE64;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -167,7 +168,7 @@ impl DatabaseConfigProvider {
         }
 
         let existing_user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(&preferred_username))
+            .filter(entities::User::Entity::username_eq_ci(&preferred_username))
             .one(db)
             .await?;
 
@@ -257,6 +258,45 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(targets?)
     }
 
+    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError> {
+        let db = self.db.lock().await;
+
+        let target = entities::Target::Entity::find()
+            .filter(entities::Target::Column::Name.eq(name))
+            .one(&*db)
+            .await?;
+
+        target
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn get_target_by_hostname(
+        &mut self,
+        hostname: &str,
+    ) -> Result<Option<Target>, WarpgateError> {
+        let db: tokio::sync::MutexGuard<'_, DatabaseConnection> = self.db.lock().await;
+
+        let hostname_query = match db.get_database_backend() {
+            DatabaseBackend::MySql => {
+                Expr::cust("JSON_UNQUOTE(JSON_EXTRACT(options, '$.http.external_host'))")
+            }
+            DatabaseBackend::Postgres => Expr::cust(r"options->'http'->>'external_host'"),
+            DatabaseBackend::Sqlite => Expr::cust(r"json_extract(options, '$.http.external_host')"),
+        };
+
+        let target = entities::Target::Entity::find()
+            .filter(hostname_query.eq(hostname))
+            .one(&*db)
+            .await?;
+
+        target
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn get_credential_policy(
         &mut self,
         username: &str,
@@ -265,7 +305,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -438,7 +478,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -549,7 +589,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?;
 
         let user_model = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?;
 
@@ -602,7 +642,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
@@ -663,7 +703,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = self.db.lock().await;
 
         let user = entities::User::Entity::find()
-            .filter(entities::User::Column::Username.eq(username))
+            .filter(entities::User::Entity::username_eq_ci(username))
             .one(&*db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;

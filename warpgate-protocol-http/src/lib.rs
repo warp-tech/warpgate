@@ -45,7 +45,10 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
 use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
-use crate::middleware::{CookieHostMiddleware, TicketMiddleware};
+use crate::middleware::{
+    ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
+    WARPGATE_PLAYGROUND_CSP,
+};
 use crate::session::{SessionStore, SharedSessionStorage};
 use crate::session_handle::warpgate_server_handle_for_request;
 
@@ -191,7 +194,13 @@ impl ProtocolServer for HTTPProtocolServer {
             let admin_api_app = admin_api_app().into_endpoint();
 
             Route::new()
-                .nest("/api/playground", openapi_ui_route)
+                .nest(
+                    "/api/playground",
+                    openapi_ui_route.with(SetHeader::new().overriding(
+                        http::header::CONTENT_SECURITY_POLICY,
+                        WARPGATE_PLAYGROUND_CSP,
+                    )),
+                )
                 .nest("/api", api_service.with(cache_bust()))
                 .nest("/api/openapi.json", openapi_spec_route)
                 .nest_no_strip(
@@ -249,6 +258,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 })
                 .data(web_ssh_manager)
                 .data(web_desktop_manager)
+                .with(ContentSecurityPolicyMiddleware)
         };
 
         let app = Route::new()

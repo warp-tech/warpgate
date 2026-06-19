@@ -11,14 +11,14 @@ use warpgate_database_protocols::mysql::protocol::connect::{
     Handshake, HandshakeResponse, SslRequest,
 };
 use warpgate_database_protocols::mysql::protocol::response::ErrPacket;
-use warpgate_tls::{TlsMode, configure_tls_connector};
+use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::common::compute_auth_challenge_response;
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
-    pub stream: MySqlStream<TcpStream, tokio_rustls::client::TlsStream<TcpStream>>,
+    pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
     pub _capabilities: Capabilities,
 }
 

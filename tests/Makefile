@@ -4,7 +4,10 @@ image-ssh-server:
 image-mysql-server:
 	cd images/mysql-server && docker build -t warpgate-e2e-mysql-server .
 
+image-mariadb-server:
+	cd images/mariadb-server && docker build -t warpgate-e2e-mariadb-server .
+
 image-postgres-server:
 	cd images/postgres-server && docker build -t warpgate-e2e-postgres-server .
 
-all: image-ssh-server image-mysql-server image-postgres-server
+all: image-ssh-server image-mysql-server image-mariadb-server image-postgres-server
