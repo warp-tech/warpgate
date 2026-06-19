@@ -1,16 +1,16 @@
 mod rfb;
 mod session_handle;
 
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use futures::TryStreamExt;
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
+use tokio_stream::StreamExt;
 use tracing::{Instrument, error, info, info_span, warn};
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
@@ -45,11 +45,14 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             certificate: TlsCertificateBundle::from_file(&certificate_path)
                 .await
                 .with_context(|| {
-                    format!("reading TLS certificate from '{}'", certificate_path.display())
+                    format!(
+                        "reading TLS certificate from '{}'",
+                        certificate_path.display()
+                    )
                 })?,
-            private_key: TlsPrivateKey::from_file(&key_path)
-                .await
-                .with_context(|| format!("reading TLS private key from '{}'", key_path.display()))?,
+            private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
+                format!("reading TLS private key from '{}'", key_path.display())
+            })?,
         }
     };
 
@@ -65,10 +68,7 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    loop {
-        let Some(stream) = listener.try_next().await.context("accepting connection")? else {
-            return Ok(());
-        };
+    while let Some(stream) = listener.next().await {
         let remote_address = stream.peer_addr().context("getting peer address")?;
         stream.set_nodelay(true)?;
         if detect_port_knock(&stream).await {
@@ -116,6 +116,8 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
             }
         });
     }
+
+    Ok(())
 }
 
 async fn handle_connection(
@@ -244,7 +246,10 @@ async fn authenticate(
                         .authorize_target(&user_info.username, &target_name)
                         .await?;
                     if !authorized {
-                        bail!("Target {target_name} not authorized for {}", user_info.username);
+                        bail!(
+                            "Target {target_name} not authorized for {}",
+                            user_info.username
+                        );
                     }
                     let (target, options) = find_vnc_target(services, &target_name).await?;
                     Ok((user_info, target, options))

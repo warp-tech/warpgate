@@ -1907,6 +1907,15 @@ dependencies = [
 
 [[package]]
 name = "des"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
+name = "des"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "916a94e407b54f9034d71dd748234cd1e516ced6284009906ae246f177eafe5a"
@@ -5562,7 +5571,7 @@ dependencies = [
  "data-encoding",
  "delegate",
  "der 0.8.0",
- "des",
+ "des 0.9.0",
  "digest 0.11.3",
  "ecdsa 0.17.0-rc.18",
  "ed25519-dalek 3.0.0-rc.0",
@@ -6799,7 +6808,7 @@ dependencies = [
  "cipher 0.5.2",
  "ctr 0.10.1",
  "ctutils",
- "des",
+ "des 0.9.0",
  "poly1305",
  "ssh-encoding",
  "zeroize",
@@ -8315,7 +8324,7 @@ version = "0.23.4"
 dependencies = [
  "anyhow",
  "bytes",
- "des",
+ "des 0.8.1",
  "futures",
  "rustls 0.23.40",
  "thiserror 2.0.18",
