@@ -39,7 +39,10 @@ where
     // Offer only VeNCrypt
     stream.write_all(&[1, SECURITY_VENCRYPT]).await?;
     stream.flush().await?;
-    let selected = stream.read_u8().await.context("reading selected security")?;
+    let selected = stream
+        .read_u8()
+        .await
+        .context("reading selected security")?;
     if selected != SECURITY_VENCRYPT {
         bail!("viewer did not select VeNCrypt (got {selected})");
     }
@@ -103,11 +106,7 @@ where
 
 /// Writes the RFB SecurityResult to the viewer. On failure (RFB 3.8) a reason
 /// string is appended.
-pub async fn server_write_security_result<S>(
-    stream: &mut S,
-    ok: bool,
-    reason: &str,
-) -> Result<()>
+pub async fn server_write_security_result<S>(stream: &mut S, ok: bool, reason: &str) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -115,7 +114,9 @@ where
         stream.write_all(&0u32.to_be_bytes()).await?;
     } else {
         stream.write_all(&1u32.to_be_bytes()).await?;
-        stream.write_all(&(reason.len() as u32).to_be_bytes()).await?;
+        stream
+            .write_all(&(reason.len() as u32).to_be_bytes())
+            .await?;
         stream.write_all(reason.as_bytes()).await?;
     }
     stream.flush().await?;
@@ -150,7 +151,10 @@ where
     stream.flush().await?;
 
     // Security types (RFB 3.7+)
-    let count = stream.read_u8().await.context("reading target security count")?;
+    let count = stream
+        .read_u8()
+        .await
+        .context("reading target security count")?;
     if count == 0 {
         let reason_len = stream.read_u32().await? as usize;
         let mut reason = vec![0u8; reason_len.min(4096)];
@@ -182,7 +186,10 @@ where
     }
 
     // SecurityResult (present for all types in RFB 3.8)
-    let result = stream.read_u32().await.context("reading target SecurityResult")?;
+    let result = stream
+        .read_u32()
+        .await
+        .context("reading target SecurityResult")?;
     if result != 0 {
         bail!("target authentication failed");
     }
@@ -193,7 +200,10 @@ where
 
     // ServerInit: 2 (w) + 2 (h) + 16 (pixel format) + 4 (name length) + name
     let mut head = [0u8; 20];
-    stream.read_exact(&mut head).await.context("reading ServerInit head")?;
+    stream
+        .read_exact(&mut head)
+        .await
+        .context("reading ServerInit head")?;
     let name_len = u32::from_be_bytes([head[16], head[17], head[18], head[19]]) as usize;
     let mut name = vec![0u8; name_len.min(4096)];
     stream.read_exact(&mut name).await?;

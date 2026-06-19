@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_core::{DesktopInput, SessionHandle, WarpgateServerHandle};

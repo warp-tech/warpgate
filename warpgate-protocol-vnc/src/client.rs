@@ -1,9 +1,7 @@
 use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{
-    Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{
     ClientKeyEvent, ClientMouseEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event,
@@ -58,9 +56,7 @@ pub fn connect(options: TargetVncOptions) -> VncClientHandles {
         async move {
             if let Err(error) = run(options, event_tx.clone(), input_rx, abort_rx).await {
                 error!(%error, "VNC backend client failed");
-                let _ = event_tx
-                    .send(DesktopEvent::Error(error.to_string()))
-                    .await;
+                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))

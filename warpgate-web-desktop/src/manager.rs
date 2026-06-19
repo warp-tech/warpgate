@@ -3,8 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
-use tokio::sync::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;

@@ -7,16 +7,15 @@
 //! [`DesktopEvent`]/[`DesktopInput`] streams, so the existing web-desktop manager and
 //! browser canvas renderer work unchanged.
 
+use std::process::Stdio;
+
 use anyhow::Context;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc::{
-    Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{ProtocolName, RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
@@ -46,7 +45,10 @@ struct ConnectConfig {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum HelperEvent {
-    Connected { width: u16, height: u16 },
+    Connected {
+        width: u16,
+        height: u16,
+    },
     RawImage {
         x: u16,
         y: u16,
@@ -54,7 +56,9 @@ enum HelperEvent {
         height: u16,
         data: String,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
     Disconnected,
 }
 
