@@ -8172,6 +8172,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-sso",
  "warpgate-tls",
 ]
 

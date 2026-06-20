@@ -1,4 +1,6 @@
 mod db;
+mod sso_user;
+pub use sso_user::resolve_and_map_sso_user;
 use std::sync::Arc;
 
 pub use db::DatabaseConfigProvider;

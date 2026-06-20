@@ -280,6 +280,72 @@ impl SsoClient {
         })
     }
 
+    /// Verify a raw OIDC ID token (e.g. from a kubectl exec plugin) without a
+    /// code exchange or nonce. Validates signature against the issuer JWKS and
+    /// checks `iss`, `exp` and `aud` (honouring the provider's trusted-audience
+    /// configuration).
+    pub async fn verify_id_token(&self, id_token_str: &str) -> Result<SsoResult, SsoError> {
+        // Capture audience-check configuration before building the verifier.
+        let trusted: Vec<String> = self
+            .config
+            .additional_trusted_audiences()
+            .cloned()
+            .unwrap_or_default();
+        let trust_unknown = self.config.trust_unknown_audiences();
+        let client_id = self.config.client_id().as_str().to_owned();
+
+        let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
+
+        // Disable the built-in audience check so we can enforce it ourselves
+        // below.  Signature / iss / exp are still fully enforced.
+        let token_verifier = client.id_token_verifier().require_audience_match(false);
+
+        let id_token: WarpgateIdToken = id_token_str
+            .parse()
+            .map_err(|e| SsoError::Verification(format!("Malformed ID token: {e}")))?;
+
+        // No nonce in a non-interactive flow: accept any (absent) nonce.
+        let claims = id_token
+            .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
+            .clone();
+
+        // Manual audience enforcement: a token is accepted iff its audience
+        // contains Warpgate's own client_id OR any configured trusted audience.
+        // When trust_unknown_audiences is true we skip the check entirely
+        // (documented semantics), but signature/iss/exp are always enforced.
+        if !trust_unknown {
+            let auds = claims.audiences();
+            let ok = auds.iter().any(|a| {
+                let a = a.as_str();
+                a == client_id || trusted.iter().any(|t| t == a)
+            });
+            if !ok {
+                return Err(SsoError::Verification(format!(
+                    "ID token audience not trusted (audiences: {})",
+                    auds.iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+        }
+
+        Ok(SsoResult {
+            token: id_token,
+            claims,
+            userinfo_claims: None,
+        })
+    }
+
+    /// Verify a raw ID token and map it to a SsoLoginResponse in one call.
+    pub async fn verify_id_token_to_response(
+        &self,
+        id_token_str: &str,
+    ) -> Result<crate::SsoLoginResponse, SsoError> {
+        let result = self.verify_id_token(id_token_str).await?;
+        Ok(crate::request::map_sso_result(&self.config, result).await)
+    }
+
     pub async fn logout(&self, token: WarpgateIdToken, redirect_url: Url) -> Result<Url, SsoError> {
         let metadata = discover_metadata(&self.config, &self.http_client).await?;
         let Some(ref url) = metadata.additional_metadata().end_session_endpoint else {

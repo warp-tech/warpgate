@@ -48,6 +48,93 @@ pub async fn authenticate_and_get_target(
             }
             return Ok(((&user).into(), target));
         }
+        drop(config_provider);
+
+        // API token did not match — try OIDC ID token validation.
+        let sso_providers = {
+            let config = services.config.lock().await;
+            config.store.sso_providers.clone()
+        };
+
+        for provider_config in &sso_providers {
+            let client = match warpgate_sso::SsoClient::new(provider_config.provider.clone()) {
+                Ok(c) => c,
+                Err(e) => {
+                    debug!(provider = %provider_config.name, error = %e, "Skipping SSO provider (client init failed)");
+                    continue;
+                }
+            };
+
+            let response = match client.verify_id_token_to_response(token).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // Wrong issuer / audience / signature for this provider — try the next.
+                    debug!(provider = %provider_config.name, error = %e, "OIDC token not valid for provider");
+                    continue;
+                }
+            };
+
+            let mut config_provider = services.config_provider.lock().await;
+            let Some(username) = warpgate_core::resolve_and_map_sso_user(
+                &mut *config_provider,
+                provider_config,
+                &response,
+            )
+            .await
+            .map_err(|e| {
+                poem::Error::from_string(
+                    format!("SSO user resolution failed: {e}"),
+                    poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            })?
+            else {
+                continue;
+            };
+
+            let target = config_provider
+                .get_target_by_name(target_name)
+                .await
+                .context("looking up target")?
+                .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
+                .ok_or_else(|| {
+                    poem::Error::from_string(
+                        format!("Kubernetes target not found: {target_name}"),
+                        poem::http::StatusCode::NOT_FOUND,
+                    )
+                })?;
+
+            if !config_provider
+                .authorize_target(&username, &target.name)
+                .await
+                .unwrap_or(false)
+            {
+                return Err(poem::Error::from_string(
+                    format!("Access denied to target: {target_name}"),
+                    poem::http::StatusCode::FORBIDDEN,
+                ));
+            }
+            drop(config_provider);
+
+            let db = services.db.lock().await;
+            let model = warpgate_db_entities::User::Entity::find()
+                .filter(warpgate_db_entities::User::Entity::username_eq_ci(&username))
+                .one(&*db)
+                .await
+                .context("looking up user in database")?;
+            let Some(model) = model else {
+                return Err(poem::Error::from_string(
+                    format!("User not found after SSO resolution: {username}"),
+                    poem::http::StatusCode::UNAUTHORIZED,
+                ));
+            };
+            let user = User::try_from(model).map_err(|e| {
+                poem::Error::from_string(
+                    format!("Failed to convert user model: {e}"),
+                    poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            })?;
+            return Ok(((&user).into(), target));
+        }
     }
 
     // Check for client certificate authentication
