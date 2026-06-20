@@ -24,6 +24,7 @@ WORKDIR /opt/warpgate
 RUN just npm ci \
     && just openapi \
     && just npm run build \
+    && just build-rdp-helper \
     && cargo build --features mysql,postgres --release
 
 FROM debian:bullseye-20260610@sha256:68cf0d859b046494f3c4288171bc477580e424f981d08f2a77742b982c32a38f

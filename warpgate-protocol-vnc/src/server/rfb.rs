@@ -7,7 +7,6 @@
 
 use anyhow::{Context, Result, bail};
 use des::Des;
-use des::cipher::generic_array::GenericArray;
 use des::cipher::{BlockEncrypt, KeyInit};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -230,11 +229,13 @@ fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     for (i, b) in password.bytes().take(8).enumerate() {
         key[i] = b.reverse_bits();
     }
-    let cipher = Des::new(GenericArray::from_slice(&key));
+    let cipher = Des::new(&key.into());
 
     let mut out = [0u8; 16];
     for chunk in 0..2 {
-        let mut block = GenericArray::clone_from_slice(&challenge[chunk * 8..chunk * 8 + 8]);
+        let mut block_bytes = [0u8; 8];
+        block_bytes.copy_from_slice(&challenge[chunk * 8..chunk * 8 + 8]);
+        let mut block = block_bytes.into();
         cipher.encrypt_block(&mut block);
         out[chunk * 8..chunk * 8 + 8].copy_from_slice(&block);
     }

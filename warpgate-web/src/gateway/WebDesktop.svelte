@@ -34,6 +34,7 @@
 
     const ws = new ReconnectingWebSocket({
         url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
+        onOpen: () => null,
         onMessage: data => onMessage(JSON.parse(data) as ServerMessage),
     })
 
@@ -47,7 +48,7 @@
                 if (msg.state === 'connected') {
                     ws.state = ConnectionState.Connected
                 } else if (msg.state === 'disconnected') {
-                    ws.state = ConnectionState.Closed
+                    ws.state = ConnectionState.Disconnected
                 }
                 break
             case 'clipboard':

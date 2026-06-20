@@ -2,10 +2,14 @@
 //!
 //! The actual RDP/IronRDP work runs in the standalone `warpgate-rdp-helper` binary
 //! (which lives outside the cargo workspace to avoid a RustCrypto pre-release version
-//! conflict between IronRDP's CredSSP stack and `russh`). This crate spawns that
-//! helper as a subprocess and bridges its line-delimited JSON stdio to the shared
+//! conflict between IronRDP's CredSSP stack and `russh`). The prebuilt helper is
+//! embedded into this crate at build time (see `build.rs`) and extracted for
+//! use, so Warpgate ships as a single executable. This crate spawns that helper as a
+//! subprocess and bridges its line-delimited JSON stdio to the shared
 //! [`DesktopEvent`]/[`DesktopInput`] streams, so the existing web-desktop manager and
 //! browser canvas renderer work unchanged.
+
+mod helper;
 
 use std::process::Stdio;
 
@@ -21,8 +25,6 @@ use warpgate_common::{ProtocolName, RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
 pub static PROTOCOL_NAME: ProtocolName = "RDP";
-
-const DEFAULT_HELPER: &str = "warpgate-rdp-helper";
 
 /// Handles for driving a backend RDP client (running in the helper subprocess).
 pub struct RdpClientHandles {
@@ -111,15 +113,15 @@ async fn run(
         RdpTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
     };
 
-    let helper_path =
-        std::env::var("WARPGATE_RDP_HELPER").unwrap_or_else(|_| DEFAULT_HELPER.to_owned());
+    // Kept in scope until after `spawn` so the Linux memfd stays open across exec.
+    let helper = helper::resolve()?;
 
-    let mut child = tokio::process::Command::new(&helper_path)
+    let mut child = tokio::process::Command::new(helper.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("spawning RDP helper ({helper_path})"))?;
+        .with_context(|| format!("spawning RDP helper ({})", helper.path().display()))?;
 
     let mut stdin = child.stdin.take().context("helper stdin")?;
     let stdout = child.stdout.take().context("helper stdout")?;
@@ -170,10 +172,10 @@ async fn run(
                 let Some(line) = line.context("reading helper output")? else {
                     break;
                 };
-                if let Ok(event) = serde_json::from_str::<HelperEvent>(line.trim()) {
-                    if forward_event(&event_tx, event).await.is_err() {
-                        break;
-                    }
+                if let Ok(event) = serde_json::from_str::<HelperEvent>(line.trim())
+                    && forward_event(&event_tx, event).await.is_err()
+                {
+                    break;
                 }
             }
             _ = abort_rx.recv() => {

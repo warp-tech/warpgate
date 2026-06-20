@@ -16,7 +16,7 @@ export type DesktopFrame =
     | { type: 'copy_rect', dst: Rect, src_x: number, src_y: number }
     | { type: 'cursor', rect: Rect, data: string }
 
-export function base64ToBytes (b64: string): Uint8Array {
+export function base64ToBytes (b64: string): Uint8Array<ArrayBuffer> {
     const binary = atob(b64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
@@ -46,7 +46,7 @@ function drawRaw (ctx: CanvasRenderingContext2D, rect: Rect, bgra: Uint8Array): 
     ctx.putImageData(new ImageData(rgba, rect.width, rect.height), rect.x, rect.y)
 }
 
-function drawJpeg (ctx: CanvasRenderingContext2D, rect: Rect, bytes: Uint8Array): void {
+function drawJpeg (ctx: CanvasRenderingContext2D, rect: Rect, bytes: Uint8Array<ArrayBuffer>): void {
     const blob = new Blob([bytes], { type: 'image/jpeg' })
     const url = URL.createObjectURL(blob)
     const img = new Image()

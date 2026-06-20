@@ -19,6 +19,10 @@ jobs:
           cargo install --locked just@1.4.0
           cargo install --locked cargo-cranky@0.3.0
 
+      # Built first so warpgate-protocol-rdp's embedded-helper code paths are linted.
+      - name: Build RDP helper
+        run: just build-rdp-helper
+
       - name: Clippy
         run: |
           just clippy
