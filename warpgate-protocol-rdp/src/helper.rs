@@ -78,9 +78,7 @@ fn run_from_memfd() -> Result<HelperExecutable, WarpgateError> {
 
     use rustix::fs::{MemfdFlags, memfd_create};
 
-    let fd = memfd_create("warpgate-rdp-helper", MemfdFlags::CLOEXEC)
-        .context("memfd_create")
-        .map_err(std::io::Error::from)?;
+    let fd = memfd_create("warpgate-rdp-helper", MemfdFlags::CLOEXEC).context("memfd_create")?;
     let mut file = std::fs::File::from(fd);
     decompress_into(&mut file)?;
     file.flush().ok();
