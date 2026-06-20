@@ -1017,6 +1017,15 @@ dependencies = [
 
 [[package]]
 name = "block-padding"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+dependencies = [
+ "generic-array 0.14.9",
+]
+
+[[package]]
+name = "block-padding"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
@@ -1996,6 +2005,15 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ecb"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a8bfa975b1aec2145850fcaa1c6fe269a16578c44705a532ae3edc92b8881c7"
+dependencies = [
+ "cipher 0.4.4",
+]
 
 [[package]]
 name = "ecdsa"
@@ -3262,6 +3280,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
+ "block-padding 0.3.3",
  "generic-array 0.14.9",
 ]
 
@@ -3271,7 +3290,7 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
 dependencies = [
- "block-padding",
+ "block-padding 0.4.2",
  "hybrid-array",
 ]
 
@@ -5560,7 +5579,7 @@ dependencies = [
  "aes 0.9.1",
  "aws-lc-rs",
  "bitflags 2.13.0",
- "block-padding",
+ "block-padding 0.4.2",
  "byteorder",
  "bytes",
  "cbc",
@@ -8325,10 +8344,15 @@ dependencies = [
 name = "warpgate-protocol-vnc"
 version = "0.23.4"
 dependencies = [
+ "aes 0.8.4",
  "anyhow",
  "bytes",
  "des 0.8.1",
+ "ecb",
  "futures",
+ "getrandom 0.2.17",
+ "md-5 0.10.6",
+ "num-bigint",
  "rustls 0.23.40",
  "thiserror 2.0.18",
  "tokio",

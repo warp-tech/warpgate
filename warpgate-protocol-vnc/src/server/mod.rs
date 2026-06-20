@@ -3,15 +3,17 @@ mod session_handle;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
-use tokio::io::{AsyncWriteExt, copy_bidirectional};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
+use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
-use tracing::{Instrument, error, info, info_span, warn};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
@@ -28,8 +30,9 @@ use warpgate_tls::{
 };
 
 use self::rfb::{
-    backend_handshake, server_read_client_init, server_read_plain_credentials,
-    server_vencrypt_pre_tls, server_write_security_result,
+    SecurityType, backend_handshake, server_apple_dh_auth, server_negotiate_security,
+    server_read_client_init, server_read_plain_credentials, server_vencrypt_sub_negotiate,
+    server_write_security_result,
 };
 use self::session_handle::VncSessionHandle;
 use crate::PROTOCOL_NAME;
@@ -120,6 +123,16 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
     Ok(())
 }
 
+/// A timeout for the case where the client stalls after
+/// we announce security types (e.g. macOS Screen Sharing)
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A viewer connection after its security upgrade: a TLS stream for VeNCrypt, or the
+/// raw (rate-limited) stream for Apple-DH. Boxed because those have distinct types and
+/// `wrap_stream` returns an opaque one.
+trait ViewerStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> ViewerStream for T {}
+
 async fn handle_connection(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
@@ -127,40 +140,86 @@ async fn handle_connection(
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
 ) -> Result<()> {
-    let mut stream = {
+    let stream = {
         let guard = server_handle.lock().await;
         guard.wrap_stream(stream).await?
     };
 
-    // Plaintext VeNCrypt negotiation, then TLS upgrade.
-    server_vencrypt_pre_tls(&mut stream).await?;
-    let acceptor = TlsAcceptor::from(tls_config);
-    let mut tls = acceptor.accept(stream).await.context("TLS handshake")?;
-
-    // VeNCrypt Plain credentials over TLS.
-    let (username, password) = server_read_plain_credentials(&mut tls).await?;
-
-    let authenticated = authenticate(
-        &services,
-        &server_handle,
-        &username,
-        password,
-        remote_address,
+    // Bound the whole handshake + auth phase with a single timeout, so a viewer that
+    // can't speak our auth (or stalls) is dropped with an error instead of hanging.
+    // The relay afterwards is intentionally untimed.
+    let Some((mut viewer, mut backend)) = timeout_at(
+        Instant::now() + HANDSHAKE_TIMEOUT,
+        negotiate_and_authorize(
+            stream,
+            &services,
+            &server_handle,
+            tls_config,
+            remote_address,
+        ),
     )
-    .await;
+    .await
+    .map_err(|_| {
+        anyhow!("VNC handshake timed out; the viewer may not support our authentication")
+    })??
+    else {
+        // `None` = authentication was rejected (failure result already sent), quit
+        return Ok(());
+    };
+
+    debug!("starting bidirectional relay");
+    copy_bidirectional(&mut viewer, &mut backend)
+        .await
+        .context("relaying VNC session")?;
+
+    Ok(())
+}
+
+/// Negotiate security, authenticate the viewer, and connect + handshake the backend
+async fn negotiate_and_authorize(
+    mut stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    services: &Services,
+    server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
+    tls_config: Arc<ServerConfig>,
+    remote_address: SocketAddr,
+) -> Result<Option<(Box<dyn ViewerStream>, TcpStream)>> {
+    // ProtocolVersion + security-type negotiation, then branch per chosen type to get
+    // the (possibly TLS-upgraded) viewer stream and the credentials it carries.
+    let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) =
+        match server_negotiate_security(&mut stream).await? {
+            SecurityType::VeNCrypt => {
+                server_vencrypt_sub_negotiate(&mut stream).await?;
+                let mut tls = TlsAcceptor::from(tls_config)
+                    .accept(stream)
+                    .await
+                    .context("TLS handshake")?;
+                let (username, password) = server_read_plain_credentials(&mut tls).await?;
+                (Box::new(tls), username, password)
+            }
+            SecurityType::AppleDh => {
+                let (username, password) = server_apple_dh_auth(&mut stream).await?;
+                (Box::new(stream), username, password)
+            }
+            SecurityType::None | SecurityType::VncAuth => {
+                bail!("unexpected non-viewer security type negotiated")
+            }
+        };
+
+    let authenticated =
+        authenticate(services, server_handle, &username, password, remote_address).await;
 
     let (user_info, target, vnc_options) = match authenticated {
         Ok(v) => v,
         Err(error) => {
             warn!(%error, "Authentication failed");
-            server_write_security_result(&mut tls, false, "Authentication failed")
+            server_write_security_result(&mut viewer, false, "Authentication failed")
                 .await
                 .ok();
-            return Ok(());
+            return Ok(None);
         }
     };
 
-    server_write_security_result(&mut tls, true, "").await?;
+    server_write_security_result(&mut viewer, true, "").await?;
 
     {
         let handle = server_handle.lock().await;
@@ -170,12 +229,19 @@ async fn handle_connection(
 
     info!(target=%target.name, "Authorized");
 
-    let shared_flag = server_read_client_init(&mut tls).await?;
+    let shared_flag = server_read_client_init(&mut viewer).await?;
 
     let target_password = match &vnc_options.auth {
         VncTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
         VncTargetAuth::None(_) => String::new(),
     };
+
+    debug!(
+        host = %vnc_options.host,
+        port = vnc_options.port,
+        shared_flag,
+        "viewer ready; connecting to backend"
+    );
 
     let mut backend = TcpStream::connect((vnc_options.host.as_str(), vnc_options.port))
         .await
@@ -183,15 +249,14 @@ async fn handle_connection(
     backend.set_nodelay(true).ok();
 
     let server_init = backend_handshake(&mut backend, &target_password, shared_flag).await?;
-    tls.write_all(&server_init).await?;
-    tls.flush().await?;
+    debug!(
+        len = server_init.len(),
+        "backend handshake complete; forwarding ServerInit to viewer"
+    );
+    viewer.write_all(&server_init).await?;
+    viewer.flush().await?;
 
-    // Transparent relay between the (TLS) viewer and the backend target.
-    copy_bidirectional(&mut tls, &mut backend)
-        .await
-        .context("relaying VNC session")?;
-
-    Ok(())
+    Ok(Some((viewer, backend)))
 }
 
 async fn authenticate(
@@ -274,10 +339,10 @@ async fn find_vnc_target(
 ) -> Result<(Target, TargetVncOptions)> {
     let targets = services.config_provider.lock().await.list_targets().await?;
     for t in targets {
-        if t.name == target_name {
-            if let TargetOptions::Vnc(ref options) = t.options {
-                return Ok((t.clone(), options.clone()));
-            }
+        if t.name == target_name
+            && let TargetOptions::Vnc(ref options) = t.options
+        {
+            return Ok((t.clone(), options.clone()));
         }
     }
     bail!("VNC target {target_name} not found");
