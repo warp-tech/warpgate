@@ -11,8 +11,16 @@ warpgate-core = { path = "../warpgate-core", default-features = false }
 anyhow.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes.workspace = true
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+tempfile = "3"
 tokio = { workspace = true, features = ["process", "io-util"] }
 tracing.workspace = true
 uuid.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+[build-dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }

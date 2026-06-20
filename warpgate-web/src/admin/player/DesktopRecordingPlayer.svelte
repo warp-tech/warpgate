@@ -128,7 +128,7 @@
     {/if}
 
     <div class="container" class:invisible={loading}>
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
         <canvas bind:this={canvas} on:click={togglePlaying} role="img"></canvas>
     </div>
 

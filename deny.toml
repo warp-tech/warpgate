@@ -207,6 +207,12 @@ allow = [
 allow = ["Unlicense"]
 crate = "async_io_stream"
 
+# `portpicker` (pulled in transitively by `sspi` in the RDP helper) is likewise
+# released under the Unlicense. Allow it scoped to that crate.
+[[licenses.exceptions]]
+allow = ["Unlicense"]
+crate = "portpicker"
+
 [[licenses.clarify]]
 crate = "ring"
 expression = "OpenSSL"
