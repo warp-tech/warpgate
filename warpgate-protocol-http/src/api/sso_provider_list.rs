@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::{AuthCredential, AuthResult};
-use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::validate_and_add_credential;
@@ -19,9 +19,11 @@ use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
+use crate::api::AnySecurityScheme;
 use crate::api::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
-    SessionExt, authorize_session, get_or_create_auth_state_for_request, session_id_for_request,
+    SessionExt, authorize_session, endpoint_auth, get_or_create_auth_state_for_request,
+    session_id_for_request,
 };
 use crate::session::SessionStore;
 
@@ -82,6 +84,23 @@ enum StartSloResponse {
     NotInSsoSession,
     #[oai(status = 404)]
     NotFound,
+}
+
+#[derive(Object)]
+pub struct SsoKubernetesConfigDescription {
+    pub name: String,
+    pub label: String,
+    pub issuer_url: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub has_client_secret: bool,
+    pub client_secret: Option<String>,
+}
+
+#[derive(ApiResponse)]
+enum GetSsoKubernetesConfigsResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<SsoKubernetesConfigDescription>>),
 }
 
 fn make_redirect_url(err: &str) -> String {
@@ -408,6 +427,42 @@ impl Api {
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),
         })))
+    }
+
+    #[oai(
+        path = "/sso/kubernetes-configs",
+        method = "get",
+        operation_id = "get_sso_kubernetes_configs",
+        transform = "endpoint_auth"
+    )]
+    async fn api_get_sso_kubernetes_configs(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetSsoKubernetesConfigsResponse, WarpgateError> {
+        let mut providers = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
+        providers.sort_by(|a, b| a.label().cmp(b.label()));
+        let configs = providers
+            .iter()
+            .filter_map(|p| p.kubernetes_oidc())
+            .map(|r| SsoKubernetesConfigDescription {
+                name: r.name,
+                label: r.label,
+                issuer_url: r.issuer_url,
+                client_id: r.client_id,
+                scopes: r.scopes,
+                has_client_secret: r.client_secret.is_some(),
+                client_secret: r.client_secret,
+            })
+            .collect();
+        Ok(GetSsoKubernetesConfigsResponse::Ok(Json(configs)))
     }
 }
 

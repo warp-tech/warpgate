@@ -11,6 +11,10 @@ export interface ConnectionOptions {
     targetDefaultDatabaseName?: string
     clientCertificatePem?: string
     clientPrivateKeyPem?: string
+    oidcIssuerUrl?: string
+    oidcClientId?: string
+    oidcScopes?: string[]
+    oidcClientSecret?: string
 }
 
 export function makeSSHUsername (opt: ConnectionOptions): string {
@@ -187,6 +191,52 @@ users:
     client-key-data: ${opt.clientPrivateKeyPem ? btoa(opt.clientPrivateKeyPem) : '<your-private-key-base64>'}
 `
     }
+}
+
+export function makeOidcKubeconfig (opt: ConnectionOptions): string {
+    const clusterUrl = makeKubernetesClusterUrl(opt)
+    const context = makeKubernetesContext(opt)
+    const namespace = makeKubernetesNamespace(opt)
+    const issuer = opt.oidcIssuerUrl ?? '<oidc-issuer-url>'
+    const clientId = opt.oidcClientId ?? '<oidc-client-id>'
+    const scopes = (opt.oidcScopes && opt.oidcScopes.length ? opt.oidcScopes : ['openid', 'email', 'profile'])
+    const args = [
+        'oidc-login',
+        'get-token',
+        `--oidc-issuer-url=${issuer}`,
+        `--oidc-client-id=${clientId}`,
+    ]
+    if (opt.oidcClientSecret) {
+        args.push(`--oidc-client-secret=${opt.oidcClientSecret}`)
+    }
+    for (const s of scopes) {
+        args.push(`--oidc-extra-scope=${s}`)
+    }
+    const argsYaml = args.map(a => `          - ${a}`).join('\n')
+    return `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${clusterUrl}
+    insecure-skip-tls-verify: true
+  name: warpgate-${opt.targetName ?? 'target'}
+contexts:
+- context:
+    cluster: warpgate-${opt.targetName ?? 'target'}
+    namespace: ${namespace}
+    user: ${context}
+  name: ${context}
+current-context: ${context}
+users:
+- name: ${context}
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: kubectl
+      interactiveMode: IfAvailable
+      args:
+${argsYaml}
+`
 }
 
 export function makeExampleKubectlCommand (_opt: ConnectionOptions): string {
