@@ -241,11 +241,13 @@ pub async fn api_get_recording_desktop_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> impl IntoResponse {
+) -> poem::Result<impl IntoResponse> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
     let recordings = ctx.services().recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
-    ws.on_upgrade(|socket| async move {
+    Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
         sink.send(Message::Text(serde_json::to_string(&json!({
@@ -277,7 +279,7 @@ pub async fn api_get_recording_desktop_stream(
         }
 
         Ok::<(), anyhow::Error>(())
-    })
+    }))
 }
 
 #[handler]
@@ -285,11 +287,13 @@ pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> impl IntoResponse {
+) -> poem::Result<impl IntoResponse> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
     let recordings = ctx.services().recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
-    ws.on_upgrade(|socket| async move {
+    Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
         sink.send(Message::Text(serde_json::to_string(&json!({
@@ -321,5 +325,5 @@ pub async fn api_get_recording_stream(
         }
 
         Ok::<(), anyhow::Error>(())
-    })
+    }))
 }

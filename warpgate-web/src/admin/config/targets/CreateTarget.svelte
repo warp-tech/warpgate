@@ -97,6 +97,7 @@
                         kind: 'Password' as const,
                         password: '',
                     },
+                    verifyTls: false,
                 },
             }[params.kind]
             if (!options) {

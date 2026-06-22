@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.23.4-72-g5b9d2d0c-modified"
+    "version": "v0.25.5-18-gaa79880c-modified"
   },
   "servers": [
     {
@@ -5980,7 +5980,8 @@
           "host",
           "port",
           "username",
-          "auth"
+          "auth",
+          "verify_tls"
         ],
         "properties": {
           "host": {
@@ -5998,6 +5999,10 @@
           },
           "auth": {
             "$ref": "#/components/schemas/RdpTargetAuth"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
           }
         }
       },

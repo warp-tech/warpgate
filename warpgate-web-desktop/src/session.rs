@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::sync::futures::Notified;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -41,7 +41,7 @@ pub struct WebDesktopSession {
     // prevents the handle from getting dropped too early
     _server_handle: Arc<Mutex<WarpgateServerHandle>>,
 
-    input_tx: UnboundedSender<DesktopInput>,
+    input_tx: Sender<DesktopInput>,
     abort_tx: UnboundedSender<()>,
 
     // events are buffered so that we can queue and replay them
@@ -60,7 +60,7 @@ impl WebDesktopSession {
         target_name: String,
         target_kind: TargetKind,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
-        input_tx: UnboundedSender<DesktopInput>,
+        input_tx: Sender<DesktopInput>,
         abort_tx: UnboundedSender<()>,
     ) -> Self {
         Self {
@@ -81,7 +81,12 @@ impl WebDesktopSession {
     pub async fn push_event(&self, msg: ServerMessage) {
         let mut buf = self.output_buffer.lock().await;
         if buf.len() >= OUTPUT_BUFFER_CAPACITY {
-            buf.pop_front();
+            // Prefer to drop "incremental" frames first
+            let drop_idx = buf
+                .iter()
+                .position(ServerMessage::is_incremental)
+                .unwrap_or(0);
+            buf.remove(drop_idx);
         }
         buf.push_back(msg);
         self.output_notify.notify_waiters();
@@ -116,7 +121,8 @@ impl WebDesktopSession {
     }
 
     pub fn send_input(&self, input: DesktopInput) {
-        let _ = self.input_tx.send(input);
+        // let inputs drop under backpressure
+        let _ = self.input_tx.try_send(input);
     }
 
     pub async fn start_disconnect_timer(&self, manager: Arc<WebDesktopClientManager>) {

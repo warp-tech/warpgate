@@ -308,6 +308,11 @@ pub struct TargetRdpOptions {
 
     #[serde(default)]
     pub auth: RdpTargetAuth,
+
+    /// Verify the RDP server's TLS certificate against the system root store.
+    /// RDP servers commonly use self-signed certificates, so this is off by default.
+    #[serde(default)]
+    pub verify_tls: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]

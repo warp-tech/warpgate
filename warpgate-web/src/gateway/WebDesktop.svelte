@@ -97,6 +97,18 @@
         send({ type: 'pointer_event', x, y, buttons: rfbButtons(e) })
     }
 
+    function onWheel (e: WheelEvent) {
+        e.preventDefault()
+        const { x, y } = canvasCoords(e)
+        // delta is a signed notch count: positive = up / right.
+        if (e.deltaY !== 0) {
+            send({ type: 'wheel_event', x, y, vertical: true, delta: e.deltaY < 0 ? 1 : -1 })
+        }
+        if (e.deltaX !== 0) {
+            send({ type: 'wheel_event', x, y, vertical: false, delta: e.deltaX > 0 ? 1 : -1 })
+        }
+    }
+
     // Map a KeyboardEvent to an X11 keysym.
     function keysym (e: KeyboardEvent): number | null {
         const special: Record<string, number> = {
@@ -211,6 +223,7 @@
             onmousemove={onPointer}
             onmousedown={onPointer}
             onmouseup={onPointer}
+            onwheel={onWheel}
             oncontextmenu={e => e.preventDefault()}
         ></canvas>
     </div>

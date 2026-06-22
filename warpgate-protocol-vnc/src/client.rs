@@ -1,25 +1,27 @@
 use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
-use tracing::{Instrument, debug, error, info_span, warn};
-use vnc::{
-    ClientKeyEvent, ClientMouseEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event,
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
+use tracing::{Instrument, debug, error, info_span, warn};
+use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
 use warpgate_common::{TargetVncOptions, VncTargetAuth};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+};
 
 /// Handles for driving a backend VNC client running on its own task.
 pub struct VncClientHandles {
     /// Normalised desktop events produced by the backend.
     pub event_rx: Receiver<DesktopEvent>,
     /// Inputs to forward to the backend.
-    pub input_tx: UnboundedSender<DesktopInput>,
+    pub input_tx: Sender<DesktopInput>,
     /// Signal the backend task to disconnect and stop.
     pub abort_tx: UnboundedSender<()>,
 }
 
-fn rect_from(r: vnc::Rect) -> DesktopRect {
+const fn rect_from(r: vnc::Rect) -> DesktopRect {
     DesktopRect {
         x: r.x,
         y: r.y,
@@ -28,19 +30,41 @@ fn rect_from(r: vnc::Rect) -> DesktopRect {
     }
 }
 
-fn map_input(input: DesktopInput) -> X11Event {
+/// Map one desktop input to the VNC events it produces. Most inputs map to a single
+/// event; a wheel scroll maps to a press+release of the relevant RFB scroll button
+/// (4-7), repeated per notch.
+fn map_input(input: DesktopInput) -> Vec<X11Event> {
     match input {
-        DesktopInput::Pointer { x, y, buttons } => X11Event::PointerEvent(ClientMouseEvent {
-            position_x: x,
-            position_y: y,
-            bottons: buttons,
-        }),
-        DesktopInput::Key { keysym, down } => X11Event::KeyEvent(ClientKeyEvent {
+        DesktopInput::Pointer { x, y, buttons } => {
+            vec![X11Event::PointerEvent((x, y, buttons).into())]
+        }
+        DesktopInput::Key { keysym, down } => vec![X11Event::KeyEvent(ClientKeyEvent {
             keycode: keysym,
             down,
-        }),
-        DesktopInput::Clipboard(text) => X11Event::CopyText(text),
-        DesktopInput::Refresh => X11Event::FullRefresh,
+        })],
+        DesktopInput::Wheel {
+            x,
+            y,
+            vertical,
+            delta,
+        } => {
+            // RFB scroll buttons: 4=up (0x08), 5=down (0x10), 6=left (0x20), 7=right (0x40).
+            let button: u8 = match (vertical, delta >= 0) {
+                (true, true) => 0x08,
+                (true, false) => 0x10,
+                (false, true) => 0x40,
+                (false, false) => 0x20,
+            };
+            let count = (delta.unsigned_abs() as usize).clamp(1, 10);
+            let mut events = Vec::with_capacity(count * 2);
+            for _ in 0..count {
+                events.push(X11Event::PointerEvent((x, y, button).into()));
+                events.push(X11Event::PointerEvent((x, y, 0).into()));
+            }
+            events
+        }
+        DesktopInput::Clipboard(text) => vec![X11Event::CopyText(text)],
+        DesktopInput::Refresh => vec![X11Event::FullRefresh],
     }
 }
 
@@ -48,7 +72,7 @@ fn map_input(input: DesktopInput) -> X11Event {
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
 pub fn connect(options: TargetVncOptions) -> VncClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
-    let (input_tx, input_rx) = unbounded_channel::<DesktopInput>();
+    let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
 
     let span = info_span!("VNC-client", host = %options.host, port = options.port);
@@ -75,7 +99,7 @@ pub fn connect(options: TargetVncOptions) -> VncClientHandles {
 async fn run(
     options: TargetVncOptions,
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
-    mut input_rx: UnboundedReceiver<DesktopInput>,
+    mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
 ) -> anyhow::Result<()> {
     event_tx
@@ -123,10 +147,10 @@ async fn run(
             event = client.poll_event() => {
                 match event {
                     Ok(Some(event)) => {
-                        if let Some(mapped) = map_event(event) {
-                            if event_tx.send(mapped).await.is_err() {
-                                break;
-                            }
+                        if let Some(mapped) = map_event(event)
+                            && event_tx.send(mapped).await.is_err()
+                        {
+                            break;
                         }
                         // Keep the framebuffer flowing.
                         client.input(X11Event::Refresh).await.ok();
@@ -141,8 +165,11 @@ async fn run(
             input = input_rx.recv() => {
                 match input {
                     Some(input) => {
-                        if let Err(error) = client.input(map_input(input)).await {
-                            warn!(%error, "VNC input error");
+                        for event in map_input(input) {
+                            if let Err(error) = client.input(event).await {
+                                warn!(%error, "VNC input error");
+                                break;
+                            }
                         }
                     }
                     None => break,
@@ -185,8 +212,8 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
         VncEvent::Error(message) => DesktopEvent::Error(message),
-        // We fix our own pixel format, so ignore the server's echo.
-        VncEvent::SetPixelFormat(_) => return None,
+        // Everything else (including the server's pixel-format echo — we fix our own)
+        // is not surfaced.
         _ => return None,
     })
 }

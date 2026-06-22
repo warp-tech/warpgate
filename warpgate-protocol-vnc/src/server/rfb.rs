@@ -191,16 +191,18 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
 
         // Decrypt: username in [0..64], password in [64..128], each NUL-terminated.
         let plain = aes128_ecb_decrypt(&aes_key, &encrypted)?;
-        Ok((cstr(&plain[..64]), cstr(&plain[64..])))
+        Ok((
+            cstr(plain.get(..64).unwrap_or_default()),
+            cstr(plain.get(64..).unwrap_or_default()),
+        ))
     }
 
     /// Left-pad (or right-truncate) `bytes` to exactly `len` bytes, big-endian.
     fn left_pad(bytes: &[u8], len: usize) -> Vec<u8> {
         let mut out = vec![0u8; len];
-        if bytes.len() >= len {
-            out.copy_from_slice(&bytes[bytes.len() - len..]);
-        } else {
-            out[len - bytes.len()..].copy_from_slice(bytes);
+        let n = bytes.len().min(len);
+        if let (Some(src), Some(dst)) = (bytes.get(bytes.len() - n..), out.get_mut(len - n..)) {
+            dst.copy_from_slice(src);
         }
         out
     }
@@ -208,6 +210,7 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
     /// Decode a fixed-width NUL-terminated C string field.
     fn cstr(bytes: &[u8]) -> String {
         let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        #[allow(clippy::indexing_slicing, reason = "checked")]
         String::from_utf8_lossy(&bytes[..end]).into_owned()
     }
 
@@ -372,7 +375,10 @@ where
         .read_exact(&mut head)
         .await
         .context("reading ServerInit head")?;
+
+    #[allow(clippy::indexing_slicing, reason = "checked")]
     let name_len = u32::from_be_bytes([head[20], head[21], head[22], head[23]]) as usize;
+
     let mut name = vec![0u8; name_len.min(MAX_STRING_LEN)];
     stream.read_exact(&mut name).await?;
 
@@ -401,12 +407,12 @@ fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     let cipher = Des::new(&key.into());
 
     let mut out = [0u8; 16];
-    for chunk in 0..2 {
-        let mut block_bytes = [0u8; 8];
-        block_bytes.copy_from_slice(&challenge[chunk * 8..chunk * 8 + 8]);
-        let mut block = block_bytes.into();
+    for (inb, outb) in challenge.chunks(8).zip(out.chunks_mut(8)) {
+        let mut block = [0u8; 8];
+        block.copy_from_slice(inb);
+        let mut block = block.into();
         cipher.encrypt_block(&mut block);
-        out[chunk * 8..chunk * 8 + 8].copy_from_slice(&block);
+        outb.copy_from_slice(&block);
     }
     out
 }

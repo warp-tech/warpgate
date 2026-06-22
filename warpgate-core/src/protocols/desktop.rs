@@ -6,6 +6,8 @@
 
 use bytes::Bytes;
 
+pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
+
 /// A rectangular region of the remote framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopRect {
@@ -62,6 +64,14 @@ pub enum DesktopInput {
     Pointer { x: u16, y: u16, buttons: u8 },
     /// A key was pressed or released, identified by its X11 keysym.
     Key { keysym: u32, down: bool },
+    /// Mouse wheel scrolled at `(x, y)`. `delta` is a signed notch count
+    /// (positive = up / right); `vertical` selects the axis.
+    Wheel {
+        x: u16,
+        y: u16,
+        vertical: bool,
+        delta: i16,
+    },
     /// Set the remote clipboard contents.
     Clipboard(String),
     /// Request a full framebuffer refresh.

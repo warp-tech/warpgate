@@ -39,3 +39,15 @@
         <input class="form-control" type="password" bind:value={options.auth.password} />
     </FormGroup>
 {/if}
+
+<h4 class="mt-4">TLS</h4>
+
+<div class="form-check">
+    <input class="form-check-input" type="checkbox" id="rdp-verify-tls" bind:checked={options.verifyTls} />
+    <label class="form-check-label" for="rdp-verify-tls">
+        Verify server certificate
+    </label>
+</div>
+<div class="text-muted small mt-1">
+    Many RDP servers use self-signed certificates; leave off unless the server presents a certificate trusted by the OS.
+</div>

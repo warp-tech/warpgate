@@ -44,11 +44,29 @@ impl From<DesktopRect> for WsRect {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    PointerEvent { x: u16, y: u16, buttons: u8 },
-    KeyEvent { keysym: u32, down: bool },
-    Clipboard { text: String },
+    PointerEvent {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    KeyEvent {
+        keysym: u32,
+        down: bool,
+    },
+    WheelEvent {
+        x: u16,
+        y: u16,
+        vertical: bool,
+        delta: i16,
+    },
+    Clipboard {
+        text: String,
+    },
     Refresh,
 }
+
+// avoid unbounded memory use from untrusted input
+const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
 
 impl From<ClientMessage> for Option<DesktopInput> {
     fn from(msg: ClientMessage) -> Self {
@@ -57,7 +75,27 @@ impl From<ClientMessage> for Option<DesktopInput> {
                 DesktopInput::Pointer { x, y, buttons }
             }
             ClientMessage::KeyEvent { keysym, down } => DesktopInput::Key { keysym, down },
-            ClientMessage::Clipboard { text } => DesktopInput::Clipboard(text),
+            ClientMessage::WheelEvent {
+                x,
+                y,
+                vertical,
+                delta,
+            } => DesktopInput::Wheel {
+                x,
+                y,
+                vertical,
+                delta,
+            },
+            ClientMessage::Clipboard { mut text } => {
+                if text.len() > MAX_CLIPBOARD_BYTES {
+                    let mut end = MAX_CLIPBOARD_BYTES;
+                    while end > 0 && !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    text.truncate(end);
+                }
+                DesktopInput::Clipboard(text)
+            }
             ClientMessage::Refresh => DesktopInput::Refresh,
         })
     }
@@ -76,6 +114,21 @@ pub enum ServerMessage {
     Clipboard { text: String },
     Bell,
     Error { message: String },
+}
+
+impl ServerMessage {
+    /// Whether this is an incremental framebuffer delta that may be dropped under
+    /// output-buffer pressure, as opposed to a structural message (resize, clipboard,
+    /// connection state) whose loss would corrupt or desync the client.
+    pub fn is_incremental(&self) -> bool {
+        matches!(
+            self,
+            Self::RawImage { .. }
+                | Self::JpegImage { .. }
+                | Self::CopyRect { .. }
+                | Self::Cursor { .. }
+        )
+    }
 }
 
 fn state_name(state: DesktopState) -> &'static str {

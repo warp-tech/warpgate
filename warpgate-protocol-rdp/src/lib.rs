@@ -19,17 +19,21 @@ use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
+};
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{ProtocolName, RdpTargetAuth, TargetRdpOptions};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+};
 
 pub static PROTOCOL_NAME: ProtocolName = "RDP";
 
 /// Handles for driving a backend RDP client (running in the helper subprocess).
 pub struct RdpClientHandles {
     pub event_rx: Receiver<DesktopEvent>,
-    pub input_tx: UnboundedSender<DesktopInput>,
+    pub input_tx: Sender<DesktopInput>,
     pub abort_tx: UnboundedSender<()>,
 }
 
@@ -42,6 +46,8 @@ struct ConnectConfig {
     domain: Option<String>,
     width: u16,
     height: u16,
+    /// Whether the helper must verify the RDP server's TLS certificate.
+    verify_tls: bool,
 }
 
 #[derive(Deserialize)]
@@ -69,12 +75,13 @@ enum HelperEvent {
 enum HelperInput {
     Pointer { x: u16, y: u16, buttons: u8 },
     Key { keysym: u32, down: bool },
+    Wheel { vertical: bool, delta: i16 },
 }
 
 /// Spawn the RDP helper for a target and bridge it to normalised desktop streams.
 pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
-    let (input_tx, input_rx) = unbounded_channel::<DesktopInput>();
+    let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
 
     let span = info_span!("RDP-client", host = %options.host, port = options.port);
@@ -101,7 +108,7 @@ pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
 async fn run(
     options: TargetRdpOptions,
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
-    mut input_rx: UnboundedReceiver<DesktopInput>,
+    mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
 ) -> anyhow::Result<()> {
     event_tx
@@ -119,12 +126,24 @@ async fn run(
     let mut child = tokio::process::Command::new(helper.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
+        // Kill the helper if this task is cancelled/dropped (tokio doesn't by default).
+        .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("spawning RDP helper ({})", helper.path().display()))?;
 
     let mut stdin = child.stdin.take().context("helper stdin")?;
     let stdout = child.stdout.take().context("helper stdout")?;
+
+    // Surface helper diagnostics (panics, errors) to the log instead of discarding them.
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                debug!(helper = %line, "RDP helper stderr");
+            }
+        });
+    }
 
     // Send the connection config as the first line.
     let config = ConnectConfig {
@@ -135,6 +154,7 @@ async fn run(
         domain: options.domain.clone(),
         width: 1280,
         height: 800,
+        verify_tls: options.verify_tls,
     };
     let mut config_line = serde_json::to_string(&config)?;
     config_line.push('\n');
@@ -149,6 +169,13 @@ async fn run(
                     Some(HelperInput::Pointer { x, y, buttons })
                 }
                 DesktopInput::Key { keysym, down } => Some(HelperInput::Key { keysym, down }),
+                DesktopInput::Wheel {
+                    vertical, delta, ..
+                } => Some(HelperInput::Wheel {
+                    vertical,
+                    // RDP wheel rotation units are ~120 per notch.
+                    delta: delta.saturating_mul(120),
+                }),
                 // Clipboard/refresh not yet wired through the helper.
                 DesktopInput::Clipboard(_) | DesktopInput::Refresh => None,
             };
@@ -168,19 +195,28 @@ async fn run(
     let mut reader = BufReader::new(stdout).lines();
     loop {
         tokio::select! {
+            biased;
+            _ = abort_rx.recv() => {
+                debug!("RDP client aborted");
+                break;
+            }
             line = reader.next_line() => {
                 let Some(line) = line.context("reading helper output")? else {
                     break;
                 };
-                if let Ok(event) = serde_json::from_str::<HelperEvent>(line.trim())
-                    && forward_event(&event_tx, event).await.is_err()
-                {
-                    break;
+                if let Ok(event) = serde_json::from_str::<HelperEvent>(line.trim()) {
+                    // Race the (possibly blocking) send against abort so a slow consumer
+                    // can't starve abort handling while the helper floods stdout.
+                    tokio::select! {
+                        biased;
+                        _ = abort_rx.recv() => break,
+                        result = forward_event(&event_tx, event) => {
+                            if result.is_err() {
+                                break;
+                            }
+                        }
+                    }
                 }
-            }
-            _ = abort_rx.recv() => {
-                debug!("RDP client aborted");
-                break;
             }
         }
     }

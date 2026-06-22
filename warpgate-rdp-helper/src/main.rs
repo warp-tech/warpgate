@@ -42,6 +42,9 @@ struct ConnectConfig {
     width: u16,
     #[serde(default = "default_height")]
     height: u16,
+    /// Verify the RDP server's TLS certificate against the system root store.
+    #[serde(default)]
+    verify_tls: bool,
 }
 
 fn default_width() -> u16 {
@@ -113,8 +116,13 @@ fn run() -> Result<()> {
         serde_json::from_str(first_line.trim()).context("parsing config")?;
 
     let connector_config = build_config(&config);
-    let (connection_result, framed) =
-        connect(connector_config, config.host.clone(), config.port).context("RDP connection")?;
+    let (connection_result, framed) = connect(
+        connector_config,
+        config.host.clone(),
+        config.port,
+        config.verify_tls,
+    )
+    .context("RDP connection")?;
 
     let width = connection_result.desktop_size.width;
     let height = connection_result.desktop_size.height;
@@ -211,10 +219,17 @@ fn process_outputs(
 /// Emit the BGRA pixels for an updated rectangle.
 fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveRectangle) {
     let img_w = image.width() as usize;
-    let left = region.left as usize;
-    let top = region.top as usize;
-    let right = region.right as usize;
-    let bottom = region.bottom as usize;
+    let img_h = image.height() as usize;
+    if img_w == 0 || img_h == 0 {
+        return;
+    }
+    // Clamp the (inclusive) region to the framebuffer — a malicious/buggy server
+    // could send a rectangle exceeding the image, which would over-allocate `out`
+    // and overflow the `u16` x/y/width/height below. After clamping, all four fit.
+    let left = (region.left as usize).min(img_w - 1);
+    let top = (region.top as usize).min(img_h - 1);
+    let right = (region.right as usize).min(img_w - 1);
+    let bottom = (region.bottom as usize).min(img_h - 1);
     if right < left || bottom < top {
         return;
     }
@@ -294,27 +309,27 @@ fn translate_input(msg: InputMessage, ops: &mut Vec<Operation>) {
 fn keysym_to_scancode(keysym: u32) -> Option<(bool, u8)> {
     // X11 function/control keysyms (0xff..)
     let special = match keysym {
-        0xff08 => (false, 0x0E), // Backspace
-        0xff09 => (false, 0x0F), // Tab
-        0xff0d => (false, 0x1C), // Enter
-        0xff1b => (false, 0x01), // Escape
-        0xffff => (true, 0x53),  // Delete
-        0xff50 => (true, 0x47),  // Home
-        0xff51 => (true, 0x4B),  // Left
-        0xff52 => (true, 0x48),  // Up
-        0xff53 => (true, 0x4D),  // Right
-        0xff54 => (true, 0x50),  // Down
-        0xff55 => (true, 0x49),  // PageUp
-        0xff56 => (true, 0x51),  // PageDown
-        0xff57 => (true, 0x4F),  // End
-        0xff63 => (true, 0x52),  // Insert
-        0xffe1 => (false, 0x2A), // Shift
-        0xffe3 => (false, 0x1D), // Control
-        0xffe9 => (false, 0x38), // Alt
-        0xffe5 => (false, 0x3A), // CapsLock
+        0xff08 => (false, 0x0E),                                    // Backspace
+        0xff09 => (false, 0x0F),                                    // Tab
+        0xff0d => (false, 0x1C),                                    // Enter
+        0xff1b => (false, 0x01),                                    // Escape
+        0xffff => (true, 0x53),                                     // Delete
+        0xff50 => (true, 0x47),                                     // Home
+        0xff51 => (true, 0x4B),                                     // Left
+        0xff52 => (true, 0x48),                                     // Up
+        0xff53 => (true, 0x4D),                                     // Right
+        0xff54 => (true, 0x50),                                     // Down
+        0xff55 => (true, 0x49),                                     // PageUp
+        0xff56 => (true, 0x51),                                     // PageDown
+        0xff57 => (true, 0x4F),                                     // End
+        0xff63 => (true, 0x52),                                     // Insert
+        0xffe1 => (false, 0x2A),                                    // Shift
+        0xffe3 => (false, 0x1D),                                    // Control
+        0xffe9 => (false, 0x38),                                    // Alt
+        0xffe5 => (false, 0x3A),                                    // CapsLock
         0xffbe..=0xffc7 => (false, 0x3B + (keysym - 0xffbe) as u8), // F1..F10
-        0xffc8 => (false, 0x57), // F11
-        0xffc9 => (false, 0x58), // F12
+        0xffc8 => (false, 0x57),                                    // F11
+        0xffc9 => (false, 0x58),                                    // F12
         _ => (false, 0xFF),
     };
     if special.1 != 0xFF {
@@ -421,6 +436,7 @@ fn connect(
     config: connector::Config,
     server_name: String,
     port: u16,
+    verify_tls: bool,
 ) -> Result<(ConnectionResult, UpgradedFramed)> {
     let tcp_stream = TcpStream::connect((server_name.as_str(), port)).context("TCP connect")?;
     tcp_stream.set_nodelay(true).ok();
@@ -434,7 +450,7 @@ fn connect(
 
     let initial_stream = framed.into_inner_no_leftover();
     let (upgraded_stream, server_public_key) =
-        tls_upgrade(initial_stream, server_name.clone()).context("TLS upgrade")?;
+        tls_upgrade(initial_stream, server_name.clone(), verify_tls).context("TLS upgrade")?;
 
     let upgraded = ironrdp_blocking::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = ironrdp_blocking::Framed::new(upgraded_stream);
@@ -463,10 +479,9 @@ fn connect(
 }
 
 mod danger {
-    use rustls::DigitallySignedStruct;
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-    use rustls::{Error, SignatureScheme};
+    use rustls::{DigitallySignedStruct, Error, SignatureScheme};
 
     #[derive(Debug)]
     pub struct NoCertificateVerification;
@@ -520,14 +535,30 @@ mod danger {
 fn tls_upgrade(
     stream: TcpStream,
     server_name: String,
+    verify: bool,
 ) -> Result<(
     rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     Vec<u8>,
 )> {
-    let mut config = rustls::client::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(std::sync::Arc::new(danger::NoCertificateVerification))
-        .with_no_client_auth();
+    let mut config = if verify {
+        // Verify the server certificate against the system root store.
+        let mut roots = rustls::RootCertStore::empty();
+        let certs =
+            rustls_native_certs::load_native_certs().context("loading native root certificates")?;
+        for cert in certs {
+            roots.add(cert).ok();
+        }
+        rustls::client::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth()
+    } else {
+        // No verification (default): RDP servers commonly use self-signed certs;
+        // CredSSP/NLA still channel-binds to the server's public key.
+        rustls::client::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
+            .with_no_client_auth()
+    };
     config.resumption = rustls::client::Resumption::disabled();
 
     let config = std::sync::Arc::new(config);
