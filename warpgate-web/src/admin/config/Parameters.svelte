@@ -446,10 +446,10 @@
                     <!-- Policy block — dims when disabled; individual inputs carry disabled attr -->
                     <div class="lp-block" class:lp-block-disabled={!parameters.loginProtectionEnabled}>
 
-                        <!-- IP rate-limit -->
+                        <!-- IP rate-limit: row 1 — trigger condition -->
                         <div class="lp-row">
                             <span class="lp-label" aria-hidden="true">IP rate-limit</span>
-                            <span class="lp-sentence" role="group" aria-label="IP rate-limit policy">
+                            <span class="lp-sentence" role="group" aria-label="IP rate-limit trigger condition">
                                 Block after
                                 <input type="number" min="1" max="1000" class="form-control form-control-sm lp-num"
                                     aria-label="Max failed attempts from one IP before blocking"
@@ -462,13 +462,20 @@
                                     disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpTimeWindowMinutes}
                                     onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpTimeWindowMinutes) } }} />
-                                min. Initial block:
+                                min.
+                            </span>
+                        </div>
+
+                        <!-- IP rate-limit: row 2 — block duration and caps (indented, no label column) -->
+                        <div class="lp-row lp-row-indent">
+                            <span class="lp-sentence" role="group" aria-label="IP block duration and caps">
+                                Block for
                                 <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
                                     aria-label="Initial block duration in minutes"
                                     disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpBaseBlockDurationMinutes}
                                     onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpBaseBlockDurationMinutes) } }} />
-                                min ×
+                                min initially, ×
                                 <input type="number" min="1.0" max="10" step="0.5" class="form-control form-control-sm lp-num lp-num-wide"
                                     aria-label="Multiplier applied to the block duration on each repeat offense"
                                     disabled={!parameters.loginProtectionEnabled}
@@ -480,13 +487,13 @@
                                     disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpMaxBlockDurationHours}
                                     onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpMaxBlockDurationHours) } }} />
-                                h. Repeat count resets after
+                                h. Resets after
                                 <input type="number" min="1" max="720" class="form-control form-control-sm lp-num"
                                     aria-label="Hours of clean activity after which the repeat-offense counter resets"
                                     disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpCooldownResetHours}
                                     onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpCooldownResetHours) } }} />
-                                h with no failed attempts.
+                                h clean.
                             </span>
                         </div>
                         <div class="lp-infobox">
@@ -596,7 +603,7 @@
         padding: .75rem .9rem;
         border-radius: .375rem;
         border: 1px solid var(--bs-border-color);
-        background: var(--bs-tertiary-bg);
+        background: transparent;
         transition: opacity .15s;
     }
     .lp-block-disabled {
