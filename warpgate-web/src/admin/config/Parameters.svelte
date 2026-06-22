@@ -7,13 +7,17 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
+    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { humantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'
+    import { stringifyError } from 'common/errors'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Section from 'admin/lib/Section.svelte'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
+    let updateError: string | undefined = $state()
+    let saveTimer: ReturnType<typeof setTimeout> | undefined
     const initPromise = init()
 
     async function init () {
@@ -23,10 +27,21 @@
     }
 
     async function update() {
-        await api.updateParameters({
-            parameterUpdate: parameters!,
-        })
-        await reloadServerInfo()
+        updateError = undefined
+        try {
+            await api.updateParameters({
+                parameterUpdate: parameters!,
+            })
+            await reloadServerInfo()
+        } catch (err) {
+            updateError = await stringifyError(err)
+        }
+    }
+
+    // Debounced save for numeric fields — coalesces rapid changes into one PUT.
+    function scheduleUpdate() {
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(update, 400)
     }
 </script>
 
@@ -36,6 +51,9 @@
     </div>
 
     <PermissionGate perm="configEdit" message="You have no permission to edit global parameters.">
+        {#if updateError}
+            <Alert color="danger" dismissible onclose={() => { updateError = undefined }}>{updateError}</Alert>
+        {/if}
         <Loadable promise={initPromise}>
         {#if parameters}
             <SectionedForm>
@@ -405,43 +423,48 @@
                         <div>Brute-force protection (IP rate-limit + user lockout)</div>
                     </label>
 
-                    {#if parameters.loginProtectionEnabled}
-                    <div class="lp-block mt-2 mb-2">
+                    <div class="lp-block mt-2 mb-2" class:lp-block-disabled={!parameters.loginProtectionEnabled} aria-disabled={!parameters.loginProtectionEnabled}>
                         <div class="lp-row">
                             <span class="lp-label" aria-hidden="true">IP rate-limit</span>
                             <span class="lp-sentence" role="group" aria-label="IP rate-limit policy">
                                 Block after
                                 <input type="number" min="1" max="1000" class="form-control form-control-sm lp-num"
                                     aria-label="Max failed attempts from one IP before blocking"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpMaxAttempts}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxAttempts = v; update() } else { e.currentTarget.value = String(parameters!.lpIpMaxAttempts) } }} />
-                                failed attempts in
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxAttempts = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpMaxAttempts) } }} />
+                                failed attempts within
                                 <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
                                     aria-label="Time window for counting failed attempts, in minutes"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpTimeWindowMinutes}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpIpTimeWindowMinutes) } }} />
-                                min for
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpTimeWindowMinutes) } }} />
+                                min → block for
                                 <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
                                     aria-label="Initial block duration in minutes"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpBaseBlockDurationMinutes}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpIpBaseBlockDurationMinutes) } }} />
-                                min, ×
-                                <input type="number" min="1" max="10" step="0.1" class="form-control form-control-sm lp-num lp-num-wide"
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpBaseBlockDurationMinutes) } }} />
+                                min initially, ×
+                                <input type="number" min="1.0" max="10" step="0.5" class="form-control form-control-sm lp-num lp-num-wide"
                                     aria-label="Multiplier applied to the block duration on each repeat offense"
                                     title="Each repeat block multiplies the previous duration by this factor (e.g. 2.0 doubles each time)"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpBlockDurationMultiplier}
-                                    onchange={e => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBlockDurationMultiplier = v; update() } else { e.currentTarget.value = String(parameters!.lpIpBlockDurationMultiplier) } }} />
-                                on repeat, capped at
+                                    onchange={e => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBlockDurationMultiplier = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpBlockDurationMultiplier) } }} />
+                                per repeat, max
                                 <input type="number" min="1" max="720" class="form-control form-control-sm lp-num"
                                     aria-label="Maximum block duration in hours"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpMaxBlockDurationHours}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; update() } else { e.currentTarget.value = String(parameters!.lpIpMaxBlockDurationHours) } }} />
-                                h, reset after
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpMaxBlockDurationHours) } }} />
+                                h. Counter resets after
                                 <input type="number" min="1" max="720" class="form-control form-control-sm lp-num"
                                     aria-label="Hours of inactivity after which the repeat-offense counter resets"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpIpCooldownResetHours}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; update() } else { e.currentTarget.value = String(parameters!.lpIpCooldownResetHours) } }} />
-                                h idle.
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpCooldownResetHours) } }} />
+                                h clean.
                             </span>
                         </div>
                         <div class="lp-row">
@@ -450,31 +473,37 @@
                                 Lock account after
                                 <input type="number" min="1" max="1000" class="form-control form-control-sm lp-num"
                                     aria-label="Max failed attempts against a single user before locking the account"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpUserMaxAttempts}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserMaxAttempts = v; update() } else { e.currentTarget.value = String(parameters!.lpUserMaxAttempts) } }} />
-                                failed attempts in
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserMaxAttempts = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserMaxAttempts) } }} />
+                                failed attempts within
                                 <input type="number" min="1" max="1440" class="form-control form-control-sm lp-num"
                                     aria-label="Time window for counting failed attempts against a single user, in minutes"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpUserTimeWindowMinutes}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserTimeWindowMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpUserTimeWindowMinutes) } }} />
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserTimeWindowMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserTimeWindowMinutes) } }} />
                                 min.
-                                <label class="lp-inline-switch" for="lpUserAutoUnlock">
-                                    <Input
-                                        id="lpUserAutoUnlock"
-                                        class="mb-0 me-1"
-                                        type="switch"
-                                        on:change={() => { parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock; update() }}
-                                        checked={parameters.lpUserAutoUnlock} />
-                                    Auto-unlock
-                                </label>
-                                {#if parameters.lpUserAutoUnlock}
-                                after
+                            </span>
+                        </div>
+                        <div class="lp-row lp-row-auto-unlock">
+                            <span class="lp-label" aria-hidden="true"></span>
+                            <label class="lp-inline-switch" for="lpUserAutoUnlock">
+                                <Input
+                                    id="lpUserAutoUnlock"
+                                    class="mb-0 me-1"
+                                    type="switch"
+                                    disabled={!parameters.loginProtectionEnabled}
+                                    on:change={() => { parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock; update() }}
+                                    checked={parameters.lpUserAutoUnlock} />
+                                Auto-unlock after
+                            </label>
+                            <span class="lp-sentence lp-sentence-short" role="group" aria-label="Auto-unlock duration">
                                 <input type="number" min="1" max="10080" class="form-control form-control-sm lp-num"
                                     aria-label="Auto-unlock delay in minutes"
+                                    disabled={!parameters.loginProtectionEnabled || !parameters.lpUserAutoUnlock}
                                     value={parameters.lpUserLockoutDurationMinutes}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserLockoutDurationMinutes = v; update() } else { e.currentTarget.value = String(parameters!.lpUserLockoutDurationMinutes) } }} />
-                                min.
-                                {/if}
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserLockoutDurationMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserLockoutDurationMinutes) } }} />
+                                min (or manual unlock if disabled).
                             </span>
                         </div>
                         <div class="lp-row">
@@ -483,8 +512,9 @@
                                 Keep blocks, lockouts, and attempt history for
                                 <input type="number" min="1" max="3650" class="form-control form-control-sm lp-num"
                                     aria-label="Days to retain failed-attempt, block, and lockout history"
+                                    disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.loginProtectionRetentionDays}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.loginProtectionRetentionDays = v; update() } else { e.currentTarget.value = String(parameters!.loginProtectionRetentionDays) } }} />
+                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.loginProtectionRetentionDays = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.loginProtectionRetentionDays) } }} />
                                 days.
                             </span>
                         </div>
@@ -492,6 +522,7 @@
                             <label class="lp-label" for="lpIpBlockedMessage">Blocked-IP message</label>
                             <input id="lpIpBlockedMessage" type="text" class="form-control form-control-sm lp-msg"
                                 placeholder="IP temporarily blocked due to failed logins"
+                                disabled={!parameters.loginProtectionEnabled}
                                 value={parameters.lpIpBlockedMessage ?? ''}
                                 onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpIpBlockedMessage = v === '' ? undefined : v; update() }} />
                         </div>
@@ -499,14 +530,14 @@
                             <label class="lp-label" for="lpUserLockedMessage">Locked-user message</label>
                             <input id="lpUserLockedMessage" type="text" class="form-control form-control-sm lp-msg"
                                 placeholder="Account temporarily locked due to failed logins"
+                                disabled={!parameters.loginProtectionEnabled}
                                 value={parameters.lpUserLockedMessage ?? ''}
                                 onchange={e => { const v = e.currentTarget.value.trim(); parameters!.lpUserLockedMessage = v === '' ? undefined : v; update() }} />
                         </div>
                         <div class="lp-foot text-muted">
-                            Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
+                            Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login Protection</a> page.
                         </div>
                     </div>
-                    {/if}
                 </Section>
             </SectionedForm>
         {/if}
@@ -522,6 +553,11 @@
         padding: .75rem .9rem;
         border-radius: .375rem;
         background: rgba(127, 127, 127, .06);
+        transition: opacity .15s;
+    }
+    .lp-block-disabled {
+        opacity: .5;
+        pointer-events: none;
     }
     .lp-row {
         display: flex;
@@ -531,6 +567,9 @@
         line-height: 1.9;
     }
     .lp-row-msg {
+        align-items: center;
+    }
+    .lp-row-auto-unlock {
         align-items: center;
     }
     .lp-label {
@@ -550,6 +589,9 @@
         align-items: baseline;
         gap: .25rem .35rem;
     }
+    .lp-sentence-short {
+        flex: 0 1 auto;
+    }
     .lp-num {
         width: 4.5rem;
         text-align: right;
@@ -567,9 +609,9 @@
     .lp-inline-switch {
         display: inline-flex;
         align-items: center;
-        gap: .25rem;
+        gap: .35rem;
         margin: 0;
-        padding-left: .5rem;
+        cursor: pointer;
     }
     .lp-foot {
         font-size: .8rem;
@@ -580,6 +622,10 @@
             flex-direction: column;
             align-items: flex-start;
             gap: .15rem;
+        }
+        .lp-row-auto-unlock {
+            flex-direction: row;
+            flex-wrap: wrap;
         }
         .lp-label {
             flex: 0 0 auto;
