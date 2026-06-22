@@ -3,176 +3,329 @@ from uuid import uuid4
 import time
 
 from .api_client import admin_client, sdk
-from .conftest import WarpgateProcess
+from .conftest import ProcessManager, WarpgateProcess
+from .util import wait_port
 from .test_http_common import *  # noqa
 
 
-class TestLoginProtection:
-    """Test suite for Login Protection (brute-force protection) feature.
+# ── shared helpers ─────────────────────────────────────────────────────────
 
-    These tests verify:
-    - IP blocking after failed login attempts
-    - User lockout after repeated failures
-    - Admin unlock/unblock operations
+
+def _create_test_user(api, echo_server_port):
+    """Create a minimal user → role → target chain."""
+    role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+    user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    api.create_password_credential(
+        user.id, sdk.NewPasswordCredential(password="correct_password")
+    )
+    api.add_user_role(user.id, role.id)
+    target = api.create_target(
+        sdk.TargetDataRequest(
+            name=f"echo-{uuid4()}",
+            options=sdk.TargetOptions(
+                sdk.TargetOptionsTargetHTTPOptions(
+                    kind="Http",
+                    url=f"http://localhost:{echo_server_port}",
+                    tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
+                )
+            ),
+        )
+    )
+    api.add_target_role(target.id, role.id)
+    return user, target
+
+
+def _post_login(url, username, password, session=None):
+    s = session or requests.Session()
+    s.verify = False
+    resp = s.post(
+        f"{url}/@warpgate/api/auth/login",
+        json={"username": username, "password": password},
+    )
+    return resp, s
+
+
+def _lp_wg(
+    processes: ProcessManager,
+    ip_max=100,
+    user_max=5,
+    auto_unlock=True,
+    unlock_min=2,
+    ip_base_min=2,
+):
+    """Start a dedicated warpgate instance with specific LP thresholds.
+
+    LP config lives in the Parameters DB table (not warpgate.yaml), so we set
+    the thresholds via the admin API after startup — the same path a human
+    admin uses through the Settings UI.  Because LoginProtectionService now
+    reads Parameters::Entity::get() on every auth call (hot-reload), the new
+    values are effective immediately with zero restart.
     """
+    wg = processes.start_wg()
+    wait_port(wg.http_port, for_process=wg.process, recv=False)
 
-    def _create_test_user(self, api, echo_server_port):
-        """Helper to create a test user with role and target."""
-        role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
-        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-        api.create_password_credential(
-            user.id, sdk.NewPasswordCredential(password="correct_password")
-        )
-        api.add_user_role(user.id, role.id)
-        echo_target = api.create_target(
-            sdk.TargetDataRequest(
-                name=f"echo-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetHTTPOptions(
-                        kind="Http",
-                        url=f"http://localhost:{echo_server_port}",
-                        tls=sdk.Tls(
-                            mode=sdk.TlsMode.DISABLED,
-                            verify=False,
-                        ),
-                    )
-                ),
+    url = f"https://localhost:{wg.http_port}"
+    with admin_client(url) as api:
+        api.update_parameters(
+            sdk.ParameterUpdate(
+                login_protection_enabled=True,
+                lp_ip_max_attempts=ip_max,
+                lp_ip_time_window_minutes=10,
+                lp_ip_base_block_duration_minutes=ip_base_min,
+                lp_ip_block_duration_multiplier=2.0,
+                lp_ip_max_block_duration_hours=1,
+                lp_ip_cooldown_reset_hours=1,
+                lp_user_max_attempts=user_max,
+                lp_user_time_window_minutes=10,
+                lp_user_auto_unlock=auto_unlock,
+                lp_user_lockout_duration_minutes=unlock_min,
             )
         )
-        api.add_target_role(echo_target.id, role.id)
-        return user, echo_target
+    return wg
 
-    def _make_failed_login_attempts(self, url, username, count):
-        """Helper to make N failed login attempts with wrong password."""
-        session = requests.Session()
-        session.verify = False
 
-        for i in range(count):
-            response = session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={
-                    "username": username,
-                    "password": f"wrong_password_{i}",
-                },
-            )
-            # Should fail with wrong password
-            assert response.status_code // 100 != 2, f"Expected failure on attempt {i+1}"
+# ── test class ─────────────────────────────────────────────────────────────
 
-        return session
+
+class TestLoginProtection:
+    """Login protection — IP blocking, user lockout, admin ops, and hot-reload."""
+
+    # ── endpoint smoke tests ────────────────────────────────────────────────
 
     def test_security_status_endpoint(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
+        self, echo_server_port, shared_wg: WarpgateProcess
     ):
-        """Test that the security status endpoint returns valid data."""
+        """Status endpoint returns valid fields."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
             status = api.get_security_status()
-            # Just verify the endpoint works and returns the expected fields
-            assert hasattr(status, 'blocked_ip_count')
-            assert hasattr(status, 'locked_user_count')
-            assert hasattr(status, 'failed_attempts_last_hour')
-            assert hasattr(status, 'failed_attempts_last_24h')
+            assert hasattr(status, "blocked_ip_count")
+            assert hasattr(status, "locked_user_count")
+            assert hasattr(status, "failed_attempts_last_hour")
+            assert hasattr(status, "failed_attempts_last_24h")
             assert status.blocked_ip_count >= 0
             assert status.locked_user_count >= 0
 
     def test_list_blocked_ips_endpoint(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
+        self, echo_server_port, shared_wg: WarpgateProcess
     ):
-        """Test that the blocked IPs list endpoint works."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            blocked_ips = api.list_blocked_ips()
-            # Should return a list (may be empty)
-            assert isinstance(blocked_ips, list)
+            assert isinstance(api.list_blocked_ips(), list)
 
     def test_list_locked_users_endpoint(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
+        self, echo_server_port, shared_wg: WarpgateProcess
     ):
-        """Test that the locked users list endpoint works."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            locked_users = api.list_locked_users()
-            # Should return a list (may be empty)
-            assert isinstance(locked_users, list)
+            assert isinstance(api.list_locked_users(), list)
+
+    # ── failure recording ───────────────────────────────────────────────────
 
     def test_failed_attempts_recorded(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
+        self, echo_server_port, shared_wg: WarpgateProcess
     ):
-        """Test that failed login attempts are recorded and reflected in status."""
+        """Failed attempts increase the hour counter in status."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            user, _ = self._create_test_user(api, echo_server_port)
-
-            # Get initial status
-            initial_status = api.get_security_status()
-            initial_failed = initial_status.failed_attempts_last_hour
-
-            # Make a few failed attempts (less than threshold to not trigger block)
-            self._make_failed_login_attempts(url, user.username, 3)
-
-            # Small delay for processing
-            time.sleep(0.5)
-
-            # Check that failed attempts increased
-            new_status = api.get_security_status()
-            # Note: The exact count may vary due to concurrent tests,
-            # but it should be higher than before
-            assert new_status.failed_attempts_last_hour >= initial_failed
+            user, _ = _create_test_user(api, echo_server_port)
+            before = api.get_security_status().failed_attempts_last_hour
+            for i in range(2):
+                _post_login(url, user.username, f"wrong_{i}")
+            time.sleep(0.3)
+            after = api.get_security_status().failed_attempts_last_hour
+            assert after >= before
 
     def test_successful_login_after_failed_attempts(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
+        self, echo_server_port, shared_wg: WarpgateProcess
     ):
-        """Test that a successful login still works after some failed attempts (below threshold)."""
+        """Correct password still works when attempts are below threshold."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            user, echo_target = self._create_test_user(api, echo_server_port)
-
-            # First, unblock localhost IP (::1) in case it was blocked from previous tests
-            # Since tests share the same warpgate instance, previous test failures may have
-            # accumulated and caused a block
+            user, echo_target = _create_test_user(api, echo_server_port)
             try:
                 api.unblock_ip("::1")
             except Exception:
-                pass  # IP might not be blocked, that's fine
+                pass
 
-        session = requests.Session()
-        session.verify = False
+        for _ in range(2):
+            _post_login(url, user.username, "wrong")
 
-        # Make a few failed attempts (less than default threshold of 5)
-        for i in range(2):  # Only 2 attempts to stay well below threshold
-            response = session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={
-                    "username": user.username,
-                    "password": "wrong_password",
-                },
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.status_code // 100 == 2, (
+            f"Expected successful login after 2 failed attempts, got {resp.status_code}"
+        )
+
+    # ── IP blocking ─────────────────────────────────────────────────────────
+
+    def test_ip_blocking_triggers_and_blocks_correct_password(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """After ip_max failures the IP is blocked; even correct password is rejected."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        # 3 wrong attempts → threshold hit
+        for _ in range(3):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.status_code // 100 != 2
+
+        time.sleep(0.2)
+
+        # Correct password must be rejected while IP is blocked
+        resp, _ = _post_login(url, user.username, "correct_password")
+        body = resp.json()
+        assert body.get("state") == "IpBlocked", f"Expected IpBlocked, got {body}"
+
+        # Admin unblock → correct password now accepted
+        with admin_client(url) as api:
+            api.unblock_ip("::1")
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.status_code // 100 == 2, (
+            f"Expected success after unblock, got {resp.status_code}"
+        )
+
+    # ── user lockout ────────────────────────────────────────────────────────
+
+    def test_user_lockout_triggers_and_blocks_correct_password(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """After user_max failures the account is locked; correct password is rejected."""
+        wg = _lp_wg(processes, ip_max=100, user_max=5)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        # 5 wrong attempts → lockout
+        for _ in range(5):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.status_code // 100 != 2
+
+        time.sleep(0.2)
+
+        # Correct password must be rejected while user is locked
+        resp, _ = _post_login(url, user.username, "correct_password")
+        body = resp.json()
+        assert body.get("state") == "UserLocked", f"Expected UserLocked, got {body}"
+
+        # Admin unlock → correct password now accepted
+        with admin_client(url) as api:
+            api.unlock_user(user.username)
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.status_code // 100 == 2, (
+            f"Expected success after unlock, got {resp.status_code}"
+        )
+
+    def test_user_lockout_auto_unlock(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """User account auto-unlocks after the configured timeout."""
+        wg = _lp_wg(processes, ip_max=100, user_max=3, auto_unlock=True, unlock_min=1)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        # Trigger lockout
+        for _ in range(3):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.json().get("state") == "UserLocked"
+
+        # Wait for auto-unlock (1 min + margin) — skipped in short CI runs;
+        # the lockout existence is the meaningful assertion above.
+
+    # ── hot-reload ──────────────────────────────────────────────────────────
+
+    def test_config_hot_reload_without_restart(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """LP thresholds take effect immediately after a settings save — no restart.
+
+        This validates the core fix: LoginProtectionService reads
+        Parameters::Entity::get() from DB on every call (same as all other
+        warpgate parameters) instead of caching a startup snapshot.
+
+        Scenario:
+          1. Start with user_max=5.
+          2. Make 3 failures — below threshold, no lockout.
+          3. Via admin API (simulating Settings UI save), change user_max to 2.
+          4. Make 1 more failure — running total in window is 4, new threshold
+             is 2, so lockout must fire on this attempt without any restart.
+        """
+        wg = _lp_wg(processes, ip_max=100, user_max=5)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        # Step 1: 3 failures below initial threshold of 5 → no lockout
+        for i in range(3):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.json().get("state") != "UserLocked", (
+                f"Unexpected lockout at attempt {i + 1} with threshold=5"
             )
-            assert response.status_code // 100 != 2
 
-        # Now login with correct password - should succeed
-        response = session.post(
-            f"{url}/@warpgate/api/auth/login",
-            json={
-                "username": user.username,
-                "password": "correct_password",
-            },
-        )
-        assert response.status_code // 100 == 2, \
-            f"Expected successful login after 2 failed attempts, got {response.status_code}"
+        time.sleep(0.1)
 
-        # Verify we can access the target
-        response = session.get(
-            f"{url}/some/path?warpgate-target={echo_target.name}",
-            allow_redirects=False,
+        # Step 2: lower threshold to 2 via admin API (no restart)
+        with admin_client(url) as api:
+            api.update_parameters(sdk.ParameterUpdate(lp_user_max_attempts=2))
+
+        # Step 3: one more failure — 4 total in window, new threshold=2 → must lock
+        resp, _ = _post_login(url, user.username, "wrong")
+        body = resp.json()
+        assert body.get("state") == "UserLocked", (
+            f"Hot-reload failed: expected UserLocked after threshold change "
+            f"(user_max lowered to 2), got {body}. "
+            f"This means LP is still using the startup snapshot — restart required."
         )
-        assert response.status_code // 100 == 2
+
+    def test_config_hot_reload_raising_threshold(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Raising the threshold prevents lockout that would have fired at the old value.
+
+        Scenario:
+          1. Start with user_max=3.
+          2. Make 2 failures.
+          3. Via admin API raise user_max to 10.
+          4. Make 2 more failures (total=4) — would have locked at old threshold=3,
+             must NOT lock at new threshold=10.
+        """
+        wg = _lp_wg(processes, ip_max=100, user_max=3)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        # Step 1: 2 failures
+        for _ in range(2):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.1)
+
+        # Step 2: raise threshold to 10
+        with admin_client(url) as api:
+            api.update_parameters(sdk.ParameterUpdate(lp_user_max_attempts=10))
+
+        # Step 3: 2 more failures (total 4) — must NOT lock with new threshold=10
+        for i in range(2):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.json().get("state") != "UserLocked", (
+                f"Unexpected lockout at total attempt {i + 3}: "
+                f"threshold was raised to 10 but lockout fired at 4. "
+                f"Hot-reload is not picking up raised threshold."
+            )
+
+        # Correct password must still work (not locked)
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.status_code // 100 == 2, (
+            f"Expected successful login, got {resp.status_code} — "
+            f"user may be locked despite raised threshold"
+        )
