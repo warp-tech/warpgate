@@ -14,6 +14,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
@@ -26,13 +27,14 @@ use warpgate_database_protocols::mysql::protocol::connect::{
 };
 use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use warpgate_database_protocols::mysql::protocol::text::Query;
+use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
-    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
+    stream: MySqlStream<S, ServerTlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,
@@ -94,9 +96,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         let challenge_2 = challenge_1.split_off(8);
         let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
 
+        let advertised_version = {
+            let config = self.services.config.lock().await;
+            config.store.mysql.advertised_version.clone()
+        };
+
         let handshake = Handshake {
             protocol_version: 10,
-            server_version: "8.0.0-Warpgate".to_owned(),
+            server_version: advertised_version,
             connection_id: 1,
             auth_plugin_data: challenge_chain,
             server_capabilities: self.capabilities,
@@ -252,10 +259,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 let user_auth_result = {
                     let credential = AuthCredential::Password(password);
 
-                    let mut cp = self.services.config_provider.lock().await;
-                    if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
-                    }
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
 
                     state.verify()
                 };
@@ -360,15 +369,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(&target_name)
                 .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::MySql(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::MySql(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, mysql_options)) = target else {

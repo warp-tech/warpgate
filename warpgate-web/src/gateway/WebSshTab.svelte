@@ -264,6 +264,15 @@
         terminal.options.disableStdin = readOnly
     })
 
+    $effect(() => {
+        if (!active) {
+            return
+        }
+        requestAnimationFrame(() => {
+            terminal.focus()
+        })
+    })
+
     export function write (data: Uint8Array): void {
         if (zmodem.feed(data) === ZmodemFeedResult.Passthrough) {
             terminal.write(data)
@@ -284,6 +293,9 @@
         requestAnimationFrame(() => {
             fitAddon.fit()
             onResize(terminal.cols, terminal.rows)
+            if (active) {
+                terminal.focus()
+            }
         })
         return { destroy () {} }
     }

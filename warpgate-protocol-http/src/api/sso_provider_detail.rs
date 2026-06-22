@@ -9,7 +9,9 @@ use tracing::debug;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_sso::{SsoClient, SsoLoginRequest};
+use warpgate_sso::{SsoClient, SsoLoginRequest, SsoReturnUrlDomainPreference};
+
+use crate::common::{host_is_subdomain_of_or_equal, is_localhost_host};
 
 pub struct Api;
 
@@ -25,6 +27,10 @@ enum StartSsoResponse {
     Ok(Json<StartSsoResponseParams>),
     #[oai(status = 404)]
     NotFound,
+    /// The request originates from a domain that has no cookie domain relationship
+    /// with `external_host` while `return_url_domain` is `external_host`
+    #[oai(status = 400)]
+    IncompatibleSsoDomain,
 }
 
 pub static SSO_CONTEXT_SESSION_KEY: &str = "sso_request";
@@ -61,8 +67,25 @@ impl Api {
         else {
             return Ok(StartSsoResponse::NotFound);
         };
+
+        if matches!(
+            provider_config.return_url_domain,
+            SsoReturnUrlDomainPreference::ExternalHost
+        ) && let (Some(request_host), Some(external_host)) = (
+            ctx.trusted_hostname(req),
+            config.store.external_host.as_deref(),
+        ) && !is_localhost_host(&request_host)
+            && !host_is_subdomain_of_or_equal(&request_host, external_host)
+        {
+            return Ok(StartSsoResponse::IncompatibleSsoDomain);
+        }
+
         let mut return_url = construct_external_url(
-            Some(req),
+            match provider_config.return_url_domain {
+                // Let `construct_external_url` fall back to config file
+                SsoReturnUrlDomainPreference::ExternalHost => None,
+                SsoReturnUrlDomainPreference::HostHeader => Some(req),
+            },
             &config,
             provider_config.return_domain_whitelist.as_deref(),
         )

@@ -139,7 +139,7 @@ impl AuthStateStore {
             .list_users()
             .await?
             .iter()
-            .find(|u| u.username == username)
+            .find(|u| u.username.to_lowercase() == username.to_lowercase())
             .cloned()
         else {
             return Err(WarpgateError::UserNotFound(username.into()));
@@ -170,6 +170,7 @@ impl AuthStateStore {
         let state = AuthState::new(
             id,
             session_id.copied(),
+            remote_ip,
             (&user).into(),
             protocol.to_string(),
             policy,

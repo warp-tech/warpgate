@@ -19,7 +19,7 @@ if (localStorage.warpgateMenuLocation) {
 onMount(async () => {
     ready = true
     const info = await api.getInfo()
-    externalHost = info.externalHost
+    externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
 })
 
 function drag (e: MouseEvent) {

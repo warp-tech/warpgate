@@ -4,7 +4,7 @@ import { compare as naturalCompareFactory } from 'natural-orderby'
 import { faArrowRight, faEllipsisV, faTerminal } from '@fortawesome/free-solid-svg-icons'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
-import { api, type TargetSnapshot, TargetKind, BootstrapThemeColor } from 'gateway/lib/api'
+import { api, type TargetSnapshot, TargetKind, BootstrapThemeColor, TargetClickAction } from 'gateway/lib/api'
 import Fa from 'svelte-fa'
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 import { serverInfo } from './lib/store'
@@ -65,7 +65,12 @@ function selectTarget (target: TargetSnapshot) {
             loadURL(`/?warpgate-target=${target.name}`)
         }
     } else if (target.kind === TargetKind.Ssh) {
-        openWebSsh(target)
+        const targetClickAction = $serverInfo?.targetClickAction
+        if (targetClickAction === TargetClickAction.ShowInstructions) {
+            instructionsTarget = target
+        } else {
+            openWebSsh(target)
+        }
     } else {
         instructionsTarget = target
     }
@@ -133,6 +138,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     return
                 }
                 e.preventDefault()
+                e.stopPropagation()
                 selectTarget(target)
             }}
         >
@@ -167,8 +173,16 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                         <Fa icon={faEllipsisV} fw />
                     </DropdownToggle>
                     <DropdownMenu end>
-                        <DropdownItem onclick={() => openWebSsh(target)}>Web terminal</DropdownItem>
-                        <DropdownItem onclick={() => showInstructions(target)}>Connection instructions</DropdownItem>
+                        <DropdownItem onclick={e => {
+                            openWebSsh(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web terminal</DropdownItem>
+                        <DropdownItem onclick={e => {
+                            showInstructions(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Connection instructions</DropdownItem>
                     </DropdownMenu>
                 </Dropdown>
             {:else if target.kind === TargetKind.Http}

@@ -22,7 +22,7 @@ pub async fn command(
     let db = services.db.lock().await;
 
     let db_user = if let Some(x) = User::Entity::find()
-        .filter(User::Column::Username.eq(username))
+        .filter(User::Entity::username_eq_ci(username))
         .all(&*db)
         .await?
         .first()

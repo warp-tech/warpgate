@@ -112,8 +112,8 @@
 
     <NavListItem
         class="mb-2"
-        title="Roles"
-        description="Group users together"
+        title="Access roles"
+        description="Grant users access to roles"
         href="/config/access-roles"
         small={sidebarMode}
     />
@@ -121,7 +121,7 @@
     <NavListItem
         class="mb-2"
         title="Admin roles"
-        description="Permissions for administrators"
+        description="Grant users access to the admin UI"
         href="/config/admin-roles"
         small={sidebarMode}
     />
@@ -202,6 +202,7 @@
 
         > .main {
             flex: 1 0 0;
+            max-width: 100%;
         }
     }
 

@@ -189,11 +189,12 @@
     })
 
     const originalTitle = document.title
-    const windowTitle = $derived(
-        (activeChannelId ? channels.get(activeChannelId)?.terminalTitle : undefined)
-        ?? sessionInfo?.targetName
-        ?? originalTitle
-    )
+    const windowTitle = $derived.by(() => {
+        const activeTerminalTitle = activeChannelId ? channels.get(activeChannelId)?.terminalTitle : undefined
+        const baseTitle = activeTerminalTitle ?? originalTitle
+        const targetName = sessionInfo?.targetName
+        return targetName ? `${targetName} - ${baseTitle}` : baseTitle
+    })
     $effect(() => { document.title = windowTitle })
 
     onDestroy(() => {

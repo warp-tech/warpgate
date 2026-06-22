@@ -169,6 +169,13 @@ class ProcessManager:
         )
         return port
 
+    def start_mariadb_server(self):
+        port = alloc_port()
+        self.start(
+            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mariadb-server"]
+        )
+        return port
+
     def start_mysql_server(self):
         port = alloc_port()
         self.start(
@@ -463,6 +470,7 @@ class ProcessManager:
         extra_scopes=None,
         users_override=None,
         extra_identity_resources=None,
+        redirect_uris=None,
     ):
         port = alloc_port()
         container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
@@ -488,7 +496,7 @@ class ProcessManager:
                 "AllowedGrantTypes": ["authorization_code"],
                 "AllowedScopes": allowed_scopes,
                 "ClientClaimsPrefix": "",
-                "RedirectUris": [
+                "RedirectUris": redirect_uris or [
                     f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
                 ],
             }
@@ -797,7 +805,7 @@ def shared_wg(processes: ProcessManager):
 # endpoint.  previously everyone called ``admin_client(url)`` directly;
 # a fixture lets us compute the URL from ``shared_wg`` once and removes
 # boilerplate from individual tests.
-from .api_client import admin_client as _admin_client_context
+from .api_client import admin_client as _admin_client_context  # noqa: E402
 
 
 @pytest.fixture

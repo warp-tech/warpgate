@@ -1,5 +1,8 @@
 use sea_orm_migration::prelude::*;
 
+use crate::helpers::string_default_value;
+use crate::m00008_users::user;
+
 pub struct Migration;
 
 impl MigrationName for Migration {
@@ -8,11 +11,10 @@ impl MigrationName for Migration {
     }
 }
 
-use crate::m00008_users::user;
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let backend = manager.get_database_backend();
         manager
             .alter_table(
                 Table::alter()
@@ -20,7 +22,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Alias::new("allowed_ip_ranges"))
                             .json()
-                            .default("null"),
+                            .default(string_default_value(backend, "null")),
                     )
                     .to_owned(),
             )

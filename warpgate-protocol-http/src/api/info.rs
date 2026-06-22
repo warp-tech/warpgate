@@ -4,7 +4,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{EntityTrait, IntoActiveModel, ModelTrait, QueryFilter, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -39,11 +39,12 @@ pub struct ExternalHostsInfo {
 pub struct SetupState {
     has_targets: bool,
     has_users: bool,
+    tutorial_dismissed: bool,
 }
 
 impl SetupState {
     pub const fn completed(&self) -> bool {
-        self.has_targets && self.has_users
+        self.tutorial_dismissed || (self.has_targets && self.has_users)
     }
 }
 
@@ -92,6 +93,8 @@ pub struct Info {
     ticket_max_uses: Option<i16>,
     ticket_require_description: bool,
     ticket_request_show_all_targets: bool,
+    target_click_action: Parameters::TargetClickAction,
+    max_api_token_duration_seconds: Option<i64>,
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
@@ -102,6 +105,14 @@ pub struct Info {
 enum InstanceInfoResponse {
     #[oai(status = 200)]
     Ok(Json<Info>),
+}
+
+#[derive(ApiResponse)]
+enum DismissTutorialResponse {
+    #[oai(status = 201)]
+    Done,
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 #[OpenApi]
@@ -142,8 +153,9 @@ impl Api {
             };
             if user_is_admin {
                 let state = SetupState {
-                    has_targets: targets.len() > 1,
+                    has_targets: !targets.is_empty(),
                     has_users: users.len() > 1,
+                    tutorial_dismissed: parameters.tutorial_dismissed,
                 };
                 if state.completed() { None } else { Some(state) }
             } else {
@@ -203,7 +215,7 @@ impl Api {
                 let perms = {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
-                        .filter(User::Column::Username.eq(username))
+                        .filter(User::Entity::username_eq_ci(username))
                         .one(&*db)
                         .await
                         .context("loading user")?
@@ -299,6 +311,8 @@ impl Api {
             ticket_max_uses: parameters.ticket_max_uses,
             ticket_require_description: parameters.ticket_require_description,
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
+            target_click_action: parameters.target_click_action,
+            max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
@@ -308,5 +322,39 @@ impl Api {
                 None
             },
         })))
+    }
+
+    #[oai(
+        path = "/dismiss-tutorial",
+        method = "post",
+        operation_id = "dismiss_tutorial"
+    )]
+    async fn api_dismiss_tutorial(
+        &self,
+        ctx: Data<&UnauthenticatedRequestContext>,
+        auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
+    ) -> poem::Result<DismissTutorialResponse> {
+        let user_is_admin = if let Some(ctx) = &auth_ctx {
+            is_user_admin(ctx).await?
+        } else {
+            false
+        };
+
+        if !user_is_admin {
+            return Ok(DismissTutorialResponse::Forbidden);
+        }
+
+        let db = ctx.services().db.lock().await;
+        let mut parameters = Parameters::Entity::get(&db)
+            .await
+            .context("loading parameters")?
+            .into_active_model();
+        parameters.tutorial_dismissed = Set(true);
+        Parameters::Entity::update(parameters)
+            .exec(&*db)
+            .await
+            .context("updating parameters")?;
+
+        Ok(DismissTutorialResponse::Done)
     }
 }

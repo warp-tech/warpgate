@@ -47,8 +47,17 @@ mod m00042_database_target_auth_again;
 mod m00043_unique_usernames;
 mod m00044_ticket_requests;
 mod m00045_role_default_flag;
-mod m00046_login_protection;
-mod m00047_login_protection_params;
+mod m00046_max_api_token_duration;
+mod m00047_record_scp;
+mod m00048_target_click_action;
+mod m00049_text_columns;
+mod m00050_password_policy;
+mod m00051_tutorial_dismissed;
+mod m00052_log_text_column;
+mod m00053_login_protection;
+mod m00054_login_protection_params;
+
+pub(crate) mod helpers;
 
 pub struct Migrator;
 
@@ -101,8 +110,15 @@ impl MigratorTrait for Migrator {
             Box::new(m00043_unique_usernames::Migration),
             Box::new(m00044_ticket_requests::Migration),
             Box::new(m00045_role_default_flag::Migration),
-            Box::new(m00046_login_protection::Migration),
-            Box::new(m00047_login_protection_params::Migration),
+            Box::new(m00046_max_api_token_duration::Migration),
+            Box::new(m00047_record_scp::Migration),
+            Box::new(m00048_target_click_action::Migration),
+            Box::new(m00049_text_columns::Migration),
+            Box::new(m00050_password_policy::Migration),
+            Box::new(m00051_tutorial_dismissed::Migration),
+            Box::new(m00052_log_text_column::Migration),
+            Box::new(m00053_login_protection::Migration),
+            Box::new(m00054_login_protection_params::Migration),
         ]
     }
 }

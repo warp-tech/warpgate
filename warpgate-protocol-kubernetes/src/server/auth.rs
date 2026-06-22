@@ -24,35 +24,29 @@ pub async fn authenticate_and_get_target(
     {
         let mut config_provider = services.config_provider.lock().await;
         if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
-            // Look up the specific target by name from the URL
-            let targets = config_provider
-                .list_targets()
+            let target = config_provider
+                .get_target_by_name(target_name)
                 .await
-                .context("listing targets")?;
+                .context("looking up target")?
+                .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
+                .ok_or_else(|| {
+                    poem::Error::from_string(
+                        format!("Kubernetes target not found: {target_name}"),
+                        poem::http::StatusCode::NOT_FOUND,
+                    )
+                })?;
 
-            // Find the target with the specified name
-            for target in targets {
-                if target.name == target_name
-                    && matches!(target.options, TargetOptions::Kubernetes(_))
-                {
-                    if config_provider
-                        .authorize_target(&user.username, &target.name)
-                        .await
-                        .unwrap_or(false)
-                    {
-                        return Ok(((&user).into(), target));
-                    }
-                    return Err(poem::Error::from_string(
-                        format!("Access denied to target: {target_name}"),
-                        poem::http::StatusCode::FORBIDDEN,
-                    ));
-                }
+            if !config_provider
+                .authorize_target(&user.username, &target.name)
+                .await
+                .unwrap_or(false)
+            {
+                return Err(poem::Error::from_string(
+                    format!("Access denied to target: {target_name}"),
+                    poem::http::StatusCode::FORBIDDEN,
+                ));
             }
-
-            return Err(poem::Error::from_string(
-                format!("Kubernetes target not found: {target_name}"),
-                poem::http::StatusCode::NOT_FOUND,
-            ));
+            return Ok(((&user).into(), target));
         }
     }
 
@@ -65,34 +59,29 @@ pub async fn authenticate_and_get_target(
             Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
                 let mut config_provider = services.config_provider.lock().await;
-                let targets = config_provider
-                    .list_targets()
+                let target = config_provider
+                    .get_target_by_name(target_name)
                     .await
-                    .context("listing targets")?;
+                    .context("looking up target")?
+                    .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
+                    .ok_or_else(|| {
+                        poem::Error::from_string(
+                            format!("Kubernetes target not found: {target_name}"),
+                            poem::http::StatusCode::NOT_FOUND,
+                        )
+                    })?;
 
-                // Find the target with the specified name
-                for target in targets {
-                    if target.name == target_name
-                        && matches!(target.options, TargetOptions::Kubernetes(_))
-                    {
-                        if config_provider
-                            .authorize_target(&user_info.username, &target.name)
-                            .await
-                            .unwrap_or(false)
-                        {
-                            return Ok((user_info, target));
-                        }
-                        return Err(poem::Error::from_string(
-                            format!("Access denied to target: {target_name}"),
-                            poem::http::StatusCode::FORBIDDEN,
-                        ));
-                    }
+                if !config_provider
+                    .authorize_target(&user_info.username, &target.name)
+                    .await
+                    .unwrap_or(false)
+                {
+                    return Err(poem::Error::from_string(
+                        format!("Access denied to target: {target_name}"),
+                        poem::http::StatusCode::FORBIDDEN,
+                    ));
                 }
-
-                return Err(poem::Error::from_string(
-                    format!("Kubernetes target not found: {target_name}"),
-                    poem::http::StatusCode::NOT_FOUND,
-                ));
+                return Ok((user_info, target));
             }
             Ok(None) => {
                 debug!("Client certificate provided but not found in database");

@@ -12,20 +12,23 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{error, warn};
+use tracing::error;
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
-use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
-use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_core::{ConfigProvider, Services};
-
 use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
+use warpgate_core::Services;
+use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 
-use super::common::logout;
-use crate::common::{SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request};
+use super::common::{emit_unknown_authentication_failed_event, logout};
+use crate::common::{
+    SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request,
+    get_or_create_auth_state_for_request, session_id_for_request,
+};
 use crate::session::SessionStore;
 pub struct Api;
 
@@ -143,12 +146,11 @@ impl Api {
     async fn api_auth_login(
         &self,
         req: &Request,
-        session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let services = ctx.services();
         let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
+        let services = ctx.services();
         let client_ip: Option<IpAddr> = get_client_ip(req, services)
             .await
             .and_then(|s| s.parse().ok());
@@ -182,17 +184,17 @@ impl Api {
             })));
         }
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
-        let state_arc = match get_auth_state_for_request(
-            &body.username,
-            session,
-            &mut auth_state_store,
-            remote_ip,
-        )
-        .await
+        let state_arc = match get_or_create_auth_state_for_request(req, &body.username, &ctx).await
         {
             Err(WarpgateError::UserNotFound(_)) => {
-                // Record failed attempt for non-existent user
+                let session_id = session_id_for_request(req, &ctx).await?;
+                emit_unknown_authentication_failed_event(
+                    session_id,
+                    remote_ip,
+                    &body.username,
+                    "password",
+                    "unknown user",
+                );
                 if let Some(ip) = client_ip {
                     let _ = services
                         .login_protection
@@ -209,6 +211,14 @@ impl Api {
                 })));
             }
             Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                let session_id = session_id_for_request(req, &ctx).await?;
+                emit_unknown_authentication_failed_event(
+                    session_id,
+                    remote_ip,
+                    &body.username,
+                    "password",
+                    "IP address not allowed",
+                );
                 return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: ApiAuthState::IpRejected,
                 })));
@@ -217,26 +227,31 @@ impl Api {
         }?;
         let mut state = state_arc.lock().await;
 
-        let mut cp = services.config_provider.lock().await;
-
-        let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
-        let is_valid = cp
-            .validate_credential(&state.user_info().username, &password_cred)
-            .await?;
-
-        if is_valid {
-            state.add_valid_credential(password_cred);
-        }
+        validate_and_add_credential(
+            &mut state,
+            &AuthCredential::Password(Secret::new(body.password.clone())),
+            &mut *ctx.services().config_provider.lock().await,
+        )
+        .await?;
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, &ctx, user_info.clone()).await?;
+                let username = user_info.username.clone();
+                authorize_session(req, &ctx, user_info).await?;
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                ctx.services()
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
                 // Clear failed attempts on successful login
                 if let Some(ip) = client_ip {
                     let _ = services
                         .login_protection
-                        .clear_failed_attempts(&ip, &user_info.username)
+                        .clear_failed_attempts(&ip, &username)
                         .await;
                 }
                 Ok(LoginResponse::Success)
@@ -266,7 +281,6 @@ impl Api {
     async fn api_auth_otp_login(
         &self,
         req: &Request,
-        session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
@@ -289,11 +303,7 @@ impl Api {
             }
         }
 
-        let state_id = session.get_auth_state_id();
-
-        let mut auth_state_store = services.auth_state_store.lock().await;
-
-        let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
+        let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 state: ApiAuthState::NotStarted,
             })));
@@ -316,28 +326,31 @@ impl Api {
             })));
         }
 
-        let mut cp = services.config_provider.lock().await;
-
-        let otp_cred = AuthCredential::Otp(body.otp.clone().into());
-        let is_valid = cp
-            .validate_credential(&state.user_info().username, &otp_cred)
-            .await?;
-
-        if is_valid {
-            state.add_valid_credential(otp_cred);
-        } else {
-            warn!("Invalid OTP for user {}", state.user_info().username);
-        }
+        validate_and_add_credential(
+            &mut state,
+            &AuthCredential::Otp(body.otp.clone().into()),
+            &mut *services.config_provider.lock().await,
+        )
+        .await?;
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, &ctx, user_info.clone()).await?;
+                let username = user_info.username.clone();
+                authorize_session(req, &ctx, user_info).await?;
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
                 // Clear failed attempts on successful login
                 if let Some(ip) = client_ip {
                     let _ = services
                         .login_protection
-                        .clear_failed_attempts(&ip, &user_info.username)
+                        .clear_failed_attempts(&ip, &username)
                         .await;
                 }
                 Ok(LoginResponse::Success)
@@ -466,7 +479,7 @@ impl Api {
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let state_arc = get_auth_state(&id, &ctx).await;
+        let state_arc = get_foreign_auth_state(&id, &ctx).await;
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
@@ -489,7 +502,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let Some(state_arc) = get_auth_state(&id, &ctx).await else {
+        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -522,10 +535,15 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let Some(state_arc) = get_auth_state(&id, &ctx).await else {
+        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
+        {
+            let mut state = state_arc.lock().await;
+            let credential = AuthCredential::WebUserApproval;
+            state.emit_authentication_failed_event(Some(&credential), "rejected by user");
+            state.reject();
+        }
         services.auth_state_store.lock().await.complete(&id).await;
         serialize_auth_state_inner(state_arc, services)
             .await
@@ -534,7 +552,9 @@ impl Api {
     }
 }
 
-async fn get_auth_state(
+/// Used to obtain an AuthState that is not for this request
+/// like when doing a web approval of an SSH session
+async fn get_foreign_auth_state(
     id: &Uuid,
     ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {

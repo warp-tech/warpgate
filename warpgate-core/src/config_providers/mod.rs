@@ -26,6 +26,13 @@ pub trait ConfigProvider {
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
 
+    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError>;
+
+    async fn get_target_by_hostname(
+        &mut self,
+        hostname: &str,
+    ) -> Result<Option<Target>, WarpgateError>;
+
     async fn validate_credential(
         &mut self,
         username: &str,

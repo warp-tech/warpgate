@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 
@@ -27,7 +27,11 @@ struct ParameterValues {
     pub ticket_max_uses: Option<i16>,
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
+    pub target_click_action: Parameters::TargetClickAction,
     pub show_session_menu: bool,
+    pub password_policy: PasswordPolicy,
+    pub max_api_token_duration_seconds: Option<i64>,
+    pub record_scp: bool,
     pub login_protection_enabled: bool,
     pub login_protection_retention_days: i32,
     pub lp_ip_max_attempts: i32,
@@ -58,7 +62,11 @@ struct ParameterUpdate {
     pub ticket_max_uses: Option<Option<i16>>,
     pub ticket_require_description: Option<bool>,
     pub ticket_request_show_all_targets: Option<bool>,
+    pub target_click_action: Option<Parameters::TargetClickAction>,
     pub show_session_menu: Option<bool>,
+    pub password_policy: Option<PasswordPolicy>,
+    pub max_api_token_duration_seconds: Option<Option<i64>>,
+    pub record_scp: Option<bool>,
     pub login_protection_enabled: Option<bool>,
     pub login_protection_retention_days: Option<i32>,
     pub lp_ip_max_attempts: Option<i32>,
@@ -113,7 +121,11 @@ impl Api {
             ticket_max_uses: parameters.ticket_max_uses,
             ticket_require_description: parameters.ticket_require_description,
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
+            target_click_action: parameters.target_click_action,
             show_session_menu: parameters.show_session_menu,
+            password_policy: parameters.password_policy(),
+            max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
+            record_scp: parameters.record_scp,
             login_protection_enabled: parameters.login_protection_enabled,
             login_protection_retention_days: parameters.login_protection_retention_days,
             lp_ip_max_attempts: parameters.lp_ip_max_attempts,
@@ -167,7 +179,21 @@ impl Api {
         parameters.ticket_require_description = body.ticket_require_description.map_or(NotSet, Set);
         parameters.ticket_request_show_all_targets =
             body.ticket_request_show_all_targets.map_or(NotSet, Set);
+        parameters.target_click_action = body.target_click_action.map_or(NotSet, Set);
         parameters.show_session_menu = body.show_session_menu.map_or(NotSet, Set);
+        parameters.max_api_token_duration_seconds =
+            body.max_api_token_duration_seconds.map_or(NotSet, Set);
+        parameters.record_scp = body.record_scp.map_or(NotSet, Set);
+
+        #[allow(clippy::cast_possible_wrap)]
+        if let Some(ref policy) = body.password_policy {
+            parameters.password_policy_min_length = Set(policy.min_length as i32);
+            parameters.password_policy_require_uppercase = Set(policy.require_uppercase);
+            parameters.password_policy_require_lowercase = Set(policy.require_lowercase);
+            parameters.password_policy_require_digits = Set(policy.require_digits);
+            parameters.password_policy_require_special = Set(policy.require_special);
+        }
+
         parameters.login_protection_enabled =
             body.login_protection_enabled.map_or(NotSet, Set);
         parameters.login_protection_retention_days =

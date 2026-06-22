@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(ldap_server::Entity)
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Alias::new("ssh_key_attribute"))
                             .string()
                             .not_null()
