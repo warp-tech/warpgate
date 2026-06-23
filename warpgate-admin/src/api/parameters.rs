@@ -50,7 +50,7 @@ struct ParameterValues {
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
-    pub allow_own_credential_management: bool,
+    pub allow_own_credential_management: Option<bool>,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub ssh_client_auth_publickey: Option<bool>,
     pub ssh_client_auth_password: Option<bool>,
@@ -160,7 +160,8 @@ impl Api {
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
-        parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
+        parameters.allow_own_credential_management =
+            body.allow_own_credential_management.map_or(NotSet, Set);
         parameters.rate_limit_bytes_per_second =
             Set(body.rate_limit_bytes_per_second.map(i64::from));
         parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);

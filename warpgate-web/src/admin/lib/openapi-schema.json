@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-33-g302f3237-modified"
+    "version": "v0.25.5-36-gbe951451-modified"
   },
   "servers": [
     {
@@ -5208,9 +5208,6 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
-        "required": [
-          "allow_own_credential_management"
-        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
