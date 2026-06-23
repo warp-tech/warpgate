@@ -43,8 +43,8 @@
     "log": {
       "$ref": "#/$defs/LogConfig",
       "default": {
-        "format": "text",
         "audit_retention": "11months 30days 3h 50m 24s",
+        "format": "text",
         "retention": "7days",
         "send_to": null
       }
@@ -57,6 +57,7 @@
     "mysql": {
       "$ref": "#/$defs/MySqlConfig",
       "default": {
+        "advertised_version": "8.0.3-Warpgate",
         "certificate": "",
         "enable": false,
         "external_host": null,
@@ -280,13 +281,13 @@
     "LogConfig": {
       "type": "object",
       "properties": {
-        "format": {
-          "$ref": "#/$defs/LogFormat",
-          "default": "text"
-        },
         "audit_retention": {
           "type": "string",
           "default": "11months 30days 3h 50m 24s"
+        },
+        "format": {
+          "$ref": "#/$defs/LogFormat",
+          "default": "text"
         },
         "retention": {
           "type": "string",
@@ -353,6 +354,11 @@
     "MySqlConfig": {
       "type": "object",
       "properties": {
+        "advertised_version": {
+          "description": "The server version advertised to clients during the handshake.\nWe can't auto-match the target's version since the target is only known\nafter the handshake, but clients use it to pick a protocol dialect.",
+          "type": "string",
+          "default": "8.0.3-Warpgate"
+        },
         "certificate": {
           "type": "string",
           "default": ""
@@ -440,7 +446,7 @@
       }
     },
     "RoleMapping": {
-      "description": "A role mapping value that accepts either a single role or a list of roles.\n In YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
+      "description": "A role mapping value that accepts either a single role or a list of roles.\nIn YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
       "anyOf": [
         {
           "type": "string"
@@ -534,10 +540,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "google"
-            },
             "admin_email": {
               "description": "A Google Workspace admin email for domain-wide delegation",
               "type": [
@@ -561,7 +563,7 @@
               "type": "string"
             },
             "role_mappings": {
-              "description": "Maps Google group email addresses to Warpgate role names.\n Use \"*\" as a key to set a default role for any group not explicitly mapped.",
+              "description": "Maps Google group email addresses to Warpgate role names.\nUse \"*\" as a key to set a default role for any group not explicitly mapped.",
               "type": [
                 "object",
                 "null"
@@ -583,6 +585,10 @@
                 "string",
                 "null"
               ]
+            },
+            "type": {
+              "type": "string",
+              "const": "google"
             }
           },
           "required": [
@@ -594,10 +600,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "apple"
-            },
             "client_id": {
               "type": "string"
             },
@@ -609,6 +611,10 @@
             },
             "team_id": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "apple"
             }
           },
           "required": [
@@ -622,10 +628,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "azure"
-            },
             "client_id": {
               "type": "string"
             },
@@ -634,6 +636,10 @@
             },
             "tenant": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "azure"
             }
           },
           "required": [
@@ -646,10 +652,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "custom"
-            },
             "additional_trusted_audiences": {
               "type": [
                 "array",
@@ -695,6 +697,10 @@
             "trust_unknown_audiences": {
               "type": "boolean",
               "default": false
+            },
+            "type": {
+              "type": "string",
+              "const": "custom"
             }
           },
           "required": [
@@ -715,7 +721,7 @@
           "default": false
         },
         "default_credential_policy": {
-          "description": "Default credential policy for auto-created users.\n Keys: \"http\", \"ssh\", \"mysql\", \"postgres\"\n Values: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+          "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
         },
         "label": {
           "type": [
@@ -738,6 +744,10 @@
             "type": "string"
           }
         },
+        "return_url_domain": {
+          "$ref": "#/$defs/SsoReturnUrlDomainPreference",
+          "default": "external_host"
+        },
         "return_url_prefix": {
           "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
           "default": "@"
@@ -753,6 +763,13 @@
       "enum": [
         "@",
         "_"
+      ]
+    },
+    "SsoReturnUrlDomainPreference": {
+      "type": "string",
+      "enum": [
+        "external_host",
+        "host_header"
       ]
     },
     "UserLockoutConfig": {

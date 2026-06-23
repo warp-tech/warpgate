@@ -811,7 +811,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="unblock_ip",
-        permission=None,
+        permission="config_edit",
         call=lambda api, r: api.unblock_ip_with_http_info("127.0.0.1"),
         expected_statuses={200},
     ),
@@ -823,7 +823,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="unlock_user",
-        permission=None,
+        permission="config_edit",
         call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
         expected_statuses={200, 404},
     ),
