@@ -278,13 +278,19 @@ class TestLoginProtection:
         with admin_client(url) as api:
             api.update_parameters(sdk.ParameterUpdate(lp_user_max_attempts=2))
 
-        # Step 3: one more failure — 4 total in window, new threshold=2 → must lock
+        # Step 3: attempt N — total=4 in window, new threshold=2.
+        # The lockout is CREATED during this request (4 >= 2), but check_user_locked
+        # runs at the start of each request, so THIS response is still the normal
+        # auth state (PasswordNeeded / Failed).  The NEXT request will see UserLocked.
+        _post_login(url, user.username, "wrong")
+
+        # Step 4: attempt N+1 — check_user_locked now finds the lockout.
         resp, _ = _post_login(url, user.username, "wrong")
         body = resp.json()
         assert body.get("state") == "UserLocked", (
-            f"Hot-reload failed: expected UserLocked after threshold change "
-            f"(user_max lowered to 2), got {body}. "
-            f"This means LP is still using the startup snapshot — restart required."
+            f"Hot-reload failed: expected UserLocked on follow-up attempt after "
+            f"threshold lowered to 2, got {body}. "
+            f"LP may still be using the startup snapshot — restart required."
         )
 
     def test_config_hot_reload_raising_threshold(
@@ -314,18 +320,18 @@ class TestLoginProtection:
         with admin_client(url) as api:
             api.update_parameters(sdk.ParameterUpdate(lp_user_max_attempts=10))
 
-        # Step 3: 2 more failures (total 4) — must NOT lock with new threshold=10
+        # Step 3: 2 more failures (total 4 in window, threshold now 10) — must NOT lock
         for i in range(2):
             resp, _ = _post_login(url, user.username, "wrong")
-            assert resp.json().get("state") != "UserLocked", (
-                f"Unexpected lockout at total attempt {i + 3}: "
-                f"threshold was raised to 10 but lockout fired at 4. "
-                f"Hot-reload is not picking up raised threshold."
+            state = resp.json().get("state")
+            assert state != "UserLocked", (
+                f"Unexpected lockout at total attempt {i + 3} with threshold=10: {state}. "
+                f"Hot-reload may not be picking up the raised threshold."
             )
 
-        # Correct password must still work (not locked)
+        # Correct password must still work — counter below new threshold
         resp, _ = _post_login(url, user.username, "correct_password")
         assert resp.status_code // 100 == 2, (
-            f"Expected successful login, got {resp.status_code} — "
-            f"user may be locked despite raised threshold"
+            f"Expected successful login after raising threshold to 10, "
+            f"got HTTP {resp.status_code}"
         )

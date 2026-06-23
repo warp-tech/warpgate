@@ -2,12 +2,13 @@ use std::net::IpAddr;
 
 use time::OffsetDateTime;
 use poem::web::Data;
-use poem_openapi::param::Path;
+use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 
+use crate::api::common::require_admin_permission;
 use super::AnySecurityScheme;
 
 pub struct Api;
@@ -75,6 +76,7 @@ enum SecurityStatusResponse {
 
 #[OpenApi]
 impl Api {
+    /// List all currently blocked IPs.
     #[oai(
         path = "/login-protection/blocked-ips",
         method = "get",
@@ -85,6 +87,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ListBlockedIpsResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
         let blocked_ips = ctx.services().login_protection.list_blocked_ips().await?;
         let result: Vec<BlockedIpInfo> = blocked_ips
             .into_iter()
@@ -99,26 +102,32 @@ impl Api {
         Ok(ListBlockedIpsResponse::Ok(Json(result)))
     }
 
+    /// Unblock an IP address.
+    ///
+    /// The IP is passed as a query parameter (`?ip=`) rather than a path segment
+    /// to avoid URL-encoding ambiguity with IPv6 addresses (e.g. `::1`).
     #[oai(
-        path = "/login-protection/blocked-ips/:ip",
+        path = "/login-protection/blocked-ips",
         method = "delete",
         operation_id = "unblock_ip"
     )]
     async fn unblock_ip(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
-        ip: Path<String>,
+        /// IP address to unblock (supports both IPv4 and IPv6).
+        ip: Query<String>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UnblockIpResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
         let ip_addr: IpAddr = match ip.parse() {
             Ok(addr) => addr,
             Err(_) => return Ok(UnblockIpResponse::InvalidIp),
         };
-
         ctx.services().login_protection.unblock_ip(&ip_addr).await?;
         Ok(UnblockIpResponse::Ok)
     }
 
+    /// List all currently locked user accounts.
     #[oai(
         path = "/login-protection/locked-users",
         method = "get",
@@ -129,6 +138,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ListLockedUsersResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
         let locked_users = ctx.services().login_protection.list_locked_users().await?;
         let result: Vec<LockedUserInfo> = locked_users
             .into_iter()
@@ -142,6 +152,7 @@ impl Api {
         Ok(ListLockedUsersResponse::Ok(Json(result)))
     }
 
+    /// Unlock a user account by username.
     #[oai(
         path = "/login-protection/locked-users/:username",
         method = "delete",
@@ -153,6 +164,7 @@ impl Api {
         username: Path<String>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UnlockUserResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
         ctx.services()
             .login_protection
             .unlock_user(&username.0)
@@ -160,6 +172,7 @@ impl Api {
         Ok(UnlockUserResponse::Ok)
     }
 
+    /// Get security status summary (blocked IPs, locked users, failure counts).
     #[oai(
         path = "/login-protection/status",
         method = "get",
@@ -170,6 +183,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<SecurityStatusResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
         let status = ctx.services().login_protection.get_security_status().await?;
         Ok(SecurityStatusResponse::Ok(Json(SecurityStatus {
             blocked_ip_count: status.blocked_ip_count,

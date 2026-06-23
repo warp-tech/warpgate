@@ -52,7 +52,7 @@ USER_ID=$(echo "$USER_RESP" | python3 -c "import sys,json; print(json.load(sys.s
 ok "Created user 'testuser' (id: $USER_ID)"
 
 # ── add password credential ───────────────────────────────────────────────────
-api_post "users/$USER_ID/credentials" '{"kind":"Password","password":"TestPass123!"}' >/dev/null
+api_post "users/$USER_ID/credentials/passwords" '{"password":"TestPass123!"}' >/dev/null
 ok "Set password credential: TestPass123!"
 
 # ── assign user to role ───────────────────────────────────────────────────────
