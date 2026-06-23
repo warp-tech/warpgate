@@ -28,6 +28,8 @@ reqwest = { workspace = true, features = ["json"] }
 rustls.workspace = true
 schemars.workspace = true
 sea-orm.workspace = true
+serde.workspace = true
+serde_ignored = "0.1"
 serde_json.workspace = true
 serde_yaml = { version = "0.9", default-features = false }
 time = { version = "0.3", default-features = false }
