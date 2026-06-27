@@ -15,6 +15,8 @@ import GroupColorCircle from 'common/GroupColorCircle.svelte'
 
 let instructionsTarget: TargetSnapshot|undefined = $state()
 
+const canEditTargets = $derived($serverInfo?.adminPermissions?.targetsEdit ?? false)
+
 async function openWebSsh (target: TargetSnapshot) {
     const { sessionId } = await api.createWebSshSession({
         createWebSshSessionBody: { targetId: target.id },
@@ -164,7 +166,12 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     SSH
                 {/if}
             </small>
-            {#if target.kind === TargetKind.Ssh}
+            {#if target.kind === TargetKind.Http}
+                <Button color="link" size="sm" tabindex={-1}>
+                    <Fa icon={faArrowRight} fw />
+                </Button>
+            {/if}
+            {#if target.kind === TargetKind.Ssh || canEditTargets}
                 <Dropdown>
                     <DropdownToggle color="link" size="sm" onclick={e => {
                         e.preventDefault()
@@ -173,23 +180,27 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                         <Fa icon={faEllipsisV} fw />
                     </DropdownToggle>
                     <DropdownMenu end>
-                        <DropdownItem onclick={e => {
-                            openWebSsh(target)
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}>Web terminal</DropdownItem>
-                        <DropdownItem onclick={e => {
-                            showInstructions(target)
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}>Connection instructions</DropdownItem>
+                        {#if target.kind === TargetKind.Ssh}
+                            <DropdownItem onclick={e => {
+                                openWebSsh(target)
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}>Web terminal</DropdownItem>
+                            <DropdownItem onclick={e => {
+                                showInstructions(target)
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}>Connection instructions</DropdownItem>
+                        {/if}
+                        {#if canEditTargets}
+                            <DropdownItem
+                                href={`/@warpgate/admin#/config/targets/${target.id}`}
+                                onclick={e => e.stopPropagation()}
+                            >Edit target</DropdownItem>
+                        {/if}
                     </DropdownMenu>
                 </Dropdown>
-            {:else if target.kind === TargetKind.Http}
-                <Button color="link" size="sm" tabindex={-1}>
-                    <Fa icon={faArrowRight} fw />
-                </Button>
-            {:else}
+            {:else if target.kind !== TargetKind.Http}
                 <Button disabled color="link" size="sm" tabindex={-1} style="visibility: hidden">
                     <Fa icon={faEllipsisV} fw />
                 </Button>
