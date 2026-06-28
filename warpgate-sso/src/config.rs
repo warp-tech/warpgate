@@ -137,6 +137,11 @@ pub enum SsoInternalProviderConfig {
         scopes: Vec<String>,
         role_mappings: Option<HashMap<String, RoleMapping>>,
         admin_role_mappings: Option<HashMap<String, RoleMapping>>,
+        /// OIDC claim to read group memberships from (e.g. "groups").
+        /// Its values are mapped to roles via role_mappings / admin_role_mappings.
+        /// When unset, the warpgate_roles / warpgate_admin_roles claims are used.
+        roles_claim: Option<String>,
+        admin_roles_claim: Option<String>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -312,6 +317,26 @@ impl SsoInternalProviderConfig {
             } => admin_role_mappings.clone(),
             _ => None,
         }
+    }
+
+    #[inline]
+    pub fn roles_claim(&self) -> &str {
+        match self {
+            Self::Custom { roles_claim, .. } => roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_roles")
+    }
+
+    #[inline]
+    pub fn admin_roles_claim(&self) -> &str {
+        match self {
+            Self::Custom {
+                admin_roles_claim, ..
+            } => admin_roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_admin_roles")
     }
 
     #[inline]
