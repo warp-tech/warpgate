@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tracing::{debug, error};
 
-use crate::{SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse};
+use crate::{
+    GroupClaim, SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse, SsoResult,
+    flatten_group_claim,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SsoLoginRequest {
@@ -76,33 +79,14 @@ impl SsoLoginRequest {
 
         let email_verified = get_claim!(email_verified);
 
-        let info_claims = result.userinfo_claims.as_ref();
-
-        macro_rules! get_additional_claim {
-            ($method:ident) => {
-                result
-                    .claims
-                    .additional_claims()
-                    .$method
-                    .clone()
-                    .or(info_claims.and_then(|x| x.additional_claims().$method.clone()))
-            };
-        }
-
         let (access_groups, admin_groups) =
             match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
             {
                 Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
-                Ok(None) => match config.groups_claim() {
-                    Some(claim) => {
-                        let groups = extract_groups(&result, &claim);
-                        (groups.clone(), groups)
-                    }
-                    None => (
-                        get_additional_claim!(warpgate_roles),
-                        get_additional_claim!(warpgate_admin_roles),
-                    ),
-                },
+                Ok(None) => (
+                    extract_groups(&result, config.roles_claim()),
+                    extract_groups(&result, config.admin_roles_claim()),
+                ),
                 Err(e) => {
                     error!("Failed to fetch Google groups: {e}");
                     (None, None)
@@ -123,15 +107,14 @@ impl SsoLoginRequest {
 
 /// Read a configurable group claim from the token (ID token first, then
 /// userinfo) and flatten it to a list of role-name strings.
-fn extract_groups(result: &crate::SsoResult, claim: &str) -> Option<Vec<String>> {
-    let get = |c: &crate::WarpgateClaims| c.additional.get(claim).cloned();
-    let raw = get(result.claims.additional_claims()).or_else(|| {
+fn extract_groups(result: &SsoResult, claim: &str) -> Option<Vec<String>> {
+    let raw = result.claims.additional_claims().0.get(claim).or_else(|| {
         result
             .userinfo_claims
             .as_ref()
-            .and_then(|u| get(u.additional_claims()))
+            .and_then(|u| u.additional_claims().0.get(claim))
     })?;
-    serde_json::from_value::<crate::GroupClaim>(raw)
+    serde_json::from_value::<GroupClaim>(raw.clone())
         .ok()
-        .map(crate::flatten_group_claim)
+        .map(flatten_group_claim)
 }

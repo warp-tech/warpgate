@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
@@ -41,7 +42,7 @@ pub(crate) enum GroupClaimEntry {
 /// value as a bare scalar rather than a one-element array; both are accepted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum GroupClaim {
+pub(crate) enum GroupClaim {
     One(GroupClaimEntry),
     Many(Vec<GroupClaimEntry>),
 }
@@ -52,7 +53,7 @@ pub enum GroupClaim {
 /// so role mappings may be keyed on either the stable group ID or its name.
 /// (A collision between one group's `display` and another's `value` would map
 /// both -- effectively impossible with opaque IDs.)
-pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
+pub(crate) fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
     let entries = match claim {
         GroupClaim::One(e) => vec![e],
         GroupClaim::Many(v) => v,
@@ -71,27 +72,12 @@ pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
     out
 }
 
-/// serde adapter so the typed `warpgate_roles` / `warpgate_admin_roles` fields
-/// accept the same shapes (string, array, object, mixed) as a dynamic group
-/// claim.
-fn deserialize_group_claim<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<GroupClaim>::deserialize(deserializer)?.map(flatten_group_claim))
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct WarpgateClaims {
-    #[serde(default, deserialize_with = "deserialize_group_claim")]
-    pub warpgate_roles: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "deserialize_group_claim")]
-    pub warpgate_admin_roles: Option<Vec<String>>,
-    /// Any other claims present in the token; used to read a configurable
-    /// group claim (e.g. "groups") by name at runtime.
-    #[serde(flatten)]
-    pub additional: std::collections::HashMap<String, serde_json::Value>,
-}
+#[serde(transparent)]
+pub struct WarpgateClaims(
+    /// Flat map of claims since role claim names are configurable
+    pub HashMap<String, serde_json::Value>,
+);
 
 impl AdditionalClaims for WarpgateClaims {}
 
@@ -335,8 +321,9 @@ impl SsoClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{flatten_group_claim, GroupClaim};
     use serde_json::json;
+
+    use super::{GroupClaim, flatten_group_claim};
 
     fn flat(j: serde_json::Value) -> Vec<String> {
         flatten_group_claim(serde_json::from_value::<GroupClaim>(j).unwrap())
@@ -349,7 +336,10 @@ mod tests {
 
     #[test]
     fn array_of_strings_sorted() {
-        assert_eq!(flat(json!(["b", "a"])), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            flat(json!(["b", "a"])),
+            vec!["a".to_string(), "b".to_string()]
+        );
     }
 
     #[test]

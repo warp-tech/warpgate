@@ -42,7 +42,8 @@ def _make_sso_provider_config(
     admin_role_mappings=None,
     extra_scopes=None,
     return_url_domain=None,
-    groups_claim=None,
+    roles_claim=None,
+    admin_roles_claim=None,
 ):
     """Build an ``sso_providers`` entry for warpgate config."""
     scopes = list(DEFAULT_OIDC_SCOPES)
@@ -59,8 +60,10 @@ def _make_sso_provider_config(
         provider["role_mappings"] = role_mappings
     if admin_role_mappings is not None:
         provider["admin_role_mappings"] = admin_role_mappings
-    if groups_claim is not None:
-        provider["groups_claim"] = groups_claim
+    if roles_claim is not None:
+        provider["roles_claim"] = roles_claim
+    if admin_roles_claim is not None:
+        provider["admin_roles_claim"] = admin_roles_claim
     sso_entry = {
         "name": "test-oidc",
         "label": "OIDC Test",
@@ -1012,7 +1015,7 @@ def _json_groups(value):
     return [{"Value": json.dumps(value), "ValueType": "json"}]
 
 
-def _run_groups_claim_test(
+def _run_roles_claim_test(
     processes,
     group_entries,
     *,
@@ -1034,7 +1037,8 @@ def _run_groups_claim_test(
         wg_http_port,
         oidc_port,
         auto_create_users=True,
-        groups_claim="groups",
+        roles_claim="groups",
+        admin_roles_claim="groups",
         role_mappings=role_mappings,
         admin_role_mappings=admin_role_mappings,
         extra_scopes=["groups"],
@@ -1062,7 +1066,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     to access/admin roles via role_mappings / admin_role_mappings."""
 
     def test_access_role_mapping(self, echo_server_port, processes: ProcessManager):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("grp-ssh"),
             role_mappings={"grp-ssh": "ssh-access-role"},
@@ -1073,7 +1077,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
 
     def test_admin_role_mapping(self, echo_server_port, processes: ProcessManager):
         # "warpgate:admin" is warpgate's built-in admin role (always present).
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("grp-admin"),
             admin_role_mappings={"grp-admin": "warpgate:admin"},
@@ -1084,7 +1088,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     def test_combined_access_and_admin(
         self, echo_server_port, processes: ProcessManager
     ):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("grp-admin", "grp-ssh"),
             role_mappings={"grp-ssh": "ssh-access-role"},
@@ -1097,7 +1101,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     def test_group_name_with_spaces(
         self, echo_server_port, processes: ProcessManager
     ):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("remote ssh users"),
             role_mappings={"remote ssh users": "ssh-access-role"},
@@ -1108,7 +1112,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     def test_duplicate_group_names_dedup(
         self, echo_server_port, processes: ProcessManager
     ):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("grp-ssh", "grp-ssh"),
             role_mappings={"grp-ssh": "ssh-access-role"},
@@ -1120,7 +1124,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     def test_multiple_groups_some_unmapped(
         self, echo_server_port, processes: ProcessManager
     ):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _str_groups("grp-ssh", "grp-admin", "grp-extra", "grp-noise"),
             role_mappings={"grp-ssh": "ssh-access-role"},
@@ -1134,7 +1138,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
         self, echo_server_port, processes: ProcessManager
     ):
         # SCIM-style object array; map on the stable `value` (id), not the name.
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _json_groups([{"value": "id-ssh", "display": "grp-ssh"}]),
             role_mappings={"id-ssh": "ssh-access-role"},
@@ -1145,7 +1149,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
     def test_mapping_by_id_and_name_mixed(
         self, echo_server_port, processes: ProcessManager
     ):
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _json_groups(
                 [
@@ -1166,7 +1170,7 @@ class TestHTTPUserAuthOIDCGroupsClaim:
         # value/display collisions across entries, a value with a space, and a
         # string entry equal to another entry's display. Flattened set is:
         #   bla, bla2, dis1, dis2, val 3, val1, val2
-        access, admin = _run_groups_claim_test(
+        access, admin = _run_roles_claim_test(
             processes,
             _json_groups(
                 [

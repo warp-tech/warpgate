@@ -140,7 +140,8 @@ pub enum SsoInternalProviderConfig {
         /// OIDC claim to read group memberships from (e.g. "groups").
         /// Its values are mapped to roles via role_mappings / admin_role_mappings.
         /// When unset, the warpgate_roles / warpgate_admin_roles claims are used.
-        groups_claim: Option<String>,
+        roles_claim: Option<String>,
+        admin_roles_claim: Option<String>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -319,11 +320,23 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn groups_claim(&self) -> Option<String> {
+    pub fn roles_claim(&self) -> &str {
         match self {
-            Self::Custom { groups_claim, .. } => groups_claim.clone(),
+            Self::Custom { roles_claim, .. } => roles_claim.as_deref(),
             _ => None,
         }
+        .unwrap_or("warpgate_roles")
+    }
+
+    #[inline]
+    pub fn admin_roles_claim(&self) -> &str {
+        match self {
+            Self::Custom {
+                admin_roles_claim, ..
+            } => admin_roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_admin_roles")
     }
 
     #[inline]
