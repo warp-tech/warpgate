@@ -79,6 +79,11 @@ pub struct SsoProviderConfig {
     /// Keys: "http", "ssh", "mysql", "postgres"
     /// Values: list of credential kinds e.g. ["sso"], ["web"], []
     pub default_credential_policy: Option<serde_json::Value>,
+    /// How long (seconds) a successful SSO web login should be trusted to
+    /// auto-approve subsequent SSH `WebUserApproval` prompts for the same user
+    /// **from the same source IP**. If unset, every SSH session continues to
+    /// require explicit browser approval.
+    pub active_web_session_ttl_seconds: Option<u64>,
 }
 
 impl SsoProviderConfig {

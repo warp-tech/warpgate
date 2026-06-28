@@ -9,7 +9,7 @@ use warpgate_common::{GlobalParams, WarpgateConfig};
 use crate::db::{connect_to_db, populate_db};
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
+use crate::{ActiveWebSessions, AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
 
 #[derive(Clone)]
 pub struct Services {
@@ -21,6 +21,7 @@ pub struct Services {
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    pub active_web_sessions: Arc<Mutex<ActiveWebSessions>>,
     pub global_params: Arc<GlobalParams>,
 }
 
@@ -57,6 +58,17 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
+        let active_web_sessions = Arc::new(Mutex::new(ActiveWebSessions::default()));
+        tokio::spawn({
+            let active_web_sessions = active_web_sessions.clone();
+            async move {
+                loop {
+                    active_web_sessions.lock().await.vacuum();
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+            }
+        });
+
         Ok(Self {
             db: db.clone(),
             recordings,
@@ -66,6 +78,7 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),
+            active_web_sessions,
             global_params: Arc::new(params),
         })
     }

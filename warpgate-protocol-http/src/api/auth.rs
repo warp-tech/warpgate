@@ -255,8 +255,16 @@ impl Api {
     async fn api_auth_logout(
         &self,
         session: &Session,
+        ctx: Data<&UnauthenticatedRequestContext>,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
+        if let Some(SessionAuthorization::User { username, .. }) = session.get_auth() {
+            ctx.services()
+                .active_web_sessions
+                .lock()
+                .await
+                .forget(&username);
+        }
         logout(session, &mut *session_middleware.lock().await);
         Ok(LogoutResponse::Success)
     }

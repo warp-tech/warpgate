@@ -301,6 +301,7 @@ pub async fn authorize_session(
         .await
         .set_user_info(user_info.clone())
         .await?;
+
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,
