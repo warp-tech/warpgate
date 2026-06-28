@@ -76,6 +76,11 @@ class Child:
     stop_timeout: float
 
 
+# Geometry of the e2e VNC backend (images/vnc-server); passed to the container and
+# asserted by the VNC tests as the size the relay resizes the viewer to.
+VNC_BACKEND_SIZE = (800, 600)
+
+
 @dataclass
 class WarpgateProcess:
     config_path: Path
@@ -85,6 +90,7 @@ class WarpgateProcess:
     mysql_port: int
     postgres_port: int
     kubernetes_port: int
+    vnc_port: int
 
 
 class ProcessManager:
@@ -181,6 +187,25 @@ class ProcessManager:
         self.start(
             ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
         )
+        return port
+
+    def start_vnc_server(self, require_password=False):
+        port = alloc_port()
+        args = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            f"warpgate-e2e-vnc-server-{uuid.uuid4()}",
+            "-p",
+            f"{port}:5900",
+            "-e",
+            f"VNC_GEOMETRY={VNC_BACKEND_SIZE[0]}x{VNC_BACKEND_SIZE[1]}",
+        ]
+        if require_password:
+            args += ["-e", "VNC_SECURITY=VncAuth", "-e", "VNC_PASSWORD=123"]
+        args.append("warpgate-e2e-vnc-server")
+        self.start(args)
         return port
 
     def start_postgres_server(self):
@@ -617,12 +642,14 @@ class ProcessManager:
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
             kubernetes_port = share_with.kubernetes_port
+            vnc_port = share_with.vnc_port
         else:
             ssh_port = alloc_port()
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
             kubernetes_port = alloc_port()
+            vnc_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -700,6 +727,14 @@ class ProcessManager:
 
             config = yaml.safe_load(config_path.open())
             config["ssh"]["host_key_verification"] = "auto_accept"
+            # unattended-setup has no --vnc-port, so enable the VNC listener here,
+            # reusing the TLS cert/key already copied into the data dir (for VeNCrypt).
+            config["vnc"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{vnc_port}",
+                "certificate": "tls.certificate.pem",
+                "key": "tls.key.pem",
+            }
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
@@ -714,6 +749,7 @@ class ProcessManager:
             mysql_port=mysql_port,
             postgres_port=postgres_port,
             kubernetes_port=kubernetes_port,
+            vnc_port=vnc_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
