@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
@@ -20,37 +21,62 @@ use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::{SsoError, discover_metadata};
 
-/// Deserialize a value that may be either a single string or a sequence of strings.
-///
-/// Some OIDC providers (e.g. oidc-mock) return a single claim value
-/// as a bare string rather than a one-element array.
-/// This deserializer accepts both forms.
-fn string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StringOrVec {
-        String(String),
-        Vec(Vec<String>),
-    }
+/// A single entry in a group-style claim: either a bare string, or a
+/// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
+/// and `display` (human-readable name).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum GroupClaimEntry {
+    Str(String),
+    Obj {
+        #[serde(default)]
+        value: Option<String>,
+        #[serde(default)]
+        display: Option<String>,
+    },
+}
 
-    Option::<StringOrVec>::deserialize(deserializer).map(|opt| {
-        opt.map(|sv| match sv {
-            StringOrVec::String(s) => vec![s],
-            StringOrVec::Vec(v) => v,
+/// A group-style claim value: a single entry, or an array of entries
+/// (strings and/or objects, mixed). Some OIDC providers return a single
+/// value as a bare scalar rather than a one-element array; both are accepted.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum GroupClaim {
+    One(GroupClaimEntry),
+    Many(Vec<GroupClaimEntry>),
+}
+
+/// Flatten a group claim into a sorted, de-duplicated list of strings.
+///
+/// For object entries BOTH `value` and `display` are emitted (when present),
+/// so role mappings may be keyed on either the stable group ID or its name.
+/// (A collision between one group's `display` and another's `value` would map
+/// both -- effectively impossible with opaque IDs.)
+pub(crate) fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
+    let entries = match claim {
+        GroupClaim::One(e) => vec![e],
+        GroupClaim::Many(v) => v,
+    };
+    let mut out: Vec<String> = entries
+        .into_iter()
+        .flat_map(|e| match e {
+            GroupClaimEntry::Str(s) => vec![s],
+            GroupClaimEntry::Obj { value, display } => {
+                [value, display].into_iter().flatten().collect()
+            }
         })
-    })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct WarpgateClaims {
-    #[serde(default, deserialize_with = "string_or_vec")]
-    pub warpgate_roles: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "string_or_vec")]
-    pub warpgate_admin_roles: Option<Vec<String>>,
-}
+#[serde(transparent)]
+pub struct WarpgateClaims(
+    /// Flat map of claims since role claim names are configurable
+    pub HashMap<String, serde_json::Value>,
+);
 
 impl AdditionalClaims for WarpgateClaims {}
 
@@ -360,5 +386,103 @@ impl SsoClient {
         req = req.set_client_id(self.config.client_id().clone());
         req = req.set_post_logout_redirect_uri(PostLogoutRedirectUrl::from_url(redirect_url));
         Ok(req.http_get_url())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{GroupClaim, flatten_group_claim};
+
+    fn flat(j: serde_json::Value) -> Vec<String> {
+        flatten_group_claim(serde_json::from_value::<GroupClaim>(j).unwrap())
+    }
+
+    #[test]
+    fn bare_string() {
+        assert_eq!(flat(json!("a")), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn array_of_strings_sorted() {
+        assert_eq!(
+            flat(json!(["b", "a"])),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn single_object_value_and_display() {
+        assert_eq!(
+            flat(json!({"value": "id1", "display": "Admins"})),
+            vec!["Admins".to_string(), "id1".to_string()]
+        );
+    }
+
+    #[test]
+    fn array_of_objects() {
+        assert_eq!(
+            flat(json!([
+                {"value": "id1", "display": "Admins"},
+                {"value": "id2", "display": "Users"}
+            ])),
+            vec![
+                "Admins".to_string(),
+                "Users".to_string(),
+                "id1".to_string(),
+                "id2".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_strings_and_partial_objects() {
+        assert_eq!(
+            flat(json!(["x", {"display": "D"}, {"value": "V"}])),
+            vec!["D".to_string(), "V".to_string(), "x".to_string()]
+        );
+    }
+
+    #[test]
+    fn deduplicates() {
+        assert_eq!(flat(json!(["a", "a"])), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn empty_array() {
+        assert!(flat(json!([])).is_empty());
+    }
+
+    #[test]
+    fn object_without_value_or_display() {
+        assert!(flat(json!([{"foo": "bar"}])).is_empty());
+    }
+
+    #[test]
+    fn complex_mixed_objects_with_cross_dedup_and_spaces() {
+        // value/display collisions across entries (e.g. two groups sharing a
+        // display, a display equal to another entry's string) must all collapse
+        // to a single sorted, de-duplicated set. A value containing a space
+        // sorts before non-space characters.
+        assert_eq!(
+            flat(json!([
+                "bla",
+                {"value": "val1", "display": "dis1"},
+                {"value": "val2", "display": "dis1"},
+                {"value": "val1", "display": "dis2"},
+                "bla2",
+                {"value": "val 3", "display": "bla2"}
+            ])),
+            vec![
+                "bla".to_string(),
+                "bla2".to_string(),
+                "dis1".to_string(),
+                "dis2".to_string(),
+                "val 3".to_string(),
+                "val1".to_string(),
+                "val2".to_string(),
+            ]
+        );
     }
 }
