@@ -71,14 +71,20 @@ pub async fn map_sso_result(
     let preferred_username = get_claim!(preferred_username)
         .map(|x| x.as_str())
         .map(ToString::to_string)
-        .or_else(|| get_claim!(email).map(|x| x.as_str()).map(ToString::to_string));
+        .or_else(|| {
+            get_claim!(email)
+                .map(|x| x.as_str())
+                .map(ToString::to_string)
+        });
 
     let name = get_claim!(name)
         .and_then(|x| x.get(None))
         .map(|x| x.as_str())
         .map(ToString::to_string);
 
-    let email = get_claim!(email).map(|x| x.as_str()).map(ToString::to_string);
+    let email = get_claim!(email)
+        .map(|x| x.as_str())
+        .map(ToString::to_string);
     let email_verified = get_claim!(email_verified);
 
     let (access_groups, admin_groups) =

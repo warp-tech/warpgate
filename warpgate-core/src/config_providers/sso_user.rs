@@ -1,5 +1,6 @@
 use tracing::debug;
-use warpgate_common::{WarpgateError, auth::AuthCredential};
+use warpgate_common::WarpgateError;
+use warpgate_common::auth::AuthCredential;
 use warpgate_sso::{RoleMapping, SsoLoginResponse, SsoProviderConfig};
 
 use crate::ConfigProvider;
@@ -46,7 +47,10 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
             let mut roles: Vec<String> = if remote_groups.is_empty() {
                 Vec::new()
             } else {
-                mappings.get("*").map(RoleMapping::roles).unwrap_or_default()
+                mappings
+                    .get("*")
+                    .map(RoleMapping::roles)
+                    .unwrap_or_default()
             };
             for group in &remote_groups {
                 if let Some(mapping) = mappings.get(group) {
@@ -60,7 +64,9 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
         active_role_names.sort();
         active_role_names.dedup();
 
-        debug!("SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}");
+        debug!(
+            "SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}"
+        );
         cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
             .await?;
     }
@@ -74,13 +80,21 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
         let active_admin_names: Vec<String> = if let Some(ref mappings) = admin_map {
             remote_admins
                 .iter()
-                .flat_map(|r| mappings.get(r).map(RoleMapping::roles).into_iter().flatten())
+                .flat_map(|r| {
+                    mappings
+                        .get(r)
+                        .map(RoleMapping::roles)
+                        .into_iter()
+                        .flatten()
+                })
                 .collect()
         } else {
             remote_admins
         };
 
-        debug!("SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}");
+        debug!(
+            "SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}"
+        );
         cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)
             .await?;
     }
