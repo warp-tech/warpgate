@@ -74,14 +74,13 @@ pub struct SsoProviderKubernetesConfig {
     pub client_secret: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-pub struct ResolvedKubernetesOidc {
-    pub name: String,
-    pub label: String,
-    pub issuer_url: String,
-    pub client_id: String,
-    pub scopes: Vec<String>,
-    pub client_secret: Option<String>,
+impl SsoProviderKubernetesConfig {
+    /// kubelogin scopes, falling back to the OIDC defaults when unset.
+    pub fn scopes_or_default(&self) -> Vec<String> {
+        self.scopes
+            .clone()
+            .unwrap_or_else(|| ["openid", "email", "profile"].map(String::from).to_vec())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -110,22 +109,6 @@ impl SsoProviderConfig {
         self.label
             .as_deref()
             .unwrap_or_else(|| self.provider.label())
-    }
-
-    pub fn kubernetes_oidc(&self) -> Option<ResolvedKubernetesOidc> {
-        let k = self.kubernetes.as_ref()?;
-        let issuer = self.provider.issuer_url().ok()?;
-        Some(ResolvedKubernetesOidc {
-            name: self.name.clone(),
-            label: self.label().to_string(),
-            issuer_url: issuer.to_string(),
-            client_id: k.client_id.clone(),
-            scopes: k
-                .scopes
-                .clone()
-                .unwrap_or_else(|| vec!["openid".into(), "email".into(), "profile".into()]),
-            client_secret: k.client_secret.clone(),
-        })
     }
 }
 
@@ -376,59 +359,5 @@ impl SsoInternalProviderConfig {
             } => *trust_unknown_audiences,
             _ => false,
         }
-    }
-}
-
-#[cfg(test)]
-mod kubernetes_oidc_tests {
-    use super::*;
-    use openidconnect::{ClientId, ClientSecret, IssuerUrl};
-
-    fn custom_provider(issuer: &str) -> SsoInternalProviderConfig {
-        SsoInternalProviderConfig::Custom {
-            client_id: ClientId::new("warpgate".into()),
-            client_secret: ClientSecret::new("s".into()),
-            issuer_url: IssuerUrl::new(issuer.into()).unwrap(),
-            scopes: vec!["openid".into()],
-            role_mappings: None,
-            admin_role_mappings: None,
-            additional_trusted_audiences: Some(vec!["kubernetes".into()]),
-            trust_unknown_audiences: false,
-        }
-    }
-
-    fn base_entry(provider: SsoInternalProviderConfig) -> SsoProviderConfig {
-        SsoProviderConfig {
-            name: "keycloak".into(),
-            label: Some("Keycloak".into()),
-            provider,
-            return_domain_whitelist: None,
-            return_url_domain: Default::default(),
-            return_url_prefix: Default::default(),
-            auto_create_users: true,
-            default_credential_policy: None,
-            kubernetes: None,
-        }
-    }
-
-    #[test]
-    fn no_kubernetes_config_resolves_to_none() {
-        let e = base_entry(custom_provider("https://idp/realms/x"));
-        assert!(e.kubernetes_oidc().is_none());
-    }
-
-    #[test]
-    fn resolves_issuer_client_and_default_scopes() {
-        let mut e = base_entry(custom_provider("https://idp/realms/x"));
-        e.kubernetes = Some(SsoProviderKubernetesConfig {
-            client_id: "kubernetes".into(),
-            scopes: None,
-            client_secret: None,
-        });
-        let r = e.kubernetes_oidc().expect("should resolve");
-        assert_eq!(r.issuer_url, "https://idp/realms/x");
-        assert_eq!(r.client_id, "kubernetes");
-        assert_eq!(r.scopes, vec!["openid", "email", "profile"]);
-        assert!(r.client_secret.is_none());
     }
 }

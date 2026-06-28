@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-18-g0278a782-modified"
+    "version": "v0.25.5-16-ga5d65a7a-modified"
   },
   "servers": [
     {
@@ -2093,8 +2093,7 @@
           "label",
           "issuer_url",
           "client_id",
-          "scopes",
-          "has_client_secret"
+          "scopes"
         ],
         "properties": {
           "name": {
@@ -2114,9 +2113,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "has_client_secret": {
-            "type": "boolean"
           },
           "client_secret": {
             "type": "string"

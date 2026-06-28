@@ -24,39 +24,33 @@ pub async fn authenticate_and_get_target(
     {
         let mut config_provider = services.config_provider.lock().await;
         if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
-            let target = config_provider
-                .get_target_by_name(target_name)
-                .await
-                .context("looking up target")?
-                .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
-                .ok_or_else(|| {
-                    poem::Error::from_string(
-                        format!("Kubernetes target not found: {target_name}"),
-                        poem::http::StatusCode::NOT_FOUND,
-                    )
-                })?;
-
-            if !config_provider
-                .authorize_target(&user.username, &target.name)
-                .await
-                .unwrap_or(false)
-            {
-                return Err(poem::Error::from_string(
-                    format!("Access denied to target: {target_name}"),
-                    poem::http::StatusCode::FORBIDDEN,
-                ));
-            }
+            let target =
+                lookup_authorized_k8s_target(&mut *config_provider, target_name, &user.username)
+                    .await?;
             return Ok(((&user).into(), target));
         }
         drop(config_provider);
 
-        // API token did not match — try OIDC ID token validation.
+        // API token did not match — try OIDC ID token validation against any SSO
+        // provider that has opted into Kubernetes OIDC.
         let sso_providers = {
             let config = services.config.lock().await;
             config.store.sso_providers.clone()
         };
 
-        for provider_config in &sso_providers {
+        // Routing hint: only a provider whose issuer matches the token can
+        // verify it, so we avoid issuer-discovery network calls to the others.
+        let token_issuer = warpgate_sso::unverified_issuer(token);
+
+        for provider_config in sso_providers.iter().filter(|p| p.kubernetes.is_some()) {
+            if let Some(ref token_issuer) = token_issuer
+                && let Ok(provider_issuer) = provider_config.provider.issuer_url()
+                && provider_issuer.url().as_str().trim_end_matches('/')
+                    != token_issuer.trim_end_matches('/')
+            {
+                continue;
+            }
+
             let client = match warpgate_sso::SsoClient::new(provider_config.provider.clone()) {
                 Ok(c) => c,
                 Err(e) => {
@@ -91,49 +85,11 @@ pub async fn authenticate_and_get_target(
                 continue;
             };
 
-            let target = config_provider
-                .get_target_by_name(target_name)
-                .await
-                .context("looking up target")?
-                .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
-                .ok_or_else(|| {
-                    poem::Error::from_string(
-                        format!("Kubernetes target not found: {target_name}"),
-                        poem::http::StatusCode::NOT_FOUND,
-                    )
-                })?;
-
-            if !config_provider
-                .authorize_target(&username, &target.name)
-                .await
-                .unwrap_or(false)
-            {
-                return Err(poem::Error::from_string(
-                    format!("Access denied to target: {target_name}"),
-                    poem::http::StatusCode::FORBIDDEN,
-                ));
-            }
+            let target =
+                lookup_authorized_k8s_target(&mut *config_provider, target_name, &username).await?;
             drop(config_provider);
 
-            let db = services.db.lock().await;
-            let model = warpgate_db_entities::User::Entity::find()
-                .filter(warpgate_db_entities::User::Entity::username_eq_ci(&username))
-                .one(&*db)
-                .await
-                .context("looking up user in database")?;
-            let Some(model) = model else {
-                return Err(poem::Error::from_string(
-                    format!("User not found after SSO resolution: {username}"),
-                    poem::http::StatusCode::UNAUTHORIZED,
-                ));
-            };
-            let user = User::try_from(model).map_err(|e| {
-                poem::Error::from_string(
-                    format!("Failed to convert user model: {e}"),
-                    poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            })?;
-            return Ok(((&user).into(), target));
+            return Ok((user_info_for_username(services, &username).await?, target));
         }
     }
 
@@ -146,28 +102,12 @@ pub async fn authenticate_and_get_target(
             Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
                 let mut config_provider = services.config_provider.lock().await;
-                let target = config_provider
-                    .get_target_by_name(target_name)
-                    .await
-                    .context("looking up target")?
-                    .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
-                    .ok_or_else(|| {
-                        poem::Error::from_string(
-                            format!("Kubernetes target not found: {target_name}"),
-                            poem::http::StatusCode::NOT_FOUND,
-                        )
-                    })?;
-
-                if !config_provider
-                    .authorize_target(&user_info.username, &target.name)
-                    .await
-                    .unwrap_or(false)
-                {
-                    return Err(poem::Error::from_string(
-                        format!("Access denied to target: {target_name}"),
-                        poem::http::StatusCode::FORBIDDEN,
-                    ));
-                }
+                let target = lookup_authorized_k8s_target(
+                    &mut *config_provider,
+                    target_name,
+                    &user_info.username,
+                )
+                .await?;
                 return Ok((user_info, target));
             }
             Ok(None) => {
@@ -186,6 +126,65 @@ pub async fn authenticate_and_get_target(
         "Unauthorized: Please provide either a valid Bearer token or a client certificate",
         poem::http::StatusCode::UNAUTHORIZED,
     ))
+}
+
+/// Look up a Kubernetes target by name and ensure `username` is authorized for
+/// it. Shared by the API-token, OIDC and client-certificate auth paths.
+async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
+    config_provider: &mut C,
+    target_name: &str,
+    username: &str,
+) -> poem::Result<Target> {
+    let target = config_provider
+        .get_target_by_name(target_name)
+        .await
+        .context("looking up target")?
+        .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
+        .ok_or_else(|| {
+            poem::Error::from_string(
+                format!("Kubernetes target not found: {target_name}"),
+                poem::http::StatusCode::NOT_FOUND,
+            )
+        })?;
+
+    if !config_provider
+        .authorize_target(username, &target.name)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(poem::Error::from_string(
+            format!("Access denied to target: {target_name}"),
+            poem::http::StatusCode::FORBIDDEN,
+        ));
+    }
+
+    Ok(target)
+}
+
+/// Load a resolved SSO user's `AuthStateUserInfo` by username.
+async fn user_info_for_username(
+    services: &Services,
+    username: &str,
+) -> poem::Result<AuthStateUserInfo> {
+    let db = services.db.lock().await;
+    let model = warpgate_db_entities::User::Entity::find()
+        .filter(warpgate_db_entities::User::Entity::username_eq_ci(username))
+        .one(&*db)
+        .await
+        .context("looking up user in database")?
+        .ok_or_else(|| {
+            poem::Error::from_string(
+                format!("User not found after SSO resolution: {username}"),
+                poem::http::StatusCode::UNAUTHORIZED,
+            )
+        })?;
+    let user = User::try_from(model).map_err(|e| {
+        poem::Error::from_string(
+            format!("Failed to convert user model: {e}"),
+            poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )
+    })?;
+    Ok((&user).into())
 }
 
 pub async fn create_authenticated_client(

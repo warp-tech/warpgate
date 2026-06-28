@@ -93,7 +93,6 @@ pub struct SsoKubernetesConfigDescription {
     pub issuer_url: String,
     pub client_id: String,
     pub scopes: Vec<String>,
-    pub has_client_secret: bool,
     pub client_secret: Option<String>,
 }
 
@@ -451,15 +450,17 @@ impl Api {
         providers.sort_by(|a, b| a.label().cmp(b.label()));
         let configs = providers
             .iter()
-            .filter_map(|p| p.kubernetes_oidc())
-            .map(|r| SsoKubernetesConfigDescription {
-                name: r.name,
-                label: r.label,
-                issuer_url: r.issuer_url,
-                client_id: r.client_id,
-                scopes: r.scopes,
-                has_client_secret: r.client_secret.is_some(),
-                client_secret: r.client_secret,
+            .filter_map(|p| {
+                let k = p.kubernetes.as_ref()?;
+                let issuer_url = p.provider.issuer_url().ok()?;
+                Some(SsoKubernetesConfigDescription {
+                    name: p.name.clone(),
+                    label: p.label().to_string(),
+                    issuer_url: issuer_url.to_string(),
+                    client_id: k.client_id.clone(),
+                    scopes: k.scopes_or_default(),
+                    client_secret: k.client_secret.clone(),
+                })
             })
             .collect();
         Ok(GetSsoKubernetesConfigsResponse::Ok(Json(configs)))

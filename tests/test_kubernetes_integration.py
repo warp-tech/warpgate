@@ -82,6 +82,12 @@ def _make_oidc_sso_provider_config(
         "label": "OIDC Test",
         "provider": provider,
         "auto_create_users": auto_create_users,
+        # Opt this provider into Kubernetes OIDC bearer auth. The auth path is
+        # gated on the presence of this block; the client_id is only used for
+        # kubeconfig generation, not for token validation.
+        "kubernetes": {
+            "client_id": KUBECTL_CLIENT_ID,
+        },
     }
 
 
