@@ -39,6 +39,9 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
+      - name: Run Rust unit tests
+        run: cargo test -p warpgate-protocol-vnc-ui
+
       - name: Build UI
         run: |
           just npm ci

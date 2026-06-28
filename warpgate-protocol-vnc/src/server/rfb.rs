@@ -18,14 +18,14 @@ use num_bigint::BigUint;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
+use super::MAX_STRING_LEN;
+
 const RFB_VERSION: &[u8; 12] = b"RFB 003.008\n";
 
 /// VeNCrypt sub-type: X.509 certificate based TLS, then Plain (username/password) auth.
 const VENCRYPT_SUBTYPE_X509PLAIN: u32 = 262;
 /// VeNCrypt protocol version we speak (major 0, minor 2).
 const VENCRYPT_VERSION: [u8; 2] = [0, 2];
-
-const MAX_STRING_LEN: usize = 4096;
 
 /// RFB security types
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -401,8 +401,8 @@ where
 /// will flag this usage — it is a known, accepted, protocol-mandated exception.
 fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     let mut key = [0u8; 8];
-    for (i, b) in password.bytes().take(8).enumerate() {
-        key[i] = b.reverse_bits();
+    for (slot, b) in key.iter_mut().zip(password.bytes().take(8)) {
+        *slot = b.reverse_bits();
     }
     let cipher = Des::new(&key.into());
 
