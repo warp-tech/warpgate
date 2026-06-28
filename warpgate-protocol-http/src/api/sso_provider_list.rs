@@ -11,17 +11,19 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::{AuthCredential, AuthResult};
-use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::validate_and_add_credential;
-use warpgate_sso::{RoleMapping, SsoClient, SsoInternalProviderConfig};
+use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
+use crate::api::AnySecurityScheme;
 use crate::api::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
-    SessionExt, authorize_session, get_or_create_auth_state_for_request, session_id_for_request,
+    SessionExt, authorize_session, endpoint_auth, get_or_create_auth_state_for_request,
+    session_id_for_request,
 };
 use crate::session::SessionStore;
 
@@ -82,6 +84,22 @@ enum StartSloResponse {
     NotInSsoSession,
     #[oai(status = 404)]
     NotFound,
+}
+
+#[derive(Object)]
+pub struct SsoKubernetesConfigDescription {
+    pub name: String,
+    pub label: String,
+    pub issuer_url: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub client_secret: Option<String>,
+}
+
+#[derive(ApiResponse)]
+enum GetSsoKubernetesConfigsResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<SsoKubernetesConfigDescription>>),
 }
 
 fn make_redirect_url(err: &str) -> String {
@@ -247,7 +265,7 @@ impl Api {
             return Ok(Err("The SSO account's e-mail is not verified".to_string()));
         }
 
-        let Some(email) = response.email else {
+        let Some(ref email) = response.email else {
             return Ok(Err("No e-mail information in the SSO response".to_string()));
         };
 
@@ -277,7 +295,7 @@ impl Api {
             .await
             .username_for_sso_credential(
                 &cred,
-                response.preferred_username,
+                response.preferred_username.clone(),
                 provider_config.clone(),
             )
             .await?;
@@ -286,7 +304,7 @@ impl Api {
             emit_unknown_authentication_failed_event(
                 session_id,
                 req.remote_addr().as_socket_addr().map(|a| a.ip()),
-                &email,
+                email,
                 &cred.safe_description(),
                 "unknown user",
             );
@@ -342,85 +360,17 @@ impl Api {
                 .await;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
-                token: response.id_token,
+                token: response.id_token.clone(),
                 supports_single_logout: context.supports_single_logout,
             });
         }
 
-        let mut cp = services.config_provider.lock().await;
-
-        let mappings = provider_config.provider.role_mappings();
-        if let Some(remote_groups) = response.access_roles {
-            // If mappings is not set, all groups are subject to sync
-            // and names won't be remapped
-            let managed_role_names = mappings
-                .as_ref()
-                .map(|m| m.iter().flat_map(|(_, v)| v.roles()).collect::<Vec<_>>());
-
-            let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
-                // Apply wildcard "*" mapping if user has any groups
-                let mut roles: Vec<String> = if remote_groups.is_empty() {
-                    Vec::new()
-                } else {
-                    mappings
-                        .get("*")
-                        .map(RoleMapping::roles)
-                        .unwrap_or_default()
-                };
-
-                // Apply specific group mappings
-                for group in &remote_groups {
-                    if let Some(mapping) = mappings.get(group) {
-                        roles.extend(mapping.roles());
-                    }
-                }
-
-                roles
-            } else {
-                // No mappings configured, pass through group names as-is
-                remote_groups
-            };
-
-            active_role_names.sort();
-            active_role_names.dedup();
-
-            debug!(
-                "SSO role mappings for {username}: active={active_role_names:?}, managed={managed_role_names:?}"
-            );
-            cp.apply_sso_role_mappings(&username, managed_role_names, active_role_names)
-                .await?;
-        }
-
-        // import admin roles from claim if present
-        if let Some(remote_admins) = response.admin_roles {
-            let admin_map = provider_config.provider.admin_role_mappings();
-
-            // compute managed list from mapping values (or all role names if no mapping provided)
-            let managed_admin_names: Option<Vec<String>> = admin_map
-                .as_ref()
-                .map(|m| m.values().flat_map(RoleMapping::roles).collect());
-
-            let active_admin_names: Vec<_> = if let Some(ref mappings) = admin_map {
-                remote_admins
-                    .iter()
-                    .flat_map(|r| {
-                        mappings
-                            .get(r)
-                            .map(RoleMapping::roles)
-                            .into_iter()
-                            .flatten()
-                    })
-                    .collect()
-            } else {
-                remote_admins.clone()
-            };
-
-            debug!(
-                "SSO admin role mappings for {username}: active={active_admin_names:?}, managed={managed_admin_names:?}"
-            );
-            cp.apply_sso_admin_role_mappings(&username, managed_admin_names, active_admin_names)
-                .await?;
-        }
+        warpgate_core::resolve_and_map_sso_user(
+            &mut *services.config_provider.lock().await,
+            provider_config,
+            &response,
+        )
+        .await?;
 
         let mut next_url = context
             .next_url
@@ -476,6 +426,44 @@ impl Api {
         Ok(StartSloResponse::Ok(Json(StartSloResponseParams {
             url: logout_url.to_string(),
         })))
+    }
+
+    #[oai(
+        path = "/sso/kubernetes-configs",
+        method = "get",
+        operation_id = "get_sso_kubernetes_configs",
+        transform = "endpoint_auth"
+    )]
+    async fn api_get_sso_kubernetes_configs(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetSsoKubernetesConfigsResponse, WarpgateError> {
+        let mut providers = ctx
+            .services()
+            .config
+            .lock()
+            .await
+            .store
+            .sso_providers
+            .clone();
+        providers.sort_by(|a, b| a.label().cmp(b.label()));
+        let configs = providers
+            .iter()
+            .filter_map(|p| {
+                let k = p.kubernetes.as_ref()?;
+                let issuer_url = p.provider.issuer_url().ok()?;
+                Some(SsoKubernetesConfigDescription {
+                    name: p.name.clone(),
+                    label: p.label().to_string(),
+                    issuer_url: issuer_url.to_string(),
+                    client_id: k.client_id.clone(),
+                    scopes: k.scopes_or_default(),
+                    client_secret: k.client_secret.clone(),
+                })
+            })
+            .collect();
+        Ok(GetSsoKubernetesConfigsResponse::Ok(Json(configs)))
     }
 }
 

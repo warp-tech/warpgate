@@ -1,8 +1,8 @@
 <script lang="ts">
     import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
-    import { api, TargetKind, type ExistingCertificateCredential } from 'gateway/lib/api'
+    import { api, TargetKind, type ExistingCertificateCredential, type SsoKubernetesConfigDescription } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
+    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, makeOidcKubeconfig } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
@@ -40,6 +40,10 @@
     let issuingCertificate = $state(false)
     let pendingSelectCertId: string | undefined = $state()
 
+    let k8sOidcConfigs: SsoKubernetesConfigDescription[] = $state([])
+    let selectedOidcProvider: string | undefined = $state(undefined)
+    let kubeconfigMode: 'oidc' | 'certificate' = $state('certificate')
+
     interface CertificateWithKeyStatus {
         credential: ExistingCertificateCredential
         hasLocalKey: boolean
@@ -70,6 +74,22 @@
             certificates = []
         } finally {
             certLoading = false
+        }
+    }
+
+    async function loadOidcConfigs () {
+        kubeconfigMode = 'certificate'
+        k8sOidcConfigs = []
+        selectedOidcProvider = undefined
+        try {
+            k8sOidcConfigs = await api.getSsoKubernetesConfigs()
+        } catch {
+            k8sOidcConfigs = []
+        }
+        const first = k8sOidcConfigs[0]
+        if (first) {
+            selectedOidcProvider = first.name
+            kubeconfigMode = 'oidc'
         }
     }
 
@@ -115,8 +135,11 @@
     $effect(() => {
         if (targetKind === TargetKind.Kubernetes && !ticketSecret) {
             loadCertificates()
+            loadOidcConfigs()
         }
     })
+
+    let selectedOidc = $derived(k8sOidcConfigs.find(c => c.name === selectedOidcProvider))
 
     // Create a reactive opts object that updates when any prop or serverInfo changes
     let opts = $derived.by(() => ({
@@ -128,6 +151,10 @@
         targetDefaultDatabaseName,
         clientCertificatePem,
         clientPrivateKeyPem,
+        oidcIssuerUrl: selectedOidc?.issuerUrl,
+        oidcClientId: selectedOidc?.clientId,
+        oidcScopes: selectedOidc?.scopes,
+        oidcClientSecret: selectedOidc?.clientSecret ?? undefined,
     }))
 
     let sshUsername = $derived(makeSSHUsername(opts))
@@ -142,6 +169,7 @@
     let targetURL = $derived(targetName ? makeTargetURL(opts) : '')
     let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
     let kubeconfig = $derived(makeKubeconfig(opts))
+    let oidcKubeconfig = $derived(makeOidcKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
 </script>
 
@@ -221,6 +249,31 @@
 
 {#if targetKind === TargetKind.Kubernetes}
 <h4 class="mb-3">Connect with kubectl</h4>
+
+{#if k8sOidcConfigs.length > 0}
+  <ul class="nav nav-pills mb-3">
+    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}" onclick={() => kubeconfigMode = 'oidc'}>OIDC (kubelogin)</button></li>
+    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}" onclick={() => kubeconfigMode = 'certificate'}>Certificate</button></li>
+  </ul>
+{/if}
+
+{#if kubeconfigMode === 'oidc' && k8sOidcConfigs.length > 0}
+  {#if k8sOidcConfigs.length > 1}
+    <label class="form-label" for="oidc-provider-select">SSO provider</label>
+    <select id="oidc-provider-select" class="form-select mb-3" bind:value={selectedOidcProvider}>
+      {#each k8sOidcConfigs as c (c.name)}
+        <option value={c.name}>{c.label}</option>
+      {/each}
+    </select>
+  {/if}
+  <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
+    <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{oidcKubeconfig}</textarea>
+    <CopyButton text={oidcKubeconfig} />
+  </FormGroup>
+  <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer">kubelogin</a> (oidc-login) kubectl plugin.</div>
+{/if}
+
+{#if kubeconfigMode === 'certificate' || k8sOidcConfigs.length === 0}
 <div class="row">
     <div class="col-12 col-lg-6">
         <!-- svelte-ignore a11y_label_has_associated_control -->
@@ -319,6 +372,7 @@
         </InfoBox>
     </div>
 </div>
+{/if}
 {/if}
 
 {#if issuingCertificate}

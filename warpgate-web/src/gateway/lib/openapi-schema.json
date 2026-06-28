@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.3-modified"
+    "version": "v0.25.5-16-ga5d65a7a-modified"
   },
   "servers": [
     {
@@ -435,6 +435,34 @@
           }
         },
         "operationId": "initiate_sso_logout"
+      }
+    },
+    "/sso/kubernetes-configs": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SsoKubernetesConfigDescription"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_sso_kubernetes_configs"
       }
     },
     "/sso/providers/{name}/start": {
@@ -2054,6 +2082,40 @@
           },
           "tutorial_dismissed": {
             "type": "boolean"
+          }
+        }
+      },
+      "SsoKubernetesConfigDescription": {
+        "type": "object",
+        "title": "SsoKubernetesConfigDescription",
+        "required": [
+          "name",
+          "label",
+          "issuer_url",
+          "client_id",
+          "scopes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "client_secret": {
+            "type": "string"
           }
         }
       },
