@@ -13,12 +13,12 @@
 
 use std::io::{BufRead, Write};
 use std::net::TcpStream;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::input::{Database, MouseButton, MousePosition, Operation, Scancode, WheelRotations};
@@ -543,8 +543,7 @@ fn tls_upgrade(
     let mut config = if verify {
         // Verify the server certificate against the system root store.
         let mut roots = rustls::RootCertStore::empty();
-        let certs =
-            rustls_native_certs::load_native_certs().context("loading native root certificates")?;
+        let certs = rustls_native_certs::load_native_certs().certs;
         for cert in certs {
             roots.add(cert).ok();
         }
