@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-25-g131c8c32-modified"
+    "version": "v0.25.5-26-gbc63d68f-modified"
   },
   "servers": [
     {
@@ -1730,6 +1730,7 @@
         "required": [
           "ports",
           "password_login_mode",
+          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
@@ -1737,6 +1738,7 @@
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
+          "web_ssh_enabled",
           "has_ldap"
         ],
         "properties": {
@@ -1760,6 +1762,10 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "minimize_password_login": {
+            "type": "boolean",
+            "description": "Deprecated: superseded by `password_login_mode`; removed as a stored\nparameter in 0.26.0. Still emitted (true when the mode is `Minimized`)\nfor backwards compatibility with older API clients."
           },
           "authorized_via_ticket": {
             "type": "boolean"
@@ -1793,6 +1799,9 @@
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "web_ssh_enabled": {
+            "type": "boolean"
           },
           "has_ldap": {
             "type": "boolean"

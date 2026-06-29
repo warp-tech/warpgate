@@ -170,9 +170,4 @@
         gap: .5rem;
         margin-bottom: .5rem;
     }
-
-    .section-title {
-        font-weight: 600;
-        font-size: .95rem;
-    }
 </style>

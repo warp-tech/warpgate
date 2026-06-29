@@ -15,6 +15,8 @@
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Section from 'admin/lib/Section.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import Subsection from 'admin/lib/Subsection.svelte';
+    import HelpText from 'admin/lib/HelpText.svelte';
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
@@ -152,73 +154,86 @@
                 </Section>
 
                 <Section id="traffic" title="Traffic">
-                    <FormGroup>
-                        <label class="mb-2" for="rateLimitBytesPerSecond">Global bandwidth limit</label>
+                    <Subsection title="Global bandwidth limit">
                         <RateLimitInput
                             id="rateLimitBytesPerSecond"
                             bind:value={parameters.rateLimitBytesPerSecond}
                             change={refreshValidity} />
-                    </FormGroup>
+                    </Subsection>
                 </Section>
 
                 <Section id="ssh" title="SSH">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label class="mb-2">Allowed authentication methods</label>
-                    <label
-                        for="sshClientAuthPublickey"
-                        class="d-flex align-items-center mb-2"
-                    >
-                        <Input
-                            id="sshClientAuthPublickey"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={parameters.sshClientAuthPublickey} />
-                        <div>Public key authentication</div>
-                    </label>
-                    <label
-                        for="sshClientAuthPassword"
-                        class="d-flex align-items-center mb-2"
-                    >
-                        <Input
-                            id="sshClientAuthPassword"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={parameters.sshClientAuthPassword}
-                        />
-                        <div>Password authentication</div>
-                    </label>
-                    <label
-                        for="sshClientAuthKeyboardInteractive"
-                        class="d-flex align-items-center"
-                    >
-                        <Input
-                            id="sshClientAuthKeyboardInteractive"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={parameters.sshClientAuthKeyboardInteractive} />
-                        <div>Keyboard-interactive authentication (OTP, 2FA prompts)</div>
-                    </label>
-                    <InfoBox class="mt-3 mb-3">
-                        Controls which authentication methods are offered to SSH clients.
-                        Disabling password authentication can help prevent brute-force attacks.
-                    </InfoBox>
+                    <Subsection title="Web SSH">
+                        <label
+                            for="webSshEnabled"
+                            class="d-flex align-items-center"
+                        >
+                            <Input
+                                id="webSshEnabled"
+                                class="mb-0 me-2"
+                                type="switch"
+                                bind:checked={parameters.webSshEnabled} />
+                            <div>Enable Web SSH (in-browser terminal)</div>
+                        </label>
+                    </Subsection>
 
-                    <div class="mt-3"></div>
+                    <Subsection title="Allowed authentication methods">
+                        <label
+                            for="sshClientAuthPublickey"
+                            class="d-flex align-items-center mb-2"
+                        >
+                            <Input
+                                id="sshClientAuthPublickey"
+                                class="mb-0 me-2"
+                                type="switch"
+                                bind:checked={parameters.sshClientAuthPublickey} />
+                            <div>Public key authentication</div>
+                        </label>
+                        <label
+                            for="sshClientAuthPassword"
+                            class="d-flex align-items-center mb-2"
+                        >
+                            <Input
+                                id="sshClientAuthPassword"
+                                class="mb-0 me-2"
+                                type="switch"
+                                bind:checked={parameters.sshClientAuthPassword}
+                            />
+                            <div>Password authentication</div>
+                        </label>
+                        <label
+                            for="sshClientAuthKeyboardInteractive"
+                            class="d-flex align-items-center"
+                        >
+                            <Input
+                                id="sshClientAuthKeyboardInteractive"
+                                class="mb-0 me-2"
+                                type="switch"
+                                bind:checked={parameters.sshClientAuthKeyboardInteractive} />
+                            <div>Keyboard-interactive authentication (OTP, 2FA prompts)</div>
+                        </label>
+                        <HelpText>
+                            Controls which authentication methods are offered to SSH clients.
+                            Disabling password authentication can help prevent brute-force attacks.
+                        </HelpText>
+                    </Subsection>
 
-                    <label
-                        for="recordScp"
-                        class="d-flex align-items-center mt-2"
-                    >
-                        <Input
-                            id="recordScp"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={parameters.recordScp} />
-                        <div>Record legacy SCP transfers</div>
-                    </label>
-                    <InfoBox class="mt-3 mb-3">
-                        Legacy SCP works over an exec channel and would be normally recorded like any other command. Disable to prevent SCP recordings from wasting storage space.
-                    </InfoBox>
+                    <Subsection title="Quirks">
+                        <label
+                            for="recordScp"
+                            class="d-flex align-items-center mt-2"
+                        >
+                            <Input
+                                id="recordScp"
+                                class="mb-0 me-2"
+                                type="switch"
+                                bind:checked={parameters.recordScp} />
+                            <div>Record legacy SCP transfers</div>
+                        </label>
+                        <HelpText>
+                            Legacy SCP works over an exec channel and would be normally recorded like any other command. Disable to prevent SCP recordings from wasting storage space.
+                        </HelpText>
+                    </Subsection>
                 </Section>
 
                 <Section id="tickets" bodyTitle="Self-service tickets" title="Tickets">
@@ -273,34 +288,36 @@
                             bind:checked={parameters.ticketRequestShowAllTargets} />
                         <div>Show all targets in ticket request form</div>
                     </label>
-                    <InfoBox class="mt-3 mb-3">
+                    <HelpText>
                         When disabled, users only see targets they already have role-based access to.
-                    </InfoBox>
+                    </HelpText>
 
-                    <FormGroup floating label="Default max ticket duration (blank = unlimited)">
-                        <input
-                            type="text"
-                            class="form-control"
-                            placeholder="e.g. 8h, 30m, 1d"
-                            use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters!.ticketMaxDurationSeconds = v } }}
-                        />
-                        <small class="form-text text-muted">
+                    <Subsection title="Limits">
+                        <FormGroup floating label="Default max ticket duration (blank = unlimited)">
+                            <input
+                                type="text"
+                                class="form-control"
+                                placeholder="e.g. 8h, 30m, 1d"
+                                use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters!.ticketMaxDurationSeconds = v } }}
+                            />
+                        </FormGroup>
+                        <HelpText>
                             Global default. Can be overridden per target. Examples: 30m, 8h, 1d, 2h30m.
-                        </small>
-                    </FormGroup>
+                        </HelpText>
 
-                    <FormGroup floating label="Max uses per ticket (blank = unlimited)">
-                        <input
-                            type="number"
-                            min="1"
-                            class="form-control"
-                            value={parameters.ticketMaxUses ?? ''}
-                            onchange={e => {
-                                const v = parseInt(e.currentTarget.value)
-                                parameters!.ticketMaxUses = isNaN(v) ? undefined : v
-                            }}
-                        />
-                    </FormGroup>
+                        <FormGroup floating label="Max uses per ticket (blank = unlimited)">
+                            <input
+                                type="number"
+                                min="1"
+                                class="form-control"
+                                value={parameters.ticketMaxUses ?? ''}
+                                onchange={e => {
+                                    const v = parseInt(e.currentTarget.value)
+                                    parameters!.ticketMaxUses = isNaN(v) ? undefined : v
+                                }}
+                            />
+                        </FormGroup>
+                    </Subsection>
                     {/if}
                 </Section>
 
@@ -339,9 +356,9 @@
                             bind:checked={parameters.showSessionMenu} />
                         <div>Show HTTP session menu</div>
                     </label>
-                    <InfoBox class="mt-3 mb-3">
+                    <HelpText>
                         Warpgate can inject a session menu into HTTP sessions, allowing users to log out or return back to the home page.
-                    </InfoBox>
+                    </HelpText>
                 </Section>
 
                 {#if hasSsoProviders}
@@ -358,9 +375,9 @@
                             <option value="Disabled">Disabled (SSO only)</option>
                         </select>
                     </FormGroup>
-                    <InfoBox class="mt-3 mb-3">
+                    <HelpText>
                         Minimized hides the username and password fields behind a link, with the focus on the SSO buttons. Disabled removes password login entirely and the server rejects password attempts — make sure all users can sign in via SSO first.
-                    </InfoBox>
+                    </HelpText>
                 </Section>
                 {/if}
 
@@ -377,16 +394,16 @@
                             bind:checked={parameters.loginProtectionEnabled} />
                         <div>Enable brute-force protection</div>
                     </label>
-                    <InfoBox class="mt-2 mb-3">
+                    <HelpText>
                         Rate-limits IPs and locks accounts after repeated failed logins. When disabled, all settings below are preserved but not enforced.
-                    </InfoBox>
+                    </HelpText>
 
                     {#if lpCapWarning}
                         <Alert color="warning" class="mb-2">{lpCapWarning}</Alert>
                     {/if}
 
                     {#if parameters.loginProtectionEnabled}
-                        <p class="lp-group-title">IP rate-limit</p>
+                    <Subsection title="IP rate-limit">
                         <div class="row g-2 mb-2">
                             <div class="col-sm-6">
                                 <FormGroup floating label="Max failures before IP block">
@@ -429,70 +446,76 @@
                                 </FormGroup>
                             </div>
                         </div>
-                        <InfoBox class="mb-3">
+                        <HelpText>
                             Each block is <strong>multiplier × the previous block duration</strong>, capped at the maximum. The repeat count resets only after the cooldown period of <em>clean</em> activity — not when a block expires.
-                        </InfoBox>
+                        </HelpText>
 
-                        <p class="lp-group-title">User lockout</p>
-                        <div class="row g-2 mb-2">
-                            <div class="col-sm-6">
-                                <FormGroup floating label="Max failures before lockout">
-                                    <input type="number" min="1" max="1000" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpUserMaxAttempts}
-                                        onchange={e => { parameters!.lpUserMaxAttempts = e.currentTarget.valueAsNumber }} />
-                                </FormGroup>
+                        <Subsection title="User lockout">
+                            <div class="row g-2 mb-2">
+                                <div class="col-sm-6">
+                                    <FormGroup floating label="Max failures before lockout">
+                                        <input type="number" min="1" max="1000" required class="form-control"
+                                            disabled={!parameters.loginProtectionEnabled}
+                                            value={parameters.lpUserMaxAttempts}
+                                            onchange={e => { parameters!.lpUserMaxAttempts = e.currentTarget.valueAsNumber }} />
+                                    </FormGroup>
+                                </div>
+                                <div class="col-sm-6">
+                                    <FormGroup floating label="Failure window">
+                                        <input type="text" class="form-control" placeholder="e.g. 60m"
+                                            use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters!.lpUserTimeWindowSeconds = v } } }} />
+                                    </FormGroup>
+                                </div>
                             </div>
-                            <div class="col-sm-6">
-                                <FormGroup floating label="Failure window">
+                            <label
+                                for="lpUserAutoUnlock"
+                                class="d-flex align-items-center mb-2"
+                            >
+                                <Input
+                                    id="lpUserAutoUnlock"
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    disabled={!parameters.loginProtectionEnabled}
+                                    bind:checked={parameters.lpUserAutoUnlock} />
+                                <div>Auto-unlock after timeout</div>
+                            </label>
+                            {#if parameters.lpUserAutoUnlock}
+                                <FormGroup floating label="Auto-unlock delay" class="mb-2">
                                     <input type="text" class="form-control" placeholder="e.g. 60m"
-                                        use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters!.lpUserTimeWindowSeconds = v } } }} />
+                                        use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters!.lpUserLockoutDurationSeconds = v } } }} />
                                 </FormGroup>
-                            </div>
-                        </div>
-                        <label
-                            for="lpUserAutoUnlock"
-                            class="d-flex align-items-center mb-2"
-                        >
-                            <Input
-                                id="lpUserAutoUnlock"
-                                class="mb-0 me-2"
-                                type="switch"
-                                disabled={!parameters.loginProtectionEnabled}
-                                bind:checked={parameters.lpUserAutoUnlock} />
-                            <div>Auto-unlock after timeout</div>
-                        </label>
-                        {#if parameters.lpUserAutoUnlock}
-                            <FormGroup floating label="Auto-unlock delay" class="mb-2">
-                                <input type="text" class="form-control" placeholder="e.g. 60m"
-                                    use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters!.lpUserLockoutDurationSeconds = v } } }} />
+                            {/if}
+                        </Subsection>
+
+                        <Subsection title="Lockout protection">
+                            <label
+                                for="lpUserExemptAdmins"
+                                class="d-flex align-items-center mb-2"
+                            >
+                                <Input
+                                    id="lpUserExemptAdmins"
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    disabled={!parameters.loginProtectionEnabled}
+                                    bind:checked={parameters.lpUserExemptAdmins} />
+                                <div>Exempt admins from lockout</div>
+                            </label>
+                            <HelpText class="mb-3">
+                                Recommended: keeps an attacker from locking out an admin account by spamming its username. IP blocking still applies to everyone.
+                            </HelpText>
+                        </Subsection>
+
+                        <Subsection title="Data retention">
+                            <FormGroup floating label="Keep records for" class="mb-3">
+                                <input type="text" class="form-control" placeholder="e.g. 30d"
+                                    use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters!.loginProtectionRetentionSeconds = v } } }} />
                             </FormGroup>
-                        {/if}
-                        <label
-                            for="lpUserExemptAdmins"
-                            class="d-flex align-items-center mb-2"
-                        >
-                            <Input
-                                id="lpUserExemptAdmins"
-                                class="mb-0 me-2"
-                                type="switch"
-                                disabled={!parameters.loginProtectionEnabled}
-                                bind:checked={parameters.lpUserExemptAdmins} />
-                            <div>Exempt admins from lockout</div>
-                        </label>
-                        <InfoBox class="mb-3">
-                            Recommended: keeps an attacker from locking out an admin account by spamming its username. IP blocking still applies to everyone.
-                        </InfoBox>
+                        </Subsection>
 
-                        <p class="lp-group-title">Data retention</p>
-                        <FormGroup floating label="Keep records for" class="mb-3">
-                            <input type="text" class="form-control" placeholder="e.g. 30d"
-                                use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters!.loginProtectionRetentionSeconds = v } } }} />
-                        </FormGroup>
-
-                        <small class="text-muted mt-2">
+                        <InfoBox>
                             Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
-                        </small>
+                        </InfoBox>
+                    </Subsection>
                     {/if}
                 </Section>
             </SectionedForm>
@@ -507,18 +530,3 @@
         </Loadable>
     </PermissionGate>
 </div>
-
-<style>
-    .lp-group-title {
-        font-size: .75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--bs-secondary-color);
-        margin: 1rem 0 .5rem;
-    }
-
-    .lp-group-title:first-child {
-        margin-top: .25rem;
-    }
-</style>

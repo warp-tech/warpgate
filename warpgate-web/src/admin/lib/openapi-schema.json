@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-25-g131c8c32-modified"
+    "version": "v0.25.5-26-gbc63d68f-modified"
   },
   "servers": [
     {
@@ -5303,6 +5303,9 @@
           },
           "lp_user_exempt_admins": {
             "type": "boolean"
+          },
+          "web_ssh_enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -5315,6 +5318,7 @@
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
           "password_login_mode",
+          "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
@@ -5335,7 +5339,8 @@
           "lp_user_time_window_seconds",
           "lp_user_auto_unlock",
           "lp_user_lockout_duration_seconds",
-          "lp_user_exempt_admins"
+          "lp_user_exempt_admins",
+          "web_ssh_enabled"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5356,6 +5361,10 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "minimize_password_login": {
+            "type": "boolean",
+            "description": "Deprecated: superseded by `password_login_mode`; removed as a stored\nparameter in 0.26.0. Still emitted (true when the mode is `Minimized`)\nfor backwards compatibility with older API clients."
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5440,6 +5449,9 @@
             "format": "int32"
           },
           "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "web_ssh_enabled": {
             "type": "boolean"
           }
         }

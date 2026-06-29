@@ -57,6 +57,7 @@ mod m00052_log_text_column;
 mod m00053_login_protection;
 mod m00054_login_protection_params;
 mod m00057_password_login_mode;
+mod m00056_web_ssh_enabled;
 
 pub(crate) mod helpers;
 
@@ -121,6 +122,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00053_login_protection::Migration),
             Box::new(m00054_login_protection_params::Migration),
             Box::new(m00057_password_login_mode::Migration),
+            Box::new(m00056_web_ssh_enabled::Migration),
         ]
     }
 }

@@ -27,7 +27,7 @@
     <Fa fw icon={faCloudSun} />
     {/if}
 </Button>
-<Tooltip target="button" animation>
+<Tooltip target="button" animation placement="left" container="body">
     {#if $currentTheme === 'dark'}
     Dark theme
     {:else if $currentTheme === 'light'}
