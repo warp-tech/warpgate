@@ -16,6 +16,7 @@ use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip;
@@ -569,7 +570,7 @@ async fn get_foreign_auth_state(
 
     {
         let state = state_arc.lock().await;
-        if &state.user_info().username != username {
+        if !username_eq_ci(&state.user_info().username, username) {
             return None;
         }
     }
@@ -630,7 +631,7 @@ pub async fn api_get_web_auth_requests_stream(
             let auth_state_store = auth_state_store.lock().await;
             if let Some(state) = auth_state_store.get(&id) {
                 let state = state.lock().await;
-                if state.user_info().username == username {
+                if username_eq_ci(&state.user_info().username, &username) {
                     sink.send(Message::Text(id.to_string())).await?;
                 }
             }
