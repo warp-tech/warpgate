@@ -10,6 +10,7 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Target::{self, TargetKind};
 use warpgate_web_ssh::WebSshClientManager;
 
@@ -83,6 +84,14 @@ impl Api {
         let (Some(username), user_id) = (ctx.auth.username(), ctx.auth.user_id()) else {
             return Ok(CreateWebSshSessionResponse::Forbidden);
         };
+
+        if !Parameters::Entity::get(&*ctx.services().db.lock().await)
+            .await
+            .map_err(WarpgateError::from)?
+            .web_ssh_enabled
+        {
+            return Ok(CreateWebSshSessionResponse::Forbidden);
+        }
 
         let Some(target) = Target::Entity::find_by_id(body.target_id)
             .one(&*ctx.services().db.lock().await)
