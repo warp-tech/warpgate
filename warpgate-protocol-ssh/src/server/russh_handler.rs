@@ -52,6 +52,8 @@ pub enum ServerHandlerEvent {
 
 pub struct ServerHandler {
     pub event_tx: UnboundedSender<ServerHandlerEvent>,
+    /// Optional custom banner shown to the client during authentication.
+    pub banner: Option<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -70,6 +72,10 @@ impl ServerHandler {
 
 impl russh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
+
+    async fn authentication_banner(&mut self) -> Result<Option<String>, Self::Error> {
+        Ok(self.banner.clone())
+    }
 
     async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
         let handle = session.handle();

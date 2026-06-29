@@ -58,6 +58,8 @@ pub struct Model {
     pub lp_user_auto_unlock: bool,
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
+    #[sea_orm(column_type = "Text")]
+    pub ssh_banner: String,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -121,6 +123,7 @@ impl Entity {
                     lp_user_auto_unlock: Set(true),
                     lp_user_lockout_duration_seconds: Set(3600),
                     lp_user_exempt_admins: Set(true),
+                    ssh_banner: Set("".into()),
                 }
                 .insert(db)
                 .await

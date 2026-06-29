@@ -219,6 +219,20 @@
                     <InfoBox class="mt-3 mb-3">
                         Legacy SCP works over an exec channel and would be normally recorded like any other command. Disable to prevent SCP recordings from wasting storage space.
                     </InfoBox>
+
+                    <div class="mt-3"></div>
+
+                    <FormGroup>
+                        <label class="mb-2" for="sshBanner">Login banner</label>
+                        <Input
+                            id="sshBanner"
+                            type="textarea"
+                            rows={4}
+                            bind:value={parameters.sshBanner} />
+                    </FormGroup>
+                    <InfoBox class="mt-3 mb-3">
+                        Optional message shown to SSH clients during authentication. Leave blank to disable.
+                    </InfoBox>
                 </Section>
 
                 <Section id="tickets" bodyTitle="Self-service tickets" title="Tickets">
