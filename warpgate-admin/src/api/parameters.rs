@@ -21,6 +21,8 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub password_login_mode: Parameters::PasswordLoginMode,
+    /// Deprecated in 0.26: superseded by `password_login_mode`
+    pub minimize_password_login: bool,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -115,6 +117,8 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             password_login_mode: parameters.password_login_mode,
+            minimize_password_login: parameters.password_login_mode
+                == Parameters::PasswordLoginMode::Minimized,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,

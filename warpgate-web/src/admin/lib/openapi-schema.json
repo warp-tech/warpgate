@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-26-gbc63d68f-modified"
+    "version": "v0.25.5-31-gad3b8b4a-modified"
   },
   "servers": [
     {
@@ -5364,7 +5364,7 @@
           },
           "minimize_password_login": {
             "type": "boolean",
-            "description": "Deprecated: superseded by `password_login_mode`; removed as a stored\nparameter in 0.26.0. Still emitted (true when the mode is `Minimized`)\nfor backwards compatibility with older API clients."
+            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"

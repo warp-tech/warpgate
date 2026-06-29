@@ -15,8 +15,8 @@
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Section from 'admin/lib/Section.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
-    import Subsection from 'admin/lib/Subsection.svelte';
-    import HelpText from 'admin/lib/HelpText.svelte';
+    import Subsection from 'admin/lib/Subsection.svelte'
+    import HelpText from 'admin/lib/HelpText.svelte'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
