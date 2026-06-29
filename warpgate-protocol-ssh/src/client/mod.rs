@@ -18,7 +18,7 @@ use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
-use russh::{MethodKind, Preferred, Sig, kex};
+use russh::{MethodKind, Preferred, Sig, kex, mac};
 use serde::Serialize;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -529,6 +529,17 @@ impl RemoteClient {
                     russh::cipher::AES_128_CTR,
                     russh::cipher::AES_128_CBC,
                     russh::cipher::TRIPLE_DES_CBC,
+                ]),
+                // The secure defaults exclude SHA-1 MACs; append them here for
+                // legacy devices (e.g. older network switches that only offer
+                // hmac-sha1). https://github.com/warp-tech/warpgate/issues/2066
+                mac: Cow::Borrowed(&[
+                    mac::HMAC_SHA512_ETM,
+                    mac::HMAC_SHA256_ETM,
+                    mac::HMAC_SHA512,
+                    mac::HMAC_SHA256,
+                    mac::HMAC_SHA1_ETM,
+                    mac::HMAC_SHA1,
                 ]),
                 ..<_>::default()
             }
