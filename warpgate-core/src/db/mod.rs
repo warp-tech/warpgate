@@ -10,10 +10,11 @@ use time::OffsetDateTime;
 use tracing::error;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
-use warpgate_db_migrations::migrate_database;
+use warpgate_db_migrations::{migrate_database, migrate_database_down, migrate_database_up};
 
 use crate::recordings::SessionRecordings;
 
+/// Open a connection to the configured database without running migrations.
 pub async fn connect_to_db(
     config: &WarpgateConfig,
     params: &GlobalParams,
@@ -55,8 +56,28 @@ pub async fn connect_to_db(
 
     let connection = Database::connect(opt).await?;
 
+    Ok(connection)
+}
+
+pub async fn connect_to_db_and_migrate(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+) -> Result<DatabaseConnection> {
+    let connection = connect_to_db(config, params).await?;
     migrate_database(&connection).await?;
     Ok(connection)
+}
+
+/// Apply `steps` pending migrations.
+pub async fn migrate_up(connection: &DatabaseConnection, steps: u32) -> Result<()> {
+    migrate_database_up(connection, steps).await?;
+    Ok(())
+}
+
+/// Revert `steps` applied migrations.
+pub async fn migrate_down(connection: &DatabaseConnection, steps: u32) -> Result<()> {
+    migrate_database_down(connection, steps).await?;
+    Ok(())
 }
 
 pub async fn populate_db(

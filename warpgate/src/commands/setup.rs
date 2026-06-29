@@ -19,7 +19,7 @@ use warpgate_common::{
     Secret, SshConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
-use warpgate_core::db::connect_to_db;
+use warpgate_core::db::connect_to_db_and_migrate;
 use warpgate_db_entities::{Role, User, UserRoleAssignment};
 
 use crate::commands::common::{assert_interactive_terminal, is_docker};
@@ -345,7 +345,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     )
     .await?;
 
-    let db = connect_to_db(&config, params).await?;
+    let db = connect_to_db_and_migrate(&config, params).await?;
 
     #[allow(clippy::expect_used)]
     let user = User::Entity::find()
