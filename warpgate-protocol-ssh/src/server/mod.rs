@@ -93,7 +93,10 @@ async fn _handle_connection(
             None
         } else {
             // Normalize line endings for terminal display.
-            Some(format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
+            Some(format!(
+                "{}\r\n",
+                text.replace("\r\n", "\n").replace('\n', "\r\n")
+            ))
         }
     };
 
