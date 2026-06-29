@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-36-gbe951451-modified"
+    "version": "v0.25.5-37-g69c02d3f-modified"
   },
   "servers": [
     {
@@ -3789,9 +3789,6 @@
           },
           "400": {
             "description": ""
-          },
-          "404": {
-            "description": ""
           }
         },
         "security": [
@@ -3851,9 +3848,6 @@
         ],
         "responses": {
           "200": {
-            "description": ""
-          },
-          "404": {
             "description": ""
           }
         },
@@ -5295,9 +5289,6 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_blocked_message": {
-            "type": "string"
-          },
           "lp_user_max_attempts": {
             "type": "integer",
             "format": "int32"
@@ -5313,8 +5304,8 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_user_locked_message": {
-            "type": "string"
+          "lp_user_exempt_admins": {
+            "type": "boolean"
           }
         }
       },
@@ -5346,7 +5337,8 @@
           "lp_user_max_attempts",
           "lp_user_time_window_minutes",
           "lp_user_auto_unlock",
-          "lp_user_lockout_duration_minutes"
+          "lp_user_lockout_duration_minutes",
+          "lp_user_exempt_admins"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5435,9 +5427,6 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_blocked_message": {
-            "type": "string"
-          },
           "lp_user_max_attempts": {
             "type": "integer",
             "format": "int32"
@@ -5453,8 +5442,8 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_user_locked_message": {
-            "type": "string"
+          "lp_user_exempt_admins": {
+            "type": "boolean"
           }
         }
       },

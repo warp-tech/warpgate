@@ -25,13 +25,7 @@ pub struct Model {
     pub failed_attempt_count: i32,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
-
-impl RelationTrait for Relation {
-    fn def(&self) -> RelationDef {
-        panic!("No relations defined")
-    }
-}
 
 impl ActiveModelBehavior for ActiveModel {}

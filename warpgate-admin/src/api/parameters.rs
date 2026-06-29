@@ -40,12 +40,11 @@ struct ParameterValues {
     pub lp_ip_block_duration_multiplier: f64,
     pub lp_ip_max_block_duration_hours: i32,
     pub lp_ip_cooldown_reset_hours: i32,
-    pub lp_ip_blocked_message: Option<String>,
     pub lp_user_max_attempts: i32,
     pub lp_user_time_window_minutes: i32,
     pub lp_user_auto_unlock: bool,
     pub lp_user_lockout_duration_minutes: i32,
-    pub lp_user_locked_message: Option<String>,
+    pub lp_user_exempt_admins: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -75,12 +74,11 @@ struct ParameterUpdate {
     pub lp_ip_block_duration_multiplier: Option<f64>,
     pub lp_ip_max_block_duration_hours: Option<i32>,
     pub lp_ip_cooldown_reset_hours: Option<i32>,
-    pub lp_ip_blocked_message: Option<Option<String>>,
     pub lp_user_max_attempts: Option<i32>,
     pub lp_user_time_window_minutes: Option<i32>,
     pub lp_user_auto_unlock: Option<bool>,
     pub lp_user_lockout_duration_minutes: Option<i32>,
-    pub lp_user_locked_message: Option<Option<String>>,
+    pub lp_user_exempt_admins: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -134,12 +132,11 @@ impl Api {
             lp_ip_block_duration_multiplier: parameters.lp_ip_block_duration_multiplier,
             lp_ip_max_block_duration_hours: parameters.lp_ip_max_block_duration_hours,
             lp_ip_cooldown_reset_hours: parameters.lp_ip_cooldown_reset_hours,
-            lp_ip_blocked_message: parameters.lp_ip_blocked_message,
             lp_user_max_attempts: parameters.lp_user_max_attempts,
             lp_user_time_window_minutes: parameters.lp_user_time_window_minutes,
             lp_user_auto_unlock: parameters.lp_user_auto_unlock,
             lp_user_lockout_duration_minutes: parameters.lp_user_lockout_duration_minutes,
-            lp_user_locked_message: parameters.lp_user_locked_message,
+            lp_user_exempt_admins: parameters.lp_user_exempt_admins,
         })))
     }
 
@@ -195,29 +192,25 @@ impl Api {
             parameters.password_policy_require_special = Set(policy.require_special);
         }
 
-        parameters.login_protection_enabled =
-            body.login_protection_enabled.map_or(NotSet, Set);
+        parameters.login_protection_enabled = body.login_protection_enabled.map_or(NotSet, Set);
         parameters.login_protection_retention_days =
             body.login_protection_retention_days.map_or(NotSet, Set);
         parameters.lp_ip_max_attempts = body.lp_ip_max_attempts.map_or(NotSet, Set);
-        parameters.lp_ip_time_window_minutes =
-            body.lp_ip_time_window_minutes.map_or(NotSet, Set);
+        parameters.lp_ip_time_window_minutes = body.lp_ip_time_window_minutes.map_or(NotSet, Set);
         parameters.lp_ip_base_block_duration_minutes =
             body.lp_ip_base_block_duration_minutes.map_or(NotSet, Set);
         parameters.lp_ip_block_duration_multiplier =
             body.lp_ip_block_duration_multiplier.map_or(NotSet, Set);
         parameters.lp_ip_max_block_duration_hours =
             body.lp_ip_max_block_duration_hours.map_or(NotSet, Set);
-        parameters.lp_ip_cooldown_reset_hours =
-            body.lp_ip_cooldown_reset_hours.map_or(NotSet, Set);
-        parameters.lp_ip_blocked_message = body.lp_ip_blocked_message.clone().map_or(NotSet, Set);
+        parameters.lp_ip_cooldown_reset_hours = body.lp_ip_cooldown_reset_hours.map_or(NotSet, Set);
         parameters.lp_user_max_attempts = body.lp_user_max_attempts.map_or(NotSet, Set);
         parameters.lp_user_time_window_minutes =
             body.lp_user_time_window_minutes.map_or(NotSet, Set);
         parameters.lp_user_auto_unlock = body.lp_user_auto_unlock.map_or(NotSet, Set);
         parameters.lp_user_lockout_duration_minutes =
             body.lp_user_lockout_duration_minutes.map_or(NotSet, Set);
-        parameters.lp_user_locked_message = body.lp_user_locked_message.clone().map_or(NotSet, Set);
+        parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

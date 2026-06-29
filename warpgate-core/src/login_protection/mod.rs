@@ -1,8 +1,5 @@
 mod cache;
 mod service;
 
-pub use cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
-pub use service::{
-    calculate_block_duration, CleanupStats, FailedAttemptInfo, LoginProtectionService,
-    SecurityStatus,
-};
+pub use cache::{IpBlockInfo, UserLockInfo};
+pub use service::{CleanupStats, FailedAttemptInfo, LoginProtectionService, SecurityStatus};

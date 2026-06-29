@@ -77,7 +77,7 @@ pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m00046_login_protection"
+        "m00053_login_protection"
     }
 }
 
@@ -108,6 +108,18 @@ impl MigrationTrait for Migration {
                     .table(failed_login_attempt::Entity)
                     .name("idx_failed_login_attempts_username_timestamp")
                     .col(Alias::new("username"))
+                    .col(Alias::new("timestamp"))
+                    .to_owned(),
+            )
+            .await?;
+
+        // Serves the retention cleanup and the status time-window counts, which
+        // filter on `timestamp` alone (the composite indexes above can't).
+        manager
+            .create_index(
+                Index::create()
+                    .table(failed_login_attempt::Entity)
+                    .name("idx_failed_login_attempts_timestamp")
                     .col(Alias::new("timestamp"))
                     .to_owned(),
             )
@@ -159,6 +171,15 @@ impl MigrationTrait for Migration {
                 Index::drop()
                     .table(ip_block::Entity)
                     .name("idx_ip_blocks_expires_at")
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_index(
+                Index::drop()
+                    .table(failed_login_attempt::Entity)
+                    .name("idx_failed_login_attempts_timestamp")
                     .to_owned(),
             )
             .await?;

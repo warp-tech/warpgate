@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::warn;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 
 use crate::db::{connect_to_db, populate_db};
@@ -65,30 +65,16 @@ impl Services {
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
         // Background cleanup task — always started; cleanup_expired() skips
-        // work when LP is disabled (re-reads the flag from DB each run).
+        // work (and logs its own summary) when there is something to do, and
+        // re-reads the enabled flag from the DB on each run.
         {
-            let login_protection_clone = login_protection.clone();
+            let login_protection = login_protection.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(3600));
                 loop {
                     interval.tick().await;
-                    match login_protection_clone.cleanup_expired().await {
-                        Ok(stats) => {
-                            if stats.expired_blocks_removed > 0
-                                || stats.expired_lockouts_removed > 0
-                                || stats.old_attempts_removed > 0
-                            {
-                                info!(
-                                    expired_blocks = stats.expired_blocks_removed,
-                                    expired_lockouts = stats.expired_lockouts_removed,
-                                    old_attempts = stats.old_attempts_removed,
-                                    "Login protection cleanup completed"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Login protection cleanup failed: {}", e);
-                        }
+                    if let Err(e) = login_protection.cleanup_expired().await {
+                        warn!("Login protection cleanup failed: {e}");
                     }
                 }
             });

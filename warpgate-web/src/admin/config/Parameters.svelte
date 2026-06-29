@@ -8,20 +8,23 @@
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import { humantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Section from 'admin/lib/Section.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
     let updateError: string | undefined = $state()
-    let saveTimer: ReturnType<typeof setTimeout> | undefined
+    let formEl: HTMLFormElement | undefined = $state()
+    let formValid = $state(true)
 
-    // Cross-field validation: initial block must not exceed the max cap.
+    // Cross-field hint: initial block longer than the cap will be clamped.
     const lpCapWarning = $derived.by(() => {
-        if (!parameters?.loginProtectionEnabled) return undefined
+        if (!parameters?.loginProtectionEnabled) { return undefined }
         const initialMin = parameters.lpIpBaseBlockDurationMinutes
         const maxMin = parameters.lpIpMaxBlockDurationHours * 60
         return initialMin > maxMin
@@ -37,22 +40,25 @@
         hasSsoProviders = ssoProviders.length > 0
     }
 
-    async function update() {
+    function refreshValidity () {
+        formValid = formEl?.checkValidity() ?? false
+    }
+
+    $effect(() => {
+        // Validate once the form has rendered with loaded values.
+        if (formEl && parameters) {
+            refreshValidity()
+        }
+    })
+
+    async function save () {
         updateError = undefined
         try {
-            await api.updateParameters({
-                parameterUpdate: parameters!,
-            })
+            await api.updateParameters({ parameterUpdate: parameters! })
             await reloadServerInfo()
         } catch (err) {
             updateError = await stringifyError(err)
         }
-    }
-
-    // Debounced save for numeric fields — coalesces rapid changes into one PUT.
-    function scheduleUpdate() {
-        clearTimeout(saveTimer)
-        saveTimer = setTimeout(update, 400)
     }
 </script>
 
@@ -67,6 +73,12 @@
         {/if}
         <Loadable promise={initPromise}>
         {#if parameters}
+            <form
+                bind:this={formEl}
+                oninput={refreshValidity}
+                onchange={refreshValidity}
+                onsubmit={e => { e.preventDefault(); save() }}
+            >
             <SectionedForm>
                 <Section id="credentials" title="Credentials">
                     <label
@@ -77,11 +89,7 @@
                             id="allowOwnCredentialManagement"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.allowOwnCredentialManagement = !parameters!.allowOwnCredentialManagement
-                                update()
-                            }}
-                            checked={parameters.allowOwnCredentialManagement} />
+                            bind:checked={parameters.allowOwnCredentialManagement} />
                         <div>Allow users to manage their own credentials</div>
                     </label>
                 </Section>
@@ -96,7 +104,6 @@
                             onchange={e => {
                                 const v = parseInt(e.currentTarget.value)
                                 parameters!.passwordPolicy.minLength = isNaN(v) ? 0 : Math.max(0, v)
-                                update()
                             }}
                         />
                     </FormGroup>
@@ -108,11 +115,7 @@
                             id="requireUppercase"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.passwordPolicy.requireUppercase = !parameters!.passwordPolicy.requireUppercase
-                                update()
-                            }}
-                            checked={parameters.passwordPolicy.requireUppercase} />
+                            bind:checked={parameters.passwordPolicy.requireUppercase} />
                         <div>Require uppercase letter</div>
                     </label>
                     <label
@@ -123,11 +126,7 @@
                             id="requireLowercase"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.passwordPolicy.requireLowercase = !parameters!.passwordPolicy.requireLowercase
-                                update()
-                            }}
-                            checked={parameters.passwordPolicy.requireLowercase} />
+                            bind:checked={parameters.passwordPolicy.requireLowercase} />
                         <div>Require lowercase letter</div>
                     </label>
                     <label
@@ -138,11 +137,7 @@
                             id="requireDigits"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.passwordPolicy.requireDigits = !parameters!.passwordPolicy.requireDigits
-                                update()
-                            }}
-                            checked={parameters.passwordPolicy.requireDigits} />
+                            bind:checked={parameters.passwordPolicy.requireDigits} />
                         <div>Require digit</div>
                     </label>
                     <label
@@ -153,11 +148,7 @@
                             id="requireSpecial"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.passwordPolicy.requireSpecial = !parameters!.passwordPolicy.requireSpecial
-                                update()
-                            }}
-                            checked={parameters.passwordPolicy.requireSpecial} />
+                            bind:checked={parameters.passwordPolicy.requireSpecial} />
                         <div>Require special character</div>
                     </label>
                 </Section>
@@ -168,7 +159,7 @@
                         <RateLimitInput
                             id="rateLimitBytesPerSecond"
                             bind:value={parameters.rateLimitBytesPerSecond}
-                            change={update} />
+                            change={refreshValidity} />
                     </FormGroup>
                 </Section>
 
@@ -183,11 +174,7 @@
                             id="sshClientAuthPublickey"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.sshClientAuthPublickey = !parameters!.sshClientAuthPublickey
-                                update()
-                            }}
-                            checked={parameters.sshClientAuthPublickey} />
+                            bind:checked={parameters.sshClientAuthPublickey} />
                         <div>Public key authentication</div>
                     </label>
                     <label
@@ -198,11 +185,8 @@
                             id="sshClientAuthPassword"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.sshClientAuthPassword = !parameters!.sshClientAuthPassword
-                                update()
-                            }}
-                            checked={parameters.sshClientAuthPassword} />
+                            bind:checked={parameters.sshClientAuthPassword}
+                        />
                         <div>Password authentication</div>
                     </label>
                     <label
@@ -213,11 +197,7 @@
                             id="sshClientAuthKeyboardInteractive"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.sshClientAuthKeyboardInteractive = !parameters!.sshClientAuthKeyboardInteractive
-                                update()
-                            }}
-                            checked={parameters.sshClientAuthKeyboardInteractive} />
+                            bind:checked={parameters.sshClientAuthKeyboardInteractive} />
                         <div>Keyboard-interactive authentication (OTP, 2FA prompts)</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -235,11 +215,7 @@
                             id="recordScp"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.recordScp = !parameters!.recordScp
-                                update()
-                            }}
-                            checked={parameters.recordScp} />
+                            bind:checked={parameters.recordScp} />
                         <div>Record legacy SCP transfers</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -256,11 +232,7 @@
                             id="ticketSelfServiceEnabled"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.ticketSelfServiceEnabled = !parameters!.ticketSelfServiceEnabled
-                                update()
-                            }}
-                            checked={parameters.ticketSelfServiceEnabled} />
+                            bind:checked={parameters.ticketSelfServiceEnabled} />
                         <div>Allow users to request tickets</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -276,11 +248,7 @@
                             id="ticketAutoApproveExistingAccess"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.ticketAutoApproveExistingAccess = !parameters!.ticketAutoApproveExistingAccess
-                                update()
-                            }}
-                            checked={parameters.ticketAutoApproveExistingAccess} />
+                            bind:checked={parameters.ticketAutoApproveExistingAccess} />
                         <div>Auto-approve when user already has role-based access</div>
                     </label>
 
@@ -292,11 +260,7 @@
                             id="ticketRequireDescription"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.ticketRequireDescription = !parameters!.ticketRequireDescription
-                                update()
-                            }}
-                            checked={parameters.ticketRequireDescription} />
+                            bind:checked={parameters.ticketRequireDescription} />
                         <div>Require description on ticket requests</div>
                     </label>
 
@@ -308,11 +272,7 @@
                             id="ticketRequestShowAllTargets"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.ticketRequestShowAllTargets = !parameters!.ticketRequestShowAllTargets
-                                update()
-                            }}
-                            checked={parameters.ticketRequestShowAllTargets} />
+                            bind:checked={parameters.ticketRequestShowAllTargets} />
                         <div>Show all targets in ticket request form</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -324,7 +284,7 @@
                             type="text"
                             class="form-control"
                             placeholder="e.g. 8h, 30m, 1d"
-                            use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters!.ticketMaxDurationSeconds = v; update() } }}
+                            use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters!.ticketMaxDurationSeconds = v } }}
                         />
                         <small class="form-text text-muted">
                             Global default. Can be overridden per target. Examples: 30m, 8h, 1d, 2h30m.
@@ -340,7 +300,6 @@
                             onchange={e => {
                                 const v = parseInt(e.currentTarget.value)
                                 parameters!.ticketMaxUses = isNaN(v) ? undefined : v
-                                update()
                             }}
                         />
                     </FormGroup>
@@ -353,7 +312,7 @@
                             type="text"
                             class="form-control"
                             placeholder="e.g. 8h, 30m, 1d"
-                            use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters!.maxApiTokenDurationSeconds = v; update() } }}
+                            use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters!.maxApiTokenDurationSeconds = v } }}
                         />
                     </FormGroup>
                 </Section>
@@ -364,10 +323,7 @@
                             id="targetClickAction"
                             class="form-select"
                             value={parameters.targetClickAction ?? 'Connect'}
-                            onchange={e => {
-                                parameters!.targetClickAction = e.currentTarget.value as TargetClickAction
-                                update()
-                            }}
+                            onchange={e => parameters!.targetClickAction = e.currentTarget.value as TargetClickAction}
                         >
                             <option value="Connect">Open web terminal</option>
                             <option value="ShowInstructions">Show connection instructions</option>
@@ -382,11 +338,7 @@
                             id="showSessionMenu"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.showSessionMenu = !parameters!.showSessionMenu
-                                update()
-                            }}
-                            checked={parameters.showSessionMenu} />
+                            bind:checked={parameters.showSessionMenu} />
                         <div>Show HTTP session menu</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -404,11 +356,7 @@
                             id="minimizePasswordLogin"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.minimizePasswordLogin = !parameters!.minimizePasswordLogin
-                                update()
-                            }}
-                            checked={parameters.minimizePasswordLogin} />
+                            bind:checked={parameters.minimizePasswordLogin} />
                         <div>Minimize password login UI</div>
                     </label>
                     <InfoBox class="mt-3 mb-3">
@@ -427,11 +375,7 @@
                             id="loginProtectionEnabled"
                             class="mb-0 me-2"
                             type="switch"
-                            on:change={() => {
-                                parameters!.loginProtectionEnabled = !parameters!.loginProtectionEnabled
-                                update()
-                            }}
-                            checked={parameters.loginProtectionEnabled} />
+                            bind:checked={parameters.loginProtectionEnabled} />
                         <div>Enable brute-force protection</div>
                     </label>
                     <InfoBox class="mt-2 mb-3">
@@ -442,57 +386,55 @@
                         <Alert color="warning" class="mb-2">{lpCapWarning}</Alert>
                     {/if}
 
-                    <!-- All policy settings — dims when disabled -->
-                    <div class:lp-disabled={!parameters.loginProtectionEnabled}>
-
+                    {#if parameters.loginProtectionEnabled}
                         <p class="lp-group-title">IP rate-limit</p>
                         <div class="row g-2 mb-2">
                             <div class="col-sm-6">
                                 <FormGroup floating label="Max failures before IP block">
-                                    <input type="number" min="1" max="1000" class="form-control"
+                                    <input type="number" min="1" max="1000" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpMaxAttempts}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxAttempts = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpMaxAttempts) } }} />
+                                        onchange={e => { parameters!.lpIpMaxAttempts = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
                             <div class="col-sm-6">
                                 <FormGroup floating label="Failure window (minutes)">
-                                    <input type="number" min="1" max="1440" class="form-control"
+                                    <input type="number" min="1" max="1440" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpTimeWindowMinutes}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpTimeWindowMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpTimeWindowMinutes) } }} />
+                                        onchange={e => { parameters!.lpIpTimeWindowMinutes = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
-                            <div class="col-6 col-sm-3">
+                            <div class="col-6">
                                 <FormGroup floating label="Initial block (min)">
-                                    <input type="number" min="1" max="1440" class="form-control"
+                                    <input type="number" min="1" max="1440" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpBaseBlockDurationMinutes}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBaseBlockDurationMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpBaseBlockDurationMinutes) } }} />
+                                        onchange={e => { parameters!.lpIpBaseBlockDurationMinutes = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
-                            <div class="col-6 col-sm-3">
+                            <div class="col-6">
                                 <FormGroup floating label="Backoff multiplier">
-                                    <input type="number" min="1.0" max="10" step="0.5" class="form-control"
+                                    <input type="number" min="1.0" max="10" step="0.5" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpBlockDurationMultiplier}
-                                        onchange={e => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpBlockDurationMultiplier = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpBlockDurationMultiplier) } }} />
+                                        onchange={e => { parameters!.lpIpBlockDurationMultiplier = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
-                            <div class="col-6 col-sm-3">
+                            <div class="col-6">
                                 <FormGroup floating label="Max block (hours)">
-                                    <input type="number" min="1" max="720" class="form-control"
+                                    <input type="number" min="1" max="720" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpMaxBlockDurationHours}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpMaxBlockDurationHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpMaxBlockDurationHours) } }} />
+                                        onchange={e => { parameters!.lpIpMaxBlockDurationHours = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
-                            <div class="col-6 col-sm-3">
+                            <div class="col-6">
                                 <FormGroup floating label="Cooldown reset (hours)">
-                                    <input type="number" min="1" max="720" class="form-control"
+                                    <input type="number" min="1" max="720" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpIpCooldownResetHours}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpIpCooldownResetHours = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpIpCooldownResetHours) } }} />
+                                        onchange={e => { parameters!.lpIpCooldownResetHours = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
                         </div>
@@ -504,18 +446,18 @@
                         <div class="row g-2 mb-2">
                             <div class="col-sm-6">
                                 <FormGroup floating label="Max failures before lockout">
-                                    <input type="number" min="1" max="1000" class="form-control"
+                                    <input type="number" min="1" max="1000" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpUserMaxAttempts}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserMaxAttempts = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserMaxAttempts) } }} />
+                                        onchange={e => { parameters!.lpUserMaxAttempts = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
                             <div class="col-sm-6">
                                 <FormGroup floating label="Failure window (minutes)">
-                                    <input type="number" min="1" max="1440" class="form-control"
+                                    <input type="number" min="1" max="1440" required class="form-control"
                                         disabled={!parameters.loginProtectionEnabled}
                                         value={parameters.lpUserTimeWindowMinutes}
-                                        onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserTimeWindowMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserTimeWindowMinutes) } }} />
+                                        onchange={e => { parameters!.lpUserTimeWindowMinutes = e.currentTarget.valueAsNumber }} />
                                 </FormGroup>
                             </div>
                         </div>
@@ -528,67 +470,60 @@
                                 class="mb-0 me-2"
                                 type="switch"
                                 disabled={!parameters.loginProtectionEnabled}
-                                on:change={() => { parameters!.lpUserAutoUnlock = !parameters!.lpUserAutoUnlock; update() }}
-                                checked={parameters.lpUserAutoUnlock} />
+                                bind:checked={parameters.lpUserAutoUnlock} />
                             <div>Auto-unlock after timeout</div>
                         </label>
                         {#if parameters.lpUserAutoUnlock}
                             <FormGroup floating label="Auto-unlock delay (minutes)" class="mb-2">
-                                <input type="number" min="1" max="10080" class="form-control"
+                                <input type="number" min="1" max="10080" required class="form-control"
                                     disabled={!parameters.loginProtectionEnabled}
                                     value={parameters.lpUserLockoutDurationMinutes}
-                                    onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.lpUserLockoutDurationMinutes = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.lpUserLockoutDurationMinutes) } }} />
+                                    onchange={e => { parameters!.lpUserLockoutDurationMinutes = e.currentTarget.valueAsNumber }} />
                             </FormGroup>
                         {/if}
+                        <label
+                            for="lpUserExemptAdmins"
+                            class="d-flex align-items-center mb-2"
+                        >
+                            <Input
+                                id="lpUserExemptAdmins"
+                                class="mb-0 me-2"
+                                type="switch"
+                                disabled={!parameters.loginProtectionEnabled}
+                                bind:checked={parameters.lpUserExemptAdmins} />
+                            <div>Exempt admins from lockout</div>
+                        </label>
+                        <InfoBox class="mb-3">
+                            Recommended: keeps an attacker from locking out an admin account by spamming its username. IP blocking still applies to everyone.
+                        </InfoBox>
 
                         <p class="lp-group-title">Data retention</p>
                         <FormGroup floating label="Keep records for (days)" class="mb-3">
-                            <input type="number" min="1" max="3650" class="form-control"
+                            <input type="number" min="1" max="3650" required class="form-control"
                                 disabled={!parameters.loginProtectionEnabled}
                                 value={parameters.loginProtectionRetentionDays}
-                                onchange={e => { const v = parseInt(e.currentTarget.value); if (!isNaN(v) && v >= 1) { parameters!.loginProtectionRetentionDays = v; scheduleUpdate() } else { e.currentTarget.value = String(parameters!.loginProtectionRetentionDays) } }} />
+                                onchange={e => { parameters!.loginProtectionRetentionDays = e.currentTarget.valueAsNumber }} />
                         </FormGroup>
 
-                        <p class="lp-group-title">Custom messages</p>
-                        <FormGroup floating label="Blocked-IP message (optional)" class="mb-2">
-                            <input id="lpIpBlockedMessage" type="text" class="form-control"
-                                placeholder="IP temporarily blocked due to failed logins"
-                                disabled={!parameters.loginProtectionEnabled}
-                                value={parameters.lpIpBlockedMessage ?? ''}
-                                oninput={e => { const v = e.currentTarget.value.trim(); parameters!.lpIpBlockedMessage = v === '' ? undefined : v; scheduleUpdate() }} />
-                        </FormGroup>
-                        <FormGroup floating label="Locked-user message (optional)" class="mb-2">
-                            <input id="lpUserLockedMessage" type="text" class="form-control"
-                                placeholder="Account temporarily locked due to failed logins"
-                                disabled={!parameters.loginProtectionEnabled}
-                                value={parameters.lpUserLockedMessage ?? ''}
-                                oninput={e => { const v = e.currentTarget.value.trim(); parameters!.lpUserLockedMessage = v === '' ? undefined : v; scheduleUpdate() }} />
-                        </FormGroup>
-                        <InfoBox class="mb-1">
-                            Returned as plain text in the HTTP login response and SSH error banner. Leave empty for the default message.
-                        </InfoBox>
-                    </div>
-
-                    <div class="lp-foot text-muted mt-2">
-                        Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
-                    </div>
+                        <small class="text-muted mt-2">
+                            Manage active blocks &amp; lockouts on the <a href="/config/login-protection" use:link>Login protection</a> page.
+                        </small>
+                    {/if}
                 </Section>
             </SectionedForm>
+
+            <StickyActionBar>
+                <AsyncButton type="button" class="btn btn-primary" disabled={!formValid} click={save}>
+                    Save
+                </AsyncButton>
+            </StickyActionBar>
+            </form>
         {/if}
         </Loadable>
     </PermissionGate>
 </div>
 
 <style>
-    /* Dims the entire policy block when LP is disabled */
-    .lp-disabled {
-        opacity: .45;
-        pointer-events: none;
-        user-select: none;
-        transition: opacity .15s;
-    }
-
-    /* Subsection headings inside the LP section */
     .lp-group-title {
         font-size: .75rem;
         font-weight: 600;
@@ -597,12 +532,8 @@
         color: var(--bs-secondary-color);
         margin: 1rem 0 .5rem;
     }
+
     .lp-group-title:first-child {
         margin-top: .25rem;
-    }
-
-    /* Footer link */
-    .lp-foot {
-        font-size: .8rem;
     }
 </style>

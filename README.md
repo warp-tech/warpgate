@@ -14,7 +14,9 @@
 
 <br/>
 <p align="center">
-<a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge&color=8f8"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-fa5?logo=hackthebox&logoColor=444&style=for-the-badge"/></a> &nbsp; <a href="https://discord.gg/Vn7BjmzhtF"><img alt="Discord" src="https://img.shields.io/discord/1280890060195233934?style=for-the-badge&color=acc&logo=discord&logoColor=white&label=Discord"></a>
+<a href="https://github.com/warp-tech/warpgate/releases/latest"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/warp-tech/warpgate/total.svg?label=DOWNLOADS&logo=github&style=for-the-badge&color=8f8"></a> &nbsp; <a href="https://nightly.link/warp-tech/warpgate/workflows/build/main"><img src="https://shields.io/badge/-Nightly%20Builds-fa5?logo=hackthebox&logoColor=444&style=for-the-badge"/></a> &nbsp; <a href="https://discord.gg/Vn7BjmzhtF"><img alt="Discord" src="https://img.shields.io/discord/1280890060195233934?style=for-the-badge&color=acc&logo=discord&logoColor=white&label=Discord"></a> &nbsp; <a href="https://warpgate.null.page/docs/"><img alt="Docs" src="https://shields.io/badge/-DOCUMENTATION-fa5?logo=gitbook&style=for-the-badge&color=26a"></a>
+
+
 </p>
 
 
@@ -32,7 +34,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQ
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
 * Not a jump host - forwards connection straight to the target in a way that's fully transparent to the client.
 * Native 2FA and SSO support (TOTP & OpenID Connect)
-* Built-in brute-force protection with IP blocking and user lockout (fail2ban-like)
+* Built-in brute-force protection with IP blocking and user lockout
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
 

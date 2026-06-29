@@ -5,16 +5,15 @@
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { Button } from '@sveltestrap/sveltestrap'
     import RelativeDate from '../RelativeDate.svelte'
+    import { onMount } from 'svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import StatCard from 'common/StatCard.svelte'
 
     let loading = $state(true)
     let error: string | undefined = $state()
     let status: SecurityStatus | undefined = $state()
     let blockedIps: BlockedIpInfo[] | undefined = $state()
     let lockedUsers: LockedUserInfo[] | undefined = $state()
-    let actionInFlight = $state(false)
-
-    // Auto-refresh every 30s while the page is open.
-    let refreshTimer: ReturnType<typeof setInterval> | undefined
 
     async function load() {
         loading = true
@@ -36,44 +35,38 @@
     }
 
     load()
-    refreshTimer = setInterval(load, 30_000)
 
-    // Clean up interval when component is destroyed.
-    import { onDestroy } from 'svelte'
-    onDestroy(() => clearInterval(refreshTimer))
+    onMount(() => {
+        const refreshTimer = setInterval(load, 30_000)
+        return () => {
+            clearInterval(refreshTimer)
+        }
+    })
 
     async function unblockIp(ip: string) {
-        if (!confirm(`Unblock ${ip}? This allows new login attempts from this address.`)) return
-        actionInFlight = true
+        if (!confirm(`Unblock ${ip}? This allows new login attempts from this address.`)) { return }
         try {
             await api.unblockIp({ ip })
             await load()
         } catch (err) {
             error = await stringifyError(err)
-        } finally {
-            actionInFlight = false
         }
     }
 
     async function unlockUser(username: string) {
-        if (!confirm(`Unlock ${username}? This allows the account to log in immediately.`)) return
-        actionInFlight = true
+        if (!confirm(`Unlock ${username}? This allows the account to log in immediately.`)) { return }
         try {
             await api.unlockUser({ username })
             await load()
         } catch (err) {
             error = await stringifyError(err)
-        } finally {
-            actionInFlight = false
         }
     }
 </script>
 
+<div class="container-max-md">
 <div class="page-summary-bar">
-    <h1>Login Protection</h1>
-    <Button color="secondary" size="sm" disabled={loading || actionInFlight} onclick={load}>
-        {loading ? 'Refreshing…' : 'Refresh'}
-    </Button>
+    <h1>login protection</h1>
 </div>
 
 {#if error}
@@ -88,35 +81,36 @@
 {:else}
     {#if status}
         <div class="stats-row">
-            <div class="stat-card" class:text-danger={status.blockedIpCount > 0}>
-                <div class="stat-value">{status.blockedIpCount}</div>
-                <div class="stat-label">blocked IPs</div>
-            </div>
-            <div class="stat-card" class:text-warning={status.lockedUserCount > 0}>
-                <div class="stat-value">{status.lockedUserCount}</div>
-                <div class="stat-label">locked users</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{status.failedAttemptsLastHour}</div>
-                <div class="stat-label">failed attempts (1h)</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{status.failedAttemptsLast24h}</div>
-                <div class="stat-label">failed attempts (24h)</div>
-            </div>
+            <StatCard
+                class="flex-grow-1"
+                color={status.blockedIpCount > 0 ? 'danger' : undefined}
+                value={status.blockedIpCount}
+                label="blocked IPs"
+            />
+            <StatCard
+                class="flex-grow-1"
+                color={status.lockedUserCount > 0 ? 'warning' : undefined}
+                value={status.lockedUserCount}
+                label="locked users"
+            />
+            <StatCard
+                class="flex-grow-1"
+                value={status.failedAttemptsLastHour}
+                label="failed attempts (1h)"
+            />
+            <StatCard
+                class="flex-grow-1"
+                value={status.failedAttemptsLast24h}
+                label="failed attempts (24h)"
+            />
         </div>
     {/if}
 
-    {#if blockedIps !== undefined}
+    {#if blockedIps && (blockedIps.length > 0)}
         <div class="section-header">
             <span class="section-title">Blocked IPs</span>
-            {#if blockedIps.length > 0}
-                <span class="badge text-bg-danger">{blockedIps.length}</span>
-            {:else}
-                <span class="text-muted section-empty">none</span>
-            {/if}
+            <span class="badge text-bg-danger">{blockedIps.length}</span>
         </div>
-        {#if blockedIps.length > 0}
         <div class="list-group list-group-flush mb-3">
             {#each blockedIps as ip (ip.ipAddress)}
                 <div class="list-group-item">
@@ -127,24 +121,18 @@
                                 Block #{ip.blockCount} &middot; expires <RelativeDate date={new Date(ip.expiresAt)} />
                             </small>
                         </div>
-                        <Button class="ms-auto" color="link" disabled={actionInFlight} onclick={() => unblockIp(ip.ipAddress)}>Unblock</Button>
+                        <AsyncButton class="ms-auto" color="link" click={() => unblockIp(ip.ipAddress)}>Unblock</AsyncButton>
                     </div>
                 </div>
             {/each}
         </div>
-        {/if}
     {/if}
 
-    {#if lockedUsers !== undefined}
+    {#if lockedUsers && (lockedUsers.length > 0)}
         <div class="section-header">
             <span class="section-title">Locked Users</span>
-            {#if lockedUsers.length > 0}
-                <span class="badge text-bg-warning">{lockedUsers.length}</span>
-            {:else}
-                <span class="text-muted section-empty">none</span>
-            {/if}
+            <span class="badge text-bg-warning">{lockedUsers.length}</span>
         </div>
-        {#if lockedUsers.length > 0}
         <div class="list-group list-group-flush mb-3">
             {#each lockedUsers as user (user.username)}
                 <div class="list-group-item">
@@ -159,14 +147,14 @@
                                 {/if}
                             </small>
                         </div>
-                        <Button class="ms-auto" color="link" disabled={actionInFlight} onclick={() => unlockUser(user.username)}>Unlock</Button>
+                        <AsyncButton class="ms-auto" color="link" click={() => unlockUser(user.username)}>Unlock</AsyncButton>
                     </div>
                 </div>
             {/each}
         </div>
-        {/if}
     {/if}
 {/if}
+</div>
 
 <style lang="scss">
     .stats-row {
@@ -174,28 +162,6 @@
         gap: 1rem;
         margin-bottom: 1.5rem;
         flex-wrap: wrap;
-    }
-
-    .stat-card {
-        flex: 1;
-        min-width: 120px;
-        padding: 1rem;
-        background: var(--bs-body-bg);
-        border: 1px solid var(--bs-border-color);
-        border-radius: 0.5rem;
-        text-align: center;
-    }
-
-    .stat-value {
-        font-size: 1.75rem;
-        font-weight: bold;
-        line-height: 1;
-    }
-
-    .stat-label {
-        font-size: 0.75rem;
-        color: var(--bs-secondary);
-        margin-top: 0.25rem;
     }
 
     .section-header {

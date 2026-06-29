@@ -28,13 +28,7 @@ pub struct Model {
     pub last_attempt_at: OffsetDateTime,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
-
-impl RelationTrait for Relation {
-    fn def(&self) -> RelationDef {
-        panic!("No relations defined")
-    }
-}
 
 impl ActiveModelBehavior for ActiveModel {}

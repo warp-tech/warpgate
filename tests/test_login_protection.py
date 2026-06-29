@@ -4,6 +4,7 @@ import time
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
+from .test_api import make_limited_admin_role_payload
 from .util import wait_port
 from .test_http_common import *  # noqa
 
@@ -334,4 +335,127 @@ class TestLoginProtection:
         assert resp.status_code // 100 == 2, (
             f"Expected successful login after raising threshold to 10, "
             f"got HTTP {resp.status_code}"
+        )
+
+    # ── SSH protocol ─────────────────────────────────────────────────────────
+
+    def test_ip_blocking_over_ssh(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        timeout,
+    ):
+        """Brute-forcing SSH password auth blocks the source IP.
+
+        Exercises the SSH integration path (the HTTP tests don't), and the
+        admin unblock flow against whichever localhost address was recorded.
+        """
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(ssh_port)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="correct_password")
+            )
+            api.add_user_role(user.id, role.id)
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            host="localhost",
+                            port=ssh_port,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        def ssh_login(password, *command):
+            # NumberOfPasswordPrompts=1 → exactly one auth attempt per invocation,
+            # so the failure count is deterministic.
+            client = processes.start_ssh_client(
+                f"{user.username}:{target.name}@localhost",
+                "-p",
+                str(wg.ssh_port),
+                "-i",
+                "/dev/null",
+                "-o",
+                "PreferredAuthentications=password",
+                "-o",
+                "NumberOfPasswordPrompts=1",
+                *command,
+                password=password,
+            )
+            out = client.communicate(timeout=timeout)[0]
+            return client.returncode, out
+
+        # Exceed the IP threshold with wrong passwords.
+        for _ in range(3):
+            rc, _ = ssh_login("wrong")
+            assert rc != 0
+
+        # IP is now blocked — even the correct password is refused.
+        rc, _ = ssh_login("correct_password")
+        assert rc != 0, "IP block should reject even a correct password over SSH"
+
+        # Admin unblocks (resolve whichever localhost address was recorded).
+        with admin_client(url) as api:
+            blocked = api.list_blocked_ips()
+            assert blocked, "expected at least one blocked IP after SSH brute force"
+            for entry in blocked:
+                api.unblock_ip(entry.ip_address)
+
+        # Correct password works again and the session proxies through.
+        rc, out = ssh_login("correct_password", "ls", "/bin/sh")
+        assert rc == 0, "correct password should work after unblock"
+        assert out == b"/bin/sh\n"
+
+    # ── admin exemption ──────────────────────────────────────────────────────
+
+    def test_admin_exempt_from_lockout(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Admins aren't locked out by username spamming, unless exemption is off."""
+        wg = _lp_wg(processes, ip_max=100, user_max=3)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+            admin_role = api.create_admin_role(
+                sdk.AdminRoleDataRequest(
+                    **make_limited_admin_role_payload(name=f"admin-{uuid4()}")
+                )
+            )
+            api.add_user_admin_role(user.id, admin_role.id)
+
+        # Default (exempt_admins=True): exceed the threshold, admin stays usable.
+        for _ in range(4):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.status_code // 100 == 2, (
+            "admin must not be locked out while exemption is enabled"
+        )
+
+        # Turn exemption off → the admin is lockable like any other account.
+        with admin_client(url) as api:
+            api.update_parameters(sdk.ParameterUpdate(lp_user_exempt_admins=False))
+        for _ in range(4):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+        resp, _ = _post_login(url, user.username, "correct_password")
+        assert resp.json().get("state") == "UserLocked", (
+            "admin must be lockable once exemption is disabled"
         )

@@ -1,15 +1,15 @@
 use std::net::IpAddr;
 
-use time::OffsetDateTime;
 use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use time::OffsetDateTime;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 
-use crate::api::common::require_admin_permission;
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -50,8 +50,6 @@ enum UnblockIpResponse {
     Ok,
     #[oai(status = 400)]
     InvalidIp,
-    #[oai(status = 404)]
-    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -64,8 +62,6 @@ enum ListLockedUsersResponse {
 enum UnlockUserResponse {
     #[oai(status = 200)]
     Ok,
-    #[oai(status = 404)]
-    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -184,7 +180,11 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<SecurityStatusResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
-        let status = ctx.services().login_protection.get_security_status().await?;
+        let status = ctx
+            .services()
+            .login_protection
+            .get_security_status()
+            .await?;
         Ok(SecurityStatusResponse::Ok(Json(SecurityStatus {
             blocked_ip_count: status.blocked_ip_count,
             locked_user_count: status.locked_user_count,
