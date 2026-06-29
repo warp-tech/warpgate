@@ -14,6 +14,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{ProtocolName, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -202,7 +203,7 @@ pub async fn get_or_create_auth_state_for_request(
         .context("Session not in request")?;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
-        let existing_matched = state.lock().await.user_info().username == username;
+        let existing_matched = username_eq_ci(&state.lock().await.user_info().username, username);
         if existing_matched {
             return Ok(state);
         }
