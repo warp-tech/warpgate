@@ -7,8 +7,9 @@ repository. They cover the new RDP/VNC desktop protocols and their session recor
 
 ## Session recording → add a "Desktop (RDP/VNC) recordings" section
 
-In-browser desktop sessions (RDP and VNC opened through the web portal) are recorded the same way as
-SSH and database sessions, when recording is enabled:
+Desktop sessions — both in-browser (RDP and VNC through the web portal) and **native VNC** (a desktop
+VNC viewer connecting to Warpgate's VeNCrypt port) — are recorded the same way as SSH and database
+sessions, when recording is enabled:
 
 ```yaml
 recordings:
@@ -35,9 +36,10 @@ with their files.
 
 Limitations:
 
-- Only **in-browser** desktop sessions are recorded. The **native VNC proxy** (a native VNC viewer
-  connecting to Warpgate's VeNCrypt port) performs a transparent passthrough and never decodes the
-  framebuffer, so those sessions cannot be recorded.
+- When recording is **disabled**, the native VNC proxy stays a transparent passthrough (no decoding,
+  no added latency). When recording is **enabled**, native VNC sessions are decoded and re-encoded so
+  the framebuffer can be captured; this trades a little bandwidth (frames are sent as uncompressed
+  regions) for the recording, and only affects recorded sessions.
 - Seeking replays from the start of the recording.
 
 ---

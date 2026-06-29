@@ -2,7 +2,7 @@ mod protocol;
 mod rfb;
 mod session_handle;
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -29,9 +29,10 @@ use warpgate_common::{
     ListenEndpoint, Secret, Target, TargetOptions, TargetVncOptions, VncTargetAuth,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    ConfigProvider, Services, SessionStateInit, State, WarpgateServerHandle, authorize_ticket,
-    consume_ticket,
+    ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
+    WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_protocol_vnc_ui as ui;
 use warpgate_tls::{
@@ -39,7 +40,7 @@ use warpgate_tls::{
 };
 
 use self::protocol::{
-    ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, forward_format_setup, pack_rgb,
+    ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, forward_format_setup, pack_bgra, pack_rgb,
     parse_server_init_size, read_client_messages, write_desktop_size,
     write_framebuffer_update_request, write_raw_rect, write_server_cut_text, write_server_init,
 };
@@ -163,7 +164,7 @@ async fn handle_connection(
     // Bound the whole handshake + auth phase with a single timeout, so a viewer that
     // can't speak our auth (or stalls) is dropped with an error instead of hanging.
     // The relay afterwards is intentionally untimed.
-    let Some((mut viewer, mut backend)) = timeout_at(
+    let Some(session) = timeout_at(
         Instant::now() + HANDSHAKE_TIMEOUT,
         negotiate_and_authorize(
             stream,
@@ -182,10 +183,22 @@ async fn handle_connection(
         return Ok(());
     };
 
-    debug!("starting bidirectional relay");
-    copy_bidirectional(&mut viewer, &mut backend)
-        .await
-        .context("relaying VNC session")?;
+    // The relay/recording loop afterwards is intentionally untimed.
+    match session {
+        AuthorizedSession::Relay {
+            mut viewer,
+            mut backend,
+        } => {
+            debug!("starting bidirectional relay");
+            copy_bidirectional(&mut viewer, &mut backend)
+                .await
+                .context("relaying VNC session")?;
+        }
+        AuthorizedSession::Record(session) => {
+            debug!("starting recording session");
+            run_recording_session(*session).await?;
+        }
+    }
 
     Ok(())
 }
@@ -197,7 +210,7 @@ async fn negotiate_and_authorize(
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
-) -> Result<Option<(Box<dyn ViewerStream>, TcpStream)>> {
+) -> Result<Option<AuthorizedSession>> {
     // ProtocolVersion + security-type negotiation, then branch per chosen type to get
     // the (possibly TLS-upgraded) viewer stream and the credentials it carries.
     let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) =
@@ -303,50 +316,110 @@ async fn negotiate_and_authorize(
 
     info!(target=%target.name, "Authorized");
 
-    let target_password = match &vnc_options.auth {
-        VncTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
-        VncTargetAuth::None(_) => String::new(),
+    // Decide whether to record. With recording disabled we keep the original, fully
+    // transparent RFB relay (byte-for-byte unchanged, no re-encoding). With a recording
+    // active we instead decode the backend and re-encode toward the viewer so the
+    // framebuffer can be captured and viewer input forwarded.
+    let session_id = server_handle.lock().await.id();
+    let recorder = match services
+        .recordings
+        .lock()
+        .await
+        .start::<DesktopRecorder, _>(
+            &session_id,
+            None,
+            DesktopRecordingMetadata::Desktop {
+                // Match the in-browser path's lowercase tag so both record identically.
+                protocol: "vnc".to_owned(),
+                target: target.name.clone(),
+            },
+        )
+        .await
+    {
+        Ok(recorder) => Some(recorder),
+        Err(warpgate_core::recordings::Error::Disabled) => None,
+        Err(error) => {
+            warn!(%error, "Failed to start VNC session recording");
+            None
+        }
     };
 
-    // Render hold screen while connecting
-    debug!(host = %vnc_options.host, port = vnc_options.port, "connecting to backend");
-    let (mut backend, backend_init) =
-        render_while(&mut viewer_wr, &mut events_rx, &mut render, async {
-            let mut backend = TcpStream::connect((vnc_options.host.as_str(), vnc_options.port))
-                .await
-                .context("connecting to VNC target")?;
-            backend.set_nodelay(true).ok();
-            let server_init =
-                backend_handshake(&mut backend, &target_password, shared_flag).await?;
-            Ok::<_, anyhow::Error>((backend, server_init))
-        })
-        .await??;
+    let Some(recorder) = recorder else {
+        // === Transparent relay (recording disabled) — unchanged behaviour ===
+        let target_password = match &vnc_options.auth {
+            VncTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
+            VncTargetAuth::None(_) => String::new(),
+        };
 
-    // Stop the reader and retrieve the stream
-    let _ = stop_tx.send(());
-    let viewer_rd = reader.await.context("joining viewer reader")??;
+        // Render hold screen while connecting
+        debug!(host = %vnc_options.host, port = vnc_options.port, "connecting to backend");
+        let (mut backend, backend_init) =
+            render_while(&mut viewer_wr, &mut events_rx, &mut render, async {
+                let mut backend = TcpStream::connect((vnc_options.host.as_str(), vnc_options.port))
+                    .await
+                    .context("connecting to VNC target")?;
+                backend.set_nodelay(true).ok();
+                let server_init =
+                    backend_handshake(&mut backend, &target_password, shared_flag).await?;
+                Ok::<_, anyhow::Error>((backend, server_init))
+            })
+            .await??;
 
-    // Apply any events the reader emitted just before stopping (final pixel format/encodings)
-    while let Ok(event) = events_rx.try_recv() {
-        render.note_event(Some(event));
-    }
+        // Stop the reader and retrieve the stream
+        let _ = stop_tx.send(());
+        let viewer_rd = reader.await.context("joining viewer reader")??;
 
-    let mut viewer = viewer_rd.unsplit(viewer_wr);
+        // Apply any events the reader emitted just before stopping (final pixel format/encodings)
+        while let Ok(event) = events_rx.try_recv() {
+            render.note_event(Some(event));
+        }
 
-    let (backend_w, backend_h) = parse_server_init_size(&backend_init)?;
+        let mut viewer = viewer_rd.unsplit(viewer_wr);
 
-    // Tell backend the viewer's pixel format / encodings and request a frame
-    forward_format_setup(
-        &mut backend,
-        &render.pixel_format,
-        render.encodings.as_deref(),
+        let (backend_w, backend_h) = parse_server_init_size(&backend_init)?;
+
+        // Tell backend the viewer's pixel format / encodings and request a frame
+        forward_format_setup(
+            &mut backend,
+            &render.pixel_format,
+            render.encodings.as_deref(),
+        )
+        .await?;
+        write_framebuffer_update_request(&mut backend, false, 0, 0, backend_w, backend_h).await?;
+
+        // Resize the viewer to match backend geometry (only if it advertised DesktopSize)
+        if render.supports_desktop_size {
+            write_desktop_size(&mut viewer, backend_w, backend_h).await?;
+        } else {
+            warn!(
+                backend_w,
+                backend_h, "viewer did not advertise DesktopSize - skipping resize"
+            );
+        }
+
+        return Ok(Some(AuthorizedSession::Relay { viewer, backend }));
+    };
+
+    // === Recording session (recording active) — decode & re-encode ===
+    // A single backend client connection (shared-mode is irrelevant — we never open a
+    // second one). Tight/CopyRect/cursor are dropped (see RECORDING_ENCODINGS) so every
+    // update arrives as plain BGRA we can both record and re-encode as an RFB Raw rect.
+    debug!(host = %vnc_options.host, port = vnc_options.port, "connecting to backend for recording");
+    let mut backend = crate::client::connect_for_recording(vnc_options.clone());
+
+    // Wait under the hold screen for the backend's initial geometry, recording every
+    // event consumed so nothing is dropped from the recording.
+    let (backend_w, backend_h) = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        wait_for_backend_size(&mut backend.event_rx, &recorder),
     )
-    .await?;
-    write_framebuffer_update_request(&mut backend, false, 0, 0, backend_w, backend_h).await?;
+    .await??;
 
-    // Resize the viewer to match backend geometry (only if it advertised DesktopSize)
+    // Resize the viewer to match backend geometry (parity with the transparent path).
     if render.supports_desktop_size {
-        write_desktop_size(&mut viewer, backend_w, backend_h).await?;
+        write_desktop_size(&mut viewer_wr, backend_w, backend_h).await?;
     } else {
         warn!(
             backend_w,
@@ -354,7 +427,190 @@ async fn negotiate_and_authorize(
         );
     }
 
-    Ok(Some((viewer, backend)))
+    Ok(Some(AuthorizedSession::Record(Box::new(RecordingSession {
+        viewer_wr,
+        viewer_events: events_rx,
+        reader,
+        stop_tx,
+        render,
+        backend,
+        recorder,
+    }))))
+}
+
+/// A negotiated, authorized session ready to run. Either a fully transparent byte
+/// relay (recording disabled) or a decode-and-re-encode recording session.
+#[allow(clippy::large_enum_variant)]
+enum AuthorizedSession {
+    Relay {
+        viewer: Box<dyn ViewerStream>,
+        backend: TcpStream,
+    },
+    Record(Box<RecordingSession>),
+}
+
+/// State handed off to [`run_recording_session`] after the handshake completes.
+struct RecordingSession {
+    viewer_wr: tokio::io::WriteHalf<Box<dyn ViewerStream>>,
+    viewer_events: mpsc::UnboundedReceiver<ClientEvent>,
+    reader: tokio::task::JoinHandle<Result<tokio::io::ReadHalf<Box<dyn ViewerStream>>>>,
+    stop_tx: oneshot::Sender<()>,
+    render: RenderState,
+    backend: crate::client::VncClientHandles,
+    recorder: DesktopRecorder,
+}
+
+/// Record an event, logging (but not failing on) recorder write errors.
+async fn record_event(recorder: &DesktopRecorder, event: &DesktopEvent) {
+    if let Err(error) = recorder.write_event(event).await {
+        warn!(%error, "Failed to record VNC desktop event");
+    }
+}
+
+/// Drain backend events until the first [`DesktopEvent::Resize`] reveals the framebuffer
+/// geometry, recording each consumed event. The backend client always emits `Resize`
+/// before any `RawImage`, so nothing visible is consumed here.
+async fn wait_for_backend_size(
+    event_rx: &mut mpsc::Receiver<DesktopEvent>,
+    recorder: &DesktopRecorder,
+) -> Result<(u16, u16)> {
+    while let Some(event) = event_rx.recv().await {
+        record_event(recorder, &event).await;
+        match event {
+            DesktopEvent::Resize { width, height } => return Ok((width, height)),
+            DesktopEvent::Error(message) => bail!("backend error before first frame: {message}"),
+            DesktopEvent::State(DesktopState::Disconnected) => {
+                bail!("backend disconnected before first frame")
+            }
+            _ => {}
+        }
+    }
+    bail!("backend channel closed before first frame")
+}
+
+/// Re-encode one queued backend frame toward the viewer in response to an outstanding
+/// `FramebufferUpdateRequest`. Clears `pending_request` once a frame is actually sent.
+async fn flush_frame<W>(viewer_wr: &mut W, render: &mut RenderState, event: DesktopEvent) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    match event {
+        DesktopEvent::RawImage { rect, data } => {
+            let pixels = pack_bgra(&render.pixel_format, &data);
+            write_raw_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &pixels).await?;
+            render.pending_request = false;
+        }
+        DesktopEvent::Resize { width, height } if render.supports_desktop_size => {
+            write_desktop_size(viewer_wr, width, height).await?;
+            render.pending_request = false;
+        }
+        // A resize the viewer can't be told about: drop it but keep the request pending
+        // so the next real frame still satisfies it. Other variants never reach the queue.
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The decode-and-re-encode loop: pump backend `DesktopEvent`s to the viewer as RFB
+/// (recording each), and forward viewer input back to the backend. Lockstep — at most
+/// one rect per `FramebufferUpdateRequest` — with a bounded queue providing end-to-end
+/// backpressure when the viewer is slow. Dropping the recorder finalises the recording.
+async fn run_recording_session(session: RecordingSession) -> Result<()> {
+    /// Bound on queued-but-unflushed backend frames before we stop draining the backend.
+    const QUEUE_CAP: usize = 256;
+
+    let RecordingSession {
+        mut viewer_wr,
+        mut viewer_events,
+        reader,
+        stop_tx,
+        mut render,
+        backend,
+        recorder,
+    } = session;
+    let crate::client::VncClientHandles {
+        mut event_rx,
+        input_tx,
+        abort_tx,
+    } = backend;
+
+    let mut queue: VecDeque<DesktopEvent> = VecDeque::new();
+
+    let result = loop {
+        // Satisfy an outstanding request with one queued frame before blocking again.
+        if render.pending_request
+            && let Some(event) = queue.pop_front()
+        {
+            if let Err(error) = flush_frame(&mut viewer_wr, &mut render, event).await {
+                break Err(error);
+            }
+            continue;
+        }
+
+        tokio::select! {
+            biased;
+
+            // Viewer → us: input to forward, plus pixel-format/encoding/refresh updates.
+            event = viewer_events.recv() => {
+                match event {
+                    Some(ClientEvent::WantsFrame) => render.pending_request = true,
+                    Some(ClientEvent::PixelFormat(pf)) => render.pixel_format = pf,
+                    Some(ClientEvent::Encodings { raw, desktop_size }) => {
+                        render.encodings = Some(raw);
+                        render.supports_desktop_size = desktop_size;
+                    }
+                    Some(ClientEvent::Key { down, keysym }) => {
+                        if input_tx.send(DesktopInput::Key { keysym, down }).await.is_err() {
+                            break Ok(());
+                        }
+                    }
+                    Some(ClientEvent::Pointer { x, y, buttons }) => {
+                        if input_tx.send(DesktopInput::Pointer { x, y, buttons }).await.is_err() {
+                            break Ok(());
+                        }
+                    }
+                    Some(ClientEvent::Clipboard(text)) => {
+                        let _ = input_tx.send(DesktopInput::Clipboard(text)).await;
+                    }
+                    None => break Ok(()), // viewer disconnected
+                }
+            }
+
+            // Backend → us: record every event, queue frames, mirror clipboard. Gated so
+            // a slow viewer back-pressures the backend instead of growing the queue.
+            event = event_rx.recv(), if queue.len() < QUEUE_CAP => {
+                match event {
+                    Some(event) => {
+                        record_event(&recorder, &event).await;
+                        match event {
+                            DesktopEvent::RawImage { .. } | DesktopEvent::Resize { .. } => {
+                                queue.push_back(event);
+                            }
+                            DesktopEvent::Clipboard(text) => {
+                                if let Err(error) = write_server_cut_text(&mut viewer_wr, &text).await {
+                                    break Err(error);
+                                }
+                            }
+                            DesktopEvent::State(DesktopState::Disconnected) => break Ok(()),
+                            DesktopEvent::Error(message) => break Err(anyhow!("backend error: {message}")),
+                            // RECORDING_ENCODINGS rules out Jpeg/CopyRect/Cursor; Bell/State ignored.
+                            _ => {}
+                        }
+                    }
+                    None => break Ok(()), // backend ended
+                }
+            }
+        }
+    };
+
+    // Teardown: stop the viewer reader and the backend client. Dropping `recorder`
+    // (held until here) finalises the recording.
+    let _ = stop_tx.send(());
+    let _ = abort_tx.send(());
+    reader.abort();
+    drop(recorder);
+
+    result
 }
 
 /// Shared state for the hold screen
@@ -390,7 +646,11 @@ impl RenderState {
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
             Some(ClientEvent::Key { down: true, keysym }) => return Some(keysym),
-            Some(ClientEvent::Key { .. }) => {}
+            // A key release, pointer motion or clipboard update is irrelevant to the
+            // hold screen; the recording session loop handles input once it takes over.
+            Some(
+                ClientEvent::Key { .. } | ClientEvent::Pointer { .. } | ClientEvent::Clipboard(_),
+            ) => {}
             None => self.reader_done = true,
         }
         None

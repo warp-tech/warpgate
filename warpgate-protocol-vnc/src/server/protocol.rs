@@ -109,11 +109,32 @@ pub fn pack_rgb(pixel_format: &PixelFormat, rgb: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Pack a BGRA image (4 bytes per pixel, `[b, g, r, a]` as produced by the backend
+/// decoder's `PixelFormat::bgra()`) into the viewer's pixel format. When the viewer
+/// kept our advertised [`DEFAULT_PIXEL_FORMAT`] — the common case — the bytes are
+/// already in exactly that 32-bit little-endian BGRX layout, so they're copied
+/// directly; otherwise each pixel is re-packed into the requested format.
+pub fn pack_bgra(pixel_format: &PixelFormat, bgra: &[u8]) -> Vec<u8> {
+    if pixel_format.raw == DEFAULT_PIXEL_FORMAT.raw {
+        return bgra.to_vec();
+    }
+    let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
+    let mut out = Vec::with_capacity(bgra.len() / 4 * bytes_per_pixel);
+    for px in bgra.chunks_exact(4) {
+        if let [b, g, r, _a] = *px {
+            pixel_format.pack(r, g, b, &mut out);
+        }
+    }
+    out
+}
+
 pub enum ClientEvent {
     PixelFormat(PixelFormat),
     Encodings { raw: Vec<u8>, desktop_size: bool },
     WantsFrame,
     Key { down: bool, keysym: u32 },
+    Pointer { x: u16, y: u16, buttons: u8 },
+    Clipboard(String),
 }
 
 pub async fn write_server_init<S>(
@@ -307,9 +328,15 @@ where
                 });
             }
             5 => {
-                // PointerEvent.
+                // PointerEvent: button-mask(1) + x(2) + y(2).
                 let mut rest = [0u8; 5];
                 reader.read_exact(&mut rest).await?;
+                let [buttons, x_hi, x_lo, y_hi, y_lo] = rest;
+                let _ = events.send(ClientEvent::Pointer {
+                    x: u16::from_be_bytes([x_hi, x_lo]),
+                    y: u16::from_be_bytes([y_hi, y_lo]),
+                    buttons,
+                });
             }
             6 => {
                 // ClientCutText: 3 padding + 4 length + text.
@@ -322,6 +349,9 @@ where
                 }
                 let mut text = vec![0u8; len];
                 reader.read_exact(&mut text).await?;
+                let _ = events.send(ClientEvent::Clipboard(
+                    String::from_utf8_lossy(&text).into_owned(),
+                ));
             }
             150 => {
                 // EnableContinuousUpdates: enable + x + y + w + h.

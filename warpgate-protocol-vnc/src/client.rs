@@ -68,9 +68,44 @@ fn map_input(input: DesktopInput) -> Vec<X11Event> {
     }
 }
 
+/// Encodings for the in-browser path. Tight (including its JPEG sub-encoding) and
+/// the cursor pseudo-encoding are decoded and rendered by the browser canvas.
+const BROWSER_ENCODINGS: &[VncEncoding] = &[
+    VncEncoding::Tight,
+    VncEncoding::Zrle,
+    VncEncoding::CopyRect,
+    VncEncoding::Raw,
+    VncEncoding::CursorPseudo,
+    VncEncoding::DesktopSizePseudo,
+];
+
+/// Encodings for the native re-encode/recording proxy. Tight is omitted so the
+/// backend never produces a JPEG sub-encoding (the workspace ships no JPEG decoder);
+/// CopyRect is omitted so re-encoding needs no server-side framebuffer; and the
+/// cursor pseudo-encoding is omitted so the backend bakes the cursor into the
+/// framebuffer. What remains decodes to plain BGRA `RawImage`/`Resize` events that
+/// re-encode straight to the viewer as RFB Raw rectangles.
+const RECORDING_ENCODINGS: &[VncEncoding] = &[
+    VncEncoding::Zrle,
+    VncEncoding::Raw,
+    VncEncoding::DesktopSizePseudo,
+];
+
 /// Connect to a VNC target and spawn a task that proxies it as normalised
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
 pub fn connect(options: TargetVncOptions) -> VncClientHandles {
+    spawn_client(options, BROWSER_ENCODINGS)
+}
+
+/// Like [`connect`], but negotiates a reduced set of encodings (see
+/// [`RECORDING_ENCODINGS`]) suitable for the native VNC proxy's decode-and-re-encode
+/// recording path, where every backend update must round-trip through a minimal RFB
+/// server encoder toward the viewer.
+pub fn connect_for_recording(options: TargetVncOptions) -> VncClientHandles {
+    spawn_client(options, RECORDING_ENCODINGS)
+}
+
+fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) -> VncClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
@@ -78,7 +113,7 @@ pub fn connect(options: TargetVncOptions) -> VncClientHandles {
     let span = info_span!("VNC-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(options, event_tx.clone(), input_rx, abort_rx).await {
+            if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await {
                 error!(%error, "VNC backend client failed");
                 let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
             }
@@ -98,6 +133,7 @@ pub fn connect(options: TargetVncOptions) -> VncClientHandles {
 
 async fn run(
     options: TargetVncOptions,
+    encodings: &'static [VncEncoding],
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
@@ -116,14 +152,12 @@ async fn run(
         VncTargetAuth::None(_) => String::new(),
     };
 
-    let client = VncConnector::new(stream)
-        .set_auth_method(async move { Ok::<_, vnc::VncError>(password) })
-        .add_encoding(VncEncoding::Tight)
-        .add_encoding(VncEncoding::Zrle)
-        .add_encoding(VncEncoding::CopyRect)
-        .add_encoding(VncEncoding::Raw)
-        .add_encoding(VncEncoding::CursorPseudo)
-        .add_encoding(VncEncoding::DesktopSizePseudo)
+    let mut connector =
+        VncConnector::new(stream).set_auth_method(async move { Ok::<_, vnc::VncError>(password) });
+    for encoding in encodings {
+        connector = connector.add_encoding(*encoding);
+    }
+    let client = connector
         .allow_shared(true)
         .set_pixel_format(PixelFormat::bgra())
         .build()
