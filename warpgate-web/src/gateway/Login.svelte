@@ -17,6 +17,7 @@
     let password = $state('')
     let otp = $state('')
     let busy = $state(false)
+    let credentialRejected = $state(false)
     let otpInput: HTMLInputElement|undefined = $state()
     let authState: ApiAuthState|undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
@@ -49,15 +50,12 @@
         }
     }
 
-    async function continueWithState () {
+    async function continueWithState ({ allowSsoRedirect = true } = {}) {
         if (authState === ApiAuthState.Success) {
             success()
         }
-        if (authState === ApiAuthState.SsoNeeded) {
+        if (authState === ApiAuthState.SsoNeeded && allowSsoRedirect) {
             const providers = await ssoProvidersPromise
-            if (!providers.length) {
-                // todo
-            }
             if (providers.length === 1) {
                 startSSO(providers[0]!)
             }
@@ -80,6 +78,7 @@
 
     async function _login () {
         error = null
+        credentialRejected = false
         try {
             if (authState === ApiAuthState.OtpNeeded) {
                 await api.otpLogin({
@@ -102,8 +101,12 @@
                 if (err.response.status === 401) {
                     const failure = LoginFailureResponseFromJSON(await err.response.json())
                     authState = failure.state
+                    credentialRejected = failure.credentialRejected ?? false
 
-                    continueWithState()
+                    // Don't auto-advance to another auth method (e.g. SSO) when
+                    // the submitted credential was rejected — show the error and
+                    // let the user retry or pick a method themselves.
+                    continueWithState({ allowSsoRedirect: !credentialRejected })
                 } else {
                     error = await err.response.text()
                 }
@@ -216,7 +219,7 @@
 
         <div class="mt-3"></div>
 
-        {#if authState === ApiAuthState.Failed}
+        {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
