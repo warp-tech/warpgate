@@ -22,6 +22,7 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, WarpgateError,
 };
@@ -295,15 +296,17 @@ impl ServerSession {
     async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
-            || self
-                .auth_state
-                .as_ref()
-                .unwrap()
-                .lock()
-                .await
-                .user_info()
-                .username
-                != username
+            || !username_eq_ci(
+                &self
+                    .auth_state
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .await
+                    .user_info()
+                    .username,
+                username,
+            )
         {
             let state = self
                 .services
