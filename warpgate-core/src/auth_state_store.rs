@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{SessionId, WarpgateError};
 
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -99,7 +100,7 @@ impl AuthStateStore {
         for auth in self.store.values() {
             {
                 let inner = auth.0.lock().await;
-                if inner.user_info().username != username {
+                if !username_eq_ci(&inner.user_info().username, username) {
                     continue;
                 }
                 let AuthResult::Need(need) = inner.verify() else {
@@ -139,7 +140,7 @@ impl AuthStateStore {
             .list_users()
             .await?
             .iter()
-            .find(|u| u.username.to_lowercase() == username.to_lowercase())
+            .find(|u| username_eq_ci(&u.username, username))
             .cloned()
         else {
             return Err(WarpgateError::UserNotFound(username.into()));
