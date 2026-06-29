@@ -7,12 +7,12 @@ use cookie::Cookie;
 use data_encoding::BASE64;
 use delegate::delegate;
 use futures::{StreamExt, TryStreamExt};
-use http::StatusCode;
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
-use http::{HeaderValue, Uri};
+use http::{HeaderValue, StatusCode, Uri};
 use poem::session::Session;
-use poem::web::{Data, websocket::WebSocket};
+use poem::web::Data;
+use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
@@ -186,7 +186,14 @@ fn rewrite_response(
         for value in entry.iter_mut() {
             try_block!({
                 let mut cookie = Cookie::parse(value.to_str()?)?;
-                cookie.set_expires(cookie::Expiration::Session);
+                // Some apps clear a cookie by re-setting it with an expiration
+                // in the past. We keep these as-is
+                // https://github.com/warp-tech/warpgate/issues/2112
+                if let Some(cookie::Expiration::DateTime(expires)) = cookie.expires()
+                    && expires >= cookie::time::OffsetDateTime::now_utc()
+                {
+                    cookie.set_expires(cookie::Expiration::Session);
+                }
                 // the domain set by the target isn't going to match the actual host anyway
                 // https://github.com/warp-tech/warpgate/issues/2048
                 cookie.unset_domain();
@@ -627,5 +634,42 @@ mod tests {
         assert_eq!(cookie.path(), Some("/"));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.secure(), Some(true));
+    }
+
+    fn rewrite_cookie(set_cookie: &str) -> Cookie<'static> {
+        let mut resp = poem::Response::builder()
+            .header(http::header::SET_COOKIE, set_cookie)
+            .body(());
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/index.php").unwrap();
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+        let cookie_headers: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(cookie_headers.len(), 1);
+        Cookie::parse(cookie_headers[0].clone()).unwrap()
+    }
+
+    #[test]
+    fn rewrite_response_keeps_past_expiration() {
+        // A past-dated deletion cookie would otherwise drop the live session
+        // cookie and cause a login loop. https://github.com/warp-tech/warpgate/issues/2112
+        let cookie =
+            rewrite_cookie("lsws_uid=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(cookie.value(), "deleted");
+        assert!(matches!(
+            cookie.expires(),
+            Some(cookie::Expiration::DateTime(_))
+        ));
+    }
+
+    #[test]
+    fn rewrite_response_removes_future_expiration() {
+        // A genuine persistent cookie must keep the expiry the origin set.
+        let cookie = rewrite_cookie("lsws_uid=abc; Path=/; Expires=Tue, 01 Jan 2999 00:00:00 GMT");
+        assert_eq!(cookie.expires(), None);
     }
 }
