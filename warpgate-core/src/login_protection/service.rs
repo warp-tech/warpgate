@@ -17,24 +17,26 @@ use warpgate_db_entities::{
 
 use super::cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
 
-/// IP rate-limiting thresholds, read from the `parameters` table.
+/// IP rate-limiting thresholds, read from the `parameters` table. All durations
+/// are stored as seconds.
 #[derive(Clone, Debug)]
 struct IpRateLimitConfig {
     max_attempts: u32,
-    time_window_minutes: u32,
-    base_block_duration_minutes: u32,
+    time_window_seconds: u32,
+    base_block_duration_seconds: u32,
     block_duration_multiplier: f32,
-    max_block_duration_hours: u32,
-    cooldown_reset_hours: u32,
+    max_block_duration_seconds: u32,
+    cooldown_reset_seconds: u32,
 }
 
-/// User-lockout thresholds, read from the `parameters` table.
+/// User-lockout thresholds, read from the `parameters` table. All durations are
+/// stored as seconds.
 #[derive(Clone, Debug)]
 struct UserLockoutConfig {
     max_attempts: u32,
-    time_window_minutes: u32,
+    time_window_seconds: u32,
     auto_unlock: bool,
-    lockout_duration_minutes: u32,
+    lockout_duration_seconds: u32,
     /// When set, users holding an admin role are never locked out (so an
     /// attacker can't lock an admin out by spamming their username).
     exempt_admins: bool,
@@ -44,7 +46,7 @@ struct UserLockoutConfig {
 #[derive(Clone, Debug)]
 struct LoginProtectionConfig {
     enabled: bool,
-    retention_days: u32,
+    retention_seconds: u32,
     ip_rate_limit: IpRateLimitConfig,
     user_lockout: UserLockoutConfig,
 }
@@ -95,20 +97,20 @@ impl LoginProtectionService {
     fn config_from_params(params: &Parameters::Model) -> LoginProtectionConfig {
         LoginProtectionConfig {
             enabled: params.login_protection_enabled,
-            retention_days: params.login_protection_retention_days as u32,
+            retention_seconds: params.login_protection_retention_seconds as u32,
             ip_rate_limit: IpRateLimitConfig {
                 max_attempts: params.lp_ip_max_attempts as u32,
-                time_window_minutes: params.lp_ip_time_window_minutes as u32,
-                base_block_duration_minutes: params.lp_ip_base_block_duration_minutes as u32,
+                time_window_seconds: params.lp_ip_time_window_seconds as u32,
+                base_block_duration_seconds: params.lp_ip_base_block_duration_seconds as u32,
                 block_duration_multiplier: params.lp_ip_block_duration_multiplier as f32,
-                max_block_duration_hours: params.lp_ip_max_block_duration_hours as u32,
-                cooldown_reset_hours: params.lp_ip_cooldown_reset_hours as u32,
+                max_block_duration_seconds: params.lp_ip_max_block_duration_seconds as u32,
+                cooldown_reset_seconds: params.lp_ip_cooldown_reset_seconds as u32,
             },
             user_lockout: UserLockoutConfig {
                 max_attempts: params.lp_user_max_attempts as u32,
-                time_window_minutes: params.lp_user_time_window_minutes as u32,
+                time_window_seconds: params.lp_user_time_window_seconds as u32,
                 auto_unlock: params.lp_user_auto_unlock,
-                lockout_duration_minutes: params.lp_user_lockout_duration_minutes as u32,
+                lockout_duration_seconds: params.lp_user_lockout_duration_seconds as u32,
                 exempt_admins: params.lp_user_exempt_admins,
             },
         }
@@ -272,7 +274,7 @@ impl LoginProtectionService {
         .await?;
 
         let ip_window_start =
-            now - time::Duration::minutes(config.ip_rate_limit.time_window_minutes as i64);
+            now - time::Duration::seconds(config.ip_rate_limit.time_window_seconds as i64);
         let ip_count = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::RemoteIp.eq(attempt.remote_ip.to_string()))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(ip_window_start))
@@ -285,7 +287,7 @@ impl LoginProtectionService {
         };
 
         let user_window_start =
-            now - time::Duration::minutes(config.user_lockout.time_window_minutes as i64);
+            now - time::Duration::seconds(config.user_lockout.time_window_seconds as i64);
         let user_count = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Username.eq(&attempt.username))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(user_window_start))
@@ -348,7 +350,7 @@ impl LoginProtectionService {
             .await?;
 
         // Escalate the block count unless the IP has been quiet long enough.
-        let cooldown = time::Duration::hours(config.ip_rate_limit.cooldown_reset_hours as i64);
+        let cooldown = time::Duration::seconds(config.ip_rate_limit.cooldown_reset_seconds as i64);
         let block_count = match &existing {
             Some(e) if now - e.last_attempt_at <= cooldown => e.block_count + 1,
             _ => 1,
@@ -411,7 +413,7 @@ impl LoginProtectionService {
         }
 
         let expires_at = config.user_lockout.auto_unlock.then(|| {
-            now + time::Duration::minutes(config.user_lockout.lockout_duration_minutes as i64)
+            now + time::Duration::seconds(config.user_lockout.lockout_duration_seconds as i64)
         });
         let reason = format!(
             "Exceeded {} failed login attempts",
@@ -616,7 +618,7 @@ impl LoginProtectionService {
             .exec(&*db)
             .await?;
 
-        let retention_cutoff = now - time::Duration::days(config.retention_days as i64);
+        let retention_cutoff = now - time::Duration::seconds(config.retention_seconds as i64);
         let old_attempts = FailedLoginAttempt::Entity::delete_many()
             .filter(FailedLoginAttempt::Column::Timestamp.lt(retention_cutoff))
             .exec(&*db)
@@ -650,8 +652,8 @@ impl LoginProtectionService {
 /// Block duration with exponential backoff:
 /// `base * multiplier^(block_count - 1)`, capped at the configured maximum.
 fn calculate_block_duration(block_count: u32, config: &IpRateLimitConfig) -> Duration {
-    let base_secs = config.base_block_duration_minutes as u64 * 60;
-    let max_secs = config.max_block_duration_hours as u64 * 3600;
+    let base_secs = config.base_block_duration_seconds as u64;
+    let max_secs = config.max_block_duration_seconds as u64;
     let factor = config
         .block_duration_multiplier
         .powi(block_count.saturating_sub(1) as i32);
@@ -666,11 +668,11 @@ mod tests {
     fn default_config() -> IpRateLimitConfig {
         IpRateLimitConfig {
             max_attempts: 5,
-            time_window_minutes: 15,
-            base_block_duration_minutes: 30,
+            time_window_seconds: 900,
+            base_block_duration_seconds: 1800,
             block_duration_multiplier: 2.0,
-            max_block_duration_hours: 24,
-            cooldown_reset_hours: 24,
+            max_block_duration_seconds: 86400,
+            cooldown_reset_seconds: 86400,
         }
     }
 

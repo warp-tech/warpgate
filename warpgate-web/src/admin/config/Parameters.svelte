@@ -25,10 +25,8 @@
     // Cross-field hint: initial block longer than the cap will be clamped.
     const lpCapWarning = $derived.by(() => {
         if (!parameters?.loginProtectionEnabled) { return undefined }
-        const initialMin = parameters.lpIpBaseBlockDurationMinutes
-        const maxMin = parameters.lpIpMaxBlockDurationHours * 60
-        return initialMin > maxMin
-            ? `Initial block (${initialMin} min) exceeds the max cap (${maxMin} min). The initial duration will be clamped to the maximum.`
+        return parameters.lpIpBaseBlockDurationSeconds > parameters.lpIpMaxBlockDurationSeconds
+            ? 'Initial block duration exceeds the maximum cap; it will be clamped to the maximum.'
             : undefined
     })
 
@@ -398,19 +396,15 @@
                                 </FormGroup>
                             </div>
                             <div class="col-sm-6">
-                                <FormGroup floating label="Failure window (minutes)">
-                                    <input type="number" min="1" max="1440" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpIpTimeWindowMinutes}
-                                        onchange={e => { parameters!.lpIpTimeWindowMinutes = e.currentTarget.valueAsNumber }} />
+                                <FormGroup floating label="Failure window">
+                                    <input type="text" class="form-control" placeholder="e.g. 15m"
+                                        use:humantimeDuration={{ seconds: parameters.lpIpTimeWindowSeconds, onChange: v => { if (v != null) { parameters!.lpIpTimeWindowSeconds = v } } }} />
                                 </FormGroup>
                             </div>
                             <div class="col-6">
-                                <FormGroup floating label="Initial block (min)">
-                                    <input type="number" min="1" max="1440" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpIpBaseBlockDurationMinutes}
-                                        onchange={e => { parameters!.lpIpBaseBlockDurationMinutes = e.currentTarget.valueAsNumber }} />
+                                <FormGroup floating label="Initial block">
+                                    <input type="text" class="form-control" placeholder="e.g. 30m"
+                                        use:humantimeDuration={{ seconds: parameters.lpIpBaseBlockDurationSeconds, onChange: v => { if (v != null) { parameters!.lpIpBaseBlockDurationSeconds = v } } }} />
                                 </FormGroup>
                             </div>
                             <div class="col-6">
@@ -422,19 +416,15 @@
                                 </FormGroup>
                             </div>
                             <div class="col-6">
-                                <FormGroup floating label="Max block (hours)">
-                                    <input type="number" min="1" max="720" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpIpMaxBlockDurationHours}
-                                        onchange={e => { parameters!.lpIpMaxBlockDurationHours = e.currentTarget.valueAsNumber }} />
+                                <FormGroup floating label="Max block">
+                                    <input type="text" class="form-control" placeholder="e.g. 24h"
+                                        use:humantimeDuration={{ seconds: parameters.lpIpMaxBlockDurationSeconds, onChange: v => { if (v != null) { parameters!.lpIpMaxBlockDurationSeconds = v } } }} />
                                 </FormGroup>
                             </div>
                             <div class="col-6">
-                                <FormGroup floating label="Cooldown reset (hours)">
-                                    <input type="number" min="1" max="720" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpIpCooldownResetHours}
-                                        onchange={e => { parameters!.lpIpCooldownResetHours = e.currentTarget.valueAsNumber }} />
+                                <FormGroup floating label="Cooldown reset">
+                                    <input type="text" class="form-control" placeholder="e.g. 24h"
+                                        use:humantimeDuration={{ seconds: parameters.lpIpCooldownResetSeconds, onChange: v => { if (v != null) { parameters!.lpIpCooldownResetSeconds = v } } }} />
                                 </FormGroup>
                             </div>
                         </div>
@@ -453,11 +443,9 @@
                                 </FormGroup>
                             </div>
                             <div class="col-sm-6">
-                                <FormGroup floating label="Failure window (minutes)">
-                                    <input type="number" min="1" max="1440" required class="form-control"
-                                        disabled={!parameters.loginProtectionEnabled}
-                                        value={parameters.lpUserTimeWindowMinutes}
-                                        onchange={e => { parameters!.lpUserTimeWindowMinutes = e.currentTarget.valueAsNumber }} />
+                                <FormGroup floating label="Failure window">
+                                    <input type="text" class="form-control" placeholder="e.g. 60m"
+                                        use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters!.lpUserTimeWindowSeconds = v } } }} />
                                 </FormGroup>
                             </div>
                         </div>
@@ -474,11 +462,9 @@
                             <div>Auto-unlock after timeout</div>
                         </label>
                         {#if parameters.lpUserAutoUnlock}
-                            <FormGroup floating label="Auto-unlock delay (minutes)" class="mb-2">
-                                <input type="number" min="1" max="10080" required class="form-control"
-                                    disabled={!parameters.loginProtectionEnabled}
-                                    value={parameters.lpUserLockoutDurationMinutes}
-                                    onchange={e => { parameters!.lpUserLockoutDurationMinutes = e.currentTarget.valueAsNumber }} />
+                            <FormGroup floating label="Auto-unlock delay" class="mb-2">
+                                <input type="text" class="form-control" placeholder="e.g. 60m"
+                                    use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters!.lpUserLockoutDurationSeconds = v } } }} />
                             </FormGroup>
                         {/if}
                         <label
@@ -498,11 +484,9 @@
                         </InfoBox>
 
                         <p class="lp-group-title">Data retention</p>
-                        <FormGroup floating label="Keep records for (days)" class="mb-3">
-                            <input type="number" min="1" max="3650" required class="form-control"
-                                disabled={!parameters.loginProtectionEnabled}
-                                value={parameters.loginProtectionRetentionDays}
-                                onchange={e => { parameters!.loginProtectionRetentionDays = e.currentTarget.valueAsNumber }} />
+                        <FormGroup floating label="Keep records for" class="mb-3">
+                            <input type="text" class="form-control" placeholder="e.g. 30d"
+                                use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters!.loginProtectionRetentionSeconds = v } } }} />
                         </FormGroup>
 
                         <small class="text-muted mt-2">

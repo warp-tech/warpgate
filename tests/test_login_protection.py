@@ -71,15 +71,15 @@ def _lp_wg(
             sdk.ParameterUpdate(
                 login_protection_enabled=True,
                 lp_ip_max_attempts=ip_max,
-                lp_ip_time_window_minutes=10,
-                lp_ip_base_block_duration_minutes=ip_base_min,
+                lp_ip_time_window_seconds=600,
+                lp_ip_base_block_duration_seconds=ip_base_min * 60,
                 lp_ip_block_duration_multiplier=2.0,
-                lp_ip_max_block_duration_hours=1,
-                lp_ip_cooldown_reset_hours=1,
+                lp_ip_max_block_duration_seconds=3600,
+                lp_ip_cooldown_reset_seconds=3600,
                 lp_user_max_attempts=user_max,
-                lp_user_time_window_minutes=10,
+                lp_user_time_window_seconds=600,
                 lp_user_auto_unlock=auto_unlock,
-                lp_user_lockout_duration_minutes=unlock_min,
+                lp_user_lockout_duration_seconds=unlock_min * 60,
             )
         )
     return wg

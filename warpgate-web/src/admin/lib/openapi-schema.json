@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-37-g69c02d3f-modified"
+    "version": "v0.25.5-38-g98e6071f-modified"
   },
   "servers": [
     {
@@ -5261,7 +5261,7 @@
           "login_protection_enabled": {
             "type": "boolean"
           },
-          "login_protection_retention_days": {
+          "login_protection_retention_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5269,11 +5269,11 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_time_window_minutes": {
+          "lp_ip_time_window_seconds": {
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_base_block_duration_minutes": {
+          "lp_ip_base_block_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5281,11 +5281,11 @@
             "type": "number",
             "format": "double"
           },
-          "lp_ip_max_block_duration_hours": {
+          "lp_ip_max_block_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_cooldown_reset_hours": {
+          "lp_ip_cooldown_reset_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5293,14 +5293,14 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_user_time_window_minutes": {
+          "lp_user_time_window_seconds": {
             "type": "integer",
             "format": "int32"
           },
           "lp_user_auto_unlock": {
             "type": "boolean"
           },
-          "lp_user_lockout_duration_minutes": {
+          "lp_user_lockout_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5327,17 +5327,17 @@
           "password_policy",
           "record_scp",
           "login_protection_enabled",
-          "login_protection_retention_days",
+          "login_protection_retention_seconds",
           "lp_ip_max_attempts",
-          "lp_ip_time_window_minutes",
-          "lp_ip_base_block_duration_minutes",
+          "lp_ip_time_window_seconds",
+          "lp_ip_base_block_duration_seconds",
           "lp_ip_block_duration_multiplier",
-          "lp_ip_max_block_duration_hours",
-          "lp_ip_cooldown_reset_hours",
+          "lp_ip_max_block_duration_seconds",
+          "lp_ip_cooldown_reset_seconds",
           "lp_user_max_attempts",
-          "lp_user_time_window_minutes",
+          "lp_user_time_window_seconds",
           "lp_user_auto_unlock",
-          "lp_user_lockout_duration_minutes",
+          "lp_user_lockout_duration_seconds",
           "lp_user_exempt_admins"
         ],
         "properties": {
@@ -5399,7 +5399,7 @@
           "login_protection_enabled": {
             "type": "boolean"
           },
-          "login_protection_retention_days": {
+          "login_protection_retention_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5407,11 +5407,11 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_time_window_minutes": {
+          "lp_ip_time_window_seconds": {
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_base_block_duration_minutes": {
+          "lp_ip_base_block_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5419,11 +5419,11 @@
             "type": "number",
             "format": "double"
           },
-          "lp_ip_max_block_duration_hours": {
+          "lp_ip_max_block_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },
-          "lp_ip_cooldown_reset_hours": {
+          "lp_ip_cooldown_reset_seconds": {
             "type": "integer",
             "format": "int32"
           },
@@ -5431,14 +5431,14 @@
             "type": "integer",
             "format": "int32"
           },
-          "lp_user_time_window_minutes": {
+          "lp_user_time_window_seconds": {
             "type": "integer",
             "format": "int32"
           },
           "lp_user_auto_unlock": {
             "type": "boolean"
           },
-          "lp_user_lockout_duration_minutes": {
+          "lp_user_lockout_duration_seconds": {
             "type": "integer",
             "format": "int32"
           },

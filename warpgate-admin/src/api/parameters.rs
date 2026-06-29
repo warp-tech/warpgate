@@ -33,17 +33,17 @@ struct ParameterValues {
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
     pub login_protection_enabled: bool,
-    pub login_protection_retention_days: i32,
+    pub login_protection_retention_seconds: i32,
     pub lp_ip_max_attempts: i32,
-    pub lp_ip_time_window_minutes: i32,
-    pub lp_ip_base_block_duration_minutes: i32,
+    pub lp_ip_time_window_seconds: i32,
+    pub lp_ip_base_block_duration_seconds: i32,
     pub lp_ip_block_duration_multiplier: f64,
-    pub lp_ip_max_block_duration_hours: i32,
-    pub lp_ip_cooldown_reset_hours: i32,
+    pub lp_ip_max_block_duration_seconds: i32,
+    pub lp_ip_cooldown_reset_seconds: i32,
     pub lp_user_max_attempts: i32,
-    pub lp_user_time_window_minutes: i32,
+    pub lp_user_time_window_seconds: i32,
     pub lp_user_auto_unlock: bool,
-    pub lp_user_lockout_duration_minutes: i32,
+    pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
 }
 
@@ -67,17 +67,17 @@ struct ParameterUpdate {
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
     pub login_protection_enabled: Option<bool>,
-    pub login_protection_retention_days: Option<i32>,
+    pub login_protection_retention_seconds: Option<i32>,
     pub lp_ip_max_attempts: Option<i32>,
-    pub lp_ip_time_window_minutes: Option<i32>,
-    pub lp_ip_base_block_duration_minutes: Option<i32>,
+    pub lp_ip_time_window_seconds: Option<i32>,
+    pub lp_ip_base_block_duration_seconds: Option<i32>,
     pub lp_ip_block_duration_multiplier: Option<f64>,
-    pub lp_ip_max_block_duration_hours: Option<i32>,
-    pub lp_ip_cooldown_reset_hours: Option<i32>,
+    pub lp_ip_max_block_duration_seconds: Option<i32>,
+    pub lp_ip_cooldown_reset_seconds: Option<i32>,
     pub lp_user_max_attempts: Option<i32>,
-    pub lp_user_time_window_minutes: Option<i32>,
+    pub lp_user_time_window_seconds: Option<i32>,
     pub lp_user_auto_unlock: Option<bool>,
-    pub lp_user_lockout_duration_minutes: Option<i32>,
+    pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
 }
 
@@ -125,17 +125,17 @@ impl Api {
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
             login_protection_enabled: parameters.login_protection_enabled,
-            login_protection_retention_days: parameters.login_protection_retention_days,
+            login_protection_retention_seconds: parameters.login_protection_retention_seconds,
             lp_ip_max_attempts: parameters.lp_ip_max_attempts,
-            lp_ip_time_window_minutes: parameters.lp_ip_time_window_minutes,
-            lp_ip_base_block_duration_minutes: parameters.lp_ip_base_block_duration_minutes,
+            lp_ip_time_window_seconds: parameters.lp_ip_time_window_seconds,
+            lp_ip_base_block_duration_seconds: parameters.lp_ip_base_block_duration_seconds,
             lp_ip_block_duration_multiplier: parameters.lp_ip_block_duration_multiplier,
-            lp_ip_max_block_duration_hours: parameters.lp_ip_max_block_duration_hours,
-            lp_ip_cooldown_reset_hours: parameters.lp_ip_cooldown_reset_hours,
+            lp_ip_max_block_duration_seconds: parameters.lp_ip_max_block_duration_seconds,
+            lp_ip_cooldown_reset_seconds: parameters.lp_ip_cooldown_reset_seconds,
             lp_user_max_attempts: parameters.lp_user_max_attempts,
-            lp_user_time_window_minutes: parameters.lp_user_time_window_minutes,
+            lp_user_time_window_seconds: parameters.lp_user_time_window_seconds,
             lp_user_auto_unlock: parameters.lp_user_auto_unlock,
-            lp_user_lockout_duration_minutes: parameters.lp_user_lockout_duration_minutes,
+            lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
         })))
     }
@@ -193,23 +193,24 @@ impl Api {
         }
 
         parameters.login_protection_enabled = body.login_protection_enabled.map_or(NotSet, Set);
-        parameters.login_protection_retention_days =
-            body.login_protection_retention_days.map_or(NotSet, Set);
+        parameters.login_protection_retention_seconds =
+            body.login_protection_retention_seconds.map_or(NotSet, Set);
         parameters.lp_ip_max_attempts = body.lp_ip_max_attempts.map_or(NotSet, Set);
-        parameters.lp_ip_time_window_minutes = body.lp_ip_time_window_minutes.map_or(NotSet, Set);
-        parameters.lp_ip_base_block_duration_minutes =
-            body.lp_ip_base_block_duration_minutes.map_or(NotSet, Set);
+        parameters.lp_ip_time_window_seconds = body.lp_ip_time_window_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_base_block_duration_seconds =
+            body.lp_ip_base_block_duration_seconds.map_or(NotSet, Set);
         parameters.lp_ip_block_duration_multiplier =
             body.lp_ip_block_duration_multiplier.map_or(NotSet, Set);
-        parameters.lp_ip_max_block_duration_hours =
-            body.lp_ip_max_block_duration_hours.map_or(NotSet, Set);
-        parameters.lp_ip_cooldown_reset_hours = body.lp_ip_cooldown_reset_hours.map_or(NotSet, Set);
+        parameters.lp_ip_max_block_duration_seconds =
+            body.lp_ip_max_block_duration_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_cooldown_reset_seconds =
+            body.lp_ip_cooldown_reset_seconds.map_or(NotSet, Set);
         parameters.lp_user_max_attempts = body.lp_user_max_attempts.map_or(NotSet, Set);
-        parameters.lp_user_time_window_minutes =
-            body.lp_user_time_window_minutes.map_or(NotSet, Set);
+        parameters.lp_user_time_window_seconds =
+            body.lp_user_time_window_seconds.map_or(NotSet, Set);
         parameters.lp_user_auto_unlock = body.lp_user_auto_unlock.map_or(NotSet, Set);
-        parameters.lp_user_lockout_duration_minutes =
-            body.lp_user_lockout_duration_minutes.map_or(NotSet, Set);
+        parameters.lp_user_lockout_duration_seconds =
+            body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;

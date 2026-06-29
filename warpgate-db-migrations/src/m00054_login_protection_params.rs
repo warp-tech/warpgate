@@ -27,60 +27,60 @@ impl MigrationTrait for Migration {
                 .not_null()
                 .default(true)
                 .to_owned(),
-            ColumnDef::new(Alias::new("login_protection_retention_days"))
+            ColumnDef::new(Alias::new("login_protection_retention_seconds"))
                 .integer()
                 .not_null()
-                .default(30)
+                .default(2592000)
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_ip_max_attempts"))
                 .integer()
                 .not_null()
                 .default(5)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_ip_time_window_minutes"))
+            ColumnDef::new(Alias::new("lp_ip_time_window_seconds"))
                 .integer()
                 .not_null()
-                .default(15)
+                .default(900)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_ip_base_block_duration_minutes"))
+            ColumnDef::new(Alias::new("lp_ip_base_block_duration_seconds"))
                 .integer()
                 .not_null()
-                .default(30)
+                .default(1800)
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_ip_block_duration_multiplier"))
                 .double()
                 .not_null()
                 .default(2.0)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_ip_max_block_duration_hours"))
+            ColumnDef::new(Alias::new("lp_ip_max_block_duration_seconds"))
                 .integer()
                 .not_null()
-                .default(24)
+                .default(86400)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_ip_cooldown_reset_hours"))
+            ColumnDef::new(Alias::new("lp_ip_cooldown_reset_seconds"))
                 .integer()
                 .not_null()
-                .default(24)
+                .default(86400)
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_user_max_attempts"))
                 .integer()
                 .not_null()
                 .default(10)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_user_time_window_minutes"))
+            ColumnDef::new(Alias::new("lp_user_time_window_seconds"))
                 .integer()
                 .not_null()
-                .default(60)
+                .default(3600)
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_user_auto_unlock"))
                 .boolean()
                 .not_null()
                 .default(true)
                 .to_owned(),
-            ColumnDef::new(Alias::new("lp_user_lockout_duration_minutes"))
+            ColumnDef::new(Alias::new("lp_user_lockout_duration_seconds"))
                 .integer()
                 .not_null()
-                .default(60)
+                .default(3600)
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_user_exempt_admins"))
                 .boolean()
@@ -123,17 +123,17 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let columns = [
             "login_protection_enabled",
-            "login_protection_retention_days",
+            "login_protection_retention_seconds",
             "lp_ip_max_attempts",
-            "lp_ip_time_window_minutes",
-            "lp_ip_base_block_duration_minutes",
+            "lp_ip_time_window_seconds",
+            "lp_ip_base_block_duration_seconds",
             "lp_ip_block_duration_multiplier",
-            "lp_ip_max_block_duration_hours",
-            "lp_ip_cooldown_reset_hours",
+            "lp_ip_max_block_duration_seconds",
+            "lp_ip_cooldown_reset_seconds",
             "lp_user_max_attempts",
-            "lp_user_time_window_minutes",
+            "lp_user_time_window_seconds",
             "lp_user_auto_unlock",
-            "lp_user_lockout_duration_minutes",
+            "lp_user_lockout_duration_seconds",
             "lp_user_exempt_admins",
         ];
 

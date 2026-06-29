@@ -108,7 +108,7 @@
 
     {#if blockedIps && (blockedIps.length > 0)}
         <div class="section-header">
-            <span class="section-title">Blocked IPs</span>
+            <h5 class="m-0">Blocked IPs</h5>
             <span class="badge text-bg-danger">{blockedIps.length}</span>
         </div>
         <div class="list-group list-group-flush mb-3">
@@ -130,7 +130,7 @@
 
     {#if lockedUsers && (lockedUsers.length > 0)}
         <div class="section-header">
-            <span class="section-title">Locked Users</span>
+            <h5 class="m-0">Locked users</h5>
             <span class="badge text-bg-warning">{lockedUsers.length}</span>
         </div>
         <div class="list-group list-group-flush mb-3">
@@ -174,9 +174,5 @@
     .section-title {
         font-weight: 600;
         font-size: .95rem;
-    }
-
-    .section-empty {
-        font-size: .85rem;
     }
 </style>
