@@ -1691,107 +1691,19 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        let remote_ip = self.remote_address.ip();
-
-        // Check if IP is blocked
-        match self
-            .services
-            .login_protection
-            .check_ip_blocked(&remote_ip)
-            .await
-        {
-            Ok(Some(block_info)) => {
-                warn!(
-                    ip = %remote_ip,
-                    expires_at = %block_info.expires_at,
-                    "SSH password auth from blocked IP"
-                );
-                return russh::server::Auth::Reject {
-                    proceed_with_methods: None,
-                    partial_success: false,
-                };
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(?e, "Failed to check IP block status");
-            }
-        }
-
-        // Extract username from selector for lockout check
-        if let AuthSelector::User { username, .. } = &selector {
-            // Check if user is locked
-            match self
-                .services
-                .login_protection
-                .check_user_locked(username)
-                .await
-            {
-                Ok(Some(_lock_info)) => {
-                    warn!(
-                        username = %username,
-                        "SSH password auth for locked user"
-                    );
-                    return russh::server::Auth::Reject {
-                        proceed_with_methods: None,
-                        partial_success: false,
-                    };
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    warn!(?e, "Failed to check user lockout status");
-                }
-            }
-        }
-
         let result = self
             .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
             .await;
 
-        match &result {
-            Ok(AuthResult::Accepted { user_info }) => {
-                // Clear failed attempts on successful auth
-                let _ = self
-                    .services
-                    .login_protection
-                    .clear_failed_attempts(&remote_ip, &user_info.username)
-                    .await;
-                russh::server::Auth::Accept
-            }
-            Ok(AuthResult::Rejected) => {
-                // Record failed attempt
-                if let AuthSelector::User { username, .. } = &selector {
-                    let _ = self
-                        .services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: username.clone(),
-                            remote_ip,
-                            protocol: "ssh".to_string(),
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
-                }
-                russh::server::Auth::reject()
-            }
+        match result {
+            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
+            Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
-                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds.clone())),
+                proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
                 partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
-                // Record failed attempt on error
-                if let AuthSelector::User { username, .. } = &selector {
-                    let _ = self
-                        .services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: username.clone(),
-                            remote_ip,
-                            protocol: "ssh".to_string(),
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
-                }
                 russh::server::Auth::Reject {
                     proceed_with_methods: None,
                     partial_success: false,
@@ -2010,22 +1922,76 @@ impl ServerSession {
                 username,
                 target_name,
             } => {
+                let remote_ip = self.remote_address.ip();
+
+                // Login protection: reject attempts from blocked IPs or locked
+                // users before evaluating credentials.
+                if self
+                    .services
+                    .login_protection
+                    .check_ip_blocked(&remote_ip)
+                    .await?
+                    .is_some()
+                {
+                    warn!(ip = %remote_ip, "SSH auth from blocked IP");
+                    return Ok(AuthResult::Rejected);
+                }
+                if self
+                    .services
+                    .login_protection
+                    .check_user_locked(username)
+                    .await?
+                    .is_some()
+                {
+                    warn!(username = %username, "SSH auth for locked user");
+                    return Ok(AuthResult::Rejected);
+                }
+
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
-                    validate_and_add_credential(
+                    let credential_valid = validate_and_add_credential(
                         &mut state,
                         &credential,
                         &mut *self.services.config_provider.lock().await,
                     )
                     .await?;
+
+                    // Record failed password/OTP guesses. Public-key offers
+                    // legitimately fail as clients try each agent key in turn, so
+                    // they aren't counted as brute-force attempts.
+                    if !credential_valid {
+                        let credential_type = match &credential {
+                            AuthCredential::Password(_) => Some("password"),
+                            AuthCredential::Otp(_) => Some("otp"),
+                            _ => None,
+                        };
+                        if let Some(credential_type) = credential_type {
+                            let _ = self
+                                .services
+                                .login_protection
+                                .record_failed_attempt(FailedAttemptInfo {
+                                    username: username.clone(),
+                                    remote_ip,
+                                    protocol: "ssh".to_string(),
+                                    credential_type: credential_type.to_string(),
+                                })
+                                .await;
+                        }
+                    }
                 }
 
                 let user_auth_result = state.verify();
 
                 match user_auth_result {
                     AuthResult::Accepted { user_info } => {
+                        // Successful auth clears the failed-attempt counters.
+                        let _ = self
+                            .services
+                            .login_protection
+                            .clear_failed_attempts(&remote_ip, &user_info.username)
+                            .await;
                         self.services
                             .auth_state_store
                             .lock()
