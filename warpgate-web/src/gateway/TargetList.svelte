@@ -16,6 +16,7 @@ import GroupColorCircle from 'common/GroupColorCircle.svelte'
 let instructionsTarget: TargetSnapshot|undefined = $state()
 
 const canEditTargets = $derived($serverInfo?.adminPermissions?.targetsEdit ?? false)
+const webSshEnabled = $derived($serverInfo?.webSshEnabled ?? true)
 
 async function openWebSsh (target: TargetSnapshot) {
     const { sessionId } = await api.createWebSshSession({
@@ -68,7 +69,7 @@ function selectTarget (target: TargetSnapshot) {
         }
     } else if (target.kind === TargetKind.Ssh) {
         const targetClickAction = $serverInfo?.targetClickAction
-        if (targetClickAction === TargetClickAction.ShowInstructions) {
+        if (!webSshEnabled || targetClickAction === TargetClickAction.ShowInstructions) {
             instructionsTarget = target
         } else {
             openWebSsh(target)
@@ -181,11 +182,13 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     </DropdownToggle>
                     <DropdownMenu end>
                         {#if target.kind === TargetKind.Ssh}
-                            <DropdownItem onclick={e => {
-                                openWebSsh(target)
-                                e.preventDefault()
-                                e.stopPropagation()
-                            }}>Web terminal</DropdownItem>
+                            {#if webSshEnabled}
+                                <DropdownItem onclick={e => {
+                                    openWebSsh(target)
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                }}>Web terminal</DropdownItem>
+                            {/if}
                             <DropdownItem onclick={e => {
                                 showInstructions(target)
                                 e.preventDefault()
@@ -229,7 +232,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         {/if}
     </ModalBody>
     <ModalFooter>
-        {#if instructionsTarget?.kind === TargetKind.Ssh}
+        {#if instructionsTarget?.kind === TargetKind.Ssh && webSshEnabled}
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"

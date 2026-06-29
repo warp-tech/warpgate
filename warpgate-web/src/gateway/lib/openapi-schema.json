@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-37-g69c02d3f-modified"
+    "version": "v0.25.5-22-g13d14bd0-modified"
   },
   "servers": [
     {
@@ -1737,6 +1737,7 @@
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
+          "web_ssh_enabled",
           "has_ldap"
         ],
         "properties": {
@@ -1793,6 +1794,9 @@
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
+          },
+          "web_ssh_enabled": {
+            "type": "boolean"
           },
           "has_ldap": {
             "type": "boolean"
