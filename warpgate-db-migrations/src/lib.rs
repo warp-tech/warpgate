@@ -54,6 +54,8 @@ mod m00049_text_columns;
 mod m00050_password_policy;
 mod m00051_tutorial_dismissed;
 mod m00052_log_text_column;
+mod m00053_login_protection;
+mod m00054_login_protection_params;
 
 pub(crate) mod helpers;
 
@@ -115,6 +117,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00050_password_policy::Migration),
             Box::new(m00051_tutorial_dismissed::Migration),
             Box::new(m00052_log_text_column::Migration),
+            Box::new(m00053_login_protection::Migration),
+            Box::new(m00054_login_protection_params::Migration),
         ]
     }
 }

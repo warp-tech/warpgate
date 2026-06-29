@@ -4,9 +4,11 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tracing::warn;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 
 use crate::db::{connect_to_db, populate_db};
+use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
@@ -21,6 +23,7 @@ pub struct Services {
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
 }
 
@@ -57,6 +60,26 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
+        // Initialize login protection service (cache warmed from DB; thresholds
+        // are read fresh from DB on every auth attempt — same as all other params).
+        let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
+
+        // Background cleanup task — always started; cleanup_expired() skips
+        // work (and logs its own summary) when there is something to do, and
+        // re-reads the enabled flag from the DB on each run.
+        {
+            let login_protection = login_protection.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(3600));
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = login_protection.cleanup_expired().await {
+                        warn!("Login protection cleanup failed: {e}");
+                    }
+                }
+            });
+        }
+
         Ok(Self {
             db: db.clone(),
             recordings,
@@ -66,6 +89,7 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(Mutex::new(admin_token)),
+            login_protection,
             global_params: Arc::new(params),
         })
     }

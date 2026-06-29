@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.3-modified"
+    "version": "v0.25.5-40-g6c82ea58-modified"
   },
   "servers": [
     {
@@ -3739,6 +3739,152 @@
         "operationId": "check_ssh_host_key"
       }
     },
+    "/login-protection/blocked-ips": {
+      "get": {
+        "summary": "List all currently blocked IPs.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BlockedIpInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_blocked_ips"
+      },
+      "delete": {
+        "summary": "Unblock an IP address.",
+        "description": "The IP is taken from the request body (rather than a path segment or\nquery parameter) to avoid encoding ambiguity with IPv6 addresses.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockIpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unblock_ip"
+      }
+    },
+    "/login-protection/locked-users": {
+      "get": {
+        "summary": "List all currently locked user accounts.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockedUserInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_locked_users"
+      }
+    },
+    "/login-protection/locked-users/{username}": {
+      "delete": {
+        "summary": "Unlock a user account by username.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unlock_user"
+      }
+    },
+    "/login-protection/status": {
+      "get": {
+        "summary": "Get security status summary (blocked IPs, locked users, failure counts).",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_security_status"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -4150,6 +4296,37 @@
           },
           "ticket_requests_manage": {
             "type": "boolean"
+          }
+        }
+      },
+      "BlockedIpInfo": {
+        "type": "object",
+        "title": "BlockedIpInfo",
+        "required": [
+          "ip_address",
+          "blocked_at",
+          "expires_at",
+          "block_count",
+          "reason"
+        ],
+        "properties": {
+          "ip_address": {
+            "type": "string"
+          },
+          "blocked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "block_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },
@@ -4865,6 +5042,31 @@
           "SamAccountName"
         ]
       },
+      "LockedUserInfo": {
+        "type": "object",
+        "title": "LockedUserInfo",
+        "required": [
+          "username",
+          "locked_at",
+          "reason"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "locked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "LogEntry": {
         "type": "object",
         "title": "LogEntry",
@@ -4997,9 +5199,6 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
-        "required": [
-          "allow_own_credential_management"
-        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
@@ -5054,6 +5253,55 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
             "type": "boolean"
           }
         }
@@ -5074,7 +5322,20 @@
           "target_click_action",
           "show_session_menu",
           "password_policy",
-          "record_scp"
+          "record_scp",
+          "login_protection_enabled",
+          "login_protection_retention_seconds",
+          "lp_ip_max_attempts",
+          "lp_ip_time_window_seconds",
+          "lp_ip_base_block_duration_seconds",
+          "lp_ip_block_duration_multiplier",
+          "lp_ip_max_block_duration_seconds",
+          "lp_ip_cooldown_reset_seconds",
+          "lp_user_max_attempts",
+          "lp_user_time_window_seconds",
+          "lp_user_auto_unlock",
+          "lp_user_lockout_duration_seconds",
+          "lp_user_exempt_admins"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5130,6 +5391,55 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
             "type": "boolean"
           }
         }
@@ -5406,6 +5716,34 @@
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
           }
         ]
+      },
+      "SecurityStatus": {
+        "type": "object",
+        "title": "SecurityStatus",
+        "required": [
+          "blocked_ip_count",
+          "locked_user_count",
+          "failed_attempts_last_hour",
+          "failed_attempts_last_24h"
+        ],
+        "properties": {
+          "blocked_ip_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "locked_user_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_hour": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_24h": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
       },
       "SessionSnapshot": {
         "type": "object",
@@ -6113,6 +6451,19 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UnblockIpRequest": {
+        "type": "object",
+        "title": "UnblockIpRequest",
+        "required": [
+          "ip"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "IP address to unblock (IPv4 or IPv6)."
+          }
+        }
       },
       "UpdateCertificateCredential": {
         "type": "object",

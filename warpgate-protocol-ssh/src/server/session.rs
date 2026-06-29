@@ -27,6 +27,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
     TrafficRecorder,
@@ -1690,10 +1691,11 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        match self
+        let result = self
             .try_auth_lazy(&selector, Some(AuthCredential::Password(password)))
-            .await
-        {
+            .await;
+
+        match result {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
@@ -1920,22 +1922,76 @@ impl ServerSession {
                 username,
                 target_name,
             } => {
+                let remote_ip = self.remote_address.ip();
+
+                // Login protection: reject attempts from blocked IPs or locked
+                // users before evaluating credentials.
+                if self
+                    .services
+                    .login_protection
+                    .check_ip_blocked(&remote_ip)
+                    .await?
+                    .is_some()
+                {
+                    warn!(ip = %remote_ip, "SSH auth from blocked IP");
+                    return Ok(AuthResult::Rejected);
+                }
+                if self
+                    .services
+                    .login_protection
+                    .check_user_locked(username)
+                    .await?
+                    .is_some()
+                {
+                    warn!(username = %username, "SSH auth for locked user");
+                    return Ok(AuthResult::Rejected);
+                }
+
                 let state_arc = self.get_auth_state(username).await?;
                 let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
-                    validate_and_add_credential(
+                    let credential_valid = validate_and_add_credential(
                         &mut state,
                         &credential,
                         &mut *self.services.config_provider.lock().await,
                     )
                     .await?;
+
+                    // Record failed password/OTP guesses. Public-key offers
+                    // legitimately fail as clients try each agent key in turn, so
+                    // they aren't counted as brute-force attempts.
+                    if !credential_valid {
+                        let credential_type = match &credential {
+                            AuthCredential::Password(_) => Some("password"),
+                            AuthCredential::Otp(_) => Some("otp"),
+                            _ => None,
+                        };
+                        if let Some(credential_type) = credential_type {
+                            let _ = self
+                                .services
+                                .login_protection
+                                .record_failed_attempt(FailedAttemptInfo {
+                                    username: username.clone(),
+                                    remote_ip,
+                                    protocol: "ssh".to_string(),
+                                    credential_type: credential_type.to_string(),
+                                })
+                                .await;
+                        }
+                    }
                 }
 
                 let user_auth_result = state.verify();
 
                 match user_auth_result {
                     AuthResult::Accepted { user_info } => {
+                        // Successful auth clears the failed-attempt counters.
+                        let _ = self
+                            .services
+                            .login_protection
+                            .clear_failed_attempts(&remote_ip, &user_info.username)
+                            .await;
                         self.services
                             .auth_state_store
                             .lock()

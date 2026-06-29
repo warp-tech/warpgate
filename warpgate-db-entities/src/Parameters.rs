@@ -14,7 +14,7 @@ pub enum TargetClickAction {
     ShowInstructions,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -45,6 +45,19 @@ pub struct Model {
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
     pub tutorial_dismissed: bool,
+    pub login_protection_enabled: bool,
+    pub login_protection_retention_seconds: i32,
+    pub lp_ip_max_attempts: i32,
+    pub lp_ip_time_window_seconds: i32,
+    pub lp_ip_base_block_duration_seconds: i32,
+    pub lp_ip_block_duration_multiplier: f64,
+    pub lp_ip_max_block_duration_seconds: i32,
+    pub lp_ip_cooldown_reset_seconds: i32,
+    pub lp_user_max_attempts: i32,
+    pub lp_user_time_window_seconds: i32,
+    pub lp_user_auto_unlock: bool,
+    pub lp_user_lockout_duration_seconds: i32,
+    pub lp_user_exempt_admins: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -95,6 +108,19 @@ impl Entity {
                     max_api_token_duration_seconds: Set(None),
                     record_scp: Set(true),
                     tutorial_dismissed: Set(false),
+                    login_protection_enabled: Set(true),
+                    login_protection_retention_seconds: Set(2592000),
+                    lp_ip_max_attempts: Set(5),
+                    lp_ip_time_window_seconds: Set(900),
+                    lp_ip_base_block_duration_seconds: Set(1800),
+                    lp_ip_block_duration_multiplier: Set(2.0),
+                    lp_ip_max_block_duration_seconds: Set(86400),
+                    lp_ip_cooldown_reset_seconds: Set(86400),
+                    lp_user_max_attempts: Set(10),
+                    lp_user_time_window_seconds: Set(3600),
+                    lp_user_auto_unlock: Set(true),
+                    lp_user_lockout_duration_seconds: Set(3600),
+                    lp_user_exempt_admins: Set(true),
                 }
                 .insert(db)
                 .await
