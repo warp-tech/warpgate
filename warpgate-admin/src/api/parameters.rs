@@ -45,6 +45,7 @@ struct ParameterValues {
     pub lp_user_auto_unlock: bool,
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
+    pub ssh_banner: String,
     pub web_ssh_enabled: bool,
 }
 
@@ -80,6 +81,7 @@ struct ParameterUpdate {
     pub lp_user_auto_unlock: Option<bool>,
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
+    pub ssh_banner: Option<String>,
     pub web_ssh_enabled: Option<bool>,
 }
 
@@ -139,6 +141,7 @@ impl Api {
             lp_user_auto_unlock: parameters.lp_user_auto_unlock,
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
+            ssh_banner: parameters.ssh_banner,
             web_ssh_enabled: parameters.web_ssh_enabled,
         })))
     }
@@ -215,6 +218,7 @@ impl Api {
         parameters.lp_user_lockout_duration_seconds =
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
+        parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
         parameters.web_ssh_enabled = body.web_ssh_enabled.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;

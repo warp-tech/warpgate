@@ -233,6 +233,18 @@
                         <HelpText>
                             Legacy SCP works over an exec channel and would be normally recorded like any other command. Disable to prevent SCP recordings from wasting storage space.
                         </HelpText>
+
+                        <FormGroup>
+                            <label class="mb-2" for="sshBanner">Login banner</label>
+                            <Input
+                                id="sshBanner"
+                                type="textarea"
+                                rows={4}
+                                bind:value={parameters.sshBanner} />
+                        </FormGroup>
+                        <HelpText class="mt-3 mb-3">
+                            Optional message shown to SSH clients during authentication.
+                        </HelpText>
                     </Subsection>
                 </Section>
 
