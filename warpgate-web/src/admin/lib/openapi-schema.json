@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-38-g98e6071f-modified"
+    "version": "v0.25.5-40-g6c82ea58-modified"
   },
   "servers": [
     {
@@ -3769,20 +3769,17 @@
       },
       "delete": {
         "summary": "Unblock an IP address.",
-        "description": "The IP is passed as a query parameter (`?ip=`) rather than a path segment\nto avoid URL-encoding ambiguity with IPv6 addresses (e.g. `::1`).",
-        "parameters": [
-          {
-            "name": "ip",
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "description": "IP address to unblock (supports both IPv4 and IPv6).",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
+        "description": "The IP is taken from the request body (rather than a path segment or\nquery parameter) to avoid encoding ambiguity with IPv6 addresses.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockIpRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": ""
@@ -6454,6 +6451,19 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UnblockIpRequest": {
+        "type": "object",
+        "title": "UnblockIpRequest",
+        "required": [
+          "ip"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "IP address to unblock (IPv4 or IPv6)."
+          }
+        }
       },
       "UpdateCertificateCredential": {
         "type": "object",

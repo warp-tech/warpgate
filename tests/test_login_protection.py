@@ -145,7 +145,7 @@ class TestLoginProtection:
         with admin_client(url) as api:
             user, echo_target = _create_test_user(api, echo_server_port)
             try:
-                api.unblock_ip("::1")
+                api.unblock_ip(sdk.UnblockIpRequest(ip="::1"))
             except Exception:
                 pass
 
@@ -183,7 +183,7 @@ class TestLoginProtection:
 
         # Admin unblock → correct password now accepted
         with admin_client(url) as api:
-            api.unblock_ip("::1")
+            api.unblock_ip(sdk.UnblockIpRequest(ip="::1"))
         resp, _ = _post_login(url, user.username, "correct_password")
         assert resp.status_code // 100 == 2, (
             f"Expected success after unblock, got {resp.status_code}"
@@ -415,7 +415,7 @@ class TestLoginProtection:
             blocked = api.list_blocked_ips()
             assert blocked, "expected at least one blocked IP after SSH brute force"
             for entry in blocked:
-                api.unblock_ip(entry.ip_address)
+                api.unblock_ip(sdk.UnblockIpRequest(ip=entry.ip_address))
 
         # Correct password works again and the session proxies through.
         rc, out = ssh_login("correct_password", "ls", "/bin/sh")

@@ -812,7 +812,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="unblock_ip",
         permission="config_edit",
-        call=lambda api, r: api.unblock_ip_with_http_info("127.0.0.1"),
+        call=lambda api, r: api.unblock_ip_with_http_info(sdk.UnblockIpRequest(ip="127.0.0.1")),
         expected_statuses={200},
     ),
     AdminApiTestCase(

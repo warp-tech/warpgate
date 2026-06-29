@@ -46,7 +46,7 @@
     async function unblockIp(ip: string) {
         if (!confirm(`Unblock ${ip}? This allows new login attempts from this address.`)) { return }
         try {
-            await api.unblockIp({ ip })
+            await api.unblockIp({ unblockIpRequest: { ip } })
             await load()
         } catch (err) {
             error = await stringifyError(err)

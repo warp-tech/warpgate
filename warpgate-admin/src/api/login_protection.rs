@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 
 use poem::web::Data;
-use poem_openapi::param::{Path, Query};
+use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use time::OffsetDateTime;
@@ -36,6 +36,12 @@ struct SecurityStatus {
     locked_user_count: u64,
     failed_attempts_last_hour: u64,
     failed_attempts_last_24h: u64,
+}
+
+#[derive(Object)]
+struct UnblockIpRequest {
+    /// IP address to unblock (IPv4 or IPv6).
+    ip: String,
 }
 
 #[derive(ApiResponse)]
@@ -100,8 +106,8 @@ impl Api {
 
     /// Unblock an IP address.
     ///
-    /// The IP is passed as a query parameter (`?ip=`) rather than a path segment
-    /// to avoid URL-encoding ambiguity with IPv6 addresses (e.g. `::1`).
+    /// The IP is taken from the request body (rather than a path segment or
+    /// query parameter) to avoid encoding ambiguity with IPv6 addresses.
     #[oai(
         path = "/login-protection/blocked-ips",
         method = "delete",
@@ -110,12 +116,11 @@ impl Api {
     async fn unblock_ip(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
-        /// IP address to unblock (supports both IPv4 and IPv6).
-        ip: Query<String>,
+        body: Json<UnblockIpRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UnblockIpResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
-        let ip_addr: IpAddr = match ip.parse() {
+        let ip_addr: IpAddr = match body.ip.parse() {
             Ok(addr) => addr,
             Err(_) => return Ok(UnblockIpResponse::InvalidIp),
         };
