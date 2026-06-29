@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-37-g69c02d3f-modified"
+    "version": "v0.25.5-19-g72b10a29-modified"
   },
   "servers": [
     {
@@ -1844,11 +1844,16 @@
         "type": "object",
         "title": "LoginFailureResponse",
         "required": [
-          "state"
+          "state",
+          "credential_rejected"
         ],
         "properties": {
           "state": {
             "$ref": "#/components/schemas/ApiAuthState"
+          },
+          "credential_rejected": {
+            "type": "boolean",
+            "description": "True when the credential the client just submitted was rejected\n(as opposed to merely needing another factor). Lets the UI show an\n\"incorrect credentials\" message and avoid auto-advancing to another\nauthentication method."
           }
         }
       },
