@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 
-use crate::db::{connect_to_db, populate_db};
+use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
@@ -33,7 +33,7 @@ impl Services {
         admin_token: Option<String>,
         params: GlobalParams,
     ) -> Result<Self> {
-        let db = connect_to_db(&config, &params).await?;
+        let db = connect_to_db_and_migrate(&config, &params).await?;
         populate_db(&db, &mut config).await?;
         let db = Arc::new(Mutex::new(db));
 

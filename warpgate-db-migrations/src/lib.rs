@@ -130,3 +130,19 @@ impl MigratorTrait for Migrator {
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(connection, None).await
 }
+
+/// Apply `steps` pending migrations.
+pub async fn migrate_database_up(
+    connection: &DatabaseConnection,
+    steps: u32,
+) -> Result<(), DbErr> {
+    Migrator::up(connection, Some(steps)).await
+}
+
+/// Revert `steps` applied migrations.
+pub async fn migrate_database_down(
+    connection: &DatabaseConnection,
+    steps: u32,
+) -> Result<(), DbErr> {
+    Migrator::down(connection, Some(steps)).await
+}
